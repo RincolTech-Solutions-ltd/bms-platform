@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -438,6 +439,24 @@ class LoanProductsIT extends IntegrationTest {
         Map<String, Object> ok = with(bulletTerms(), "fees", List.of(flatFee("deducted_at_disbursement", 99_999)));
         assertThat(send(HttpMethod.POST, BASE, null, product("FEE-OK", ok)).getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
+    }
+
+    /** At most 20 fees per version and per preview, which keeps every fee sum far inside a long. */
+    @Test
+    void feeListsAreBounded() {
+        List<Map<String, Object>> fees = new ArrayList<>();
+        for (int i = 0; i < 21; i++) {
+            fees.add(flatFee("added_to_loan", 1_000));
+        }
+        ResponseEntity<JsonNode> product =
+                send(HttpMethod.POST, BASE, null, product("MANY-FEES", with(bulletTerms(), "fees", fees)));
+        assertThat(product.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(product.getBody().get("errors").findValuesAsString("field")).contains("terms.fees");
+        Map<String, Object> preview = preview("flat", 2000, "per_term", 1, "bullet", 500_000);
+        preview.put("fees", fees);
+        assertThat(send(HttpMethod.POST, BASE + "/schedule-preview", null, preview)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
     /** FR-ORG-07 needs a cover to compare: a product that requires collateral states its minimum. */
