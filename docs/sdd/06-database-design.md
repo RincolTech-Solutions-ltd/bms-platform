@@ -303,7 +303,9 @@ after values. Older logos stay in `documents` (rows are never deleted).
 `email varchar(320)`, `phone_e164 varchar(16)`, `status text NOT NULL` [`invited`,
 `active`, `deactivated`], `failed_login_count integer NOT NULL DEFAULT 0`,
 `locked_until timestamptz`, `mfa_enabled boolean NOT NULL DEFAULT false`,
-`last_login_at timestamptz`.
+`last_login_at timestamptz`, `preferences jsonb NOT NULL DEFAULT '{}'` (`V24`, ADR-025; CHECK it is
+an object). `preferences.tours` maps a guided tour id to `{status: completed | dismissed, version, at}`
+(FR-IAM-14); it holds only what the user chose for themselves, never anything a permission reads.
 Partial unique `(tenant_id, lower(email)) WHERE email IS NOT NULL AND kind = 'staff'`;
 partial unique `(tenant_id, phone_e164) WHERE kind = 'member'`.
 `CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)`.
@@ -1215,8 +1217,9 @@ permission (granted to the roles that hold `retail.purchase.create`), the inter-
 account in `bms_seed_retail_chart` and for every tenant that switched retail on before it,
 `retail_transfers` and `retail_transfer_lines` (append-only), the `transfer_out` and `transfer_in`
 movement kinds and the movements' `transfer_id` link (sections 6.11.1 and 6.11.2). It takes the next
-number free on `main` when it merges, so it may be renumbered then. The next migration is V23
-(`MigrationOrderIT`, chapter 15 section 15.4.3).
+number free on `main` when it merges, so it may be renumbered then. `V24__user_preferences.sql`
+(#19, ADR-025) adds `users.preferences` (section 6.5), additive with a default; V23 is the sign-up
+migration of #89. The next migration is V25 (`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 

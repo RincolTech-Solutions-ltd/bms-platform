@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Bodies of {@code /api/v1/users}, {@code /api/v1/roles} and {@code /api/v1/me} (section 7.11.4). */
@@ -87,7 +88,10 @@ final class UserApi {
             UUID defaultBranchId,
             boolean mfaEnabled,
             boolean mfaRequired,
-            int unusedRecoveryCodes) {}
+            int unusedRecoveryCodes,
+
+            @Schema(description = "Guided tours the user finished or dismissed, by tour id (issue #19)")
+            Map<String, TourProgress.TourState> tours) {}
 
     @Schema(name = "PlatformMe")
     record PlatformMeResponse(UUID userId, String kind, String fullName, String email, List<String> permissions) {}

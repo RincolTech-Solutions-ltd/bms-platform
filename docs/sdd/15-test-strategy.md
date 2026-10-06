@@ -221,6 +221,14 @@ output changed.
   formatting, the second factor and invitation token parsing, the password rule echo, recovery
   code display and the active branch choice (`auth/codes.test.ts`).
 - Component tests for the schedule table, allocation display and approval queue.
+- First run and guided tours (FR-IAM-13, FR-IAM-14): `areas/auth/first-run.test.tsx` renders each
+  first-run step and error state; `tour/model.test.ts` covers step filtering by permission, module
+  and feature flag, the first-run and replay rules, the skip of a missing anchor, the focus trap,
+  keys and swipes, and the copy rules; `tour/tours.test.tsx` renders the screen of every step of
+  every tour as the user it is written for and fails when a `data-tour` anchor is missing;
+  `tour/spotlight.test.tsx` checks the dialog semantics, the live region and that no style
+  attribute is written. `FirstRunIT` proves that accepting signs the user in only under the
+  sign-in rules and that tour progress is per user.
 - Bundle budget check for the member area (NFR-PERF-06).
 - Accessibility checks on key screens (NFR-ACC-01).
 

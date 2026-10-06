@@ -52,6 +52,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   screens on the real API (`docs/specs/retail-ui-notes.md`). Stock transfers between branches
   (issue #84, ADR-020 amendment) add `V22`. Flyway runs with `outOfOrder` off, so a new migration
   takes a number above the highest one on any open branch (`V23` next).
+- **First run and guided tours (issues #19 and #86, ADR-025):** accepting an invitation signs the
+  user in; the PWA walks a new user through password, an optional second factor and recovery codes;
+  role aware spotlight tours (`frontend/src/tour/`) start once and replay from Help, with per-user
+  progress in `users.preferences` (`V24`). A new screen adds `data-tour` anchors and its steps.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -109,7 +113,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 |---|---|---|---|---|
 | `core.kernel` | Money, rates, clock, tenant context, principal and route declarations, errors | 3.4 R-ROUND | none | none |
 | `core.tenancy` | Tenants, plans, subscriptions, modules, settings, branches | TEN, BR | 6.4, 6.5 | 7.11.3, 7.11.4 |
-| `core.identity` | Users, credentials, sessions, roles, permissions | IAM | 6.4, 6.5 | 7.11.2, 7.11.4 |
+| `core.identity` | Users, credentials, sessions, roles, permissions, own tour progress | IAM | 6.4, 6.5 | 7.11.2, 7.11.4 |
 | `core.audit` | Audit log | AUD | 6.5 `audit_log` | 7.11.4 |
 | `core.approvals` | Maker-checker | APR | 6.5 `approval_requests` | 7.11.5 |
 | `core.platform` | Platform console: tenant creation, modules, subscriptions | TEN | 6.4, 6.5 | 7.11.3 |
@@ -283,6 +287,9 @@ Accepted (this list is the ADR index):
 - ADR-019 Collateral release as an approval action, and the interim duplicate pledge rule (proposed, #24)
 - ADR-020 Retail vertical brought forward; stock as append-only movements; retail events post to the
   ledger (proposed, #50)
+- ADR-024 Self-onboarding with operator verification, per-module subscriptions and manual payments
+- ADR-025 First run signs the invitee in; guided tours are data with per-user progress on the server
+  (proposed, #19 and #86)
 
 Pending (cite only as "pending ADR-NNN"):
 

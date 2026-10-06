@@ -38,7 +38,7 @@ export function StockTable({ rows, showCost }: { rows: StockRow[]; showCost: boo
   );
 }
 
-function StockPage() {
+export function StockPage() {
   const { branchId, branchName } = useSingleBranch();
   const canProfit = useProfitAccess();
   const [query, setQuery] = useState('');
@@ -55,8 +55,10 @@ function StockPage() {
       ) : (
         <>
           <p className="branch-line">Branch: <strong>{branchName}</strong></p>
-          <label htmlFor="stock-search">Search by name or code</label>
-          <input id="stock-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
+          <div data-tour="stock-search">
+            <label htmlFor="stock-search">Search by name or code</label>
+            <input id="stock-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
+          </div>
           <label style={{ fontWeight: 400 }}>
             <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={negativeOnly} onChange={(e) => setNegativeOnly(e.target.checked)} />
             Show only negative stock
