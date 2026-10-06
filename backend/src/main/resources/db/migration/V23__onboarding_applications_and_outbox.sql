@@ -10,8 +10,8 @@
 -- bms_owner has BYPASSRLS, so its functions see every row, and any other role is refused every
 -- row even if a grant is added by mistake.
 --
--- The number is provisional: V22 is claimed by an open retail pull request, and the dev lead
--- renumbers this file to the next free number at merge time (Flyway runs with outOfOrder off).
+-- V23 is the next number after the retail stock transfers (V22, #84); Flyway runs with outOfOrder
+-- off, so a later migration takes V24.
 
 -- ---------------------------------------------------------------------------------------------
 -- Business name normalisation for the duplicate warning (spec section 4.2 item 4): lower case,

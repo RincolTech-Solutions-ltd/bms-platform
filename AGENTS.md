@@ -49,14 +49,15 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (ADR-020): catalogue, stock, sales, purchasing, usage, valuation and daily profit (`V10` to
   `V12`), the oversell refusal and price floor (`V13`), the review fixes (`V14`), the
   `import-retail` command (`V20`, `docs/runbooks/import-retail.md`) and the phone-first retail
-  screens on the real API (`docs/specs/retail-ui-notes.md`). Flyway runs with `outOfOrder` off,
-  so a new migration takes a number above the highest one on any open branch (`V21` next).
-- **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` (provisional number,
-  renumbered at merge) with `onboarding_applications` and `notification_outbox`, reached only
-  through definer functions; the public sign-up and applicant page; the operator portal on the
-  platform host (operator sign-in, applications queue, Activate through `TenantProvisioning`,
-  messages not sent); the outbox sender job with SMTP and Telegram senders, off until their
-  `BMS_SMTP_*`, `BMS_MAIL_FROM` and `BMS_TELEGRAM_*` variables are set.
+  screens on the real API (`docs/specs/retail-ui-notes.md`). Stock transfers between branches
+  (issue #84, ADR-020 amendment) add `V22`. Flyway runs with `outOfOrder` off, so a new migration
+  takes a number above the highest one on any open branch (`V24` next).
+- **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
+  `onboarding_applications` and `notification_outbox`, reached only through definer functions;
+  the public sign-up and applicant page; the operator portal on the platform host (operator
+  sign-in, applications queue, Activate through `TenantProvisioning`, messages not sent); the
+  outbox sender job with SMTP and Telegram senders, off until their `BMS_SMTP_*`, `BMS_MAIL_FROM`
+  and `BMS_TELEGRAM_*` variables are set.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -138,7 +139,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | Member area | Member self-service | MSS; chapter 11 | none | 7.11.18 |
 | `retail.manifest` | The retail vertical's registration with the core (ADR-020) | 3.28 | 6.11.1 chart | none |
 | `retail.catalogue` | Categories, units, products, append-only price history | RET-01, RET-02 | 6.11 | 7.11.20 |
-| `retail.stock` | Stock movements and balances, stock-takes, usage and damage, reconciliation; retail posting and idempotency helpers | RET-03, RET-07, RET-08, RET-11 | 6.11 | 7.11.20 |
+| `retail.stock` | Stock movements and balances, stock-takes, usage and damage, transfers between branches, reconciliation; retail posting and idempotency helpers | RET-03, RET-07, RET-08, RET-11, RET-16 | 6.11 | 7.11.20 |
 | `retail.sales` | Sales with snapshots, voids, credit buyers, payments | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
 | `retail.purchasing` | Suppliers, restocks that set prices atomically | RET-06, RET-11 | 6.11 | 7.11.20 |
 | `retail.reports` | Valuation, revaluation difference, daily profit | RET-09, RET-10 | 6.11.3 | 7.11.20 |
