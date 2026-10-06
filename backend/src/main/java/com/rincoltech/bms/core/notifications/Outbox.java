@@ -27,7 +27,7 @@ public interface Outbox {
      * template: the volume bounds of the sign-up endpoints are counted in the database, not in
      * memory. Runs in the caller's transaction.
      */
-    int countSince(String throttleKey, String templateKey, Instant since);
+    int countSince(String throttleKey, String templateKey, Instant since, Instant until);
 
     /**
      * @param channel {@link #EMAIL} or {@link #TELEGRAM}
@@ -36,6 +36,8 @@ public interface Outbox {
      * @param params template values; cleared from the row once it is sent
      * @param idempotencyKey unique per message, for example {@code onboarding.activation:<id>}
      * @param throttleKey groups rows for a volume bound (see {@link #countSince}), or null
+     * @param expiresAt when the link the message carries stops working, or null: the row is never
+     *     sent, sent again or kept with its parameters after it
      */
     record Message(
             String channel,
@@ -43,7 +45,8 @@ public interface Outbox {
             String templateKey,
             Map<String, String> params,
             String idempotencyKey,
-            String throttleKey) {
+            String throttleKey,
+            Instant expiresAt) {
 
         public Message {
             params = Map.copyOf(params);
@@ -55,7 +58,7 @@ public interface Outbox {
                 String templateKey,
                 Map<String, String> params,
                 String idempotencyKey) {
-            this(channel, recipient, templateKey, params, idempotencyKey, null);
+            this(channel, recipient, templateKey, params, idempotencyKey, null, null);
         }
     }
 }

@@ -279,8 +279,15 @@ class OnboardingIT extends IntegrationTest {
         String local = email.substring(0, email.indexOf('@'));
         String tagged = local + "+again@" + email.substring(email.indexOf('@') + 1);
         assertThat(apply(form(tagged, "Test Tagged Name", phone())).getBody()).isEqualTo(first.getBody());
-        assertThat(outboxRows("onboarding.verify_email", tagged)).isZero();
-        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
+        assertThat(owner().sql(
+                                "SELECT count(*) FROM onboarding_applications WHERE contact_email_key = onboarding_email_key(?)")
+                        .param(email)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        // The link goes to the address just submitted (round 2 review item 2).
+        assertThat(outboxRows("onboarding.verify_email", tagged)).isEqualTo(1);
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(2);
         String gmail = "test.dots." + UUID.randomUUID().toString().substring(0, 6) + "@gmail.com";
         String other = "203.0.113." + (ADDRESS.addAndGet(1) % 200 + 1);
         publicPost("/api/v1/platform/sign-up/applications", form(gmail, "Test Gmail Shop", phone()), other);
@@ -418,10 +425,26 @@ class OnboardingIT extends IntegrationTest {
         assertThat(SignUpRateLimiter.addressKey("not-an-address.example")).startsWith("raw:");
     }
 
+    long verifyRowsFor(String mailbox) {
+        return owner().sql(
+                        "SELECT count(*) FROM notification_outbox WHERE throttle_key = 'onboarding.verify:' || onboarding_email_key(?)")
+                .param(mailbox)
+                .query(Long.class)
+                .single();
+    }
+
+    String linkHashOf(String mailbox) {
+        return owner().sql(
+                        "SELECT link_token_hash FROM onboarding_applications WHERE contact_email_key = onboarding_email_key(?)")
+                .param(mailbox)
+                .query(String.class)
+                .single();
+    }
+
     /**
      * Review B2 (b): at most 3 confirmation emails to one mailbox in 24 hours, counted in the
-     * database, from any number of addresses. Over the bound the answer is the same 202 and
-     * nothing is rotated or sent.
+     * database, from any number of addresses and address variants. Over the bound the answer is the
+     * same 202 and nothing is rotated or sent.
      */
     @Test
     void confirmationEmailsPerMailboxAreBoundedInTheDatabase() {
@@ -437,61 +460,132 @@ class OnboardingIT extends IntegrationTest {
                             .getStatusCode())
                     .isEqualTo(HttpStatus.ACCEPTED);
         }
-        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
-        String hash = owner().sql("SELECT link_token_hash FROM onboarding_applications WHERE contact_email = ?")
-                .param(email)
-                .query(String.class)
-                .single();
+        assertThat(verifyRowsFor(email)).isEqualTo(3);
+        String hash = linkHashOf(email);
         ResponseEntity<JsonNode> over = publicPost(
                 "/api/v1/platform/sign-up/applications",
                 form(local + "+v9" + domain, "Test Bound Shop", phone()),
                 "203.0.113." + (n % 200 + 7));
         assertThat(over.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(over.getBody().get("status").asString()).isEqualTo("check_your_email");
-        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
-        assertThat(owner().sql("SELECT link_token_hash FROM onboarding_applications WHERE contact_email = ?")
-                        .param(email)
-                        .query(String.class)
-                        .single())
-                .isEqualTo(hash);
+        assertThat(verifyRowsFor(email)).isEqualTo(3);
+        assertThat(linkHashOf(email)).isEqualTo(hash);
     }
 
     /**
+     * Round 2 review item 2: a variant submitted first (for example a +tag on a domain that does
+     * not deliver them) cannot squat the mailbox. The real address's sign-up gets the link at the
+     * real address, and while unconfirmed that address becomes the stored one.
+     */
+    @Test
+    void aVariantSubmittedFirstCannotSquatTheMailbox() {
+        String email = Api.email("victim");
+        String variant = email.substring(0, email.indexOf('@')) + "+squat" + email.substring(email.indexOf('@'));
+        int n = ADDRESS.addAndGet(5);
+        publicPost(
+                "/api/v1/platform/sign-up/applications",
+                form(variant, "Test Squat Shop", phone()),
+                "203.0.113." + (n % 200 + 1));
+        assertThat(apply(form(email, "Test Victim Shop", phone())).getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(1);
+        assertThat(owner().sql(
+                                "SELECT contact_email FROM onboarding_applications WHERE contact_email_key = onboarding_email_key(?)")
+                        .param(email)
+                        .query(String.class)
+                        .single())
+                .isEqualTo(email);
+        // The real address confirms with its own link; the squatter's link no longer works.
+        String token = tokenOf(outboxParams("onboarding.verify_email", email).get("link"));
+        assertThat(publicPost("/api/v1/platform/sign-up/verify", Map.of("token", token))
+                        .getBody()
+                        .get("email_verified")
+                        .asBoolean())
+                .isTrue();
+        String squatToken =
+                tokenOf(outboxParams("onboarding.verify_email", variant).get("link"));
+        assertThat(publicPost("/api/v1/platform/sign-up/status", Map.of("token", squatToken))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Autowired
+    org.springframework.jdbc.core.simple.JdbcClient jdbc;
+
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @Autowired
+    com.rincoltech.bms.core.notifications.Outbox outbox;
+
+    @Autowired
+    com.rincoltech.bms.core.audit.PlatformAuditLog platformAudit;
+
+    @Autowired
+    com.rincoltech.bms.core.tenancy.PlatformHost hosts;
+
+    @Autowired
+    com.rincoltech.bms.core.platform.TenantProvisioning provisioning;
+
+    @Autowired
+    List<com.rincoltech.bms.core.tenancy.ModuleManifest> manifests;
+
+    /**
      * Review B2 (c): the global caps. Over the hourly cap of new applications or of confirmation
-     * emails a sign-up is answered 202 and nothing is created or sent; the first request over it
-     * writes one audit row and one Telegram alert for the hour.
+     * emails a sign-up is answered and nothing is created or sent; the first request over it writes
+     * one audit row and one Telegram alert for the hour. The test runs its own service with a clock
+     * ten years ahead and caps of 5, and its rows lie in that hour, so it shares no counts with any
+     * other test (round 2 review item 8): the counts are bounded above by the service's clock.
      */
     @Test
     void theGlobalCapsStopSignUpsAndAlertTheOperatorOnce() {
+        Instant future = Instant.now()
+                .plus(java.time.Duration.ofDays(3650))
+                .truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+                .plus(java.time.Duration.ofMinutes(30));
+        com.rincoltech.bms.kernel.BusinessClock clock =
+                new com.rincoltech.bms.kernel.BusinessClock(java.time.Clock.fixed(future, java.time.ZoneOffset.UTC));
+        ApplicationService capped = new ApplicationService(
+                jdbc,
+                transactionManager,
+                outbox,
+                platformAudit,
+                hosts,
+                provisioning,
+                clock,
+                new SignUpRateLimiter(clock),
+                new OnboardingProperties(5, 5, 3),
+                manifests);
+        String hour = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00", java.util.Locale.ROOT)
+                .format(future.atOffset(java.time.ZoneOffset.UTC));
         JdbcClient owner = owner();
-        String marker = "C-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        String marker = UUID.randomUUID().toString().substring(0, 8);
+        java.sql.Timestamp at = java.sql.Timestamp.from(future.minus(java.time.Duration.ofMinutes(10)));
         try {
             owner.sql("""
                             INSERT INTO onboarding_applications (id, reference, business_name, contact_name, contact_email,
-                                   contact_phone_e164, country, modules, term, way_in)
-                            SELECT gen_random_uuid(), ? || '-' || g, 'Test Cap Shop', 'Test Cap', 'cap-' || ? || '-' || g || '@example.test',
-                                   '+256700000000', 'UG', '{retail}', 'monthly', 'trial'
-                              FROM generate_series(1, 400) g
-                            """).params(marker.substring(0, 6), marker).update();
+                                   contact_phone_e164, country, modules, term, way_in, created_at, updated_at)
+                            SELECT gen_random_uuid(), 'C-' || ? || g, 'Test Cap Shop', 'Test Cap', 'cap-' || ? || '-' || g || '@example.test',
+                                   '+256700000000', 'UG', '{retail}', 'monthly', 'trial', ?, ?
+                              FROM generate_series(1, 5) g
+                            """).params(marker.substring(0, 6), marker, at, at).update();
             String email = Api.email("capped");
-            ResponseEntity<JsonNode> capped = apply(form(email, "Test Capped Shop", phone()));
-            assertThat(capped.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-            assertThat(capped.getBody().get("status").asString()).isEqualTo("check_your_email");
+            capped.submit(request(email));
+            capped.submit(request(Api.email("capped")));
             assertThat(owner.sql("SELECT count(*) FROM onboarding_applications WHERE contact_email = ?")
                             .param(email)
                             .query(Long.class)
                             .single())
                     .isZero();
             assertThat(outboxRows("onboarding.verify_email", email)).isZero();
-            apply(form(Api.email("capped"), "Test Capped Shop", phone()));
-            assertThat(owner.sql(
-                                    "SELECT count(*) FROM notification_outbox WHERE template_key = 'onboarding.cap_reached'"
-                                            + " AND created_at > now() - interval '1 hour'")
+            assertThat(owner.sql("SELECT count(*) FROM notification_outbox WHERE idempotency_key = ?")
+                            .param("onboarding.cap_reached:" + hour)
                             .query(Long.class)
                             .single())
                     .isEqualTo(1);
-            assertThat(owner.sql("SELECT count(*) FROM platform_audit_log WHERE action = 'platform.sign_up.cap_reached'"
-                                    + " AND occurred_at > now() - interval '1 hour'")
+            assertThat(owner.sql(
+                                    "SELECT count(*) FROM platform_audit_log WHERE action = 'platform.sign_up.cap_reached' AND data->>'hour' = ?")
+                            .param(hour)
                             .query(Long.class)
                             .single())
                     .isEqualTo(1);
@@ -503,19 +597,42 @@ class OnboardingIT extends IntegrationTest {
         // The same for confirmation emails.
         try {
             owner.sql("""
-                            INSERT INTO notification_outbox (id, channel, recipient, template_key, status, idempotency_key)
-                            SELECT gen_random_uuid(), 'email', 'cap@example.test', 'onboarding.verify_email', 'sent', ? || g
-                              FROM generate_series(1, 400) g
-                            """).param("test.cap:" + marker + ":").update();
+                            INSERT INTO notification_outbox (id, channel, recipient, template_key, status, idempotency_key, created_at)
+                            SELECT gen_random_uuid(), 'email', 'cap@example.test', 'onboarding.verify_email', 'sent', ? || g, ?
+                              FROM generate_series(1, 5) g
+                            """).params("test.cap:" + marker + ":", at).update();
             String email = Api.email("capped");
-            assertThat(apply(form(email, "Test Capped Shop", phone())).getStatusCode())
-                    .isEqualTo(HttpStatus.ACCEPTED);
+            capped.submit(request(email));
             assertThat(outboxRows("onboarding.verify_email", email)).isZero();
+            assertThat(owner.sql("SELECT count(*) FROM onboarding_applications WHERE contact_email = ?")
+                            .param(email)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
         } finally {
             owner.sql("DELETE FROM notification_outbox WHERE idempotency_key LIKE ?")
                     .param("test.cap:" + marker + ":%")
                     .update();
         }
+        // Below the caps the same service creates and sends.
+        String email = Api.email("uncapped");
+        capped.submit(request(email));
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(1);
+    }
+
+    static SignUpController.SignUpRequest request(String email) {
+        return new SignUpController.SignUpRequest(
+                "Test Capped Shop",
+                "Test Applicant 01",
+                email,
+                "0700000001",
+                "UG",
+                List.of("retail"),
+                "monthly",
+                "trial",
+                null,
+                null,
+                null);
     }
 
     /** The in-memory buckets are bounded: a flood of addresses never grows them past the cap. */

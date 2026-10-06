@@ -151,6 +151,9 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
     expect(unconfirmed).not.toContain('We are looking at your application');
     expect(await page({ view: { ...base, email_verified: false }, confirming: true })).toMatch(/disabled="">Confirming/);
     expect(await page({})).not.toContain('Confirm my email');
+    expect(await page({ view: { ...base, status: 'needs_info', email_verified: false, operator_note: 'Q?' } })).toContain(
+      'Confirm my email',
+    );
   });
 
   it('shows the operator question and an answer form when more information is needed', async () => {

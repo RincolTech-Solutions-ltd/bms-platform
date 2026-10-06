@@ -282,7 +282,13 @@ The per-address limits are token buckets in memory, bounded at 10,000 keys (leas
 dropped first), per API instance and lost on restart; a flood of fresh addresses can evict them,
 so they are a first, cheap line only. The bounds that must hold under a flood (per mailbox and
 global) are counted in the database inside one serialised sign-up transaction, and over them the
-answer stays the same 202, so the endpoint is no oracle. The client address is the one Tomcat's
+answer stays the same 202, so the endpoint is no oracle. The global caps are deliberately small,
+so they can be filled cheaply: a handful of addresses (about 6 at 5 applications each) fill the
+default cap of 30 in an hour, after which every applicant, real or not, sees the normal answer and
+gets no email until the hour passes. That is the intended trade: the cap bounds what the form can
+make the platform send, and the operator is told at once (one Telegram alert and a
+`platform.sign_up.cap_reached` audit row per hour) and follows the runbook
+(`docs/runbooks/onboard-tenant.md`, "Protect the public sign-up"). The client address is the one Tomcat's
 RemoteIpValve takes from the trusted proxy's `X-Forwarded-For` (the right-most untrusted value, so
 a value a client prepends changes nothing). In front of all of this is the Cloudflare rate
 limiting rule for `/api/v1/platform/sign-up/*` (chapter 9 section 9.8,

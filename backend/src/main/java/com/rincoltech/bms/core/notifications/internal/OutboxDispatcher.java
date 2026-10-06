@@ -24,7 +24,9 @@ import tools.jackson.databind.ObjectMapper;
  * sets a lease, and commits; the send runs outside any transaction, holding no connection; a
  * second short transaction records the result. A crash, a lost connection or an Error during the
  * send leaves the row {@code pending} with the attempt already counted, and it comes back after
- * the lease: delivery is at least once, the idempotency key travels with the message where the
+ * the lease; a row whose attempts are used up (or whose link has expired) is marked {@code failed}
+ * by the next claim instead of being sent again, so the bound holds even when every send dies with
+ * an Error: delivery is at least once, the idempotency key travels with the message where the
  * provider supports one, and the third failed attempt marks the row {@code failed}, which the
  * operator portal lists. Logs carry the row id, channel, template and attempt only: never the
  * recipient, the text or a link.
@@ -93,8 +95,8 @@ class OutboxDispatcher {
 
     private Optional<Row> claim(String[] names) {
         Instant now = clock.now();
-        return transactions.execute(status -> jdbc.sql("SELECT * FROM notification_outbox_claim(?, ?, ?)")
-                .params(names, Timestamp.from(now), Timestamp.from(now.plus(LEASE)))
+        return transactions.execute(status -> jdbc.sql("SELECT * FROM notification_outbox_claim(?, ?, ?, ?)")
+                .params(names, MAX_ATTEMPTS, Timestamp.from(now), Timestamp.from(now.plus(LEASE)))
                 .query((rs, n) -> new Row(
                         rs.getObject("id", UUID.class),
                         rs.getString("channel"),

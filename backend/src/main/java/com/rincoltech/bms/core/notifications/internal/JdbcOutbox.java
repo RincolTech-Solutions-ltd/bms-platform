@@ -39,25 +39,27 @@ class JdbcOutbox implements Outbox {
         // A template that cannot render would only fail at send time: refuse it in the cause's
         // transaction instead.
         templates.render(message.channel(), message.templateKey(), message.params());
-        return Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?)")
-                .params(
-                        UUID.randomUUID(),
-                        message.channel(),
-                        message.recipient(),
-                        message.templateKey(),
-                        mapper.writeValueAsString(message.params()),
-                        message.idempotencyKey(),
-                        message.throttleKey(),
-                        Timestamp.from(clock.now()))
-                .query(Boolean.class)
-                .single());
+        return Boolean.TRUE.equals(
+                jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?)")
+                        .params(
+                                UUID.randomUUID(),
+                                message.channel(),
+                                message.recipient(),
+                                message.templateKey(),
+                                mapper.writeValueAsString(message.params()),
+                                message.idempotencyKey(),
+                                message.throttleKey(),
+                                message.expiresAt() == null ? null : Timestamp.from(message.expiresAt()),
+                                Timestamp.from(clock.now()))
+                        .query(Boolean.class)
+                        .single());
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public int countSince(String throttleKey, String templateKey, Instant since) {
-        return jdbc.sql("SELECT notification_outbox_count_since(?, ?, ?)")
-                .params(throttleKey, templateKey, Timestamp.from(since))
+    public int countSince(String throttleKey, String templateKey, Instant since, Instant until) {
+        return jdbc.sql("SELECT notification_outbox_count_since(?, ?, ?, ?)")
+                .params(throttleKey, templateKey, Timestamp.from(since), Timestamp.from(until))
                 .query(Integer.class)
                 .single();
     }

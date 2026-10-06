@@ -330,6 +330,84 @@ class OutboxIT extends IntegrationTest {
         Fake telegram = new Fake("telegram", 0);
         dispatcher.dispatch(List.of(telegram), 1000);
         assertThat(telegram.tried).doesNotContain(key);
+
+        // Round 2 review item 3: it keeps dying. The second and third deaths use up the attempts,
+        // and the next claim marks the row failed instead of offering it a fourth time.
+        for (int death = 2; death <= 3; death++) {
+            TestDatabase.owner()
+                    .sql(
+                            "UPDATE notification_outbox SET next_attempt_at = now() - interval '1 second' WHERE idempotency_key = ?")
+                    .param(key)
+                    .update();
+            assertThatThrownBy(() -> {
+                        for (int i = 0; i < 10_000; i++) {
+                            if (dispatcher.dispatch(List.of(dying), 1) == 0) {
+                                break;
+                            }
+                        }
+                    })
+                    .isInstanceOf(AssertionError.class);
+            assertThat(row(key).get("attempts")).isEqualTo(death);
+        }
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE notification_outbox SET next_attempt_at = now() - interval '1 second' WHERE idempotency_key = ?")
+                .param(key)
+                .update();
+        for (int i = 0; i < 10_000; i++) {
+            if (dispatcher.dispatch(List.of(dying), 1) == 0) {
+                break;
+            }
+        }
+        Map<String, Object> done = row(key);
+        assertThat(done.get("status")).isEqualTo("failed");
+        assertThat(done.get("attempts")).isEqualTo(3);
+        assertThat(done.get("last_error")).isEqualTo("attempts used up");
+    }
+
+    /**
+     * Round 2 review item 5: a row whose own link has expired (an activation link lasts 72 hours)
+     * is never sent and cannot be sent again, even inside the 7 day window.
+     */
+    @Test
+    void aRowWhoseLinkExpiredIsNeitherSentNorRetried() {
+        String key = key();
+        new TransactionTemplate(transactionManager)
+                .executeWithoutResult(status -> outbox.enqueue(new Outbox.Message(
+                        "telegram",
+                        "operator",
+                        "onboarding.operator_alert",
+                        Map.of(
+                                "reference", "A-TEST0002",
+                                "business_name", "Test Expiry Shop",
+                                "modules", "retail",
+                                "portal_url", "https://localhost/platform/applications/x"),
+                        key,
+                        null,
+                        java.time.Instant.now().minusSeconds(60))));
+        Fake telegram = new Fake("telegram", 0);
+        dispatcher.dispatch(List.of(telegram), 1000);
+        assertThat(telegram.tried).doesNotContain(key);
+        Map<String, Object> expired = row(key);
+        assertThat(expired.get("status")).isEqualTo("failed");
+        assertThat(expired.get("last_error")).isEqualTo("expired");
+
+        String id = TestDatabase.owner()
+                .sql("SELECT id::text FROM notification_outbox WHERE idempotency_key = ?")
+                .param(key)
+                .query(String.class)
+                .single();
+        Api platform = Api.platform(http);
+        String opEmail = Api.email("operator");
+        UUID opId = Api.platformUser(opEmail);
+        Session op = platform.signIn(opId, opEmail, Api.PASSWORD, null);
+        assertThat(platform.post("/api/v1/platform/outbox/" + id + "/retry", Map.of(), op.accessToken())
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("outbox_too_old");
+        assertThat(dispatcher.purge()).isPositive();
+        assertThat(row(key).get("params")).isEqualTo("{}");
     }
 
     /**

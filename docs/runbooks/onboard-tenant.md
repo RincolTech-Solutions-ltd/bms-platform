@@ -80,9 +80,18 @@ The API also caps new applications and confirmation emails per hour
 (`BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR`, default 30; `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR`,
 default 60). When a cap trips, the operator chat gets one Telegram alert for that hour and
 `platform_audit_log` a `platform.sign_up.cap_reached` row; sign-ups are still answered but nothing
-is created or sent until the hour passes. Look at the applications of the last hour: a burst of
-throwaway addresses means the edge rule needs tightening; a real launch means the cap can be
-raised in `/opt/bms/.env`. The senders log
+is created or sent until the hour passes. The caps are small on purpose, so a handful of addresses
+(about 6) can fill the default one in an hour, and real applicants in that hour see the normal
+"check your email" page but get no email. On the alert:
+
+1. Open the portal's applications (status "Waiting for review" shows only confirmed ones) and the
+   `platform_audit_log` rows of the last hour to see whether the burst is real.
+2. A burst of throwaway names or addresses: tighten the Cloudflare rule (fewer requests per
+   minute, or a managed challenge on the sign-up path) and let the hour pass.
+3. A real launch or campaign: raise `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR` and
+   `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR` in `/opt/bms/.env` and restart the API.
+4. Applicants who signed up while the cap held received nothing: they can apply again with the same
+   email after the hour (a repeat sends a fresh link to the address they type). The senders log
 the row id, channel and template only, never an address, a text or a link.
 
 ## Create a tenant

@@ -79,11 +79,10 @@ class TelegramChannel implements OutboxChannel {
             response = http.send(request, HttpResponse.BodyHandlers.discarding());
         } catch (java.io.IOException e) {
             // The exception text can name the URL, which carries the token.
-            throw new IllegalStateException(
-                    "Telegram unreachable: " + e.getClass().getSimpleName());
+            throw new SendFailure("Telegram unreachable: " + e.getClass().getSimpleName());
         }
         if (response.statusCode() / 100 != 2) {
-            throw new IllegalStateException("Telegram answered HTTP " + response.statusCode());
+            throw new SendFailure("Telegram answered HTTP " + response.statusCode());
         }
     }
 }

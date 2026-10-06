@@ -83,7 +83,7 @@ export function ApplicantPage({
         <dt>Wanted</dt>
         <dd>{modules.join(', ')}</dd>
       </dl>
-      {view.email_verified === false && view.status === 'submitted' ? (
+      {view.email_verified === false && (view.status === 'submitted' || view.status === 'needs_info') ? (
         <section aria-labelledby="confirm-heading" className="form-grid">
           <h2 id="confirm-heading">Confirm your email</h2>
           <p>Press the button to confirm this is your email address. We then look at your application.</p>

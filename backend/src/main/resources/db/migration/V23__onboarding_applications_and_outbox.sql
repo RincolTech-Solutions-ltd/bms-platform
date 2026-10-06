@@ -118,6 +118,8 @@ CREATE TABLE notification_outbox (
     attempts        integer      NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     idempotency_key varchar(200) NOT NULL UNIQUE,
     throttle_key    varchar(400),
+    -- When the link the row carries stops working: never sent, retried or kept after it.
+    expires_at      timestamptz,
     last_error      varchar(300),
     next_attempt_at timestamptz  NOT NULL DEFAULT now(),
     created_at      timestamptz  NOT NULL DEFAULT now(),
@@ -156,23 +158,27 @@ END
 $$;
 
 -- A new applicant link for the open application of this mailbox (a repeated sign-up): returns
--- the application's reference and its stored address (the link goes there, never to the second
--- form's variant), or nothing when the mailbox has no open application.
+-- the application's reference, or nothing when the mailbox has no open application. The link goes
+-- to the address just submitted (round 2 review item 2), which the key treats as the same mailbox;
+-- while unconfirmed, that address also becomes the stored one.
 CREATE FUNCTION onboarding_application_relink(
     p_email text, p_link_hash text, p_link_expires_at timestamptz, p_now timestamptz)
 RETURNS TABLE (id uuid, reference text, contact_email text)
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
     UPDATE onboarding_applications a
-       SET link_token_hash = p_link_hash, link_token_expires_at = p_link_expires_at, updated_at = p_now
+       SET link_token_hash = p_link_hash, link_token_expires_at = p_link_expires_at, updated_at = p_now,
+           -- Until the address is confirmed, the last submitted form of the mailbox is the one the
+           -- link goes to, so a variant submitted first (which may bounce) cannot squat it.
+           contact_email = CASE WHEN a.email_verified_at IS NULL THEN p_email ELSE a.contact_email END
      WHERE a.contact_email_key = onboarding_email_key(p_email) AND a.status IN ('submitted', 'needs_info', 'verified')
     RETURNING a.id, a.reference::text, a.contact_email::text
 $$;
 
 -- New applications since a time, for the global sign-up cap (review B2).
-CREATE FUNCTION onboarding_applications_created_since(p_since timestamptz)
+CREATE FUNCTION onboarding_applications_created_since(p_since timestamptz, p_until timestamptz)
 RETURNS integer
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT count(*)::integer FROM onboarding_applications WHERE created_at >= p_since
+    SELECT count(*)::integer FROM onboarding_applications WHERE created_at >= p_since AND created_at <= p_until
 $$;
 
 -- What the applicant may see (spec section 10), by link token. With p_verify the email is marked
@@ -193,7 +199,7 @@ BEGIN
     IF NOT FOUND THEN
         RETURN;
     END IF;
-    IF p_verify AND v.email_verified_at IS NULL AND v.status = 'submitted' THEN
+    IF p_verify AND v.email_verified_at IS NULL AND v.status IN ('submitted', 'needs_info') THEN
         UPDATE onboarding_applications SET email_verified_at = p_now, updated_at = p_now WHERE onboarding_applications.id = v.id;
         v.email_verified_at := p_now;
         v_new := true;
@@ -360,14 +366,14 @@ $$;
 -- Returns true when the row was written, false when the idempotency key was already used.
 CREATE FUNCTION notification_outbox_enqueue(
     p_id uuid, p_channel text, p_recipient text, p_template_key text, p_params jsonb, p_idempotency_key text,
-    p_throttle_key text, p_now timestamptz)
+    p_throttle_key text, p_expires_at timestamptz, p_now timestamptz)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
     INSERT INTO notification_outbox (id, channel, recipient, template_key, params, idempotency_key, throttle_key,
-                                     next_attempt_at, created_at, updated_at)
+                                     expires_at, next_attempt_at, created_at, updated_at)
     VALUES (p_id, p_channel, p_recipient, p_template_key, coalesce(p_params, '{}'), p_idempotency_key, p_throttle_key,
-            p_now, p_now, p_now)
+            p_expires_at, p_now, p_now, p_now)
     ON CONFLICT (idempotency_key) DO NOTHING;
     RETURN FOUND;
 END
@@ -375,31 +381,45 @@ $$;
 
 -- Rows written since a time, by throttle key or, with a null key, by template: the volume bounds
 -- of the sign-up endpoints are counted here, in the database, not in an evictable map (review B2).
-CREATE FUNCTION notification_outbox_count_since(p_throttle_key text, p_template_key text, p_since timestamptz)
+CREATE FUNCTION notification_outbox_count_since(
+    p_throttle_key text, p_template_key text, p_since timestamptz, p_until timestamptz)
 RETURNS integer
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT count(*)::integer FROM notification_outbox o
-     WHERE o.created_at >= p_since
+     WHERE o.created_at >= p_since AND o.created_at <= p_until
        AND (p_throttle_key IS NULL OR o.throttle_key = p_throttle_key)
        AND (p_template_key IS NULL OR o.template_key = p_template_key)
 $$;
 
 -- Claims the next due row of an enabled channel in its own short transaction (review N3): the
 -- attempt is counted and a lease set (next_attempt_at = p_lease_until) before anything is sent, so
--- a crash, a lost connection or an Error during the send still uses up an attempt, the row comes
--- back only after the lease, and three attempts remain the bound. A concurrent sender skips the
+-- a crash, a lost connection or an Error during the send still uses up an attempt and the row comes
+-- back only after the lease. Before claiming, due rows that have used p_max_attempts (an attempt
+-- that died before it could record a failure) or whose link has expired become failed, so the
+-- attempt bound holds whatever the send does (round 2 review item 3). A concurrent sender skips a
 -- locked row (SKIP LOCKED) while the claim runs, and the lease keeps it away afterwards.
-CREATE FUNCTION notification_outbox_claim(p_channels text[], p_now timestamptz, p_lease_until timestamptz)
+CREATE FUNCTION notification_outbox_claim(
+    p_channels text[], p_max_attempts integer, p_now timestamptz, p_lease_until timestamptz)
 RETURNS TABLE (id uuid, channel text, recipient text, template_key text, params jsonb, idempotency_key text, attempts integer)
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    UPDATE notification_outbox d
+       SET status = 'failed', failed_at = p_now, updated_at = p_now,
+           last_error = CASE WHEN d.expires_at IS NOT NULL AND d.expires_at <= p_now THEN 'expired'
+                             ELSE coalesce(d.last_error, 'attempts used up') END
+     WHERE d.status = 'pending' AND d.next_attempt_at <= p_now AND d.channel = ANY (p_channels)
+       AND (d.attempts >= p_max_attempts OR (d.expires_at IS NOT NULL AND d.expires_at <= p_now));
+    RETURN QUERY
     UPDATE notification_outbox o
        SET attempts = o.attempts + 1, next_attempt_at = p_lease_until, updated_at = p_now
      WHERE o.id = (SELECT c.id FROM notification_outbox c
                     WHERE c.status = 'pending' AND c.next_attempt_at <= p_now AND c.channel = ANY (p_channels)
+                      AND c.attempts < p_max_attempts
                     ORDER BY c.next_attempt_at, c.id
                     LIMIT 1
                       FOR UPDATE SKIP LOCKED)
-    RETURNING o.id, o.channel, o.recipient::text, o.template_key::text, o.params, o.idempotency_key::text, o.attempts
+    RETURNING o.id, o.channel, o.recipient::text, o.template_key::text, o.params, o.idempotency_key::text, o.attempts;
+END
 $$;
 
 -- Records the result of a claimed attempt (attempts already counted). Success: sent, parameters
@@ -444,8 +464,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 
 -- The operator sends a failed row again: pending, attempts reset. Only a row created after
--- p_created_after (the longest link lifetime ago) whose parameters are still there; returns
--- 'retried', 'too_old' or 'not_failed' (review N1: an expired link is never sent).
+-- p_created_after (the longest link lifetime ago), whose own link has not expired (an activation
+-- link lasts 72 hours) and whose parameters are still there; returns 'retried', 'too_old' or
+-- 'not_failed' (review N1, round 2 item 5: an expired link is never sent).
 CREATE FUNCTION notification_outbox_retry(p_id uuid, p_created_after timestamptz, p_now timestamptz)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -456,7 +477,8 @@ BEGIN
     IF NOT FOUND OR v.status <> 'failed' THEN
         RETURN 'not_failed';
     END IF;
-    IF v.created_at < p_created_after OR v.params = '{}'::jsonb THEN
+    IF v.created_at < p_created_after OR v.params = '{}'::jsonb
+       OR (v.expires_at IS NOT NULL AND v.expires_at <= p_now) THEN
         RETURN 'too_old';
     END IF;
     UPDATE notification_outbox
@@ -479,7 +501,8 @@ LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
                       failed_at = coalesce(failed_at, p_now),
                       last_error = CASE WHEN status = 'pending' THEN 'expired' ELSE last_error END,
                       updated_at = p_now
-                WHERE status IN ('pending', 'failed') AND created_at < p_links_before
+                WHERE status IN ('pending', 'failed')
+                  AND (created_at < p_links_before OR (expires_at IS NOT NULL AND expires_at < p_now))
                   AND (params <> '{}'::jsonb OR status = 'pending')
                RETURNING 1)
     SELECT ((SELECT count(*) FROM d) + (SELECT count(*) FROM c))::integer
@@ -497,15 +520,15 @@ REVOKE ALL ON FUNCTION onboarding_application_lock(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_application_activated(uuid, uuid, uuid, text, text, text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_applications_expire(timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION onboarding_applications_purge(timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION notification_outbox_claim(text[], timestamptz, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION notification_outbox_claim(text[], integer, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_record(uuid, boolean, text, integer, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_failures(integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_counts() FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_retry(uuid, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_purge(timestamptz, timestamptz, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION notification_outbox_count_since(text, text, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION onboarding_applications_created_since(timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION notification_outbox_count_since(text, text, timestamptz, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION onboarding_applications_created_since(timestamptz, timestamptz) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION onboarding_application_create(uuid, text, text, text, text, text, text, text[], text, text, text, text, text, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_relink(text, text, timestamptz, timestamptz) TO bms_app;
@@ -519,12 +542,12 @@ GRANT EXECUTE ON FUNCTION onboarding_application_lock(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_activated(uuid, uuid, uuid, text, text, text, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_applications_expire(timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_applications_purge(timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION notification_outbox_claim(text[], timestamptz, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION notification_outbox_claim(text[], integer, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_record(uuid, boolean, text, integer, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_failures(integer) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_counts() TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_retry(uuid, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_purge(timestamptz, timestamptz, timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION notification_outbox_count_since(text, text, timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION onboarding_applications_created_since(timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION notification_outbox_count_since(text, text, timestamptz, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION onboarding_applications_created_since(timestamptz, timestamptz) TO bms_app;

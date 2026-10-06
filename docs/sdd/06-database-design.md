@@ -257,20 +257,24 @@ One row per message to send (spec section 11, FR-NTF-09): `id uuid PK`, `channel
 whose id stays in the environment), `template_key varchar(100)`, `params jsonb` (template values;
 cleared to `{}` once sent, because they can hold a one-time link), `status` [`pending`, `sent`,
 `failed`], `attempts integer`, `idempotency_key varchar(200) UNIQUE`, `throttle_key varchar(400)`
-(groups rows for a volume bound, for example `onboarding.verify:<mailbox>`), `last_error
+(groups rows for a volume bound, for example `onboarding.verify:<mailbox>`), `expires_at` (when the
+link the row carries stops working: never sent, sent again or kept with its parameters after it),
+`last_error
 varchar(300)` (an error class or a sender's own safe message, never a text, an address or a
 token), `next_attempt_at` (also the claim lease), `created_at`, `updated_at`, `sent_at`,
 `failed_at`. Indexes on pending rows, failed rows, `(throttle_key, created_at)` and
 `(template_key, created_at)`. Row-level security forced with no policy, no grant to `bms_app`.
 Functions: `notification_outbox_enqueue` (ON CONFLICT on the key does nothing),
-`notification_outbox_count_since` (rows by throttle key or template since a time, for the sign-up
-bounds), `notification_outbox_claim` (one due row of the enabled channels, `FOR UPDATE SKIP
-LOCKED`, counting the attempt and setting the lease in the same statement),
+`notification_outbox_count_since` (rows by throttle key or template in a time window, for the
+sign-up bounds), `notification_outbox_claim` (first marks due rows with their attempts used up or
+their link expired as `failed`, then takes one due row of the enabled channels with `FOR UPDATE
+SKIP LOCKED`, counting the attempt and setting the lease in the same statement),
 `notification_outbox_record` (sent, or pending again after 1 then 5 minutes, or `failed` at the
 third attempt), `notification_outbox_failures`, `notification_outbox_counts`,
-`notification_outbox_retry` (only a failed row younger than 7 days with its parameters) and
+`notification_outbox_retry` (only a failed row younger than 7 days, with its link not expired and
+its parameters kept) and
 `notification_outbox_purge` (sent rows deleted after 30 days; any unsent row older than 7 days
-loses its parameters, a pending one becoming `failed`, `expired`). It has no
+or past its `expires_at` loses its parameters, a pending one becoming `failed`, `expired`). It has no
 `tenant_id` in this slice; tenant messages (`outbox_events`, `notifications` of section 6.5) are
 still to come.
 

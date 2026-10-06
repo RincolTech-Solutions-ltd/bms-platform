@@ -156,7 +156,7 @@ class ApplicationService {
                     .query(String.class)
                     .single();
             String throttle = "onboarding.verify:" + mailbox;
-            if (outbox.countSince(throttle, null, now.minus(Duration.ofHours(24)))
+            if (outbox.countSince(throttle, null, now.minus(Duration.ofHours(24)), now)
                     >= caps.maxVerificationEmailsPerMailbox()) {
                 log.info("sign-up answered without an email: mailbox bound reached");
                 return;
@@ -183,28 +183,34 @@ class ApplicationService {
                                     Timestamp.from(now))
                             .query(Boolean.class)
                             .single());
+            // A repeat goes to the address just submitted, which the key treats as the same mailbox,
+            // never to a variant stored earlier: a variant that bounces cannot squat the mailbox
+            // (round 2 review item 2).
             String recipient = email;
             if (created) {
                 audit.record("platform.application.submitted", null, null, Map.of("application_id", id));
             } else {
-                record Open(String reference, String email) {}
-                Optional<Open> open = jdbc.sql(
-                                "SELECT reference, contact_email FROM onboarding_application_relink(?, ?, ?, ?)")
+                Optional<String> open = jdbc.sql("SELECT reference FROM onboarding_application_relink(?, ?, ?, ?)")
                         .params(email, hash, Timestamp.from(now.plus(LINK_TTL)), Timestamp.from(now))
-                        .query((rs, n) -> new Open(rs.getString("reference"), rs.getString("contact_email")))
+                        .query(String.class)
                         .optional();
                 if (open.isEmpty()) {
                     return;
                 }
-                reference = open.get().reference();
-                recipient = open.get().email();
+                reference = open.get();
             }
             // No text the applicant typed: the address is not confirmed yet (review B1).
             Map<String, String> params = new LinkedHashMap<>();
             params.put("reference", reference);
             params.put("link", hosts.platformOrigin() + "/sign-up/verify#token=" + token);
             outbox.enqueue(new Outbox.Message(
-                    Outbox.EMAIL, recipient, VERIFY_TEMPLATE, params, "onboarding.link:" + hash, throttle));
+                    Outbox.EMAIL,
+                    recipient,
+                    VERIFY_TEMPLATE,
+                    params,
+                    "onboarding.link:" + hash,
+                    throttle,
+                    now.plus(LINK_TTL)));
         });
     }
 
@@ -215,11 +221,11 @@ class ApplicationService {
      */
     private boolean capReached(Instant now) {
         Instant hourAgo = now.minus(Duration.ofHours(1));
-        int applications = jdbc.sql("SELECT onboarding_applications_created_since(?)")
-                .param(Timestamp.from(hourAgo))
+        int applications = jdbc.sql("SELECT onboarding_applications_created_since(?, ?)")
+                .params(Timestamp.from(hourAgo), Timestamp.from(now))
                 .query(Integer.class)
                 .single();
-        int emails = outbox.countSince(null, VERIFY_TEMPLATE, hourAgo);
+        int emails = outbox.countSince(null, VERIFY_TEMPLATE, hourAgo, now);
         if (applications < caps.maxApplicationsPerHour() && emails < caps.maxVerificationEmailsPerHour()) {
             return false;
         }
@@ -371,7 +377,9 @@ class ApplicationService {
                         before.contactEmail(),
                         to.equals("rejected") ? "onboarding.rejected" : "onboarding.needs_info",
                         params,
-                        "onboarding.link:" + hash));
+                        "onboarding.link:" + hash,
+                        null,
+                        now.plus(LINK_TTL)));
             }
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("application_id", id);
@@ -466,7 +474,9 @@ class ApplicationService {
                                 application.contactEmail(),
                                 "onboarding.activation",
                                 params,
-                                "onboarding.activation:" + id));
+                                "onboarding.activation:" + id,
+                                null,
+                                tenant.invitationExpiresAt()));
                         Map<String, Object> data = new LinkedHashMap<>();
                         data.put("application_id", id);
                         data.put("reference", application.reference());

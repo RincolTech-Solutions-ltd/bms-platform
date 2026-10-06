@@ -467,8 +467,9 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   read them; the applicant page shows none of them; `rejected` and `expired` applications are
   deleted 90 days after they closed (FR-ONB-09). An outbox row keeps its parameters, which can hold
   a one-time link, until it is sent or, if it is never sent (a sender off, or three failures), at
-  most 7 days, the longest link lifetime: the nightly purge then clears them, and "send again" is
-  refused for such a row. The links are therefore readable in the database (and in a backup)
+  most 7 days, the longest link lifetime, and never past the link's own expiry (72 hours for an
+  activation link): such a row is not sent, the nightly purge clears its parameters, and "send
+  again" is refused. The links are therefore readable in the database (and in a backup)
   while a row waits, which is the cost of sending later; they expire on their own (72 hours for an
   activation, 7 days for an applicant link). The portal shows a masked recipient and an error
   class or a sender's own safe message, never a text. A Telegram bot token that is not in the
