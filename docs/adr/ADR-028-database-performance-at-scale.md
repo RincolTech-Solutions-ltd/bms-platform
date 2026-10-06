@@ -95,7 +95,8 @@ host); extended statistics on the movements' branch and product (no difference o
 index exists); a pre-aggregated profit table (the year report takes 472 ms at 25 times the data on
 the staging profile); `fillfactor` on `retail_sales`, `idempotency_keys` and `tenant_sequences`
 (already 100 percent HOT). Not done, not needed: JSON indexes (no query filters on JSON). Not
-measurable yet: the schedule, outbox and notification tables, which do not exist.
+measured: `notification_outbox` (V23, #89), which merged after these measurements (its claim reads a
+partial index on pending rows), and the schedule tables, which do not exist yet.
 
 ## Consequences
 
@@ -123,7 +124,7 @@ were not measured. Run `scripts/db-bench` on the staging host itself out of hour
 `database-health-check.md` monthly. A loans list filtered to one status walks the
 creation-order index past the other statuses (14 ms at worst here, where every active loan is
 recent); if a real tenant's list is slow, measure `(tenant_id, status, created_at, id)`. A tenant far
-larger than the largest here, or the first lending schedules and outbox, are the next reasons to
+larger than the largest here, or the first lending schedules and a busy outbox, are the next reasons to
 measure again.
 
 ## Appendix: timings (ms)
