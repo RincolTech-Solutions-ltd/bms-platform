@@ -39,6 +39,7 @@ A letter suffix (`FR-REP-04a`) splits one statement into separately testable par
 | CLN | Collections | 3.26 |
 | MSS | Member self-service | 3.27 |
 | RET | Retail vertical: catalogue, stock, sales, purchasing, valuation (ADR-020) | 3.28 |
+| ONB | Self-onboarding: sign-up, applications, operator activation (ADR-024) | 3.29 |
 
 **Phase column.** `MVP` is in the first release for the pilot tenant
 (`docs/specs/lending-mvp-scope.md` orders them). `P2` is planned after the MVP. `Later`
@@ -362,6 +363,9 @@ is dismissed (`setup_dismissed`, tenant wide).
 | FR-NTF-06 | The system shall not send the same reminder twice for the same schedule item and reminder type. | Idempotency key `(schedule_item_id, reminder_type)`; rerunning the reminder job sends nothing new. | MVP |
 | FR-NTF-07 | The system shall count SMS segments sent per tenant per month for plan reporting. | The count appears in the super admin tenant view. | MVP |
 | FR-NTF-08 | Email notifications (staff invitations, password reset, report ready) shall use the same outbox. | Tested with a fake provider. | MVP |
+| FR-NTF-09 | The platform outbox (`notification_outbox`, ADR-024, spec section 11) shall be delivered at least once: a sender job claims due rows with `FOR UPDATE SKIP LOCKED`, sends, and records the result; each row has a unique idempotency key; a failure is retried after 1 and 5 minutes and the third failure marks the row `failed`, listed in the operator portal with a masked recipient and a "send again" action. | `OutboxIT`: one row per key, a locked row is skipped and not sent twice, three failures then `failed`, retry back to `pending`; a sent row's parameters are cleared. | MVP |
+| FR-NTF-10 | Email shall be sent over SMTP with implicit TLS (default port 465) using `BMS_SMTP_HOST`, `BMS_SMTP_PORT`, `BMS_SMTP_USER`, `BMS_SMTP_PASSWORD` and `BMS_MAIL_FROM`. With any of them unset the email sender is off, its rows stay `pending` and nothing fails. Secrets, message texts, links and addresses are never logged. | `OutboxIT` with fake senders; the test profile sets none of the variables. | MVP |
+| FR-NTF-11 | Operator alerts shall go to Telegram through the Bot API `sendMessage` (`BMS_TELEGRAM_BOT_TOKEN`, `BMS_TELEGRAM_OPERATOR_CHAT_ID`) and to the email of every active platform operator. Unset, the Telegram sender is off as in FR-NTF-10. The WhatsApp relay is build step 3 of the spec. | `OnboardingIT`: a newly confirmed application writes one Telegram row and one email row per operator, once. | MVP |
 
 The SMS aggregator is not yet chosen (pending ADR-013). Chapter 12 defines the adapter
 interface so the choice does not change these requirements.
@@ -680,3 +684,24 @@ by `docs/specs/retail-pilot-data-dictionary.md`. `MVP` here is the retail first 
 | FR-RET-13 | Retail permissions and the sales and admin role mapping shall be seeded, with branch scope applied per permission (ADR-017). | `PermissionMatrixIT` compares the seeded rows with chapter 8; a sales user holds exactly the sales column. | MVP |
 | FR-RET-14 | Every retail write shall be audited. | Each create, edit, price change, sale, void, payment, purchase, usage report and stock-take commit writes an `audit_log` row in its transaction. | MVP |
 | FR-RET-15 | Phone-first PWA screens shall cover the flows above, gated by permission. | Built in increment R6 against chapter 7 section 7.11.20. | MVP |
+
+## 3.29 Self-onboarding (ONB)
+
+A business applies on a public page of the platform host; the platform operator verifies it and
+activates it, which creates the tenant and sends the first admin a one-time link (ADR-024,
+`docs/specs/self-onboarding-and-subscriptions.md`). This section is build step 1 of the spec: the
+payment is a free text note by the operator; the price book, payment records, the trial clock,
+reminders and agents are later steps. An application is not a tenant.
+
+| ID | Requirement | Acceptance criteria | Phase |
+|---|---|---|---|
+| FR-ONB-01 | A public sign-up form on the platform host shall take the business name, contact name, email and phone, country (`UG`, `KE`, `TZ`, `RW`), modules wanted (the module keys, `lending`, `retail`), term (`monthly`, `annual`), the way in (`trial`, `paid`), an optional agent code (recorded, not used) and a short free text. Input is trimmed, normalised (NFC, no control characters) and capped; a Uganda phone in any local form is stored as E.164, other countries in international form. | Each invalid field is refused with `validation_failed` or `invalid_phone`; an unknown field is refused. | MVP |
+| FR-ONB-02 | The email shall be confirmed by a one-time link (256 random bits, stored as SHA-256 only, valid 7 days, in the URL fragment only) before the application reaches the operator queue. The same link opens the applicant page. | An unconfirmed application is not in the queue; opening the link confirms it once. | MVP |
+| FR-ONB-03 | The public endpoints shall resist abuse: 5 applications an hour per client address and 3 per email, 30 link reads per 10 minutes per address (429 `rate_limited`); a hidden field that, when filled, drops the request with the normal answer; one open application per email; and the same answer for a known and an unknown email (a known email gets a fresh link to its open application). | `OnboardingIT` covers each limit, the honeypot, the duplicate email and the identical answers. | MVP |
+| FR-ONB-04 | The applicant page shall show the reference, the status in plain words, the modules, the operator's question while `needs_info` with a form to answer it (the answer puts the application back to `submitted`), and the reason when rejected. It shows no contact details. | A malformed, unknown or replaced link gets 404 `link_invalid`. | MVP |
+| FR-ONB-05 | The operator portal shall list confirmed applications newest first with a status filter and the count per status, and show one application with its possible repeats: other applications with the same email, phone or normalised business name, and tenants with the same normalised name (spec section 4.2 item 4). | Normalisation ignores case, punctuation and the suffixes Ltd, Limited, Co, Company, SMC, Enterprise(s). | MVP |
+| FR-ONB-06 | The operator shall Verify (from `submitted` or `needs_info`), ask for more information with a note the applicant sees (from `submitted` or `verified`) or Reject with a reason (from any open status). Needs info and Reject email the applicant a fresh link. | A move from any other status is 409 `application_state`; each decision writes `platform_audit_log`. | MVP |
+| FR-ONB-07 | Activate (operator only, `verified` only) shall take the modules, term, way in (`trial`, or `paid` with a required note of the payment received), an optional plan (default `starter`), an editable slug suggested from the business name (FR-TEN-02) and an ignored agent code. In one transaction it creates the tenant through the same path as FR-TEN-01 with the applicant as the invited first tenant admin (72 hour link, FR-IAM-01), starts the subscription as `trial` or `active`, marks the application `activated` with who and when, writes `platform_audit_log`, and queues the activation email. The links use `BMS_TENANT_HOST_PATTERN` and `BMS_PLATFORM_HOST`, never a request header. A second Activate does nothing and says so. | `OnboardingIT`: exactly one tenant, a working invitation, one email row, one audit row, also under four concurrent calls; a taken slug rolls everything back. | MVP |
+| FR-ONB-08 | A newly confirmed application shall write an operator alert to the outbox (FR-NTF-11) in the same transaction. | One alert set per application. | MVP |
+| FR-ONB-09 | A scheduled job shall expire applications whose email is not confirmed within 14 days and delete `rejected` and `expired` applications 90 days after they closed. | `OnboardingIT` with backdated rows. | MVP |
+
