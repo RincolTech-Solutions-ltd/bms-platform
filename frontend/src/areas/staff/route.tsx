@@ -3,10 +3,10 @@ import { Link, Outlet, createLazyRoute, useNavigate, useRouterState } from '@tan
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
-import { ALL_BRANCHES, initialBranch, loadBranch, saveBranch } from '../../auth/branch';
 import { getAccessToken, refreshSession, setAccessToken, subscribe } from '../../auth/session';
 import { HelpMenu, TourProvider } from '../../tour/host';
 import { icons } from '../../components/icons';
+import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
 import { RetailNav } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
@@ -41,7 +41,7 @@ function StaffLayout() {
   const me = useQuery({ queryKey: ['me', token], queryFn: (): Promise<Me> => (mock ? loadRetailMock().then((m) => m.mockMe(import.meta.env.VITE_RETAIL_MOCK_ROLE)) : fetchMe()),
     enabled: token !== null || mock,
   });
-  const [branch, setBranch] = useState<string | null>(null);
+  const { branch, choose, ready } = useActiveBranch(me.data);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const managesSettings = (me.data?.permissions ?? []).includes('core.settings.manage');
   const settings = useQuery({ queryKey: ['settings'], queryFn: fetchSettings, enabled: managesSettings && !mock });
@@ -53,21 +53,12 @@ function StaffLayout() {
     void navigate({ to: '/staff/setup', replace: true });
   }, [pathname, settings.data, navigate]);
 
-  useEffect(() => {
-    if (me.data) setBranch(initialBranch(me.data, loadBranch(me.data.user_id ?? '')));
-  }, [me.data]);
-
-  if (restoring || !me.data) {
+  if (restoring || !me.data || !ready) {
     return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <p className="loading">Loading</p>;
   }
 
   const profile = me.data;
   if (mock) void loadRetailMock().then((m) => m.setMockProfitAccess(canSeeProfit(profile)));
-  function choose(selection: string) {
-    setBranch(selection);
-    saveBranch(profile.user_id ?? '', selection);
-  }
-
   async function signOut() {
     await api.POST('/api/v1/auth/logout');
     setAccessToken(null);
@@ -78,7 +69,7 @@ function StaffLayout() {
   const recoveryCodesLeft = profile.unused_recovery_codes ?? 0;
 
   return (
-    <StaffContext.Provider value={{ me: profile, branch }}>
+    <StaffContext.Provider value={{ me: profile, branch, chooseBranch: choose }}>
       <TourProvider me={profile} saveProgress={!mock}>
         <StaffBar me={profile} branch={branch} onBranch={choose} onSignOut={() => void signOut()} />
         {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
@@ -107,17 +98,7 @@ export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: 
           <span className="staff-user-name">{me.full_name}</span>
         </span>
         <HelpMenu />
-        <label className="branch-picker" data-tour="branch-picker">
-          Branch{' '}
-          <select value={branch ?? ''} onChange={(e) => onBranch(e.target.value)}>
-            {me.all_branches && <option value={ALL_BRANCHES}>All branches</option>}
-            {(me.branches ?? []).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.code} {b.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <BranchPicker me={me} branch={branch} onChoose={onBranch} />
         <button className="btn-ghost btn-sm" onClick={onSignOut}>Sign out</button>
       </div>
       <nav className="tabs" aria-label="Staff areas" data-tour="nav-areas">
