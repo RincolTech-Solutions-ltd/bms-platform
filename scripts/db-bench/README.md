@@ -1,6 +1,6 @@
 # db-bench: query plans at 25 times the data
 
-A throwaway PostgreSQL benchmark (issue #107, ADR-025, chapter 15 section 15.4.4). It never
+A throwaway PostgreSQL benchmark (issue #107, ADR-028, chapter 15 section 15.4.4). It never
 touches a real database: `run.sh` creates its own container (label `bms.bench=throwaway`) and
 refuses to act on any other.
 
@@ -16,7 +16,7 @@ scripts/db-bench/run.sh migrate 22         # V1 to V22; omit the number for ever
 scripts/db-bench/run.sh seed 25            # about 7 minutes and 3.6 GB on a cloud machine
 scripts/db-bench/run.sh profile pi         # the staging limits: 176 MB, one CPU, 48 MB buffers
 scripts/db-bench/run.sh measure before-pi  # results/before-pi.md and one .plan file per query
-scripts/db-bench/run.sh apply backend/src/main/resources/db/migration/V24__database_optimisation.sql
+scripts/db-bench/run.sh apply backend/src/main/resources/db/migration/V26__database_optimisation.sql
 QUERIES="queries queries-after" scripts/db-bench/run.sh measure after-pi
 scripts/db-bench/run.sh write after-pi 60  # pgbench the sale path for 60 s
 scripts/db-bench/run.sh down

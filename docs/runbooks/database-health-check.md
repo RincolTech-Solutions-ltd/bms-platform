@@ -1,6 +1,6 @@
 # Runbook: database health check
 
-**Applies to:** staging (ARM64 host) and production · **Decisions:** ADR-003, ADR-025 · **Issue:** #107
+**Applies to:** staging (ARM64 host) and production · **Decisions:** ADR-003, ADR-028 · **Issue:** #107
 
 A read-only check of the PostgreSQL database: what is slow, what is bloated, which indexes are
 never used and which tables are read without one. Every query here only reads the statistics
@@ -75,7 +75,7 @@ SELECT round(mean_exec_time::numeric, 2) AS mean_ms, calls,
 
 What is slow: a screen query (lists, search, picker) with a mean above 50 ms on production or
 500 ms on the staging host; a report above 2 s on production. Compare with the measured numbers in
-ADR-025 before calling anything a regression.
+ADR-028 before calling anything a regression.
 
 Statements running now, and who is waiting on whom:
 
@@ -115,7 +115,7 @@ than the rows returned, and `shared read` (blocks that came from disk, not the c
 
 A predicate built from a function PostgreSQL does not mark leakproof, such as `lower(col) = ...`
 or `col ILIKE ...`, cannot be used as an index condition under row-level security, because it
-would run before the tenant policy (ADR-025). It is applied as a filter after the tenant's rows are
+would run before the tenant policy (ADR-028). It is applied as a filter after the tenant's rows are
 found. That is expected; it only matters if the tenant has many rows on that table.
 
 ## 5. Bloat and vacuum
@@ -139,7 +139,7 @@ What to look for:
   is not keeping up. On the staging host it runs with two workers (section 9); check the log for
   `canceling autovacuum task` and for long transactions (section 3) holding the horizon back.
 - `hot_pct` on the update-heavy tables (`retail_stock_balances`, `retail_sales`,
-  `idempotency_keys`, `tenant_sequences`, `auth_sessions`, `lending_loans`): after V24 these have
+  `idempotency_keys`, `tenant_sequences`, `auth_sessions`, `lending_loans`): after V26 these have
   free space on each page (fillfactor) so most updates are HOT (no index change). Below 50 percent
   means the free space is used up or an index now covers an updated column.
 

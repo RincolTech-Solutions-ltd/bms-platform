@@ -69,8 +69,8 @@ CX22). Memory is budgeted with container limits so one runaway process cannot st
 The API pool is 10 connections (`BMS_DB_POOL_SIZE`). Virtual threads serve requests, so the pool,
 not a thread count, is the concurrency limit on the database. Every pool connection starts with a 60 s
 `statement_timeout` and a 60 s `idle_in_transaction_session_timeout` (`BMS_DB_STATEMENT_TIMEOUT`,
-`BMS_DB_IDLE_IN_TRANSACTION_TIMEOUT`, ADR-025). The PostgreSQL settings above were measured with
-`scripts/db-bench` at 25 times the staging data (ADR-025) and are kept; the recommended values,
+`BMS_DB_IDLE_IN_TRANSACTION_TIMEOUT`, ADR-028). The PostgreSQL settings above were measured with
+`scripts/db-bench` at 25 times the staging data (ADR-028) and are kept; the recommended values,
 including `pg_stat_statements` for production, are in `deploy/postgres/recommended/` and change only
 through `docs/runbooks/database-tuning.md`. `docs/runbooks/database-health-check.md` is the monthly
 check of slow queries, bloat and indexes. When the capacity dataset
@@ -275,7 +275,7 @@ Staging runs on an ARM64 host that already exists at a Rincol home site: a Raspb
   | Container | Limit | Notes |
   |---|---|---|
   | `api` | 448 MB | Serial GC, C1 only (`TieredStopAtLevel=1`), heap at most 50 percent, metaspace 128 MB (ADR-018 finding L6: was 160 MB, leaving too little headroom), code cache 48 MB, 512 KB stacks, 24 Tomcat threads, pool of 5. Measured at about 235 MB after start. |
-  | `postgres` | 176 MB | `shared_buffers=48MB`, `effective_cache_size=128MB`, `work_mem=2MB`, `max_connections=20`, longer checkpoints to spare the SD card. Measured at 25 times the staging data inside these limits (ADR-025); recommended next: two autovacuum workers of 16 MB each (`deploy/postgres/recommended/pi-staging.conf`), not yet applied. |
+  | `postgres` | 176 MB | `shared_buffers=48MB`, `effective_cache_size=128MB`, `work_mem=2MB`, `max_connections=20`, longer checkpoints to spare the SD card. Measured at 25 times the staging data inside these limits (ADR-028); recommended next: two autovacuum workers of 16 MB each (`deploy/postgres/recommended/pi-staging.conf`), not yet applied. |
   | `cloudflared` | 48 MB | |
   | `proxy`, `web` | 32 MB each | Caddy |
   | `migrate` | 160 MB | Only while a deploy runs, next to the old API |

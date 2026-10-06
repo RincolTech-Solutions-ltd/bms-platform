@@ -1,4 +1,4 @@
-# ADR-025: Database performance measured at 25 times the data: covering indexes, the plain tenant policy kept, connection limits
+# ADR-028: Database performance measured at 25 times the data: covering indexes, the plain tenant policy kept, connection limits
 
 ## Status
 
@@ -26,7 +26,7 @@ PostgreSQL 17.11 on an x86_64 cloud machine with NVMe storage. The servers' `.en
 pins PostgreSQL 16 and the integration tests run 16, so the staging profile was repeated on
 PostgreSQL 16 (three runs per statement): the same changes win by similar factors there (sales first
 page 459 to 0.21 ms, reconciliation 2,030 to 248 ms, valuation as of 2,075 to 214 ms, year profit
-1,731 to 370 ms) and V24 took 9.0 s. The one difference: the import's positions took 3.0 s before
+1,731 to 370 ms) and V26 took 9.0 s. The one difference: the import's positions took 3.0 s before
 on 16, against 28.5 s on 17, where the planner chose 12,000 index probes; 0.8 s after on both.
 
 What the plans showed:
@@ -53,7 +53,7 @@ What the plans showed:
 1. **Measure before changing.** A change to an index, a hot query or a server setting is measured
    with `scripts/db-bench` at 25 times the data on both profiles, and the numbers go in the pull
    request. Only changes the plans prove are made.
-2. **One migration, V24, indexes and a storage setting only**: `(tenant_id, created_at, id)` on
+2. **One migration, V26, indexes and a storage setting only**: `(tenant_id, created_at, id)` on
    `retail_sales` and `lending_loans`; `(tenant_id, sale_date) INCLUDE (id, branch_id, status)` on
    `retail_sales`; covering indexes for the reports on `retail_sale_lines`,
    `retail_stock_movements` and `journal_lines`, replacing four indexes with the same leading
@@ -74,7 +74,7 @@ What the plans showed:
    from 57 to 744 ms. Predictable plans are worth more than a quarter on three reports.
 5. **Indexes are built inside the migration's transaction**, not `CONCURRENTLY`, which Flyway could
    only run in a separate non-transactional file. Measured on the staging profile at 25 times the
-   data, V24 took 9.4 s in all (largest build 3.5 s, each drop under 3 ms; 6.8 s on the production
+   data, V26 took 9.4 s in all (largest build 3.5 s, each drop under 3 ms; 6.8 s on the production
    profile); two clients recording sales throughout waited for those 9.4 s and none failed. Today's
    staging data is a twenty-fifth of that. The migration sets `lock_timeout = '5s'`, so behind a
    long report it fails and the deploy stops before the swap, instead of queueing every request.
@@ -110,7 +110,7 @@ or a leaked transaction frees its connection within a minute. There is a repeata
 
 **Worse:** five more indexes to maintain on writes (the sale path measured the same: 43.0 ms
 before and 44.2 ms after per three-line sale on the staging profile, 60 s of pgbench, two clients);
-covering indexes are larger than the ones they replaced; V24 blocks writes to the tables it
+covering indexes are larger than the ones they replaced; V26 blocks writes to the tables it
 indexes while it runs; a statement that legitimately needs more than 60 s now fails unless the
 host raises `BMS_DB_STATEMENT_TIMEOUT`. Search by `ILIKE` or similarity cannot use an index under
 row-level security (only leakproof predicates can be index conditions), so member and product search
@@ -129,7 +129,7 @@ measure again.
 ## Appendix: timings (ms)
 
 Median execution time of each statement in `scripts/db-bench/queries` (planning time excluded; it
-was 1 to 7 ms throughout), before and after V24 and the code changes, on the staging and the
+was 1 to 7 ms throughout), before and after V26 and the code changes, on the staging and the
 production profiles at 25 times the data. `e07` and `g07` after are one statement for a page of 51
 parents, against one of 51 statements before; `g06` after is one statement for a page, against one
 of 153 before. `i10` is the plan limit count on member creation.

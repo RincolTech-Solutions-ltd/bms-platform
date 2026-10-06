@@ -126,7 +126,7 @@ none either way, because the policy is only evaluated against rows.
 
 The policy compares `tenant_id` with `current_setting(...)` directly. Wrapping the setting in a
 sub-select, so it is evaluated once per statement instead of once per row read, was measured and
-rejected (ADR-025): with the indexes of section 6.12 it saved about a quarter on a few reports, but
+rejected (ADR-028): with the indexes of section 6.12 it saved about a quarter on a few reports, but
 it hides the tenant from the planner's statistics, and a valuation report became 13 times slower on
 a large tenant. Under the policy only *leakproof* predicates (equality and range on uuid, dates,
 timestamps and text) can be index conditions: `lower(col) = ...`, `ILIKE` and trigram `%` run as
@@ -598,7 +598,7 @@ Index `(tenant_id, branch_id, entry_date)`, `(tenant_id, source_type, source_id)
 | `memo` | `text` | |
 
 `CHECK (debit >= 0 AND credit >= 0)`, `CHECK ((debit > 0) <> (credit > 0))`.
-Index `(tenant_id, account_id) INCLUDE (entry_id, debit, credit)` (V24, section 6.12),
+Index `(tenant_id, account_id) INCLUDE (entry_id, debit, credit)` (V26, section 6.12),
 `(tenant_id, subledger_type, subledger_id)`.
 
 Balance enforcement: a constraint trigger
@@ -864,7 +864,7 @@ creation and replaced by the approved terms at approval.
 Indexes: `(tenant_id, member_id)`, `(tenant_id, branch_id, status)`,
 `(tenant_id, officer_user_id, status)`, `(tenant_id, status, next_due_date)`,
 `(tenant_id, status, days_past_due) WHERE status = 'active'`, and `(tenant_id, created_at, id)` for
-the list's order (V24). The approver CHECK is named
+the list's order (V26). The approver CHECK is named
 `lending_loans_approver_is_not_submitter_or_appraiser`. Guarantor and pledge rows of a draft are
 replaced as a whole, so `bms_app` holds DELETE on those two tables only, and triggers
 (`lending_loan_collateral_guard`, `lending_loan_guarantors_guard`) refuse any insert, delete or
@@ -1170,7 +1170,7 @@ erDiagram
 - Seed data (currencies, plans, roles, permissions, role permissions) is applied by
   migrations and is idempotent.
 - Indexes are built with plain `CREATE INDEX` inside the migration's transaction, which blocks
-  writes to that table until the migration commits (ADR-025). The lock time of every build is
+  writes to that table until the migration commits (ADR-028). The lock time of every build is
   measured with `scripts/db-bench` at 25 times the data and written in the migration; a migration
   that touches existing tables starts with `SET LOCAL lock_timeout = '5s'`, so it fails fast behind
   a long report instead of queueing every request. When a build would block writes for longer than
@@ -1232,10 +1232,12 @@ permission (granted to the roles that hold `retail.purchase.create`), the inter-
 account in `bms_seed_retail_chart` and for every tenant that switched retail on before it,
 `retail_transfers` and `retail_transfer_lines` (append-only), the `transfer_out` and `transfer_in`
 movement kinds and the movements' `transfer_id` link (sections 6.11.1 and 6.11.2). It takes the next
-number free on `main` when it merges, so it may be renumbered then. V23 is taken by the open
-self-onboarding branch (#97). `V24__database_optimisation.sql` (#107, ADR-025) changes indexes and a
-storage setting only (section 6.12). The next migration is V25 (`MigrationOrderIT`, chapter 15
-section 15.4.3).
+number free on `main` when it merges, so it may be renumbered then. V23, V24 and V25 are held by the open
+self-onboarding (#97), guided tour (#123) and loan servicing (#126) branches.
+`V26__database_optimisation.sql` (#107, ADR-028) changes indexes and a storage setting only
+(section 6.12); with `outOfOrder` off it merges after those three, or they take numbers above it.
+The next migration is V27
+(`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 
@@ -1362,7 +1364,7 @@ Imported history (sales, purchases, adjustments, returns, usage, legacy balances
 
 Indexes: `(tenant_id, branch_id, product_id, business_date) INCLUDE (qty, kind, historical)`, which
 serves reconciliation, valuation as of a date and the import's positions from the index alone
-(V24, replacing the V11 balance index and the V14 business date index); `(tenant_id, source_type,
+(V26, replacing the V11 balance index and the V14 business date index); `(tenant_id, source_type,
 source_id)`; `(tenant_id, occurred_at, id)` for the movements list, whose local-date filter adds an
 instant range so this index applies (section 6.12); `(tenant_id, transfer_id)` partial.
 
@@ -1375,7 +1377,7 @@ taken in branch and product order). Product rows are locked only by restocks and
 with the sum of its movements and records any difference as a system audit row
 (`retail.stock.reconciliation_mismatch`); it never corrects a balance. Every movement updates a
 row here, so the table keeps free space on each page (`fillfactor = 80`) and has no index on `qty`
-(V24 dropped the partial `qty < 0` index, which no query used and which made every update non-HOT):
+(V26 dropped the partial `qty < 0` index, which no query used and which made every update non-HOT):
 balance updates are HOT and do not grow the indexes (section 6.12).
 
 ### `retail_transfers` (RLS; `bms_app` SELECT, INSERT, UPDATE of the void only)
@@ -1439,14 +1441,14 @@ owner's `bms.allow_mutation` maintenance switch of `reject_mutation` applies).
 
 Indexes: `(tenant_id, branch_id, sale_date, created_at, id)` for a branch's list,
 `(tenant_id, created_at, id)` for the list's order across branches, `(tenant_id, sale_date) INCLUDE
-(id, branch_id, status)` for the daily profit (both V24), `(tenant_id, customer_id)` partial.
+(id, branch_id, status)` for the daily profit (both V26), `(tenant_id, customer_id)` partial.
 
 ### `retail_sale_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
 
 `line_no`, `product_id`, `qty numeric(14,3) > 0`, and the snapshots `unit_price_minor` and
 `unit_cost_minor` with `line_total_minor` and `line_cost_minor` (each rounded half up once). Profit
 is computed from these, never from the product's current prices (ADR-020 decision 5). Index
-`(tenant_id, sale_id) INCLUDE (line_total_minor, line_cost_minor)` (V24): a list page loads the lines
+`(tenant_id, sale_id) INCLUDE (line_total_minor, line_cost_minor)` (V26): a list page loads the lines
 of all its sales in one statement, and the daily profit sums them without reading the heap.
 
 ### `retail_suppliers` (RLS; `bms_app` SELECT, INSERT)
@@ -1543,13 +1545,13 @@ as `bms_app` under the tenant's row-level security:
 Primary key `(tenant_id, source_file, source_ref)`: a row already present is skipped, so a re-run
 of the same export adds nothing.
 
-## 6.12 Performance and indexing (issue #107, ADR-025)
+## 6.12 Performance and indexing (issue #107, ADR-028)
 
 Measured with `scripts/db-bench`: a throwaway PostgreSQL 17 container holding 25 times the staging
 data (50 tenants of mixed size, one large retail tenant with 40 percent of the retail rows; 500,000
 sales, 1.5 million sale lines, 1.6 million stock movements, 2.1 million audit rows; 3.6 GB), every
 hot query of the code taken as `bms_app` with row-level security on, under the staging settings
-(176 MB, one CPU, 48 MB `shared_buffers`) and the production ones. ADR-025 has the before and after
+(176 MB, one CPU, 48 MB `shared_buffers`) and the production ones. ADR-028 has the before and after
 table.
 
 **Index rules.**
@@ -1570,11 +1572,11 @@ table.
 - No index on a column that every hot update changes; free space (`fillfactor`) on the one table
   updated on every sale (`retail_stock_balances`). `retail_sales`, `idempotency_keys` and
   `tenant_sequences` were measured at 100 percent HOT updates already and keep the default.
-- An index no query uses is dropped (V24 dropped five), and a new one is added only with a plan
+- An index no query uses is dropped (V26 dropped five), and a new one is added only with a plan
   that shows it used.
 
 **Query rules.** A list loads the children of a page in one statement (`IN (...)` over the page's
-ids), never one statement per row (sales, transfers and purchases, V24 release). A date filter on a
+ids), never one statement per row (sales, transfers and purchases, V26 release). A date filter on a
 timestamp keeps an instant range next to any local-date expression so the index applies. Lists are
 keyset paginated and never count; reports are bounded by their date range and branch filter.
 

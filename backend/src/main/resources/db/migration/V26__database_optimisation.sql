@@ -1,9 +1,9 @@
--- V24: database optimisation (issue #107, ADR-025; docs/sdd/06-database-design.md section 6.12).
+-- V26: database optimisation (issue #107, ADR-028; docs/sdd/06-database-design.md section 6.12).
 --
 -- Indexes and storage settings only: no table, column, constraint, policy, grant or row changes, so
 -- the previous release runs unchanged on this schema (expand and contract, section 6.9). Every
 -- change below was measured with scripts/db-bench on a copy of the schema holding 25 times the
--- staging data, as bms_app with row-level security on; ADR-025 has the before and after timings.
+-- staging data, as bms_app with row-level security on; ADR-028 has the before and after timings.
 --
 -- Locks. Flyway runs this file in one transaction, so every lock is held until it commits. The
 -- builds take SHARE locks (reads continue, writes to that table wait); the drops at the end take
@@ -11,7 +11,7 @@
 -- settings (32 MB maintenance_work_mem, one CPU, 176 MB), the whole file took 9.4 s, the largest
 -- build (stock movements, 1.6 million rows) 3.5 s, each drop under 3 ms; concurrent sales waited
 -- for those 9.4 s and none failed. Today's staging data is a twenty-fifth of that. Plain
--- CREATE INDEX, not CONCURRENTLY, which cannot run inside the transaction (ADR-025).
+-- CREATE INDEX, not CONCURRENTLY, which cannot run inside the transaction (ADR-028).
 --
 -- lock_timeout: if a long report holds a table, this migration fails after 5 seconds instead of
 -- queueing every request behind it; the deploy stops before the swap and is simply re-run.

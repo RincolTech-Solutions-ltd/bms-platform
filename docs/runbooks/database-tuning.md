@@ -1,10 +1,10 @@
 # Runbook: database tuning and diagnostics
 
-**Applies to:** staging (ARM64 host) and production · **Decisions:** ADR-018, ADR-025 · **Issue:** #107
+**Applies to:** staging (ARM64 host) and production · **Decisions:** ADR-018, ADR-028 · **Issue:** #107
 
 How to change a PostgreSQL setting safely, and how to switch on the two diagnostic extensions,
 `pg_stat_statements` and `auto_explain`, without breaking the staging host's memory cap. The
-measured basis is ADR-025; the recommended values are in `deploy/postgres/recommended/`. Nothing in
+measured basis is ADR-028; the recommended values are in `deploy/postgres/recommended/`. Nothing in
 this runbook is applied automatically: the compose files stay the source of truth for every
 setting, and a change to them goes through a pull request.
 
@@ -34,7 +34,7 @@ API survives with a few failed requests; do it out of hours.
 
 ## 2. pg_stat_statements (which statements take the time)
 
-What it costs, measured in the benchmark container (ADR-025): shared memory grew by about
+What it costs, measured in the benchmark container (ADR-028): shared memory grew by about
 440 kB with `pg_stat_statements.max = 1000` (from 59,736,064 to 60,186,624 bytes in
 `pg_shmem_allocations`), and the record-a-sale write path showed no measurable cost (60 s of
 pgbench, two clients, staging limits: 45.1 ms per sale without it, 43.2 ms with it). The container
@@ -113,7 +113,7 @@ by these; a migration that touches existing tables sets its own `lock_timeout` (
 
 ## 5. Autovacuum and fillfactor
 
-Defaults everywhere, except `retail_stock_balances` (`fillfactor = 80`, V24), the table every sale
+Defaults everywhere, except `retail_stock_balances` (`fillfactor = 80`, V26), the table every sale
 updates. Recommended on the staging host and not yet applied: `autovacuum_max_workers = 2` and
 `autovacuum_work_mem = 16MB` (`deploy/postgres/recommended/pi-staging.conf`), so autovacuum cannot
 take more than 32 MB beside the 48 MB of buffers. Check that autovacuum keeps up with
