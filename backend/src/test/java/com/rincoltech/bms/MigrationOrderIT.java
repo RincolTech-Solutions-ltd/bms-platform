@@ -19,7 +19,7 @@ import org.testcontainers.utility.MountableFile;
 /**
  * The one Flyway sequence shared by lending and retail (issue #71, review F6): V1 to V9 (lending,
  * V9 the loan appraisals of #42), V10 to V14 (retail R1 to R4, the price floor and the review
- * fixes), V20 (the retail import references) and V21 (the pledge release guard) apply in order on an empty database, and on a
+ * fixes), V20 (the retail import references) and V21 (the lending review follow-ups) apply in order on an empty database, and on a
  * database a server already migrated to V9 before the retail work reached it, with
  * {@code outOfOrder} off exactly as {@link DatabaseMigrator} runs it. Each case gets its own
  * PostgreSQL 16 container initialised by {@code deploy/postgres/initdb/01-roles.sh}.

@@ -1,4 +1,7 @@
--- V21: a released pledge or guarantee stays released (follow-up to the #45 review).
+-- V21: lending follow-ups from the #44 and #45 reviews (issue #49). V21 is claimed for lending
+-- on issue #50.
+--
+-- 1. A released pledge or guarantee stays released.
 --
 -- V8's guards let any UPDATE through that kept the loan, the item (or guarantor) and the amount,
 -- so on a frozen loan released_at could be set back to NULL, or a released guarantee reactivated.
@@ -39,3 +42,8 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+-- 2. A flat fee is at most 10^15 minor units, the API bound (ProductApi.MAX_MONEY_MINOR), so a
+--    row written outside the API cannot hold an amount the schedule arithmetic cannot sum.
+ALTER TABLE lending_loan_product_fees
+    ADD CONSTRAINT lending_loan_product_fees_amount_bound CHECK (amount_minor <= 1000000000000000);
