@@ -11,8 +11,20 @@ interface OutboxChannel {
 
     boolean enabled();
 
-    /** Sends one message or throws; the exception's message must not carry the text or recipient. */
+    /**
+     * Sends one message or throws. Only a {@link SendFailure}'s message is ever stored or shown,
+     * so a sender reports what went wrong through one, written to carry no text, recipient or
+     * secret; any other exception is reduced to its class.
+     */
     void send(Delivery delivery) throws Exception;
+
+    /** A failure a sender describes itself: its message is safe to store, log and show. */
+    final class SendFailure extends Exception {
+
+        SendFailure(String message) {
+            super(message, null, false, false);
+        }
+    }
 
     /**
      * @param recipient an email address, or {@code operator} for the Telegram operator chat

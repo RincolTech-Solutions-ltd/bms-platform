@@ -135,8 +135,6 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- WebP decoding for tenant logos (FR-TEN-08): a read-only ImageIO plugin, BSD licensed;
-             a WebP upload is decoded and stored again as PNG. -->
         <!-- Outbox email (FR-NTF-10): SMTP over implicit TLS through Jakarta Mail's Eclipse Angus
              implementation. The JDK has no SMTP client; the version is the one the Spring Boot
              parent manages. Only the SMTP transport is used, configured by hand (no starter). -->
@@ -144,6 +142,8 @@
             <groupId>org.eclipse.angus</groupId>
             <artifactId>angus-mail</artifactId>
         </dependency>
+        <!-- WebP decoding for tenant logos (FR-TEN-08): a read-only ImageIO plugin, BSD licensed;
+             a WebP upload is decoded and stored again as PNG. -->
         <dependency>
             <groupId>com.twelvemonkeys.imageio</groupId>
             <artifactId>imageio-webp</artifactId>

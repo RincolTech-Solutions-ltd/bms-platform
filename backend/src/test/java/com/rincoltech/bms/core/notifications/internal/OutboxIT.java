@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -67,11 +68,11 @@ class OutboxIT extends IntegrationTest {
         }
 
         @Override
-        public void send(Delivery delivery) {
+        public void send(Delivery delivery) throws SendFailure {
             tried.add(delivery.idempotencyKey());
             if (failures > 0) {
                 failures--;
-                throw new IllegalStateException("fake provider down");
+                throw new SendFailure("fake provider down");
             }
             sent.add(delivery);
         }
@@ -194,7 +195,7 @@ class OutboxIT extends IntegrationTest {
             Map<String, Object> row = row(key);
             assertThat(row.get("attempts")).isEqualTo(attempt);
             assertThat(row.get("status")).isEqualTo(attempt < 3 ? "pending" : "failed");
-            assertThat((String) row.get("last_error")).isEqualTo("IllegalStateException: fake provider down");
+            assertThat((String) row.get("last_error")).isEqualTo("SendFailure: fake provider down");
             // The backoff holds the row back: make it due again for the next attempt.
             TestDatabase.owner()
                     .sql(
@@ -281,20 +282,155 @@ class OutboxIT extends IntegrationTest {
         assertThat(row(locked).get("status")).isEqualTo("sent");
     }
 
+    /**
+     * Review N3: the attempt is counted and leased when the row is claimed, in its own
+     * transaction, so a send that dies with an Error (not an Exception) still uses up an attempt
+     * and the row stays away for the lease instead of being claimed first again at once.
+     */
+    @Test
+    void anAttemptThatDiesIsCountedAndTheRowIsLeased() {
+        String key = key();
+        enqueue("telegram", "operator", key);
+        OutboxChannel dying = new OutboxChannel() {
+            @Override
+            public String channel() {
+                return "telegram";
+            }
+
+            @Override
+            public boolean enabled() {
+                return true;
+            }
+
+            @Override
+            public void send(Delivery delivery) {
+                if (delivery.idempotencyKey().equals(key)) {
+                    throw new AssertionError("the send died");
+                }
+            }
+        };
+        assertThatThrownBy(() -> {
+                    for (int i = 0; i < 10_000; i++) {
+                        if (dispatcher.dispatch(List.of(dying), 1) == 0) {
+                            break;
+                        }
+                    }
+                })
+                .isInstanceOf(AssertionError.class);
+        Map<String, Object> row = TestDatabase.owner()
+                .sql("SELECT status, attempts, next_attempt_at > now() + interval '1 minute' AS leased"
+                        + " FROM notification_outbox WHERE idempotency_key = ?")
+                .param(key)
+                .query()
+                .singleRow();
+        assertThat(row.get("status")).isEqualTo("pending");
+        assertThat(row.get("attempts")).isEqualTo(1);
+        assertThat(row.get("leased")).isEqualTo(true);
+        // Not due during the lease: another run does not pick it up.
+        Fake telegram = new Fake("telegram", 0);
+        dispatcher.dispatch(List.of(telegram), 1000);
+        assertThat(telegram.tried).doesNotContain(key);
+    }
+
+    /**
+     * Review N1: no one-time link outlives its use in the outbox. The nightly purge clears the
+     * parameters of any unsent row older than 7 days (a pending one becomes failed, "expired") and
+     * deletes rows sent more than 30 days ago; a failed row that old cannot be sent again.
+     */
+    @Test
+    void oldLinksAreClearedAndCannotBeSentAgain() {
+        String pending = key();
+        enqueue("email", "test-old@example.test", pending);
+        String failed = key();
+        enqueue("email", "test-old@example.test", failed);
+        String sent = key();
+        enqueue("email", "test-old@example.test", sent);
+        var owner = TestDatabase.owner();
+        owner.sql(
+                        "UPDATE notification_outbox SET created_at = now() - interval '8 days' WHERE idempotency_key IN (?, ?)")
+                .params(pending, failed)
+                .update();
+        owner.sql(
+                        "UPDATE notification_outbox SET status = 'failed', attempts = 3, failed_at = now() WHERE idempotency_key = ?")
+                .param(failed)
+                .update();
+        owner.sql(
+                        "UPDATE notification_outbox SET status = 'sent', sent_at = now() - interval '31 days' WHERE idempotency_key = ?")
+                .param(sent)
+                .update();
+
+        String id = owner.sql("SELECT id::text FROM notification_outbox WHERE idempotency_key = ?")
+                .param(failed)
+                .query(String.class)
+                .single();
+        Api platform = Api.platform(http);
+        String opEmail = Api.email("operator");
+        UUID opId = Api.platformUser(opEmail);
+        Session op = platform.signIn(opId, opEmail, Api.PASSWORD, null);
+        ResponseEntity<JsonNode> tooOld =
+                platform.post("/api/v1/platform/outbox/" + id + "/retry", Map.of(), op.accessToken());
+        assertThat(tooOld.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(tooOld.getBody().get("code").asString()).isEqualTo("outbox_too_old");
+
+        assertThat(dispatcher.purge()).isGreaterThanOrEqualTo(3);
+        Map<String, Object> expired = row(pending);
+        assertThat(expired.get("status")).isEqualTo("failed");
+        assertThat(expired.get("last_error")).isEqualTo("expired");
+        assertThat(expired.get("params")).isEqualTo("{}");
+        assertThat(row(failed).get("params")).isEqualTo("{}");
+        assertThat(owner.sql("SELECT count(*) FROM notification_outbox WHERE idempotency_key = ?")
+                        .param(sent)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /** Review N2: a malformed bot token switches the sender off instead of reaching any message. */
+    @Test
+    void aMalformedTelegramTokenSwitchesTheSenderOff() {
+        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+        String good = "123456789:" + "A".repeat(35);
+        assertThat(new TelegramChannel(
+                                new NotificationProperties(null, new NotificationProperties.Telegram(good, "-1001")),
+                                mapper)
+                        .enabled())
+                .isTrue();
+        for (String bad : List.of(good + "\r", good + " ", "123456789:short", "not a token")) {
+            assertThat(new TelegramChannel(
+                                    new NotificationProperties(null, new NotificationProperties.Telegram(bad, "-1001")),
+                                    mapper)
+                            .enabled())
+                    .as("token %s", bad.length())
+                    .isFalse();
+        }
+        assertThat(new TelegramChannel(
+                                new NotificationProperties(null, new NotificationProperties.Telegram(good, "x y")),
+                                mapper)
+                        .enabled())
+                .isFalse();
+        // A JDK exception that quotes a URL is reduced to its class.
+        assertThat(OutboxDispatcher.safeError(
+                        new IllegalArgumentException("Illegal character in path: https://api.telegram.org/bot" + good)))
+                .isEqualTo("IllegalArgumentException");
+    }
+
     /** Every template renders with fabricated values; the SMTP Message-ID is stable per key. */
     @Test
     void templatesRenderAndTheMessageIdIsStable() {
         OutboxTemplates templates = new OutboxTemplates();
-        Map<String, String> params = Map.of(
-                "contact_name", "Test Applicant 01",
-                "business_name", "Test Shop",
-                "link", "https://localhost/sign-up/verify#token=fabricated",
-                "note", "Test note.",
-                "expires_at", "9 Oct 2026 08:00 UTC",
-                "sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in",
-                "reference", "A-TEST0001",
-                "modules", "retail",
-                "portal_url", "https://localhost/platform/applications/x");
+        Map<String, String> params = Map.ofEntries(
+                Map.entry("contact_name", "Test Applicant 01"),
+                Map.entry("business_name", "Test Shop"),
+                Map.entry("link", "https://localhost/sign-up/verify#token=fabricated"),
+                Map.entry("note", "Test note."),
+                Map.entry("expires_at", "9 Oct 2026 08:00 UTC"),
+                Map.entry("sign_in_url", "https://test-bms-staging.rincoltech.test/sign-in"),
+                Map.entry("reference", "A-TEST0001"),
+                Map.entry("modules", "retail"),
+                Map.entry("portal_url", "https://localhost/platform/applications/x"),
+                Map.entry("hour", "2026-10-06 08:00"),
+                Map.entry("applications", "30"),
+                Map.entry("emails", "60"));
         for (String channel : List.of("email", "telegram")) {
             for (String key : OutboxTemplates.keys(channel)) {
                 OutboxTemplates.Rendered rendered = templates.render(channel, key, params);
@@ -304,6 +440,9 @@ class OutboxIT extends IntegrationTest {
                 }
             }
         }
+        // Review B1: the email to an unconfirmed address carries only the server's values.
+        assertThat(OutboxTemplates.placeholders("email", "onboarding.verify_email"))
+                .containsExactlyInAnyOrder("link", "reference");
         assertThatThrownBy(() -> templates.render("email", "no.such.template", params))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(SmtpEmailChannel.messageId("onboarding.activation:1"))

@@ -4,8 +4,10 @@ import { applicantReply, applicantStatus, type ApplicantView, OnboardingError, s
 import { loadApplicantToken, MODULES, readLinkToken, saveApplicantToken } from './forms';
 
 // The applicant page (FR-ONB-02, FR-ONB-04, spec section 10), opened from the emailed link
-// (/sign-up/verify#token=...). Opening it confirms the email. The token is read from the fragment,
-// removed from the address bar and kept for this tab only, so it is never sent in a URL.
+// (/sign-up/verify#token=...). Opening it only shows the application: the email is confirmed by
+// pressing "Confirm my email", so a mail scanner that opens links confirms nothing (review N4).
+// The token is read from the fragment, removed from the address bar and kept for this tab only,
+// so it is never sent in a URL.
 
 const NEXT_STEP: Record<string, string> = {
   submitted: 'We are looking at your application. We will contact you by phone or email.',
@@ -22,11 +24,23 @@ export interface ApplicantPageProps {
   error: string | null;
   reply: string;
   replying: boolean;
+  confirming: boolean;
   onReplyChange: (value: string) => void;
   onReply: (e: FormEvent) => void;
+  onConfirm: () => void;
 }
 
-export function ApplicantPage({ view, loading, error, reply, replying, onReplyChange, onReply }: ApplicantPageProps) {
+export function ApplicantPage({
+  view,
+  loading,
+  error,
+  reply,
+  replying,
+  confirming,
+  onReplyChange,
+  onReply,
+  onConfirm,
+}: ApplicantPageProps) {
   if (loading) {
     return (
       <main className="narrow">
@@ -69,7 +83,17 @@ export function ApplicantPage({ view, loading, error, reply, replying, onReplyCh
         <dt>Wanted</dt>
         <dd>{modules.join(', ')}</dd>
       </dl>
-      <p role="status">{NEXT_STEP[view.status ?? ''] ?? ''}</p>
+      {view.email_verified === false && view.status === 'submitted' ? (
+        <section aria-labelledby="confirm-heading" className="form-grid">
+          <h2 id="confirm-heading">Confirm your email</h2>
+          <p>Press the button to confirm this is your email address. We then look at your application.</p>
+          <button className="btn-brand" type="button" disabled={confirming} onClick={onConfirm}>
+            {confirming ? 'Confirming' : 'Confirm my email'}
+          </button>
+        </section>
+      ) : (
+        <p role="status">{NEXT_STEP[view.status ?? ''] ?? ''}</p>
+      )}
       {view.status === 'needs_info' && (
         <section aria-labelledby="question-heading">
           <h2 id="question-heading">Our question</h2>
@@ -90,12 +114,13 @@ export function ApplicantPage({ view, loading, error, reply, replying, onReplyCh
   );
 }
 
-function Applicant({ verify }: { verify: boolean }) {
+function Applicant() {
   const [view, setView] = useState<ApplicantView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState('');
   const [replying, setReplying] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,11 +135,21 @@ function Applicant({ verify }: { verify: boolean }) {
       setLoading(false);
       return;
     }
-    (verify && fromLink ? verifyApplicant(current) : applicantStatus(current))
+    applicantStatus(current)
       .then(setView)
       .catch((err: unknown) => setError(err instanceof OnboardingError ? err.message : 'We could not open your application.'))
       .finally(() => setLoading(false));
-  }, [verify]);
+  }, []);
+
+  function confirm() {
+    if (!token || confirming) return;
+    setConfirming(true);
+    setError(null);
+    verifyApplicant(token)
+      .then(setView)
+      .catch((err: unknown) => setError(err instanceof OnboardingError ? err.message : 'We could not confirm your email.'))
+      .finally(() => setConfirming(false));
+  }
 
   function sendReply(e: FormEvent) {
     e.preventDefault();
@@ -131,9 +166,19 @@ function Applicant({ verify }: { verify: boolean }) {
   }
 
   return (
-    <ApplicantPage view={view} loading={loading} error={error} reply={reply} replying={replying} onReplyChange={setReply} onReply={sendReply} />
+    <ApplicantPage
+      view={view}
+      loading={loading}
+      error={error}
+      reply={reply}
+      replying={replying}
+      confirming={confirming}
+      onReplyChange={setReply}
+      onReply={sendReply}
+      onConfirm={confirm}
+    />
   );
 }
 
-export const VerifyRoute = createLazyRoute('/sign-up/verify')({ component: () => <Applicant verify /> });
-export const StatusRoute = createLazyRoute('/application')({ component: () => <Applicant verify={false} /> });
+export const VerifyRoute = createLazyRoute('/sign-up/verify')({ component: Applicant });
+export const StatusRoute = createLazyRoute('/application')({ component: Applicant });

@@ -265,9 +265,35 @@ class OnboardingIT extends IntegrationTest {
                         .single())
                 .isEqualTo(1);
         assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(2);
-        // The second email names the stored business, not what the second form said.
-        assertThat(outboxParams("onboarding.verify_email", email).get("business_name"))
-                .isEqualTo("Test First Shop " + email);
+        // The confirmation email carries only the server's reference and the link: no text the
+        // applicant typed reaches an unconfirmed address (review B1).
+        Map<String, String> params = outboxParams("onboarding.verify_email", email);
+        assertThat(params.keySet()).containsExactlyInAnyOrder("reference", "link");
+        assertThat(params.get("reference"))
+                .isEqualTo(owner().sql("SELECT reference FROM onboarding_applications WHERE contact_email = ?")
+                        .param(email)
+                        .query(String.class)
+                        .single());
+        // A +tag or Gmail dot variant reaches the same mailbox: still one open application, and the
+        // fresh link goes to the stored address, not to the variant (review N5).
+        String local = email.substring(0, email.indexOf('@'));
+        String tagged = local + "+again@" + email.substring(email.indexOf('@') + 1);
+        assertThat(apply(form(tagged, "Test Tagged Name", phone())).getBody()).isEqualTo(first.getBody());
+        assertThat(outboxRows("onboarding.verify_email", tagged)).isZero();
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
+        String gmail = "test.dots." + UUID.randomUUID().toString().substring(0, 6) + "@gmail.com";
+        String other = "203.0.113." + (ADDRESS.addAndGet(1) % 200 + 1);
+        publicPost("/api/v1/platform/sign-up/applications", form(gmail, "Test Gmail Shop", phone()), other);
+        publicPost(
+                "/api/v1/platform/sign-up/applications",
+                form(gmail.replace(".", "").replace("gmailcom", "googlemail.com"), "Test Gmail Shop", phone()),
+                other);
+        assertThat(owner().sql(
+                                "SELECT count(*) FROM onboarding_applications WHERE contact_email_key = onboarding_email_key(?)")
+                        .param(gmail)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
         // Only the newest link works.
         assertThat(publicPost("/api/v1/platform/sign-up/status", Map.of("token", firstToken))
                         .getStatusCode())
@@ -304,6 +330,8 @@ class OnboardingIT extends IntegrationTest {
         assertThat(apply(kenya).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
 
         String other = Api.email("invalid");
+        Map<String, Object> accented = form("jos\u00e9@example.test", "Test Shop", phone());
+        assertThat(apply(accented).getBody().get("code").asString()).isEqualTo("validation_failed");
         assertThat(apply(form(other, "x".repeat(201), phone()))
                         .getBody()
                         .get("code")
@@ -322,9 +350,12 @@ class OnboardingIT extends IntegrationTest {
         assertThat(apply(unknownField).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
-    /** FR-ONB-03: 5 applications an hour from one address, 3 for one email; then 429. */
+    /**
+     * FR-ONB-03, review B2 and N6: 5 applications an hour from one address, IPv6 counted per /64,
+     * a spoofed left-most X-Forwarded-For value changes nothing, and 30 link reads per 10 minutes.
+     */
     @Test
-    void applicationsAreRateLimitedPerAddressAndPerEmail() {
+    void applicationsAreRateLimitedPerAddress() {
         for (int i = 0; i < SignUpRateLimiter.CREATE_PER_IP.capacity(); i++) {
             assertThat(apply(form(Api.email("rate"), "Test Rate Shop", phone())).getStatusCode())
                     .isEqualTo(HttpStatus.ACCEPTED);
@@ -333,20 +364,38 @@ class OnboardingIT extends IntegrationTest {
         assertThat(limited.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(limited.getBody().get("code").asString()).isEqualTo("rate_limited");
 
-        String email = Api.email("same");
-        int n = ADDRESS.addAndGet(10);
-        for (int i = 0; i < SignUpRateLimiter.CREATE_PER_EMAIL.capacity(); i++) {
+        // Behind the trusted proxy the valve takes the right-most untrusted value: a client that
+        // prepends its own X-Forwarded-For entries still lands in its real bucket.
+        String real = "198.51.100." + (ADDRESS.addAndGet(1) % 250 + 1);
+        for (int i = 0; i < SignUpRateLimiter.CREATE_PER_IP.capacity(); i++) {
             assertThat(publicPost(
                                     "/api/v1/platform/sign-up/applications",
-                                    form(email, "Test Same Shop", phone()),
-                                    "203.0.113." + (n % 200 + i))
+                                    form(Api.email("spoof"), "Test Spoof Shop", phone()),
+                                    "203.0.113." + (i + 1) + ", " + real)
                             .getStatusCode())
                     .isEqualTo(HttpStatus.ACCEPTED);
         }
         assertThat(publicPost(
                                 "/api/v1/platform/sign-up/applications",
-                                form(email, "Test Same Shop", phone()),
-                                "203.0.113." + (n % 200 + 5))
+                                form(Api.email("spoof"), "Test Spoof Shop", phone()),
+                                "203.0.113.99, " + real)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+
+        // One IPv6 /64 is one bucket, however many addresses inside it are used.
+        String prefix = "2001:db8:" + Integer.toHexString(ADDRESS.addAndGet(1)) + ":1:";
+        for (int i = 0; i < SignUpRateLimiter.CREATE_PER_IP.capacity(); i++) {
+            assertThat(publicPost(
+                                    "/api/v1/platform/sign-up/applications",
+                                    form(Api.email("six"), "Test Six Shop", phone()),
+                                    prefix + Integer.toHexString(i + 1) + ":0:0:1")
+                            .getStatusCode())
+                    .isEqualTo(HttpStatus.ACCEPTED);
+        }
+        assertThat(publicPost(
+                                "/api/v1/platform/sign-up/applications",
+                                form(Api.email("six"), "Test Six Shop", phone()),
+                                prefix + "ffff:0:0:9")
                         .getStatusCode())
                 .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
 
@@ -356,6 +405,117 @@ class OnboardingIT extends IntegrationTest {
         assertThat(publicPost("/api/v1/platform/sign-up/status", Map.of("token", "x".repeat(43)))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    void addressKeysGroupAnIpv6NetworkAndKeepIpv4Addresses() {
+        assertThat(SignUpRateLimiter.addressKey("2001:db8:1:2::1"))
+                .isEqualTo(SignUpRateLimiter.addressKey("2001:db8:1:2:ffff:ffff:ffff:ffff"))
+                .isNotEqualTo(SignUpRateLimiter.addressKey("2001:db8:1:3::1"));
+        assertThat(SignUpRateLimiter.addressKey("198.51.100.1"))
+                .isNotEqualTo(SignUpRateLimiter.addressKey("198.51.100.2"));
+        assertThat(SignUpRateLimiter.addressKey(null)).isEqualTo("unknown");
+        assertThat(SignUpRateLimiter.addressKey("not-an-address.example")).startsWith("raw:");
+    }
+
+    /**
+     * Review B2 (b): at most 3 confirmation emails to one mailbox in 24 hours, counted in the
+     * database, from any number of addresses. Over the bound the answer is the same 202 and
+     * nothing is rotated or sent.
+     */
+    @Test
+    void confirmationEmailsPerMailboxAreBoundedInTheDatabase() {
+        String email = Api.email("bound");
+        String local = email.substring(0, email.indexOf('@'));
+        String domain = email.substring(email.indexOf('@'));
+        int n = ADDRESS.addAndGet(10);
+        for (int i = 0; i < 3; i++) {
+            assertThat(publicPost(
+                                    "/api/v1/platform/sign-up/applications",
+                                    form(i == 0 ? email : local + "+v" + i + domain, "Test Bound Shop", phone()),
+                                    "203.0.113." + (n % 200 + i))
+                            .getStatusCode())
+                    .isEqualTo(HttpStatus.ACCEPTED);
+        }
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
+        String hash = owner().sql("SELECT link_token_hash FROM onboarding_applications WHERE contact_email = ?")
+                .param(email)
+                .query(String.class)
+                .single();
+        ResponseEntity<JsonNode> over = publicPost(
+                "/api/v1/platform/sign-up/applications",
+                form(local + "+v9" + domain, "Test Bound Shop", phone()),
+                "203.0.113." + (n % 200 + 7));
+        assertThat(over.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(over.getBody().get("status").asString()).isEqualTo("check_your_email");
+        assertThat(outboxRows("onboarding.verify_email", email)).isEqualTo(3);
+        assertThat(owner().sql("SELECT link_token_hash FROM onboarding_applications WHERE contact_email = ?")
+                        .param(email)
+                        .query(String.class)
+                        .single())
+                .isEqualTo(hash);
+    }
+
+    /**
+     * Review B2 (c): the global caps. Over the hourly cap of new applications or of confirmation
+     * emails a sign-up is answered 202 and nothing is created or sent; the first request over it
+     * writes one audit row and one Telegram alert for the hour.
+     */
+    @Test
+    void theGlobalCapsStopSignUpsAndAlertTheOperatorOnce() {
+        JdbcClient owner = owner();
+        String marker = "C-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        try {
+            owner.sql("""
+                            INSERT INTO onboarding_applications (id, reference, business_name, contact_name, contact_email,
+                                   contact_phone_e164, country, modules, term, way_in)
+                            SELECT gen_random_uuid(), ? || '-' || g, 'Test Cap Shop', 'Test Cap', 'cap-' || ? || '-' || g || '@example.test',
+                                   '+256700000000', 'UG', '{retail}', 'monthly', 'trial'
+                              FROM generate_series(1, 400) g
+                            """).params(marker.substring(0, 6), marker).update();
+            String email = Api.email("capped");
+            ResponseEntity<JsonNode> capped = apply(form(email, "Test Capped Shop", phone()));
+            assertThat(capped.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+            assertThat(capped.getBody().get("status").asString()).isEqualTo("check_your_email");
+            assertThat(owner.sql("SELECT count(*) FROM onboarding_applications WHERE contact_email = ?")
+                            .param(email)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+            assertThat(outboxRows("onboarding.verify_email", email)).isZero();
+            apply(form(Api.email("capped"), "Test Capped Shop", phone()));
+            assertThat(owner.sql(
+                                    "SELECT count(*) FROM notification_outbox WHERE template_key = 'onboarding.cap_reached'"
+                                            + " AND created_at > now() - interval '1 hour'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(1);
+            assertThat(owner.sql("SELECT count(*) FROM platform_audit_log WHERE action = 'platform.sign_up.cap_reached'"
+                                    + " AND occurred_at > now() - interval '1 hour'")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(1);
+        } finally {
+            owner.sql("DELETE FROM onboarding_applications WHERE contact_email LIKE ?")
+                    .param("cap-" + marker + "-%")
+                    .update();
+        }
+        // The same for confirmation emails.
+        try {
+            owner.sql("""
+                            INSERT INTO notification_outbox (id, channel, recipient, template_key, status, idempotency_key)
+                            SELECT gen_random_uuid(), 'email', 'cap@example.test', 'onboarding.verify_email', 'sent', ? || g
+                              FROM generate_series(1, 400) g
+                            """).param("test.cap:" + marker + ":").update();
+            String email = Api.email("capped");
+            assertThat(apply(form(email, "Test Capped Shop", phone())).getStatusCode())
+                    .isEqualTo(HttpStatus.ACCEPTED);
+            assertThat(outboxRows("onboarding.verify_email", email)).isZero();
+        } finally {
+            owner.sql("DELETE FROM notification_outbox WHERE idempotency_key LIKE ?")
+                    .param("test.cap:" + marker + ":%")
+                    .update();
+        }
     }
 
     /** The in-memory buckets are bounded: a flood of addresses never grows them past the cap. */
@@ -734,6 +894,13 @@ class OnboardingIT extends IntegrationTest {
                             .param(table)
                             .query(Boolean.class)
                             .single())
+                    .isTrue();
+            assertThat(owner().sql(
+                                    "SELECT relforcerowsecurity FROM pg_class WHERE relname = ? AND relnamespace = 'public'::regnamespace")
+                            .param(table)
+                            .query(Boolean.class)
+                            .single())
+                    .as("%s has FORCE ROW LEVEL SECURITY (review N9)", table)
                     .isTrue();
         }
         List<String> functions = owner().sql("""

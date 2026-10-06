@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.notifications;
 
+import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -22,17 +23,39 @@ public interface Outbox {
     boolean enqueue(Message message);
 
     /**
+     * Rows written since {@code since} with this throttle key, or, with a null key, of this
+     * template: the volume bounds of the sign-up endpoints are counted in the database, not in
+     * memory. Runs in the caller's transaction.
+     */
+    int countSince(String throttleKey, String templateKey, Instant since);
+
+    /**
      * @param channel {@link #EMAIL} or {@link #TELEGRAM}
      * @param recipient an email address, or {@link #OPERATOR_CHAT}; never logged unmasked
      * @param templateKey for example {@code onboarding.activation}; rendered when sent
      * @param params template values; cleared from the row once it is sent
      * @param idempotencyKey unique per message, for example {@code onboarding.activation:<id>}
+     * @param throttleKey groups rows for a volume bound (see {@link #countSince}), or null
      */
     record Message(
-            String channel, String recipient, String templateKey, Map<String, String> params, String idempotencyKey) {
+            String channel,
+            String recipient,
+            String templateKey,
+            Map<String, String> params,
+            String idempotencyKey,
+            String throttleKey) {
 
         public Message {
             params = Map.copyOf(params);
+        }
+
+        public Message(
+                String channel,
+                String recipient,
+                String templateKey,
+                Map<String, String> params,
+                String idempotencyKey) {
+            this(channel, recipient, templateKey, params, idempotencyKey, null);
         }
     }
 }

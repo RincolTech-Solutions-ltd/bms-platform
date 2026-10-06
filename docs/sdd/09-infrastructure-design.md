@@ -161,6 +161,20 @@ migration) with status only, no details.
   only. With a sender's values unset it is off: its messages wait as `pending` and nothing fails.
   The staging host's `/opt/bms/.env` holds them since 2026-10-06 (issue #89). Outbound traffic is
   SMTPS to the mail provider and HTTPS to `api.telegram.org`; nothing is opened inbound.
+  `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR` (default 30) and
+  `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR` (default 60) are the global sign-up caps.
+- Edge rule for the public sign-up (ADR-024, chapter 7 section 7.10), added by the dev lead in the
+  Cloudflare dashboard for the platform host: a rate limiting rule on `URI Path starts with
+  /api/v1/platform/sign-up/`, counting by IP, 10 requests per minute, action block for 10 minutes.
+  It is the first line; the API's own bounds hold without it.
+- Client addresses for the per-address limits: on staging, Cloudflare appends the visitor to
+  `X-Forwarded-For`, cloudflared and Caddy (`Caddyfile.tunnel`, which trusts the tunnel and reads
+  `Cf-Connecting-Ip`) pass it on, and Tomcat's RemoteIpValve takes the right-most untrusted value,
+  so a value a client prepends changes nothing. On the production VM the tenant and platform
+  records are DNS only (`docs/runbooks/provision-host.md`), so Caddy's peer is the visitor. If the
+  production records are ever proxied through Cloudflare, add Cloudflare's published ranges to
+  `trusted_proxies` with `client_ip_headers Cf-Connecting-Ip` in `deploy/caddy/Caddyfile` first;
+  otherwise every visitor behind one edge shares one bucket.
 - Production refuses development switches at startup: `ALLOW_TENANT_HEADER` and `AUTH_MODE=dev`
   are accepted only in the `dev` and `test` profiles, and the servers run the `server` profile.
 

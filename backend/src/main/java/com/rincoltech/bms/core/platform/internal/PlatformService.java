@@ -208,6 +208,15 @@ class PlatformService implements TenantProvisioning {
                                     .single();
                         }
                     } catch (DataIntegrityViolationException e) {
+                        // A tenant created concurrently with the same slug passes the count above
+                        // and meets the unique constraint here (review N7).
+                        if (String.valueOf(e.getMessage()).contains("tenants_slug_key")) {
+                            throw new ApiException(
+                                    HttpStatus.CONFLICT,
+                                    "duplicate_slug",
+                                    "Slug taken",
+                                    "Another tenant has this slug.");
+                        }
                         throw ApiException.rule(
                                 "invalid_tenant", "The plan, currency or modules are not valid for a new tenant.");
                     }

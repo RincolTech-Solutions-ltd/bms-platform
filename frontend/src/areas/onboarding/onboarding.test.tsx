@@ -50,6 +50,7 @@ describe('sign-up form checks (FR-ONB-01)', () => {
     expect(signUpProblems({ ...filled, business_name: 'x'.repeat(201) }).business_name).toBeDefined();
     expect(signUpProblems({ ...filled, message: 'x'.repeat(1001) }).message).toBeDefined();
     expect(signUpProblems({ ...filled, agent_code: 'bad code!' }).agent_code).toBeDefined();
+    expect(signUpProblems({ ...filled, contact_email: 'josé@example.test' }).contact_email).toBeDefined();
   });
 
   it('trims the request and leaves empty optional fields out', () => {
@@ -116,7 +117,18 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
   };
   const page = (patch: Partial<Parameters<typeof ApplicantPage>[0]>) =>
     inRouter(
-      <ApplicantPage view={base} loading={false} error={null} reply="" replying={false} onReplyChange={noop} onReply={noop} {...patch} />,
+      <ApplicantPage
+        view={base}
+        loading={false}
+        error={null}
+        reply=""
+        replying={false}
+        confirming={false}
+        onReplyChange={noop}
+        onReply={noop}
+        onConfirm={noop}
+        {...patch}
+      />,
     );
 
   it('reads the token from the link fragment only', () => {
@@ -131,6 +143,14 @@ describe('the applicant page (FR-ONB-02, FR-ONB-04)', () => {
     expect(html).toContain('A-TEST0001');
     expect(html).toContain('Waiting for review');
     expect(html).toContain('Shop: sales, stock and restocking');
+  });
+
+  it('confirms the email only on the button, never on opening the link (review N4)', async () => {
+    const unconfirmed = await page({ view: { ...base, email_verified: false } });
+    expect(unconfirmed).toContain('Confirm my email');
+    expect(unconfirmed).not.toContain('We are looking at your application');
+    expect(await page({ view: { ...base, email_verified: false }, confirming: true })).toMatch(/disabled="">Confirming/);
+    expect(await page({})).not.toContain('Confirm my email');
   });
 
   it('shows the operator question and an answer form when more information is needed', async () => {

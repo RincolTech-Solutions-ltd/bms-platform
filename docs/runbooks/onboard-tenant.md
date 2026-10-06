@@ -61,7 +61,28 @@ Set these in `/opt/bms/.env` (never in git; `.env.example` lists them empty), th
 
 With a sender's values unset it is off: its messages wait as `pending` and nothing fails; the
 portal's "Messages not sent" page says which sender is off. A message that fails three times
-stays `failed` there with its error class; fix the cause and press "Send again". The senders log
+stays `failed` there with its error class; fix the cause and press "Send again". After 7 days an
+unsent message loses its link and cannot be sent again (`outbox_too_old`): issue a new one (for an
+applicant, Needs info; for a tenant admin, a new invitation). A bot token that is not in the
+`<digits>:<characters>` shape (for example with a trailing space or a CRLF line ending in
+`.env`) switches Telegram off with a warning in the log; fix the line.
+
+## Protect the public sign-up (once per environment, the dev lead)
+
+The sign-up form is public. In front of the API's own bounds, add a Cloudflare rate limiting rule
+for the platform host (dashboard, Security, WAF, Rate limiting rules):
+
+- When: `URI Path starts with /api/v1/platform/sign-up/` and hostname is the platform host.
+- Counting: by IP; 10 requests per 1 minute.
+- Action: block for 10 minutes.
+
+The API also caps new applications and confirmation emails per hour
+(`BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR`, default 30; `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR`,
+default 60). When a cap trips, the operator chat gets one Telegram alert for that hour and
+`platform_audit_log` a `platform.sign_up.cap_reached` row; sign-ups are still answered but nothing
+is created or sent until the hour passes. Look at the applications of the last hour: a burst of
+throwaway addresses means the edge rule needs tightening; a real launch means the cap can be
+raised in `/opt/bms/.env`. The senders log
 the row id, channel and template only, never an address, a text or a link.
 
 ## Create a tenant
@@ -90,8 +111,9 @@ setup token.
 
 ## Activate an application (self-onboarding, ADR-024)
 
-1. A new application whose email is confirmed raises an alert on Telegram and by email to every
-   active operator, and appears in the portal (`https://<platform host>/platform`, "Applications").
+1. An applicant confirms their email with the "Confirm my email" button on the page the emailed
+   link opens. The application then raises an alert on Telegram and by email to every active
+   operator, and appears in the portal (`https://<platform host>/platform`, "Applications").
 2. Open it. Check the **Possible repeat** box: another application or tenant with the same email,
    phone or business name may be a repeat free month (spec section 4.2 item 4).
 3. Call or message the applicant. Then **Verify**, or **Needs info** with a question (the applicant

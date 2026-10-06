@@ -244,11 +244,16 @@ The platform principal carries both, and no tenant token reaches a `/platform` r
 host to every onboarding and outbox route).
 
 **Public sign-up endpoints (ADR-024, spec sections 10 and 12).** `/platform/sign-up/*` is public on
-the platform host only. Controls: per-address and per-email token buckets (chapter 7 section 7.10);
-a hidden `website` field whose value drops the request silently; one open application per email,
-enforced by a unique index; the same 202 answer for a new, a known and a dropped request; input
-length caps, trimming and NFC normalisation; and the operator's verification as the real gate, so
-nothing is provisioned for a stranger. The applicant link is 256 random bits, stored as SHA-256
+the platform host only. Controls: the Cloudflare rate limiting rule in front (chapter 9 section
+9.8); per-address token buckets, IPv6 by /64; in the database, at most 3 confirmation emails per
+mailbox in 24 hours and global hourly caps that alert the operator (chapter 7 section 7.10); a
+hidden `website` field whose value drops the request silently; one open application per mailbox
+(+tags and Gmail dots ignored), enforced by a unique index; the same 202 answer for a new, a known,
+a bounded and a dropped request; ASCII-only addresses, input length caps, trimming and NFC
+normalisation; a confirmation email that carries no text the applicant typed (only the server's
+reference and the link), so the form cannot relay someone's words from the platform's sender; a
+"Confirm my email" button, so a mail scanner that opens the link confirms nothing; and the
+operator's verification as the real gate, so nothing is provisioned for a stranger. The applicant link is 256 random bits, stored as SHA-256
 only, valid 7 days, replaced by every new email, carried in the URL fragment and sent in a request
 body, and compared digest to digest in constant time after the indexed lookup.
 
@@ -452,9 +457,15 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   the `email` of a `core.user.invited` row is masked from then on.
 - Applications (ADR-024) hold a business contact's name, email and phone. Only platform operators
   read them; the applicant page shows none of them; `rejected` and `expired` applications are
-  deleted 90 days after they closed (FR-ONB-09). The outbox keeps a message's parameters, which
-  can hold a one-time link, only until it is sent, and shows the operator a masked recipient and
-  an error class, never a text. Senders log the row id, channel and template only.
+  deleted 90 days after they closed (FR-ONB-09). An outbox row keeps its parameters, which can hold
+  a one-time link, until it is sent or, if it is never sent (a sender off, or three failures), at
+  most 7 days, the longest link lifetime: the nightly purge then clears them, and "send again" is
+  refused for such a row. The links are therefore readable in the database (and in a backup)
+  while a row waits, which is the cost of sending later; they expire on their own (72 hours for an
+  activation, 7 days for an applicant link). The portal shows a masked recipient and an error
+  class or a sender's own safe message, never a text. A Telegram bot token that is not in the
+  token shape switches the sender off, so it cannot reach an error message. Senders log the row
+  id, channel and template only.
 - Staff free text on a loan (purpose text, return, rejection and cancellation notes, visit notes)
   can hold personal data about the member or third parties. It is staff-only: the member area
   never returns it.
@@ -478,7 +489,8 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 | Enumeration of member records across the member portal | Ownership check returns 404, UUIDs not sequential |
 | Sign-up flood or a stranger consuming the shared host | Rate limits, honeypot, email confirmation, operator verification before anything is provisioned (ADR-024) |
 | Sign-up used to learn which emails are customers | Same answer for known and unknown emails; a known email gets the link by email only |
-| A leaked activation or applicant link | Hashed at rest, single purpose, 72 hours (activation) or 7 days (applicant), in the URL fragment only, cleared from the outbox once sent |
+| A leaked activation or applicant link | Hashed at rest in its own table, single purpose, 72 hours (activation) or 7 days (applicant), in the URL fragment only; in the outbox only until sent, at most 7 days |
+| The sign-up form used to send attacker-written text (phishing relay) | The confirmation email carries only the server's reference and link; volume bounded per mailbox and globally in the database |
 
 ## 8.11 Open items
 

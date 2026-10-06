@@ -3,6 +3,7 @@ package com.rincoltech.bms.core.notifications.internal;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.kernel.BusinessClock;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -38,7 +39,7 @@ class JdbcOutbox implements Outbox {
         // A template that cannot render would only fail at send time: refuse it in the cause's
         // transaction instead.
         templates.render(message.channel(), message.templateKey(), message.params());
-        return Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?)")
+        return Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_enqueue(?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?)")
                 .params(
                         UUID.randomUUID(),
                         message.channel(),
@@ -46,8 +47,18 @@ class JdbcOutbox implements Outbox {
                         message.templateKey(),
                         mapper.writeValueAsString(message.params()),
                         message.idempotencyKey(),
+                        message.throttleKey(),
                         Timestamp.from(clock.now()))
                 .query(Boolean.class)
                 .single());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int countSince(String throttleKey, String templateKey, Instant since) {
+        return jdbc.sql("SELECT notification_outbox_count_since(?, ?, ?)")
+                .params(throttleKey, templateKey, Timestamp.from(since))
+                .query(Integer.class)
+                .single();
     }
 }

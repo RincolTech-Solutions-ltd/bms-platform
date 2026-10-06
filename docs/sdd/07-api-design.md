@@ -188,7 +188,7 @@ published under the platform host.
 | 404 | Not found or outside branch scope; `unknown_tenant`; `module_not_enabled`; `link_invalid` (an applicant link that is malformed, unknown, replaced or expired, one answer for all, ADR-024) |
 | 413 | `file_too_large`: an upload over 5 MB, or a logo over 1 MB (chapter 8 section 8.8) |
 | 415 | `unsupported_file_type`: an upload that is not JPEG, PNG or PDF by content (a logo: not PNG, JPEG or WebP, or an image that cannot be decoded) |
-| 409 | `version_conflict`, `idempotency_in_progress`, `invalid_status_transition`, `approval_already_pending`, `mfa_already_enrolled`, `mfa_not_enrolled`, `mfa_enrolment_not_started`, duplicates (`duplicate_nin`, `duplicate_import`, `collateral_already_pledged`, `duplicate_email`, `duplicate_phone`, `duplicate_branch_code`, `duplicate_slug`, `duplicate_product_code`); `transaction_conflict` (the database aborted the transaction as a deadlock victim or serialisation loser; nothing was saved, `Retry-After` is set and the same request may be retried with the same `Idempotency-Key`); `stock_moved_since_count` (a retail stock-take whose lines moved after the count so far that the adjustment would leave a negative balance; recount them); `application_state` (an onboarding decision or reply the application's status does not allow), `application_not_verified` (Activate before Verify), `outbox_not_failed` (send again on a row that has not failed); `conflict` for any other unique or foreign key violation |
+| 409 | `version_conflict`, `idempotency_in_progress`, `invalid_status_transition`, `approval_already_pending`, `mfa_already_enrolled`, `mfa_not_enrolled`, `mfa_enrolment_not_started`, duplicates (`duplicate_nin`, `duplicate_import`, `collateral_already_pledged`, `duplicate_email`, `duplicate_phone`, `duplicate_branch_code`, `duplicate_slug`, `duplicate_product_code`); `transaction_conflict` (the database aborted the transaction as a deadlock victim or serialisation loser; nothing was saved, `Retry-After` is set and the same request may be retried with the same `Idempotency-Key`); `stock_moved_since_count` (a retail stock-take whose lines moved after the count so far that the adjustment would leave a negative balance; recount them); `application_state` (an onboarding decision or reply the application's status does not allow), `application_not_verified` (Activate before Verify), `outbox_not_failed` (send again on a row that has not failed), `outbox_too_old` (send again on a row older than its link's 7 day lifetime); `conflict` for any other unique or foreign key violation |
 | 422 | Validation and business rule failures (codes below) |
 | 423 | `tenant_suspended`, `account_locked` |
 | 428 | `precondition_required`: a `PATCH`, or a state transition or retail price edit, without `If-Match` (section 7.9) |
@@ -269,15 +269,21 @@ replaces this before a second API instance is added):
 | Any authenticated user | 600 requests per minute |
 | Report runs per user | 10 per minute |
 | Callbacks per provider | 50 per second |
-| Sign-up: new applications per client address (ADR-024) | 5 per hour |
-| Sign-up: new applications per email (hashed key) | 3 per hour |
-| Sign-up: link reads (verify, status, reply) per client address | 30 per 10 minutes |
+| Sign-up: new applications per client address, an IPv6 client by its /64 (ADR-024) | 5 per hour (429) |
+| Sign-up: link reads (verify, status, reply) per client address | 30 per 10 minutes (429) |
+| Sign-up: confirmation emails per mailbox (database) | 3 per 24 hours (202, nothing sent) |
+| Sign-up: new applications, all clients (database, `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR`) | 30 per hour by default (202, nothing created; audit row and one Telegram alert per hour) |
+| Sign-up: confirmation emails, all clients (database, `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR`) | 60 per hour by default (as above) |
 
-The sign-up limits are token buckets in memory, bounded at 10,000 keys (least recently used
-dropped first), per API instance and lost on restart. They answer 429 `rate_limited`. The client
-address is the one Tomcat's RemoteIpValve takes from the trusted proxy's `X-Forwarded-For`. An
-edge rule at Cloudflare in front of the platform host is the real volume control and is the dev
-lead's to configure; these limits are the second line.
+The per-address limits are token buckets in memory, bounded at 10,000 keys (least recently used
+dropped first), per API instance and lost on restart; a flood of fresh addresses can evict them,
+so they are a first, cheap line only. The bounds that must hold under a flood (per mailbox and
+global) are counted in the database inside one serialised sign-up transaction, and over them the
+answer stays the same 202, so the endpoint is no oracle. The client address is the one Tomcat's
+RemoteIpValve takes from the trusted proxy's `X-Forwarded-For` (the right-most untrusted value, so
+a value a client prepends changes nothing). In front of all of this is the Cloudflare rate
+limiting rule for `/api/v1/platform/sign-up/*` (chapter 9 section 9.8,
+`docs/runbooks/onboard-tenant.md`).
 
 ## 7.11 Endpoint catalogue
 

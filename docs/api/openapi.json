@@ -4538,9 +4538,11 @@
             "type" : "string"
           },
           "contact_email" : {
+            "description" : "ASCII only: an address needing SMTPUTF8 is refused",
             "format" : "email",
             "maxLength" : 254,
             "minLength" : 0,
+            "pattern" : "^[\\x21-\\x7E]+$",
             "type" : "string"
           },
           "contact_name" : {
@@ -8022,7 +8024,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Send a failed row again (FR-NTF-09)",
+        "summary" : "Send a failed row again, if younger than its link's lifetime (FR-NTF-09)",
         "tags" : [ "platform" ]
       }
     },

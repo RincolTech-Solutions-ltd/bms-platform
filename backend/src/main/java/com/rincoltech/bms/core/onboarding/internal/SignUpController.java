@@ -41,7 +41,15 @@ class SignUpController {
     record SignUpRequest(
             @NotBlank @Size(max = 200) String businessName,
             @NotBlank @Size(max = 200) String contactName,
-            @NotBlank @Email @Size(max = 254) String contactEmail,
+
+            @NotBlank
+            @Email
+            @Size(max = 254)
+            @Pattern(
+                    regexp = "^[\\x21-\\x7E]+$",
+                    message = "Use an address in plain letters, digits and symbols (no accents).")
+            @Schema(description = "ASCII only: an address needing SMTPUTF8 is refused")
+            String contactEmail,
 
             @NotBlank @Size(max = 20) @Schema(description = "Local or international form; stored as E.164")
             String contactPhone,

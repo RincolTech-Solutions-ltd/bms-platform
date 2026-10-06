@@ -1200,7 +1200,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send a failed row again (FR-NTF-09) */
+        /** Send a failed row again, if younger than its link's lifetime (FR-NTF-09) */
         post: operations["platformRetryOutbox"];
         delete?: never;
         options?: never;
@@ -3850,7 +3850,10 @@ export interface components {
             /** @description Recorded; agents arrive later */
             agent_code?: string;
             business_name: string;
-            /** Format: email */
+            /**
+             * Format: email
+             * @description ASCII only: an address needing SMTPUTF8 is refused
+             */
             contact_email: string;
             contact_name: string;
             /** @description Local or international form; stored as E.164 */

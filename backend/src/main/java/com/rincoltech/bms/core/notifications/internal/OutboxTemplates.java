@@ -21,16 +21,20 @@ class OutboxTemplates {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-z_]+)}");
 
     private static final Map<String, Template> EMAIL = Map.of(
+            // Sent to an address nobody has confirmed yet: it carries no text the applicant typed,
+            // only the server's reference and link, so the form cannot be used to send someone
+            // else's words from the platform's sender (review B1).
             "onboarding.verify_email",
-            new Template("Confirm your email for BMS", """
-                    Hello {contact_name},
+            new Template("Confirm your email for BMS application {reference}", """
+                    Hello,
 
-                    Thank you for applying to use BMS for {business_name}.
-                    Open this link to confirm your email address and follow your application:
+                    This email address was used to apply to use BMS (application {reference}).
+                    Open this link to confirm the address and follow the application:
 
                     {link}
 
-                    The link works for 7 days. If you did not apply, you can ignore this email.
+                    The link works for 7 days. If you did not apply, ignore this email: nothing
+                    happens without the confirmation.
 
                     Rincoltech
                     """),
@@ -88,7 +92,13 @@ class OutboxTemplates {
             "onboarding.operator_alert",
             new Template(
                     null,
-                    "New BMS application {reference}: {business_name} ({modules}). Open the portal: {portal_url}"));
+                    "New BMS application {reference}: {business_name} ({modules}). Open the portal: {portal_url}"),
+            "onboarding.cap_reached",
+            new Template(
+                    null,
+                    "BMS sign-up cap reached for the hour starting {hour} UTC: {applications} new applications and"
+                            + " {emails} confirmation emails. New sign-ups are answered but nothing is sent until the"
+                            + " hour passes. Check the edge rule and the portal."));
 
     Rendered render(String channel, String templateKey, Map<String, String> params) {
         Map<String, Template> byKey = switch (channel) {
@@ -102,6 +112,18 @@ class OutboxTemplates {
         }
         return new Rendered(
                 template.subject() == null ? null : fill(template.subject(), params), fill(template.text(), params));
+    }
+
+    /** The placeholders a template uses, for the render tests. */
+    static java.util.Set<String> placeholders(String channel, String templateKey) {
+        Template template = (channel.equals("email") ? EMAIL : TELEGRAM).get(templateKey);
+        java.util.Set<String> names = new java.util.TreeSet<>();
+        for (String text : new String[] {template.subject(), template.text()}) {
+            if (text != null) {
+                PLACEHOLDER.matcher(text).results().forEach(r -> names.add(r.group(1)));
+            }
+        }
+        return names;
     }
 
     /** The template keys of a channel, for the render test. */

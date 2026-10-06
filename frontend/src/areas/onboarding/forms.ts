@@ -57,7 +57,8 @@ export const EMPTY_SIGN_UP: SignUpForm = {
 
 export type Problems = Partial<Record<string, string>>;
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** ASCII only, as the API: an address that needs SMTPUTF8 could never be sent to. */
+const EMAIL = /^[\x21-\x3F\x41-\x7E]+@[\x21-\x3F\x41-\x7E]+\.[\x21-\x3F\x41-\x7E]+$/;
 const PHONE = /^\+?[0-9 ()-]{9,20}$/;
 const AGENT = /^[A-Za-z0-9-]*$/;
 
@@ -68,7 +69,7 @@ export function signUpProblems(form: SignUpForm): Problems {
   if (form.contact_name.trim().length < 2) problems.contact_name = 'Enter your name.';
   if (form.contact_name.length > 200) problems.contact_name = 'Use at most 200 characters.';
   if (!EMAIL.test(form.contact_email.trim()) || form.contact_email.length > 254) {
-    problems.contact_email = 'Enter an email address, for example name@example.com.';
+    problems.contact_email = 'Enter an email address in plain letters, for example name@example.com.';
   }
   if (!PHONE.test(form.contact_phone.trim())) problems.contact_phone = 'Enter your phone number, for example 0700 000 000.';
   if (form.modules.length === 0) problems.modules = 'Choose at least one.';

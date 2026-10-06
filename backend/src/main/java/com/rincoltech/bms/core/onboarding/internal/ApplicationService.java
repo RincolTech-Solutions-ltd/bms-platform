@@ -78,6 +78,7 @@ class ApplicationService {
     private static final Pattern SPACES = Pattern.compile("\\s+");
     private static final char[] REFERENCE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ".toCharArray();
     private static final String DEFAULT_PLAN = "starter";
+    static final String VERIFY_TEMPLATE = "onboarding.verify_email";
 
     private final JdbcClient jdbc;
     private final TransactionTemplate transactions;
@@ -87,6 +88,7 @@ class ApplicationService {
     private final TenantProvisioning provisioning;
     private final BusinessClock clock;
     private final SignUpRateLimiter limiter;
+    private final OnboardingProperties caps;
     private final Set<String> moduleKeys;
 
     ApplicationService(
@@ -98,6 +100,7 @@ class ApplicationService {
             TenantProvisioning provisioning,
             BusinessClock clock,
             SignUpRateLimiter limiter,
+            OnboardingProperties caps,
             List<ModuleManifest> manifests) {
         this.jdbc = jdbc;
         this.transactions = new TransactionTemplate(transactionManager);
@@ -107,6 +110,7 @@ class ApplicationService {
         this.provisioning = provisioning;
         this.clock = clock;
         this.limiter = limiter;
+        this.caps = caps;
         this.moduleKeys = manifests.stream().map(ModuleManifest::key).collect(Collectors.toUnmodifiableSet());
     }
 
@@ -114,9 +118,12 @@ class ApplicationService {
 
     /**
      * FR-ONB-01, FR-ONB-02, FR-ONB-03. Creates the application and emails a link to confirm the
-     * address; when the email already has an open application, emails a fresh link to that one
-     * instead. Either way the caller gets the same answer, so the endpoint does not reveal which
-     * emails are known. A filled honeypot field is accepted and dropped.
+     * address; when the mailbox already has an open application, emails a fresh link to that one's
+     * stored address instead. Either way, and also when a bound is reached or the honeypot is
+     * filled, the caller gets the same answer, so the endpoint does not reveal which emails are
+     * known. The bounds that must hold under a flood are counted in the database inside one
+     * serialised transaction (review B2): the global caps per hour, and confirmation emails per
+     * mailbox per 24 hours; a request over a bound creates, rotates and sends nothing.
      */
     void submit(SignUpRequest request) {
         limiter.acquire(SignUpRateLimiter.CREATE_PER_IP, RequestContext.clientIp());
@@ -125,7 +132,6 @@ class ApplicationService {
             return;
         }
         String email = request.contactEmail().trim().toLowerCase(Locale.ROOT);
-        limiter.acquire(SignUpRateLimiter.CREATE_PER_EMAIL, sha256(email));
         String phone = phone(request.country(), request.contactPhone());
         List<String> modules = checkModules(request.modules());
         String businessName = line(request.businessName());
@@ -138,12 +144,30 @@ class ApplicationService {
         String hash = sha256(token);
         Instant now = clock.now();
         transactions.executeWithoutResult(status -> {
+            // One sign-up at a time, so the counts below are exact under concurrency.
+            jdbc.sql("SELECT pg_advisory_xact_lock(hashtext('core.onboarding.sign-up'))")
+                    .query()
+                    .listOfRows();
+            if (capReached(now)) {
+                return;
+            }
+            String mailbox = jdbc.sql("SELECT onboarding_email_key(?)")
+                    .param(email)
+                    .query(String.class)
+                    .single();
+            String throttle = "onboarding.verify:" + mailbox;
+            if (outbox.countSince(throttle, null, now.minus(Duration.ofHours(24)))
+                    >= caps.maxVerificationEmailsPerMailbox()) {
+                log.info("sign-up answered without an email: mailbox bound reached");
+                return;
+            }
             UUID id = UUID.randomUUID();
+            String reference = reference();
             boolean created = Boolean.TRUE.equals(
                     jdbc.sql("SELECT onboarding_application_create(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                             .params(
                                     id,
-                                    reference(),
+                                    reference,
                                     businessName,
                                     contactName,
                                     email,
@@ -159,28 +183,69 @@ class ApplicationService {
                                     Timestamp.from(now))
                             .query(Boolean.class)
                             .single());
-            Map<String, String> names;
+            String recipient = email;
             if (created) {
-                names = Map.of("contact_name", contactName, "business_name", businessName);
                 audit.record("platform.application.submitted", null, null, Map.of("application_id", id));
             } else {
-                Optional<Map<String, String>> open = jdbc.sql(
-                                "SELECT id, contact_name, business_name FROM onboarding_application_relink(?, ?, ?, ?)")
+                record Open(String reference, String email) {}
+                Optional<Open> open = jdbc.sql(
+                                "SELECT reference, contact_email FROM onboarding_application_relink(?, ?, ?, ?)")
                         .params(email, hash, Timestamp.from(now.plus(LINK_TTL)), Timestamp.from(now))
-                        .query((rs, n) -> Map.of(
-                                "contact_name", rs.getString("contact_name"),
-                                "business_name", rs.getString("business_name")))
+                        .query((rs, n) -> new Open(rs.getString("reference"), rs.getString("contact_email")))
                         .optional();
                 if (open.isEmpty()) {
                     return;
                 }
-                names = open.get();
+                reference = open.get().reference();
+                recipient = open.get().email();
             }
-            Map<String, String> params = new LinkedHashMap<>(names);
+            // No text the applicant typed: the address is not confirmed yet (review B1).
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("reference", reference);
             params.put("link", hosts.platformOrigin() + "/sign-up/verify#token=" + token);
             outbox.enqueue(new Outbox.Message(
-                    Outbox.EMAIL, email, "onboarding.verify_email", params, "onboarding.link:" + hash));
+                    Outbox.EMAIL, recipient, VERIFY_TEMPLATE, params, "onboarding.link:" + hash, throttle));
         });
+    }
+
+    /**
+     * The global caps of {@link OnboardingProperties}. When one is reached the first request of the
+     * hour writes an audit row and a Telegram alert to the operator (one per hour, by idempotency
+     * key); every request of that hour is answered but creates and sends nothing.
+     */
+    private boolean capReached(Instant now) {
+        Instant hourAgo = now.minus(Duration.ofHours(1));
+        int applications = jdbc.sql("SELECT onboarding_applications_created_since(?)")
+                .param(Timestamp.from(hourAgo))
+                .query(Integer.class)
+                .single();
+        int emails = outbox.countSince(null, VERIFY_TEMPLATE, hourAgo);
+        if (applications < caps.maxApplicationsPerHour() && emails < caps.maxVerificationEmailsPerHour()) {
+            return false;
+        }
+        String hour =
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:00", Locale.ROOT).format(now.atOffset(ZoneOffset.UTC));
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("hour", hour);
+        params.put("applications", Integer.toString(applications));
+        params.put("emails", Integer.toString(emails));
+        boolean first = outbox.enqueue(new Outbox.Message(
+                Outbox.TELEGRAM,
+                Outbox.OPERATOR_CHAT,
+                "onboarding.cap_reached",
+                params,
+                "onboarding.cap_reached:" + hour));
+        if (first) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("hour", hour);
+            data.put("applications_last_hour", applications);
+            data.put("verification_emails_last_hour", emails);
+            data.put("max_applications_per_hour", caps.maxApplicationsPerHour());
+            data.put("max_verification_emails_per_hour", caps.maxVerificationEmailsPerHour());
+            audit.record("platform.sign_up.cap_reached", null, null, data);
+            log.warn("sign-up cap reached for the hour {}: new sign-ups send nothing until it passes", hour);
+        }
+        return true;
     }
 
     /** FR-ONB-02, FR-ONB-04: the applicant page; with {@code verify} the email is confirmed. */

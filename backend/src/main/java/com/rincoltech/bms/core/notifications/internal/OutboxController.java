@@ -100,19 +100,29 @@ class OutboxController {
 
     @PostMapping("/{outbox_id}/retry")
     @RequiresPermission("platform.tenants.manage")
-    @Operation(summary = "Send a failed row again (FR-NTF-09)", operationId = "platformRetryOutbox")
+    @Operation(
+            summary = "Send a failed row again, if younger than its link's lifetime (FR-NTF-09)",
+            operationId = "platformRetryOutbox")
     @Transactional
     public ResponseEntity<Void> retry(@PathVariable("outbox_id") UUID id) {
-        boolean retried = Boolean.TRUE.equals(jdbc.sql("SELECT notification_outbox_retry(?, ?)")
-                .params(id, Timestamp.from(clock.now()))
-                .query(Boolean.class)
-                .single());
-        if (!retried) {
+        Instant now = clock.now();
+        String result = jdbc.sql("SELECT notification_outbox_retry(?, ?, ?)")
+                .params(id, Timestamp.from(now.minus(OutboxJobs.LINK_LIFETIME)), Timestamp.from(now))
+                .query(String.class)
+                .single();
+        if (result.equals("not_failed")) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "outbox_not_failed",
                     "Not a failed message",
                     "Only a failed message can be retried.");
+        }
+        if (result.equals("too_old")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "outbox_too_old",
+                    "Too old to send",
+                    "This message is older than its link's lifetime. Issue a new link instead, for example with Needs info.");
         }
         audit.record("platform.outbox.retried", CurrentPrincipal.require().userId(), null, Map.of("outbox_id", id));
         return ResponseEntity.noContent().build();
