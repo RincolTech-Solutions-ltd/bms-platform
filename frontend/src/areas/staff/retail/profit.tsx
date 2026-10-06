@@ -3,6 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retail, type DailyProfit, type Valuation } from '../../../api/retail';
 import { showQty } from './maths';
+import { EmptyState, SkeletonList } from '../../../components/states';
 import { BranchRequired, Gate, Problem, money, useSingleBranch } from './ui';
 
 // Stock value (FR-RET-09) is a stock read; its cost columns arrive only with retail.profit.read.
@@ -49,7 +50,7 @@ function ValuationPage() {
       {branchId === null ? <BranchRequired /> : (
         <>
           <p className="branch-line">Branch: <strong>{branchName}</strong></p>
-          {valuation.isPending && <p className="loading">Loading</p>}
+          {valuation.isPending && <SkeletonList label="Loading stock value" />}
           <Problem error={valuation.error} />
           {valuation.data && <ValuationTable valuation={valuation.data} />}
         </>
@@ -63,7 +64,7 @@ export function ProfitTable({ report }: { report: DailyProfit }) {
   return (
     <>
       <p className="rt-total">Profit for the period {money(report.profit_minor ?? 0)}</p>
-      <div className="table-wrap" tabIndex={0}><table>
+      {rows.length === 0 ? <EmptyState art="noSales" title="No sales yet.">Sales in this period appear here, day by day.</EmptyState> : <div className="table-wrap" tabIndex={0}><table>
         <thead>
           <tr>
             <th>Day</th>
@@ -84,7 +85,7 @@ export function ProfitTable({ report }: { report: DailyProfit }) {
             </tr>
           ))}
         </tbody>
-      </table></div>
+      </table></div>}
     </>
   );
 }
@@ -106,7 +107,7 @@ function ProfitPage() {
             <div><label htmlFor="to">To</label><input id="to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           </div>
           {from > to && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
-          {profit.isPending && from <= to && <p className="loading">Loading</p>}
+          {profit.isPending && from <= to && <SkeletonList label="Loading profit" />}
           <Problem error={profit.error} />
           {profit.data && <ProfitTable report={profit.data} />}
         </>

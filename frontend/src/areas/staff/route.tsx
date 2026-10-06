@@ -6,6 +6,7 @@ import { loadRetailMock, retailMockEnabled } from '../../api/retail';
 import { ALL_BRANCHES, initialBranch, loadBranch, saveBranch } from '../../auth/branch';
 import { getAccessToken, refreshSession, setAccessToken, subscribe } from '../../auth/session';
 import { icons } from '../../components/icons';
+import { BrandLoader } from '../../components/states';
 import { StaffContext } from './context';
 import { RetailNav } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
@@ -57,7 +58,7 @@ function StaffLayout() {
   }, [me.data]);
 
   if (restoring || !me.data) {
-    return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <p className="loading">Loading</p>;
+    return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <BrandLoader />;
   }
 
   const profile = me.data;

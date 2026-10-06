@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retail, type StockRow } from '../../../api/retail';
+import { EmptyState, SkeletonList } from '../../../components/states';
 import { showQty } from './maths';
 import { BranchRequired, Gate, Problem, money, useProfitAccess, useSingleBranch } from './ui';
 
@@ -10,7 +11,7 @@ import { BranchRequired, Gate, Problem, money, useProfitAccess, useSingleBranch 
 // sends no cost field to anyone else.
 
 export function StockTable({ rows, showCost }: { rows: StockRow[]; showCost: boolean }) {
-  if (rows.length === 0) return <p className="empty-state">No items found.</p>;
+  if (rows.length === 0) return <EmptyState art="noProducts" title="No items found.">Try another name or code, or restock to add items.</EmptyState>;
   return (
     <div className="table-wrap" tabIndex={0}><table>
       <thead>
@@ -61,7 +62,7 @@ function StockPage() {
             <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={negativeOnly} onChange={(e) => setNegativeOnly(e.target.checked)} />
             Show only negative stock
           </label>
-          {stock.isPending && <p className="loading">Loading</p>}
+          {stock.isPending && <SkeletonList label="Loading stock" />}
           <Problem error={stock.error} />
           {stock.data && <StockTable rows={stock.data} showCost={canProfit} />}
         </>
