@@ -79,3 +79,156 @@ body {
 .app-footer a {
   display: inline-flex;
 }
+
+/*
+ * Forms, notices and tables of the sign-up page and the operator portal (ADR-024). Accents use
+ * the brand variables above; the warning and error tints are status colours, not brand colours.
+ */
+.narrow {
+  max-width: 560px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #8a8a8a;
+  border-radius: 4px;
+}
+
+.field input[aria-invalid='true'],
+.field textarea[aria-invalid='true'] {
+  border-color: #a4262c;
+}
+
+.field-problem {
+  color: #a4262c;
+  font-size: 0.9rem;
+}
+
+fieldset {
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  display: grid;
+  gap: 6px;
+}
+
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-brand {
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-brand:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.notice {
+  padding: 8px 12px;
+  border-left: 4px solid var(--brand);
+  background: #f4f4f4;
+}
+
+.notice-error {
+  border-left-color: #a4262c;
+  background: #fdf3f4;
+}
+
+.notice-warning {
+  border-left-color: #8a5a00;
+  background: #fff8e6;
+}
+
+/* The sign-up honeypot: present in the form, never shown. */
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+}
+
+.facts dt {
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.pre-line {
+  white-space: pre-line;
+}
+
+.wrap-anywhere {
+  overflow-wrap: anywhere;
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #d9d9d9;
+  vertical-align: top;
+}
+
+.filters,
+.actions,
+.portal-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.filters button[aria-pressed='true'] {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  border: 0;
+}
+
+.portal-user {
+  margin-left: auto;
+  color: #555;
+}

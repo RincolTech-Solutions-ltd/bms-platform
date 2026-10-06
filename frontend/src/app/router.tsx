@@ -6,8 +6,8 @@ import { Shell } from './shell';
 
 // Route-level split (ADR-009): /staff and /member are separate lazily loaded route trees, so a
 // member never downloads staff code; sign-in and invitation acceptance are small chunks of their
-// own. The platform console (on the platform host, BMS_PLATFORM_HOST) joins as a further tree
-// when built; until then its host shows a placeholder.
+// own. The platform host (BMS_PLATFORM_HOST) serves the public sign-up page and applicant page and
+// the operator portal under /platform (ADR-024), each lazily loaded as well.
 
 // The root layout is the shared shell (brand bar, theme colour, Powered-by footer): every route
 // below it inherits it, so no area draws its own.
@@ -28,9 +28,18 @@ function AreaChooser() {
     : classifyHost(window.location.hostname, hosts.data);
   if (area.kind === 'platform') {
     return (
-      <main>
-        <h1>BMS Platform console</h1>
-        <p>The platform console is not built yet. Tenants sign in at their own address.</p>
+      <main className="narrow">
+        <h1>BMS by Rincoltech</h1>
+        <p>Run your shop or lending business from your phone: sales, stock, members and loans.</p>
+        <p>
+          <Link to="/sign-up" className="btn-brand">
+            Apply to start
+          </Link>
+        </p>
+        <p>Already a customer? Sign in at the address in your activation email.</p>
+        <p>
+          <Link to="/platform/sign-in">Operator sign-in</Link>
+        </p>
       </main>
     );
   }
@@ -97,6 +106,36 @@ const retailStocktakeRoute = retailScreen('/stocktake').lazy(() => import('../ar
 const retailValuationRoute = retailScreen('/valuation').lazy(() => import('../areas/staff/retail/profit').then((m) => m.ValuationRoute));
 const retailProfitRoute = retailScreen('/profit').lazy(() => import('../areas/staff/retail/profit').then((m) => m.Route));
 
+const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up' }).lazy(() =>
+  import('../areas/onboarding/sign-up').then((m) => m.Route),
+);
+const signUpVerifyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up/verify' }).lazy(() =>
+  import('../areas/onboarding/applicant').then((m) => m.VerifyRoute),
+);
+const applicationStatusRoute = createRoute({ getParentRoute: () => rootRoute, path: '/application' }).lazy(() =>
+  import('../areas/onboarding/applicant').then((m) => m.StatusRoute),
+);
+
+const operatorSignInRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform/sign-in' }).lazy(() =>
+  import('../areas/platform/sign-in').then((m) => m.Route),
+);
+const operatorSetupRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform/setup' }).lazy(() =>
+  import('../areas/platform/sign-in').then((m) => m.SetupRoute),
+);
+const platformRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform' }).lazy(() =>
+  import('../areas/platform/route').then((m) => m.Route),
+);
+const platformApplicationsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/' }).lazy(() =>
+  import('../areas/platform/applications').then((m) => m.Route),
+);
+const platformApplicationRoute = createRoute({
+  getParentRoute: () => platformRoute,
+  path: '/applications/$applicationId',
+}).lazy(() => import('../areas/platform/application').then((m) => m.Route));
+const platformOutboxRoute = createRoute({ getParentRoute: () => platformRoute, path: '/outbox' }).lazy(() =>
+  import('../areas/platform/outbox').then((m) => m.Route),
+);
+
 const memberRoute = createRoute({ getParentRoute: () => rootRoute, path: '/member' }).lazy(() =>
   import('../areas/member/route').then((m) => m.Route),
 );
@@ -117,6 +156,12 @@ export const router = createRouter({
         retailProfitRoute,
       ])]),
     memberRoute,
+    signUpRoute,
+    signUpVerifyRoute,
+    applicationStatusRoute,
+    operatorSignInRoute,
+    operatorSetupRoute,
+    platformRoute.addChildren([platformApplicationsRoute, platformApplicationRoute, platformOutboxRoute]),
   ]),
 });
 
