@@ -50,8 +50,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `V12`), the oversell refusal and price floor (`V13`), the review fixes (`V14`), the
   `import-retail` command (`V20`, `docs/runbooks/import-retail.md`) and the phone-first retail
   screens on the real API (`docs/specs/retail-ui-notes.md`). Stock transfers between branches
-  (issue #84, ADR-020 amendment) add `V22`. Flyway runs with `outOfOrder` off, so a new migration
-  takes a number above the highest one on any open branch (`V23` next).
+  (issue #84, ADR-020 amendment) add `V22`. The database optimisation (issue #107, ADR-025) adds
+  `V24` (indexes and a fillfactor only; `V23` is the open self-onboarding branch). Flyway runs with
+  `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
+  (`V25` next).
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -84,6 +86,7 @@ bms-platform/
 ├── backend/             Spring Boot API, modules by package (ADR-010), Flyway migrations
 ├── frontend/            the React PWA: staff area, member area, platform console (ADR-009)
 ├── deploy/              host-side files: compose.yml, deploy.sh, backup.sh, Caddy, SQL (SDD ch. 9)
+├── scripts/db-bench/    throwaway PostgreSQL benchmark at 25 times the data (ADR-025); never production
 ├── fixtures/            fabricated test data only (pilot register sample)
 ├── docs/
 │   ├── workspace.dsl    Structurizr C4 model; wires in sdd/ and adr/ as one site
@@ -283,6 +286,8 @@ Accepted (this list is the ADR index):
 - ADR-019 Collateral release as an approval action, and the interim duplicate pledge rule (proposed, #24)
 - ADR-020 Retail vertical brought forward; stock as append-only movements; retail events post to the
   ledger (proposed, #50)
+- ADR-025 Database performance: measured on 25 times the data, covering indexes, the plain tenant
+  policy kept, connection timeouts (proposed, #107)
 
 Pending (cite only as "pending ADR-NNN"):
 
