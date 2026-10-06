@@ -33,20 +33,20 @@ export interface OperatorSignInViewProps {
 
 export function OperatorSignInView(p: OperatorSignInViewProps) {
   return (
-    <main className="narrow">
+    <main className="card auth-card">
       <h1>Operator sign-in</h1>
       {p.message && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {p.message}
         </p>
       )}
       {p.step.kind === 'password' && (
-        <form onSubmit={p.onSubmitPassword} className="form-grid" aria-busy={p.busy}>
-          <div className="field">
+        <form onSubmit={p.onSubmitPassword} className="form-stack" aria-busy={p.busy}>
+          <div>
             <label htmlFor="op-login">Email</label>
             <input id="op-login" type="email" value={p.login} onChange={(e) => p.onLogin(e.target.value)} autoComplete="username" required />
           </div>
-          <div className="field">
+          <div>
             <label htmlFor="op-password">Password</label>
             <input
               id="op-password"
@@ -63,11 +63,11 @@ export function OperatorSignInView(p: OperatorSignInViewProps) {
         </form>
       )}
       {p.step.kind === 'challenge' && (
-        <form onSubmit={p.onSubmitChallenge} className="form-grid" aria-busy={p.busy}>
+        <form onSubmit={p.onSubmitChallenge} className="form-stack" aria-busy={p.busy}>
           <p>Enter the code from your authenticator app, or one of your recovery codes.</p>
-          <div className="field">
+          <div>
             <label htmlFor="op-code">Code</label>
-            <input id="op-code" value={p.code} onChange={(e) => p.onCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" required />
+            <input id="op-code" value={p.code} onChange={(e) => p.onCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" className="input-code" required />
           </div>
           <button className="btn-brand" type="submit" disabled={p.busy}>
             Verify
@@ -75,17 +75,17 @@ export function OperatorSignInView(p: OperatorSignInViewProps) {
         </form>
       )}
       {p.step.kind === 'enrol' && (
-        <form onSubmit={p.onSubmitEnrolment} className="form-grid" aria-busy={p.busy}>
+        <form onSubmit={p.onSubmitEnrolment} className="form-stack" aria-busy={p.busy}>
           <p>Operators must use a second factor. Add this account to an authenticator app, then enter the code it shows.</p>
-          <p>
-            Secret: <code>{p.step.enrolment.secret}</code>
-          </p>
+          <div className="secret-box">
+            <code>{p.step.enrolment.secret}</code>
+          </div>
           <p className="wrap-anywhere">
             <a href={p.step.enrolment.otpauth_uri}>{p.step.enrolment.otpauth_uri}</a>
           </p>
-          <div className="field">
+          <div>
             <label htmlFor="op-enrol-code">Code from the app</label>
-            <input id="op-enrol-code" value={p.code} onChange={(e) => p.onCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" required />
+            <input id="op-enrol-code" value={p.code} onChange={(e) => p.onCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" className="input-code" required />
           </div>
           <button className="btn-brand" type="submit" disabled={p.busy}>
             Turn on
@@ -93,10 +93,10 @@ export function OperatorSignInView(p: OperatorSignInViewProps) {
         </form>
       )}
       {p.step.kind === 'codes' && (
-        <section className="form-grid">
+        <section className="form-stack">
           <h2>Your recovery codes</h2>
           <p>Each code signs you in once if you lose your phone. Save them somewhere safe now: they are shown only this once.</p>
-          <pre>{recoveryCodesText(p.step.codes)}</pre>
+          <pre className="codes-box">{recoveryCodesText(p.step.codes)}</pre>
           <button className="btn-brand" type="button" onClick={p.onCodesSaved}>
             I have saved them
           </button>
@@ -215,10 +215,10 @@ export function OperatorSetupView(p: {
   onSubmit: (e: FormEvent) => void;
 }) {
   return (
-    <main className="narrow">
+    <main className="card auth-card">
       <h1>Set your operator password</h1>
       {p.message && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {p.message}
         </p>
       )}
@@ -227,12 +227,12 @@ export function OperatorSetupView(p: {
           Your password is set. <a href="/platform/sign-in">Sign in</a> and turn on two-step sign-in.
         </p>
       ) : (
-        <form onSubmit={p.onSubmit} className="form-grid" aria-busy={p.busy}>
-          <div className="field">
+        <form onSubmit={p.onSubmit} className="form-stack" aria-busy={p.busy}>
+          <div>
             <label htmlFor="op-setup-token">Setup token</label>
             <input id="op-setup-token" value={p.token} onChange={(e) => p.onToken(e.target.value.trim())} autoComplete="off" required />
           </div>
-          <div className="field">
+          <div>
             <label htmlFor="op-new-password">New password (at least 12 characters)</label>
             <input
               id="op-new-password"

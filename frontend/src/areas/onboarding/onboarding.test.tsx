@@ -80,7 +80,7 @@ describe('the sign-up page (FR-ONB-01, FR-ONB-03)', () => {
 
   it('hides the honeypot from people, keyboards and screen readers', () => {
     const html = view();
-    expect(html).toMatch(/<div class="hp" aria-hidden="true">/);
+    expect(html).toMatch(/<div class="visually-hidden" aria-hidden="true">/);
     expect(html).toMatch(/id="website"[^>]*tabindex="-1"|tabindex="-1"[^>]*id="website"/);
   });
 

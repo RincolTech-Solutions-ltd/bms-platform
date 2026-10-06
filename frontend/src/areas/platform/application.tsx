@@ -29,7 +29,8 @@ import {
 export function DuplicateWarning({ duplicates }: { duplicates: PossibleDuplicate[] }) {
   if (duplicates.length === 0) return null;
   return (
-    <section className="notice notice-warning" role="note" aria-labelledby="dup-heading">
+    <section className="alert alert-warning" role="note" aria-labelledby="dup-heading">
+      <div>
       <h2 id="dup-heading">Possible repeat</h2>
       <p>This may be a business that applied or had a free month before. Check before you activate a trial.</p>
       <ul>
@@ -40,6 +41,7 @@ export function DuplicateWarning({ duplicates }: { duplicates: PossibleDuplicate
           </li>
         ))}
       </ul>
+      </div>
     </section>
   );
 }
@@ -119,18 +121,18 @@ export function DecisionPanel({ status, busy, note, onNote, onDecide }: Decision
   const canReject = canVerify || status === 'verified';
   if (!canVerify && !canAsk && !canReject) return null;
   return (
-    <section aria-labelledby="decide-heading" className="form-grid">
+    <section aria-labelledby="decide-heading" className="form-stack">
       <h2 id="decide-heading">Decide</h2>
       {canVerify && (
         <button className="btn-brand" type="button" disabled={busy} onClick={() => onDecide('verify')}>
           Verify
         </button>
       )}
-      <div className="field">
+      <div>
         <label htmlFor="decision-note">Note to the applicant (for Needs info or Reject; they see it)</label>
         <textarea id="decision-note" value={note} onChange={(e) => onNote(e.target.value)} rows={3} maxLength={1000} />
       </div>
-      <div className="actions">
+      <div className="cluster">
         {canAsk && (
           <button type="button" disabled={busy || note.trim().length === 0} onClick={() => onDecide('needs-info')}>
             Needs info
@@ -157,12 +159,12 @@ export interface ActivateFormViewProps {
 export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: ActivateFormViewProps) {
   const set = (patch: Partial<ActivateForm>) => onChange({ ...form, ...patch });
   return (
-    <form onSubmit={onSubmit} className="form-grid" aria-labelledby="activate-heading" aria-busy={busy}>
+    <form onSubmit={onSubmit} className="form-stack" aria-labelledby="activate-heading" aria-busy={busy}>
       <h2 id="activate-heading">Activate</h2>
       <fieldset>
         <legend>Modules</legend>
         {MODULES.map((m) => (
-          <label key={m.key} className="choice">
+          <label key={m.key}>
             <input
               type="checkbox"
               checked={form.modules.includes(m.key)}
@@ -171,9 +173,9 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
             {m.label}
           </label>
         ))}
-        {problems.modules && <span className="field-problem">{problems.modules}</span>}
+        {problems.modules && <span className="field-error">{problems.modules}</span>}
       </fieldset>
-      <div className="field">
+      <div>
         <label htmlFor="activate-term">Term</label>
         <select id="activate-term" value={form.term} onChange={(e) => set({ term: e.target.value })}>
           {TERMS.map((t) => (
@@ -185,16 +187,16 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
       </div>
       <fieldset>
         <legend>Way in</legend>
-        <label className="choice">
+        <label>
           <input type="radio" name="activate-way" checked={form.way_in === 'trial'} onChange={() => set({ way_in: 'trial' })} />
           One month free (trial)
         </label>
-        <label className="choice">
+        <label>
           <input type="radio" name="activate-way" checked={form.way_in === 'paid'} onChange={() => set({ way_in: 'paid' })} />
           Paid: payment received
         </label>
       </fieldset>
-      <div className="field">
+      <div>
         <label htmlFor="activate-note">Payment received (method, reference, date){form.way_in === 'paid' ? '' : ' (optional)'}</label>
         <textarea
           id="activate-note"
@@ -206,12 +208,12 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
           aria-describedby={problems.payment_note ? 'activate-note-problem' : undefined}
         />
         {problems.payment_note && (
-          <span id="activate-note-problem" className="field-problem">
+          <span id="activate-note-problem" className="field-error">
             {problems.payment_note}
           </span>
         )}
       </div>
-      <div className="field">
+      <div>
         <label htmlFor="activate-slug">Address name (slug, cannot change later)</label>
         <input
           id="activate-slug"
@@ -222,7 +224,7 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
           aria-describedby={problems.slug ? 'activate-slug-problem' : undefined}
         />
         {problems.slug && (
-          <span id="activate-slug-problem" className="field-problem">
+          <span id="activate-slug-problem" className="field-error">
             {problems.slug}
           </span>
         )}
@@ -236,7 +238,8 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
 
 export function ActivationDone({ result }: { result: ActivationResult }) {
   return (
-    <section role="status" className="notice">
+    <section role="status" className="alert alert-success">
+      <div>
       {result.activated_now ? (
         <>
           <p>
@@ -251,6 +254,7 @@ export function ActivationDone({ result }: { result: ActivationResult }) {
       ) : (
         <p>This application was already activated as {result.tenant_slug}. Nothing was changed.</p>
       )}
+      </div>
     </section>
   );
 }
@@ -311,14 +315,14 @@ function ApplicationScreen() {
         <Link to="/platform">Back to applications</Link>
       </p>
       <h1>Application {query.data?.application?.reference}</h1>
-      {query.isPending && <p role="status">Loading</p>}
+      {query.isPending && <p role="status" className="loading">Loading</p>}
       {query.isError && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {query.error.message}
         </p>
       )}
       {error && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {error}
         </p>
       )}

@@ -36,20 +36,34 @@ function PortalLayout() {
   }
 
   if (restoring || !me.data) {
-    return <p role="status">{me.isError ? 'Could not load your profile. Sign in again.' : 'Loading'}</p>;
+    return me.isError ? (
+      <p role="alert" className="alert alert-danger">
+        Could not load your profile. Sign in again.
+      </p>
+    ) : (
+      <p role="status" className="loading">
+        Loading
+      </p>
+    );
   }
   return (
     <div>
-      <nav aria-label="Operator portal" className="portal-nav">
-        <Link to="/platform" activeOptions={{ exact: true }}>
-          Applications
-        </Link>
-        <Link to="/platform/outbox">Messages not sent</Link>
-        <span className="portal-user">{me.data.full_name}</span>
-        <button type="button" onClick={() => void signOut()}>
-          Sign out
-        </button>
-      </nav>
+      <header className="staff-bar">
+        <div className="staff-bar-top">
+          <span className="staff-user">
+            <span className="staff-user-name">{me.data.full_name}</span>
+          </span>
+          <button type="button" className="btn-ghost btn-sm" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
+        <nav className="tabs" aria-label="Operator portal">
+          <Link to="/platform" activeOptions={{ exact: true }}>
+            Applications
+          </Link>
+          <Link to="/platform/outbox">Messages not sent</Link>
+        </nav>
+      </header>
       <Outlet />
     </div>
   );

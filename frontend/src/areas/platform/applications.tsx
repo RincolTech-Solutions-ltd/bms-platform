@@ -19,7 +19,7 @@ export function ApplicationsTable({
   const open = (counts.submitted ?? 0) + (counts.needs_info ?? 0) + (counts.verified ?? 0);
   return (
     <>
-      <div role="group" aria-label="Filter by status" className="filters">
+      <div role="group" aria-label="Filter by status" className="cluster filters">
         <button type="button" aria-pressed={filter === 'open'} onClick={() => onFilter('open')}>
           Open ({open})
         </button>
@@ -32,8 +32,8 @@ export function ApplicationsTable({
       {items.length === 0 ? (
         <p>No applications here.</p>
       ) : (
-        <table className="table">
-          <caption className="sr-only">Applications</caption>
+        <div className="table-wrap">
+        <table aria-label="Applications">
           <thead>
             <tr>
               <th scope="col">Reference</th>
@@ -67,6 +67,7 @@ export function ApplicationsTable({
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );
@@ -79,9 +80,9 @@ function Applications() {
   return (
     <main>
       <h1>Applications</h1>
-      {query.isPending && <p role="status">Loading</p>}
+      {query.isPending && <p role="status" className="loading">Loading</p>}
       {query.isError && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {query.error.message}
         </p>
       )}

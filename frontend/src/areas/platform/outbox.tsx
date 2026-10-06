@@ -24,15 +24,15 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
       {(['email', 'telegram'] as const)
         .filter((c) => !channels.includes(c))
         .map((c) => (
-          <p key={c} className="notice notice-warning">
+          <p key={c} className="alert alert-warning">
             The {c === 'email' ? 'email' : 'Telegram'} sender is not configured on this server: its messages wait until it is.
           </p>
         ))}
       {(status.failures ?? []).length === 0 ? (
         <p>Nothing has failed.</p>
       ) : (
-        <table className="table">
-          <caption className="sr-only">Failed messages</caption>
+        <div className="table-wrap">
+        <table aria-label="Failed messages">
           <thead>
             <tr>
               <th scope="col">Message</th>
@@ -40,9 +40,7 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
               <th scope="col">To</th>
               <th scope="col">Error</th>
               <th scope="col">Failed</th>
-              <th scope="col">
-                <span className="sr-only">Action</span>
-              </th>
+              <th scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -62,6 +60,7 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );
@@ -77,9 +76,9 @@ function Outbox() {
   return (
     <main>
       <h1>Messages not sent</h1>
-      {query.isPending && <p role="status">Loading</p>}
+      {query.isPending && <p role="status" className="loading">Loading</p>}
       {(query.isError || retry.isError) && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {(query.error ?? retry.error)?.message}
         </p>
       )}

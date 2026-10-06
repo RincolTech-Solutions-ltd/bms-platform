@@ -30,11 +30,11 @@ export interface SignUpViewProps {
 
 function Field({ id, label, problem, children }: { id: string; label: string; problem?: string; children: React.ReactNode }) {
   return (
-    <div className="field">
+    <div>
       <label htmlFor={id}>{label}</label>
       {children}
       {problem && (
-        <span id={`${id}-problem`} className="field-problem">
+        <span id={`${id}-problem`} className="field-error">
           {problem}
         </span>
       )}
@@ -45,7 +45,7 @@ function Field({ id, label, problem, children }: { id: string; label: string; pr
 export function SignUpView({ form, problems, busy, error, done, onChange, onSubmit }: SignUpViewProps) {
   if (done) {
     return (
-      <main className="narrow">
+      <main className="card auth-card">
         <h1>Check your email</h1>
         <p role="status">
           We have sent a link to <strong>{form.contact_email}</strong>. Open it to confirm your email. We then look at your
@@ -58,15 +58,15 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
   const set = (patch: Partial<SignUpForm>) => onChange({ ...form, ...patch });
   const describedBy = (name: string) => (problems[name] ? `${name}-problem` : undefined);
   return (
-    <main className="narrow">
+    <main className="card auth-card">
       <h1>Start using BMS</h1>
       <p>Tell us about your business. We check every application and then send you a link to sign in.</p>
       {error && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {error}
         </p>
       )}
-      <form onSubmit={onSubmit} className="form-grid" noValidate aria-busy={busy}>
+      <form onSubmit={onSubmit} className="form-stack" noValidate aria-busy={busy}>
         <Field id="business_name" label="Business name" problem={problems.business_name}>
           <input
             id="business_name"
@@ -132,7 +132,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
         <fieldset aria-describedby={describedBy('modules')}>
           <legend>What do you want to use?</legend>
           {MODULES.map((m) => (
-            <label key={m.key} className="choice">
+            <label key={m.key}>
               <input
                 type="checkbox"
                 name="modules"
@@ -144,7 +144,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
             </label>
           ))}
           {problems.modules && (
-            <span id="modules-problem" className="field-problem">
+            <span id="modules-problem" className="field-error">
               {problems.modules}
             </span>
           )}
@@ -152,7 +152,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
         <fieldset>
           <legend>How do you want to start?</legend>
           {WAYS_IN.map((w) => (
-            <label key={w.key} className="choice">
+            <label key={w.key}>
               <input type="radio" name="way_in" value={w.key} checked={form.way_in === w.key} onChange={() => set({ way_in: w.key })} />
               {w.label}
             </label>
@@ -161,7 +161,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
         <fieldset>
           <legend>Pay</legend>
           {TERMS.map((t) => (
-            <label key={t.key} className="choice">
+            <label key={t.key}>
               <input type="radio" name="term" value={t.key} checked={form.term === t.key} onChange={() => set({ term: t.key })} />
               {t.label}
             </label>
@@ -181,7 +181,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
           <textarea id="message" value={form.message} onChange={(e) => set({ message: e.target.value })} maxLength={1000} rows={3} />
         </Field>
         {/* The hidden field: off screen, out of the tab order and hidden from screen readers. */}
-        <div className="hp" aria-hidden="true">
+        <div className="visually-hidden" aria-hidden="true">
           <label htmlFor="website">Website</label>
           <input id="website" name="website" tabIndex={-1} autoComplete="off" value={form.website} onChange={(e) => set({ website: e.target.value })} />
         </div>

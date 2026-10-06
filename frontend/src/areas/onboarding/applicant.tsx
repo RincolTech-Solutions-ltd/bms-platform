@@ -43,7 +43,7 @@ export function ApplicantPage({
 }: ApplicantPageProps) {
   if (loading) {
     return (
-      <main className="narrow">
+      <main className="card auth-card">
         <h1>Your application</h1>
         <p role="status">Opening your application</p>
       </main>
@@ -51,9 +51,9 @@ export function ApplicantPage({
   }
   if (!view) {
     return (
-      <main className="narrow">
+      <main className="card auth-card">
         <h1>Your application</h1>
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {error ?? 'This link is not valid or has expired.'}
         </p>
         <p>
@@ -64,10 +64,10 @@ export function ApplicantPage({
   }
   const modules = (view.modules ?? []).map((key) => MODULES.find((m) => m.key === key)?.label ?? key);
   return (
-    <main className="narrow">
+    <main className="card auth-card">
       <h1>Your application</h1>
       {error && (
-        <p role="alert" className="notice notice-error">
+        <p role="alert" className="alert alert-danger">
           {error}
         </p>
       )}
@@ -84,7 +84,7 @@ export function ApplicantPage({
         <dd>{modules.join(', ')}</dd>
       </dl>
       {view.email_verified === false && (view.status === 'submitted' || view.status === 'needs_info') ? (
-        <section aria-labelledby="confirm-heading" className="form-grid">
+        <section aria-labelledby="confirm-heading" className="form-stack">
           <h2 id="confirm-heading">Confirm your email</h2>
           <p>Press the button to confirm this is your email address. We then look at your application.</p>
           <button className="btn-brand" type="button" disabled={confirming} onClick={onConfirm}>
@@ -97,9 +97,9 @@ export function ApplicantPage({
       {view.status === 'needs_info' && (
         <section aria-labelledby="question-heading">
           <h2 id="question-heading">Our question</h2>
-          <p className="notice">{view.operator_note}</p>
-          <form onSubmit={onReply} className="form-grid" aria-busy={replying}>
-            <div className="field">
+          <p className="alert alert-info">{view.operator_note}</p>
+          <form onSubmit={onReply} className="form-stack" aria-busy={replying}>
+            <div>
               <label htmlFor="reply">Your answer</label>
               <textarea id="reply" value={reply} onChange={(e) => onReplyChange(e.target.value)} rows={4} maxLength={1000} required />
             </div>
@@ -109,7 +109,7 @@ export function ApplicantPage({
           </form>
         </section>
       )}
-      {view.status === 'rejected' && view.reject_reason && <p className="notice">{view.reject_reason}</p>}
+      {view.status === 'rejected' && view.reject_reason && <p className="alert alert-info">{view.reject_reason}</p>}
     </main>
   );
 }
