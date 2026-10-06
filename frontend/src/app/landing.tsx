@@ -10,7 +10,7 @@ import { classifyHost, loadHostConfig } from './hosts';
 // The public landing page (#99, #106). On a tenant host its copy, module cards and buttons follow
 // the modules the tenant has switched on, read from the public GET /api/v1/branding: a retail only
 // tenant is never promised members or loans, nor shown the Member portal button. The platform host
-// and an unknown host show a short hero without modules.
+// offers sign-up and operator sign-in (#89); an unknown host shows a short hero.
 
 export type LandingCard = { key: string; icon: keyof typeof icons; title: string; text: string };
 
@@ -141,13 +141,37 @@ export function Landing() {
   const area =
     import.meta.env.DEV && import.meta.env.VITE_DEV_TENANT ? { kind: 'tenant' as const } : classifyHost(window.location.hostname, hosts.data);
   if (area.kind === 'platform') {
+    // The platform host (#89): a new business applies through sign-up; an operator signs in.
     return (
       <main className="landing">
         <Hero>
-          <span className="badge badge-info">Coming soon</span>
-          <h1>BMS Platform console</h1>
-          <p className="lead">The platform console is not built yet. Tenants sign in at their own address.</p>
+          <h1>BMS by Rincoltech</h1>
+          <p className="lead">Run your shop or lending business from your phone: sales, stock, members and loans.</p>
+          <ul className="landing-actions">
+            <li>
+              <Link to="/sign-up" className="btn btn-primary btn-lg btn-block">
+                Apply to start
+              </Link>
+            </li>
+            <li>
+              <Link to="/platform/sign-in" className="btn btn-lg btn-block">
+                Operator sign-in
+              </Link>
+            </li>
+          </ul>
         </Hero>
+        <ul className="landing-modules">
+          <li className="card feature-card">
+            <span className="icon-chip">{icons.building}</span>
+            <h2>New business</h2>
+            <p>Apply in a few minutes. We check every application and email you a link to sign in.</p>
+          </li>
+          <li className="card feature-card">
+            <span className="icon-chip">{icons.user}</span>
+            <h2>Already a customer</h2>
+            <p>Sign in at the address in your activation email.</p>
+          </li>
+        </ul>
       </main>
     );
   }

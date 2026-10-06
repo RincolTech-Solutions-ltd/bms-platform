@@ -5,8 +5,8 @@ import { Shell } from './shell';
 
 // Route-level split (ADR-009): /staff and /member are separate lazily loaded route trees, so a
 // member never downloads staff code; sign-in and invitation acceptance are small chunks of their
-// own. The platform console (on the platform host, BMS_PLATFORM_HOST) joins as a further tree
-// when built; until then its host shows a placeholder.
+// own. The platform host (BMS_PLATFORM_HOST) serves the public sign-up page and applicant page and
+// the operator portal under /platform (ADR-024), each lazily loaded as well.
 
 // The root layout is the shared shell (brand bar, theme colour, Powered-by footer): every route
 // below it inherits it, so no area draws its own.
@@ -66,6 +66,36 @@ const styleRoute = createRoute({ getParentRoute: () => rootRoute, path: '/style'
   import('../areas/style/route').then((m) => m.Route),
 );
 
+const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up' }).lazy(() =>
+  import('../areas/onboarding/sign-up').then((m) => m.Route),
+);
+const signUpVerifyRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up/verify' }).lazy(() =>
+  import('../areas/onboarding/applicant').then((m) => m.VerifyRoute),
+);
+const applicationStatusRoute = createRoute({ getParentRoute: () => rootRoute, path: '/application' }).lazy(() =>
+  import('../areas/onboarding/applicant').then((m) => m.StatusRoute),
+);
+
+const operatorSignInRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform/sign-in' }).lazy(() =>
+  import('../areas/platform/sign-in').then((m) => m.Route),
+);
+const operatorSetupRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform/setup' }).lazy(() =>
+  import('../areas/platform/sign-in').then((m) => m.SetupRoute),
+);
+const platformRoute = createRoute({ getParentRoute: () => rootRoute, path: '/platform' }).lazy(() =>
+  import('../areas/platform/route').then((m) => m.Route),
+);
+const platformApplicationsRoute = createRoute({ getParentRoute: () => platformRoute, path: '/' }).lazy(() =>
+  import('../areas/platform/applications').then((m) => m.Route),
+);
+const platformApplicationRoute = createRoute({
+  getParentRoute: () => platformRoute,
+  path: '/applications/$applicationId',
+}).lazy(() => import('../areas/platform/application').then((m) => m.Route));
+const platformOutboxRoute = createRoute({ getParentRoute: () => platformRoute, path: '/outbox' }).lazy(() =>
+  import('../areas/platform/outbox').then((m) => m.Route),
+);
+
 const memberRoute = createRoute({ getParentRoute: () => rootRoute, path: '/member' }).lazy(() =>
   import('../areas/member/route').then((m) => m.Route),
 );
@@ -89,6 +119,12 @@ export const router = createRouter({
       ])]),
     memberRoute,
     styleRoute,
+    signUpRoute,
+    signUpVerifyRoute,
+    applicationStatusRoute,
+    operatorSignInRoute,
+    operatorSetupRoute,
+    platformRoute.addChildren([platformApplicationsRoute, platformApplicationRoute, platformOutboxRoute]),
   ]),
 });
 
