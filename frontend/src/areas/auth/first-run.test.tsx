@@ -45,7 +45,7 @@ describe('step 1: choose a password', () => {
 
   it('tells a user with a broken link what to do', () => {
     const broken = page(<AcceptInvitation token={null} />);
-    expect(broken).toContain('This link is not complete');
+    expect(broken).toContain('This invitation link is not complete.');
     expect(broken).toContain('ask your administrator for a new one');
     expect(broken).not.toContain('new-password');
   });

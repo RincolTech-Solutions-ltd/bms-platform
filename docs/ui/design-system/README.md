@@ -33,8 +33,8 @@ scrolled to the bottom when the page is longer than one screen.
 | `17-profit` | Daily profit table |
 | `18-member-portal` | Member portal placeholder |
 | `19-tenant-colour-...` | Retail home, sale and landing with a fabricated tenant colour (`#1E6B3A`) set on the set-up screen: the tenant colour replaces the Rincol blue |
-| `20-first-run-...` (issue #86) | The first run after an invitation at 390px: choose a password, the two-step offer ("Recommended, not required", Skip for now), the set-up with the QR code, a wrong code, the recovery codes |
-| `21-tour-...`, `22-tour-...`, `23-help-sheet` (issue #19) | The guided tours: the tenant admin's welcome, a lit logo field, the retail tiles at 1280px, the seller's payment step, and the Help sheet |
+| `24-first-run-...` (issue #86) | The first run after an invitation at 390px: choose a password, the two-step offer ("Recommended, not required", Skip for now), the set-up with the QR code, a wrong code, the recovery codes |
+| `25-tour-...`, `26-tour-...`, `27-help-sheet` (issue #19) | The guided tours: the tenant admin's welcome, a lit logo field, the retail tiles at 1280px, the seller's payment step, and the Help sheet |
 
 ## Checks run with the walk
 
@@ -51,7 +51,29 @@ branch's base; a set-password screen and the platform console, which do not exis
 
 The walk scripts are not committed.
 
-The `20` to `23` captures (2026-10-06) were taken differently: the production build under `vite preview`,
+## Visual polish (#106)
+
+Taken on 2026-10-06 with the Vite dev server (`VITE_DEV_TENANT=demo VITE_RETAIL_MOCK=1`), headless Chromium at
+390x844, and the public branding and approvals answers stubbed in the browser with fabricated values (tenant
+"Sample Shop (fabricated)", officers "Test Officer 01" and "02"). Compare with the `01`, `02b`, `03` and `08`
+captures above, taken before.
+
+| File | Screen |
+|---|---|
+| `20-landing-retail-only-phone` | The landing on a retail only tenant (#99): sales and stock copy, no Member portal |
+| `20b-landing-lending-and-retail-phone` | Both modules: both module cards, the Members card and the Member portal |
+| `20c-landing-tenant-colour-phone` | A tenant colour: the accent family (stripe, tints, bars, primary) follows it |
+| `21-sign-in-polish-phone`, `21b-accept-invitation-incomplete-link-polish-phone` | The sign-in drawing, raised card; the error state panel |
+| `22-approvals-cards-phone`, `22b-approvals-empty-state-phone` | Approvals as cards below 560px; the empty state with its drawing |
+| `23-style-page-states-phone`, `23b-style-page-icons-phone` | Two screens of the living style page (`/style`) |
+
+Checks: no horizontal overflow and no control under 44px on the landing (each module combination), sign-in,
+accept-invitation, style, approvals, retail home, stock, sale and profit routes at 390px and 1280px; axe-core
+4 (WCAG 2.0 and 2.1 A and AA) with no violations on those routes, with the Rincol default and with a tenant
+colour.
+
+
+The `24` to `27` captures (2026-10-06) were taken differently: the production build under `vite preview`,
 the production CSP added to every HTML response, headless Chromium at 390x844 (and 1280x800), and the
 API answered by Playwright with fabricated bodies (no backend). The same walk tabbed through every tour
 step (focus stayed in the card), checked for sideways overflow and targets under 44px, ran axe-core 4

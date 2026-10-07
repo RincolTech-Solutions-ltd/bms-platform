@@ -6,6 +6,7 @@ import { loadRetailMock, retailMockEnabled } from '../../api/retail';
 import { getAccessToken, refreshSession, setAccessToken, subscribe } from '../../auth/session';
 import { HelpMenu, TourProvider } from '../../tour/host';
 import { icons } from '../../components/icons';
+import { BrandLoader } from '../../components/states';
 import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
 import { RetailNav } from './retail/nav';
@@ -54,7 +55,7 @@ function StaffLayout() {
   }, [pathname, settings.data, navigate]);
 
   if (restoring || !me.data || !ready) {
-    return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <p className="loading">Loading</p>;
+    return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <BrandLoader />;
   }
 
   const profile = me.data;

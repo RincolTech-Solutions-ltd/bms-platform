@@ -38,7 +38,7 @@ retyping it; where tours live; and where "this user finished the tour" is stored
    builds its screen, switches its flag on and bumps the tour version. A component test renders
    every step's screen and fails when an anchor is missing.
 4. **Per-user progress lives in `users.preferences`**, a JSON object on the existing row (one
-   additive column, migration `V24`), under `tours`: per tour id, `completed` or `dismissed`, the
+   additive column, migration `V27`), under `tours`: per tour id, `completed` or `dismissed`, the
    tour version and the time. `GET /api/v1/me` returns it and `PUT /api/v1/me/tours/{tour_id}` writes
    the caller's own entry only; it is a convenience, not a security decision, and is not audited.
    "Do not show this again" is a dismissal and holds for good; finishing is per version, so a new

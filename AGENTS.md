@@ -51,8 +51,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `import-retail` command (`V20`, `docs/runbooks/import-retail.md`) and the phone-first retail
   screens on the real API (`docs/specs/retail-ui-notes.md`). Stock transfers between branches
   (issue #84, ADR-020 amendment) add `V22`. Flyway runs with `outOfOrder` off, so a new migration
-  takes a number above the highest one on any open branch (`V27` next: V24 is the first-run preferences of #19, and
-  V25 and V26 are held by open branches).
+  takes a number above the highest one on any open branch (`V28` next: V25 and V26 are held by open
+  branches, and V27 is the first-run preferences of #19).
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator
@@ -62,7 +62,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
 - **First run and guided tours (issues #19 and #86, ADR-025):** accepting an invitation signs the
   user in; the PWA walks a new user through password, an optional second factor and recovery codes;
   role aware spotlight tours (`frontend/src/tour/`) start once and replay from Help, with per-user
-  progress in `users.preferences` (`V24`). A new screen adds `data-tour` anchors and its steps.
+  progress in `users.preferences` (`V27`). A new screen adds `data-tour` anchors and its steps.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are

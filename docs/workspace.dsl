@@ -43,7 +43,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
 
                 # ---------------- core ----------------
                 tenancy       = component "Tenancy" "Tenants, plans and limits, module switching, settings, branding (logo, theme colour), branches. Resolves the tenant from the host, binds app.tenant_id, and makes a suspended tenant read only." "core" "core"
-                identity      = component "Identity and Access" "Staff and platform sign-in (argon2id, TOTP with recovery codes, ADR-014), revocable server-side sessions, invitations whose acceptance signs the user in (ADR-025), roles, permission matrix, per-permission branch scope, and each user's own guided tour progress (users.preferences)." "core" "core"
+                identity      = component "Identity and Access" "Staff and platform sign-in (argon2id, TOTP with recovery codes, ADR-014), revocable server-side sessions, invitations whose acceptance signs the user in (ADR-025), roles, permission matrix, per-permission branch scope, and each user's own guided tour progress (users.preferences, migration V27)." "core" "core"
                 audit         = component "Audit" "Append-only audit log written in the same transaction as each change; platform audit log; search and CSV export." "core" "core"
                 approvals     = component "Approvals" "Maker-checker requests with payload snapshots; executes approved actions through actions registered by the owning modules (ADR-015)." "core" "core"
                 platform      = component "Platform Console" "Tenant creation with head office, modules and first admin; module switching; subscriptions and suspension; tenant admin MFA reset. Served only on the platform host to platform operators (ADR-016, ADR-018)." "core" "core"
@@ -124,7 +124,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         # COMPONENT LEVEL (inside the API)
         # ==================================================================
         bms.web -> bms.api.identity "Signs in; loads permissions and branch scope"
-        bms.web -> bms.api.tenancy "Tenant settings and branches; public branding (logo, theme colour) for the shell"
+        bms.web -> bms.api.tenancy "Tenant settings and branches; public branding (logo, theme colour, enabled modules) for the shell and the landing page"
         bms.web -> bms.api.platform "Platform console: tenants, modules, subscriptions"
         bms.web -> bms.api.audit "Searches and exports the audit log"
         bms.web -> bms.api.members "Registers, searches and verifies members"

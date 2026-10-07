@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { normaliseSecondFactor, plainProblem } from '../../auth/codes';
 import { setAccessToken } from '../../auth/session';
+import { illustrations } from '../../components/illustrations';
 import { ErrorLine, RecoveryCodes, StepHeader, TwoStepSetup } from './steps';
 
 // Staff sign-in (FR-IAM-04 to FR-IAM-06, FR-IAM-11): password, then the second factor when the
@@ -102,6 +103,7 @@ function SignIn() {
     <main className="card auth-card">
       {step.kind === 'password' && (
         <>
+          <span className="auth-art">{illustrations.secure}</span>
           <StepHeader title="Staff sign-in" lead="Use the email or phone and the password you set from your invitation." />
           <ErrorLine message={message} />
           <form onSubmit={submitPassword} className="form-stack">

@@ -3,6 +3,8 @@ import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { invitationToken, plainProblem } from '../../auth/codes';
 import { setAccessToken } from '../../auth/session';
+import { illustrations } from '../../components/illustrations';
+import { StatusPanel } from '../../components/states';
 import { ErrorLine, PasswordFields, RecoveryCodes, StepHeader, TwoStepSetup, passwordReady } from './steps';
 
 // The first run of an invited user (FR-IAM-01, issues #86 and #93). The one-time token arrives in
@@ -103,10 +105,10 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
   if (!token) {
     return (
       <main className="card auth-card">
-        <StepHeader title="This link is not complete" />
-        <p role="alert" className="alert alert-warning">
+        <StepHeader title="Invitation" />
+        <StatusPanel tone="error" title="This invitation link is not complete.">
           Open the link from your invitation message again, or ask your administrator for a new one.
-        </p>
+        </StatusPanel>
       </main>
     );
   }
@@ -115,6 +117,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
     <main className="card auth-card">
       {step.kind === 'password' && (
         <>
+          <span className="auth-art">{illustrations.secure}</span>
           <StepHeader step={1} of={STEPS} title="Choose a password" lead="You will use it with your email or phone to sign in." />
           <ErrorLine message={message} />
           <form onSubmit={submitPassword} className="form-stack" noValidate>
@@ -176,8 +179,10 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
 
       {step.kind === 'sign-in' && (
         <>
-          <StepHeader title="Your password is set" />
-          <p className="alert alert-success">Sign in with your email or phone and your new password.</p>
+          <StepHeader title="Welcome" />
+          <StatusPanel tone="success" title="Your password is set.">
+            Sign in with your email or phone and your new password.
+          </StatusPanel>
           <Link to="/sign-in" className="btn btn-primary btn-lg btn-block">
             Sign in
           </Link>

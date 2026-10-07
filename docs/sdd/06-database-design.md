@@ -357,7 +357,7 @@ after values. Older logos stay in `documents` (rows are never deleted).
 `email varchar(320)`, `phone_e164 varchar(16)`, `status text NOT NULL` [`invited`,
 `active`, `deactivated`], `failed_login_count integer NOT NULL DEFAULT 0`,
 `locked_until timestamptz`, `mfa_enabled boolean NOT NULL DEFAULT false`,
-`last_login_at timestamptz`, `preferences jsonb NOT NULL DEFAULT '{}'` (`V24`, ADR-025; CHECK it is
+`last_login_at timestamptz`, `preferences jsonb NOT NULL DEFAULT '{}'` (`V27`, ADR-025; CHECK it is
 an object). `preferences.tours` maps a guided tour id to `{status: completed | dismissed, version, at}`
 (FR-IAM-14); it holds only what the user chose for themselves, never anything a permission reads.
 Partial unique `(tenant_id, lower(email)) WHERE email IS NOT NULL AND kind = 'staff'`;
@@ -1273,9 +1273,10 @@ account in `bms_seed_retail_chart` and for every tenant that switched retail on 
 movement kinds and the movements' `transfer_id` link (sections 6.11.1 and 6.11.2). It takes the next
 number free on `main` when it merges, so it may be renumbered then. `V23__onboarding_applications_and_outbox.sql` (#89, ADR-024) creates
 `onboarding_applications` and `notification_outbox` (section 6.4) with `onboarding_normalise_name`,
-`onboarding_email_key` and their definer functions. `V24__user_preferences.sql`
-(#19, ADR-025) adds `users.preferences` (section 6.5), additive with a default. The next migration is
-V27 (V25 and V26 are held by open branches; `MigrationOrderIT`, chapter 15 section 15.4.3).
+`onboarding_email_key` and their definer functions. `V27__user_preferences.sql`
+(#19, ADR-025) adds `users.preferences` (section 6.5), additive with a default; it follows V26, the
+database audit of #148, and V25 is held by an open branch. The next migration is V28
+(`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 
