@@ -107,6 +107,11 @@ export const icons = {
       <path d="M15 7h6v6" />
     </Svg>
   ),
+  salesAnalysis: (
+    <Svg>
+      <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
+    </Svg>
+  ),
   user: (
     <Svg>
       <circle cx="12" cy="8" r="4" />

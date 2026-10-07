@@ -21,9 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 class ReportsController {
 
     private final ReportsService service;
+    private final SalesAnalysisService salesAnalysis;
 
-    ReportsController(ReportsService service) {
+    ReportsController(ReportsService service, SalesAnalysisService salesAnalysis) {
         this.service = service;
+        this.salesAnalysis = salesAnalysis;
     }
 
     @GetMapping("/valuation")
@@ -45,5 +47,20 @@ class ReportsController {
             @RequestParam(name = "from", required = false) LocalDate from,
             @RequestParam(name = "to", required = false) LocalDate to) {
         return service.dailyProfit(branchIds, from, to);
+    }
+
+    @GetMapping("/sales-analysis")
+    @RequiresPermission("retail.sale.read")
+    @Operation(
+            summary = "Sales by period, branch, category, product and seller, with slow movers (issue #149)",
+            operationId = "getRetailSalesAnalysis")
+    SalesAnalysisApi.Analysis salesAnalysis(
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "from", required = false) LocalDate from,
+            @RequestParam(name = "to", required = false) LocalDate to,
+            @RequestParam(name = "group", required = false) String group,
+            @RequestParam(name = "top", required = false) Integer top,
+            @RequestParam(name = "slow_days", required = false) Integer slowDays) {
+        return salesAnalysis.analyse(branchIds, from, to, group, top, slowDays);
     }
 }

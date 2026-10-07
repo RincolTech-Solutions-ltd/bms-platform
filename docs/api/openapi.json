@@ -3964,6 +3964,192 @@
         },
         "required" : [ "lines", "payment_method" ]
       },
+      "RetailSalesAnalysis" : {
+        "properties" : {
+          "by_branch" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisRow"
+            },
+            "type" : "array"
+          },
+          "by_category" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisRow"
+            },
+            "type" : "array"
+          },
+          "by_product" : {
+            "description" : "The top products by sales",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisRow"
+            },
+            "type" : "array"
+          },
+          "by_seller" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisRow"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "from" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "group" : {
+            "description" : "day, week or month",
+            "type" : "string"
+          },
+          "no_sales" : {
+            "description" : "Active items with no sale at all in the range",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailStockedItem"
+            },
+            "type" : "array"
+          },
+          "no_sales_total" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "profit_visible" : {
+            "description" : "True when cost and profit figures are included",
+            "type" : "boolean"
+          },
+          "series" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisPeriod"
+            },
+            "type" : "array"
+          },
+          "slow_days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "slow_movers" : {
+            "description" : "Items with stock on hand and no sale in the last slow_days days, as of today",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailStockedItem"
+            },
+            "type" : "array"
+          },
+          "slow_movers_total" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "top" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "top_by_quantity" : {
+            "description" : "The top products by quantity",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSalesAnalysisRow"
+            },
+            "type" : "array"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/RetailSalesAnalysisTotals"
+          }
+        }
+      },
+      "RetailSalesAnalysisPeriod" : {
+        "properties" : {
+          "gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "margin_bp" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "period_start" : {
+            "description" : "First day of the day, ISO week (Monday) or month",
+            "format" : "date",
+            "type" : "string"
+          },
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailSalesAnalysisRow" : {
+        "description" : "One branch, category, product or seller. code and unit are set for a product only.",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "margin_bp" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "qty" : {
+            "type" : "string"
+          },
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailSalesAnalysisTotals" : {
+        "properties" : {
+          "gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots of the sale lines",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "margin_bp" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers; gross profit over sales in basis points, half up",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "qty" : {
+            "description" : "Units sold, summed over lines of every unit of measure; a rough volume only",
+            "type" : "string"
+          },
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailStockBranch" : {
         "properties" : {
           "code" : {
@@ -4099,6 +4285,32 @@
             "type" : "string"
           },
           "sell_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailStockedItem" : {
+        "description" : "A product with stock on hand, summed over the reported branches",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "type" : "string"
+          },
+          "stock_at_price_minor" : {
+            "description" : "Quantity on hand times the current sell price",
             "format" : "int64",
             "type" : "integer"
           },
@@ -9611,6 +9823,76 @@
           }
         },
         "summary" : "Profit per branch per day (FR-RET-10)",
+        "tags" : [ "retail-reports" ]
+      }
+    },
+    "/api/v1/retail/reports/sales-analysis" : {
+      "get" : {
+        "operationId" : "getRetailSalesAnalysis",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "group",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "top",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "slow_days",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSalesAnalysis"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Sales by period, branch, category, product and seller, with slow movers (issue #149)",
         "tags" : [ "retail-reports" ]
       }
     },

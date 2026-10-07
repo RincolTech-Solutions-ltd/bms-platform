@@ -1622,6 +1622,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/sales-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sales by period, branch, category, product and seller, with slow movers (issue #149) */
+        get: operations["getRetailSalesAnalysis"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/valuation": {
         parameters: {
             query?: never;
@@ -3749,6 +3766,100 @@ export interface components {
              */
             sale_date?: string;
         };
+        RetailSalesAnalysis: {
+            by_branch?: components["schemas"]["RetailSalesAnalysisRow"][];
+            by_category?: components["schemas"]["RetailSalesAnalysisRow"][];
+            /** @description The top products by sales */
+            by_product?: components["schemas"]["RetailSalesAnalysisRow"][];
+            by_seller?: components["schemas"]["RetailSalesAnalysisRow"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            /** @description day, week or month */
+            group?: string;
+            /** @description Active items with no sale at all in the range */
+            no_sales?: components["schemas"]["RetailStockedItem"][];
+            /** Format: int32 */
+            no_sales_total?: number;
+            /** @description True when cost and profit figures are included */
+            profit_visible?: boolean;
+            series?: components["schemas"]["RetailSalesAnalysisPeriod"][];
+            /** Format: int32 */
+            slow_days?: number;
+            /** @description Items with stock on hand and no sale in the last slow_days days, as of today */
+            slow_movers?: components["schemas"]["RetailStockedItem"][];
+            /** Format: int32 */
+            slow_movers_total?: number;
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            top?: number;
+            /** @description The top products by quantity */
+            top_by_quantity?: components["schemas"]["RetailSalesAnalysisRow"][];
+            totals?: components["schemas"]["RetailSalesAnalysisTotals"];
+        };
+        RetailSalesAnalysisPeriod: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            gross_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            margin_bp?: number;
+            /**
+             * Format: date
+             * @description First day of the day, ISO week (Monday) or month
+             */
+            period_start?: string;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        /** @description One branch, category, product or seller. code and unit are set for a product only. */
+        RetailSalesAnalysisRow: {
+            code?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            gross_profit_minor?: number;
+            /** Format: uuid */
+            id?: string;
+            label?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            margin_bp?: number;
+            qty?: string;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+            unit?: string;
+        };
+        RetailSalesAnalysisTotals: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots of the sale lines
+             */
+            gross_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers; gross profit over sales in basis points, half up
+             */
+            margin_bp?: number;
+            /** @description Units sold, summed over lines of every unit of measure; a rough volume only */
+            qty?: string;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
         RetailStockBranch: {
             code?: string;
             head_office?: boolean;
@@ -3812,6 +3923,20 @@ export interface components {
             qty?: string;
             /** Format: int64 */
             sell_minor?: number;
+            unit?: string;
+        };
+        /** @description A product with stock on hand, summed over the reported branches */
+        RetailStockedItem: {
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            /**
+             * Format: int64
+             * @description Quantity on hand times the current sell price
+             */
+            stock_at_price_minor?: number;
             unit?: string;
         };
         RetailStocktake: {
@@ -7287,6 +7412,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailDailyProfit"];
+                };
+            };
+        };
+    };
+    getRetailSalesAnalysis: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                group?: string;
+                top?: number;
+                slow_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSalesAnalysis"];
                 };
             };
         };
