@@ -297,6 +297,7 @@ Accepted (this list is the ADR index):
   (spec `docs/specs/self-onboarding-and-subscriptions.md`; build step 1 is #89)
 - ADR-028 Database performance: measured on 25 times the data, covering indexes, the plain tenant
   policy kept, connection timeouts (proposed, #107)
+- ADR-029 One fixed low stock threshold for retail, a per-tenant settings group later (#145)
 
 Pending (cite only as "pending ADR-NNN"):
 
