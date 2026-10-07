@@ -8,6 +8,7 @@ import { icons } from '../../components/icons';
 import { BrandLoader } from '../../components/states';
 import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
+import { showInvestments } from './lending/investment-state';
 import { showLending } from './lending/permissions';
 import { showSavings } from './lending/savings-permissions';
 import { RetailNav } from './retail/nav';
@@ -87,6 +88,7 @@ function StaffLayout() {
           {canSeeApprovals && <Link to="/staff/approvals">Approvals</Link>}
           {showLending(profile) && <Link to="/staff/lending" activeOptions={{ exact: true }}>Loans</Link>}
           {showSavings(profile) && <Link to="/staff/lending/savings">Savings</Link>}
+          {showInvestments(profile) && <Link to="/staff/lending/investments">Investments</Link>}
           {showRetail(profile) && <Link to="/staff/retail">Retail</Link>}
           {managesSettings && <Link to="/staff/setup">Business set-up</Link>}
         </nav>

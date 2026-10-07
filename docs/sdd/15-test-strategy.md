@@ -147,14 +147,15 @@ write and unbound-session tests cover it without a separate suite.
 does, on a fresh PostgreSQL 16 container per case: every migration (V1 to V9 lending, V10 to V14
 retail, V20 the retail import references, V21 the lending follow-ups, V22 the retail stock
 transfers, V23 the onboarding applications and outbox of #89, V26 the indexes of #107, V28 the
-retail catalogue management of #146, V29 lending disbursement and repayments of #108) applies in
-order on an empty database; on a database already migrated to V9 with a lending tenant, exactly V10
-to V14, V20, V21, V22, V23, V26, V28 and V29 apply and that tenant can then switch retail on; a
+retail catalogue management of #146, V29 lending disbursement and repayments of #108, V30 lending
+savings of #151, V32 lending investments of #152) applies in order on an empty database; on a database already migrated to V9
+with a lending tenant, exactly V10 to V14, V20, V21, V22, V23, V26, V28, V29, V30 and V32 apply, the
+tenant gets the investment penalty account 4060 from V32, and it can then switch retail on; a
 tenant that switched retail on at V21 gets the inter-branch clearing account (code 1190, system
 controlled) from V22 (#84); a database at V22 holding retail rows (a negative balance among them)
 keeps every row through V23 and V26, whose new indexes replace the old ones and whose balance table
 gets its fillfactor (#107); a database at V28 holding loans in draft, approved and cancelled takes
-exactly V29 and keeps them (#108); and no two migration files share a version (issue #71, review
+exactly V29, V30 and V32 and keeps them (#108); and no two migration files share a version (issue #71, review
 F6). V24, V25 and V27 stay unused; a new migration takes a number above the highest applied one and
 adds its version to the list.
 
@@ -241,6 +242,17 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
   for one balance (exactly one succeeds) and 50 deposits (exact balance, unique gap-free `seq` and
   receipts). `RlsIsolationIT` has a factory row in each savings table and checks the three savings
   ledgers are append-only.
+- **Investment return golden tests** (`InvestmentReturnsTest`, #152, R-INV-1 to R-INV-6). Flat
+  schedules with their rounding residue, monthly compounding (rounding each month, over two years),
+  month-end clamping in a leap and a common year, quarterly payout periods, part periods counted
+  over 366 days in a leap year and split at 1 January, and both early withdrawal worked examples
+  with a penalty, each asserted to the minor unit. `InvestmentsIT` then checks every journal line of
+  each investment event of chapter 6 section 6.6.3 on PostgreSQL, funding with and without a checker,
+  the daily job run twice and three times at once (each period accrued once), two concurrent
+  payouts of one due return (exactly one pays), reversal rules, branch scope, idempotent retries,
+  the maturity ladder and the metrics, and after each test that the trial balance balances and both
+  investment liabilities equal each investment's balances. `LendingSeedIT` checks the seed's twelve
+  months of investment history the same way, and `RlsIsolationIT` covers the four new tables.
 - **Report golden tests.** Each report in chapter 14 runs over its fabricated dataset and
   is compared with a committed expected output (JSON), including the PAR worked example.
 - **Document golden tests.** Each PDF template renders fabricated data; the test compares

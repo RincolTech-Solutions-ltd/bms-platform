@@ -22,7 +22,8 @@ import org.testcontainers.utility.MountableFile;
  * fixes), V20 (the retail import references), V21 (the lending review follow-ups), V22 (the retail
  * stock transfers of #84), V23 (the onboarding applications and the outbox of #89), V26 (the
  * indexes of #107), V28 (the retail catalogue management of #146), V29 (lending disbursement and
- * repayments, #108) and V30 (lending savings, #151) apply in order on an empty database, and on a
+ * repayments, #108), V30 (lending savings, #151) and V32 (lending investments, #152) apply in order
+ * on an empty database, and on a
  * database a server already migrated to V9 before the retail work reached it, with
  * {@code outOfOrder} off exactly as {@link DatabaseMigrator} runs it. Each case gets its own
  * PostgreSQL 16 container initialised by {@code deploy/postgres/initdb/01-roles.sh}.
@@ -31,7 +32,7 @@ class MigrationOrderIT {
 
     static final List<String> VERSIONS = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
-            "28", "29", "30");
+            "28", "29", "30", "32");
 
     @Test
     void everyMigrationAppliesInOrderOnAnEmptyDatabase() {
@@ -42,7 +43,7 @@ class MigrationOrderIT {
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("30");
+            assertThat(result.targetSchemaVersion).isEqualTo("32");
             assertThat(applied(postgres)).containsExactlyElementsOf(VERSIONS);
             assertThat(flyway(postgres, null).info().pending()).isEmpty();
         }
@@ -80,8 +81,16 @@ class MigrationOrderIT {
 
             assertThat(second.success).isTrue();
             assertThat(second.migrations.stream().map(m -> m.version).toList())
-                    .containsExactly("10", "11", "12", "13", "14", "20", "21", "22", "23", "26", "28", "29", "30");
+                    .containsExactly(
+                            "10", "11", "12", "13", "14", "20", "21", "22", "23", "26", "28", "29", "30", "32");
             assertThat(applied(postgres)).containsExactlyElementsOf(VERSIONS);
+            // V32 (#152) gives a tenant that already holds the lending chart the investment penalty account.
+            assertThat(owner.sql(
+                                    "SELECT code FROM gl_accounts WHERE tenant_id = ? AND system_key = 'investment_penalty_income'")
+                            .param(tenant)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("4060");
             assertThat(flyway(postgres, null).info().pending()).isEmpty();
             // The tenant from V9 can switch retail on: its chart is seeded next to the lending one.
             owner.sql("SELECT platform_set_tenant_modules(?, ?::text[], NULL)")
@@ -188,7 +197,7 @@ class MigrationOrderIT {
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
             assertThat(result.success).isTrue();
-            assertThat(result.migrations.stream().map(m -> m.version).toList()).containsExactly("29", "30");
+            assertThat(result.migrations.stream().map(m -> m.version).toList()).containsExactly("29", "30", "32");
             assertThat(owner.sql("SELECT count(*) FROM lending_loans WHERE tenant_id = ?")
                             .param(tenant)
                             .query(Long.class)
@@ -223,7 +232,7 @@ class MigrationOrderIT {
             MigrateResult result =
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
-            assertThat(result.migrations.stream().map(m -> m.version).toList()).containsExactly("30");
+            assertThat(result.migrations.stream().map(m -> m.version).toList()).containsExactly("30", "32");
             assertThat(owner.sql(enqueue)
                             .params(UUID.randomUUID(), "sms", "+256700000001", "test:v30")
                             .query(Boolean.class)
@@ -289,7 +298,7 @@ class MigrationOrderIT {
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
             assertThat(result.migrations.stream().map(m -> m.version).toList())
-                    .containsExactly("23", "26", "28", "29", "30");
+                    .containsExactly("23", "26", "28", "29", "30", "32");
             assertThat(owner.sql("SELECT qty::text FROM retail_stock_balances WHERE tenant_id = ?")
                             .param(tenant)
                             .query(String.class)
