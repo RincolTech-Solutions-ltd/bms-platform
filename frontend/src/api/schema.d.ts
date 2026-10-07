@@ -1656,6 +1656,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/stock-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Days of cover, reorder suggestions, dead stock and shrinkage by branch (issue #149) */
+        get: operations["getRetailStockHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/valuation": {
         parameters: {
             query?: never;
@@ -3358,6 +3375,36 @@ export interface components {
             active?: boolean;
             name?: string;
         };
+        /** @description Items with cover below lead_days, the lowest first, with a suggested quantity */
+        RetailCoverList: {
+            items?: components["schemas"]["RetailCoverRow"][];
+            /**
+             * Format: int32
+             * @description Rows before the row limit
+             */
+            total?: number;
+        };
+        /** @description Stock against the pace of the last 30 days of sales, in one branch */
+        RetailCoverRow: {
+            /** @description Average units sold a day over the last 30 days, three places */
+            avg_daily?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when the cover is above 365 days and days_of_cover shows 365.0 */
+            capped?: boolean;
+            code?: string;
+            /** @description Stock divided by the daily average, one place; 0.0 when none is left */
+            days_of_cover?: string;
+            description?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            /** @description Units sold in the last 30 days in this branch */
+            sold_last30?: string;
+            /** @description Reorder rows only: units to buy to reach cover_days of cover at this pace */
+            suggested_qty?: string;
+            unit?: string;
+        };
         RetailCustomer: {
             /**
              * Format: int64
@@ -3439,6 +3486,54 @@ export interface components {
             stocktake_difference_minor?: number;
             /** Format: int64 */
             usage_cost_minor?: number;
+        };
+        /** @description Stock on hand with no sale in the branch in the last 90 days */
+        RetailDeadStock: {
+            branches?: components["schemas"]["RetailDeadStockBranch"][];
+            /** Format: int32 */
+            days?: number;
+            /** @description The largest by value at price */
+            items?: components["schemas"]["RetailDeadStockItem"][];
+            /** Format: int32 */
+            items_total?: number;
+            /**
+             * Format: int64
+             * @description All reported branches; Present only with retail.profit.read in this branch in every branch reported
+             */
+            value_at_cost_minor?: number;
+            /** Format: int64 */
+            value_at_price_minor?: number;
+        };
+        RetailDeadStockBranch: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int32 */
+            item_count?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; quantity times the current cost
+             */
+            value_at_cost_minor?: number;
+            /** Format: int64 */
+            value_at_price_minor?: number;
+        };
+        /** @description The largest by value at price */
+        RetailDeadStockItem: {
+            /** Format: uuid */
+            branch_id?: string;
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch
+             */
+            value_at_cost_minor?: number;
+            /** Format: int64 */
+            value_at_price_minor?: number;
         };
         RetailMarginBelowTarget: {
             items?: components["schemas"]["RetailMarginRow"][];
@@ -3983,12 +4078,76 @@ export interface components {
             /** Format: int64 */
             sales_minor?: number;
         };
+        RetailShrinkageBranch: {
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch
+             */
+            damaged_cost_minor?: number;
+            /** Format: int32 */
+            damaged_reports?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; used and damaged plus loss, less gain
+             */
+            net_cost_minor?: number;
+            /**
+             * Format: int32
+             * @description Stock-take lines that found more than the books
+             */
+            over_lines?: number;
+            /**
+             * Format: int32
+             * @description Stock-take lines that found less than the books
+             */
+            short_lines?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; the value at cost of what stock-takes found extra
+             */
+            stocktake_gain_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; the value at cost of what stock-takes found missing
+             */
+            stocktake_loss_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; usage reported as used, at the cost when reported
+             */
+            used_cost_minor?: number;
+            /** Format: int32 */
+            used_reports?: number;
+        };
         RetailStockBranch: {
             code?: string;
             head_office?: boolean;
             /** Format: uuid */
             id?: string;
             name?: string;
+        };
+        RetailStockHealth: {
+            cover?: components["schemas"]["RetailCoverList"];
+            /** Format: int32 */
+            cover_days?: number;
+            currency?: string;
+            dead_stock?: components["schemas"]["RetailDeadStock"];
+            /** Format: date */
+            from?: string;
+            /** Format: int32 */
+            lead_days?: number;
+            /** @description True when cost figures are included for every branch reported (retail.profit.read) */
+            profit_visible?: boolean;
+            reorder?: components["schemas"]["RetailCoverList"];
+            shrinkage?: components["schemas"]["RetailShrinkageBranch"][];
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            top?: number;
+            /** Format: int32 */
+            velocity_days?: number;
         };
         RetailStockMovement: {
             /** Format: date-time */
@@ -7588,6 +7747,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSalesAnalysis"];
+                };
+            };
+        };
+    };
+    getRetailStockHealth: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                top?: number;
+                lead_days?: number;
+                cover_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockHealth"];
                 };
             };
         };

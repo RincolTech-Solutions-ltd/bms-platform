@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Margins, SalesAnalysis } from '../../../api/retail-analytics';
+import type { Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Bars, Sparkline, rangeProblem } from './analytics-ui';
 import { canUse } from './permissions';
 import { MarginsView } from './margins';
 import { SalesAnalysisView } from './sales-analysis';
+import { StockHealthView } from './stock-health';
 import { Gate } from './ui';
 
 const renderToString = (node: ReactElement) => render(node).replaceAll('<!-- -->', '');
@@ -142,5 +143,51 @@ describe('margins', () => {
     const html = page('sales', <Gate screen="margins" title="Margins"><p>SECRET-CONTENT</p></Gate>);
     expect(html).toContain('You do not have access');
     expect(html).not.toContain('SECRET-CONTENT');
+  });
+});
+
+describe('stock health', () => {
+  const health: StockHealth = {
+    from: '2026-09-08', to: '2026-10-07', currency: 'UGX', top: 10, velocity_days: 30, lead_days: 14, cover_days: 30, profit_visible: true,
+    cover: { total: 1, items: [{ branch_id: 'b1', product_id: 'p5', code: 'ANA-5', description: 'Test Product ANA-5', unit: 'piece', qty_on_hand: '1.000', sold_last30: '5.000', avg_daily: '0.167', days_of_cover: '6.0', capped: false }] },
+    reorder: { total: 1, items: [{ branch_id: 'b1', product_id: 'p5', code: 'ANA-5', description: 'Test Product ANA-5', unit: 'piece', qty_on_hand: '1.000', sold_last30: '5.000', avg_daily: '0.167', days_of_cover: '6.0', capped: false, suggested_qty: '4.000' }] },
+    dead_stock: {
+      days: 90, items_total: 1, value_at_price_minor: 2100, value_at_cost_minor: 1200,
+      branches: [{ branch_id: 'b1', item_count: 1, value_at_price_minor: 2100, value_at_cost_minor: 1200 }],
+      items: [{ branch_id: 'b1', product_id: 'p3', code: 'ANA-3', description: 'Test Product ANA-3', unit: 'piece', qty_on_hand: '3.000', value_at_price_minor: 2100, value_at_cost_minor: 1200 }],
+    },
+    shrinkage: [{ branch_id: 'b1', used_reports: 1, damaged_reports: 1, short_lines: 1, over_lines: 0, used_cost_minor: 1000, damaged_cost_minor: 400, stocktake_loss_minor: 400, stocktake_gain_minor: 0, net_cost_minor: 1800 }],
+  };
+  const nameOf = (id?: string) => (id === 'b1' ? 'Head office' : 'Branch');
+
+  /** The body of a caller without retail.profit.read: no key that holds a cost. */
+  function plain(): StockHealth {
+    return JSON.parse(JSON.stringify({ ...health, profit_visible: false }, (key, value) => (/cost|loss|gain/.test(key) ? undefined : value))) as StockHealth;
+  }
+
+  it('shows reorder, cover, dead stock and shrinkage with cost where sent', () => {
+    const html = renderToString(<StockHealthView data={health} nameOf={nameOf} />);
+    expect(html).toContain('Reorder: under 14 days of cover');
+    expect(html).toContain('6.0 days');
+    expect(html).toContain('4 piece');
+    expect(html).toContain('Dead stock: no sale in 90 days');
+    expect(html).toContain('UGX 1,200');
+    expect(html).toContain('UGX 1,800');
+    expect(html).toContain('Head office');
+  });
+
+  it('shows no cost column and no cost figure without them', () => {
+    const html = renderToString(<StockHealthView data={plain()} nameOf={nameOf} />);
+    expect(html).toContain('UGX 2,100');
+    expect(html).not.toMatch(/cost/i);
+    expect(html).not.toContain('1,200');
+    expect(html).not.toContain('1,800');
+  });
+
+  it('is open to stock readers and says over 365 days when capped', () => {
+    expect(canUse(mockMe('sales'), 'stockHealth')).toBe(true);
+    expect(canUse({ permissions: ['retail.sale.read'] }, 'stockHealth')).toBe(false);
+    const capped: StockHealth = { ...health, cover: { total: 1, items: [{ ...(health.cover?.items?.[0] ?? {}), days_of_cover: '365.0', capped: true }] } };
+    expect(renderToString(<StockHealthView data={capped} nameOf={nameOf} />)).toContain('over 365.0 days');
   });
 });

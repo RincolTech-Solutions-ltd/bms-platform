@@ -3048,6 +3048,67 @@
           }
         }
       },
+      "RetailCoverList" : {
+        "description" : "Items with cover below lead_days, the lowest first, with a suggested quantity",
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailCoverRow"
+            },
+            "type" : "array"
+          },
+          "total" : {
+            "description" : "Rows before the row limit",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailCoverRow" : {
+        "description" : "Stock against the pace of the last 30 days of sales, in one branch",
+        "properties" : {
+          "avg_daily" : {
+            "description" : "Average units sold a day over the last 30 days, three places",
+            "type" : "string"
+          },
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "capped" : {
+            "description" : "True when the cover is above 365 days and days_of_cover shows 365.0",
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "days_of_cover" : {
+            "description" : "Stock divided by the daily average, one place; 0.0 when none is left",
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "type" : "string"
+          },
+          "sold_last30" : {
+            "description" : "Units sold in the last 30 days in this branch",
+            "type" : "string"
+          },
+          "suggested_qty" : {
+            "description" : "Reorder rows only: units to buy to reach cover_days of cover at this pace",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
       "RetailCustomer" : {
         "properties" : {
           "balance_minor" : {
@@ -3215,6 +3276,96 @@
             "type" : "integer"
           },
           "usage_cost_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDeadStock" : {
+        "description" : "Stock on hand with no sale in the branch in the last 90 days",
+        "properties" : {
+          "branches" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDeadStockBranch"
+            },
+            "type" : "array"
+          },
+          "days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "items" : {
+            "description" : "The largest by value at price",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDeadStockItem"
+            },
+            "type" : "array"
+          },
+          "items_total" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "value_at_cost_minor" : {
+            "description" : "All reported branches; Present only with retail.profit.read in this branch in every branch reported",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "value_at_price_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDeadStockBranch" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "item_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "value_at_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; quantity times the current cost",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "value_at_price_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDeadStockItem" : {
+        "description" : "The largest by value at price",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "value_at_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "value_at_price_minor" : {
             "format" : "int64",
             "type" : "integer"
           }
@@ -4348,6 +4499,57 @@
           }
         }
       },
+      "RetailShrinkageBranch" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "damaged_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "damaged_reports" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "net_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; used and damaged plus loss, less gain",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "over_lines" : {
+            "description" : "Stock-take lines that found more than the books",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "short_lines" : {
+            "description" : "Stock-take lines that found less than the books",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stocktake_gain_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; the value at cost of what stock-takes found extra",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "stocktake_loss_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; the value at cost of what stock-takes found missing",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "used_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; usage reported as used, at the cost when reported",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "used_reports" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailStockBranch" : {
         "properties" : {
           "code" : {
@@ -4362,6 +4564,56 @@
           },
           "name" : {
             "type" : "string"
+          }
+        }
+      },
+      "RetailStockHealth" : {
+        "properties" : {
+          "cover" : {
+            "$ref" : "#/components/schemas/RetailCoverList"
+          },
+          "cover_days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "dead_stock" : {
+            "$ref" : "#/components/schemas/RetailDeadStock"
+          },
+          "from" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "lead_days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "profit_visible" : {
+            "description" : "True when cost figures are included for every branch reported (retail.profit.read)",
+            "type" : "boolean"
+          },
+          "reorder" : {
+            "$ref" : "#/components/schemas/RetailCoverList"
+          },
+          "shrinkage" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailShrinkageBranch"
+            },
+            "type" : "array"
+          },
+          "to" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "top" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "velocity_days" : {
+            "format" : "int32",
+            "type" : "integer"
           }
         }
       },
@@ -10154,6 +10406,77 @@
           }
         },
         "summary" : "Sales by period, branch, category, product and seller, with slow movers (issue #149)",
+        "tags" : [ "retail-reports" ]
+      }
+    },
+    "/api/v1/retail/reports/stock-health" : {
+      "get" : {
+        "operationId" : "getRetailStockHealth",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "top",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "lead_days",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cover_days",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailStockHealth"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Days of cover, reorder suggestions, dead stock and shrinkage by branch (issue #149)",
         "tags" : [ "retail-reports" ]
       }
     },

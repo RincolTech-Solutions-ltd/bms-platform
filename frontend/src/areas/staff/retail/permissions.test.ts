@@ -12,7 +12,7 @@ describe('retail permission gating', () => {
     expect(canUse(sales, 'restock')).toBe(false);
     expect(canUse(sales, 'stocktake')).toBe(false);
     // Stock value is a stock read; only its cost columns need retail.profit.read.
-    expect(screensFor(sales).map((s) => s.screen)).toEqual(['sale', 'creditSales', 'salesHistory', 'usage', 'stock', 'transfers', 'valuation', 'salesAnalysis', 'catalogue']);
+    expect(screensFor(sales).map((s) => s.screen)).toEqual(['sale', 'creditSales', 'salesHistory', 'usage', 'stock', 'transfers', 'valuation', 'salesAnalysis', 'stockHealth', 'catalogue']);
     expect(canUse(sales, 'transfer')).toBe(false);
   });
 
@@ -21,7 +21,7 @@ describe('retail permission gating', () => {
     expect(only('retail.sale.create')).toEqual(['sale']);
     expect(only('retail.purchase.create')).toEqual(['restock']);
     expect(only('retail.usage.report')).toEqual(['usage']);
-    expect(only('retail.stock.read')).toEqual(['stock', 'transfers', 'valuation']);
+    expect(only('retail.stock.read')).toEqual(['stock', 'transfers', 'valuation', 'stockHealth']);
     expect(only('retail.profit.read')).toEqual(['profit', 'margins']);
     expect(only('retail.sale.read')).toEqual(['creditSales', 'salesHistory', 'salesAnalysis']);
   });
@@ -29,7 +29,7 @@ describe('retail permission gating', () => {
   it('offers everything to an admin', () => {
     expect(canSeeProfit(admin)).toBe(true);
     expect(screensFor(admin).map((s) => s.screen)).toEqual(
-      ['sale', 'creditSales', 'salesHistory', 'restock', 'usage', 'stock', 'stocktake', 'transfer', 'transfers', 'valuation', 'profit', 'salesAnalysis', 'margins', 'catalogue'],
+      ['sale', 'creditSales', 'salesHistory', 'restock', 'usage', 'stock', 'stocktake', 'transfer', 'transfers', 'valuation', 'profit', 'salesAnalysis', 'margins', 'stockHealth', 'catalogue'],
     );
   });
 

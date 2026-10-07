@@ -119,6 +119,11 @@ export const icons = {
       <circle cx="17" cy="17" r="2.5" />
     </Svg>
   ),
+  stockHealth: (
+    <Svg>
+      <path d="M3 12h4l3-8 4 16 3-8h4" />
+    </Svg>
+  ),
   user: (
     <Svg>
       <circle cx="12" cy="8" r="4" />
