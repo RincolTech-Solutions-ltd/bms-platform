@@ -1639,6 +1639,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149) */
+        get: operations["getRetailDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/margins": {
         parameters: {
             query?: never;
@@ -3593,6 +3610,121 @@ export interface components {
             stocktake_difference_minor?: number;
             /** Format: int64 */
             usage_cost_minor?: number;
+        };
+        RetailDashboard: {
+            currency?: string;
+            /** Format: date */
+            date?: string;
+            /** @description The last 30 days ending today, one entry a day, oldest first */
+            days?: components["schemas"]["RetailDashboardDay"][];
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            last30_gross_profit_minor?: number;
+            /** Format: int64 */
+            last30_sales_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            last7_gross_profit_minor?: number;
+            /** Format: int64 */
+            last7_sales_minor?: number;
+            /** @description True when profit figures are included */
+            profit_visible?: boolean;
+            shops?: components["schemas"]["RetailDashboardShop"][];
+            stock?: components["schemas"]["RetailDashboardStock"];
+            today?: components["schemas"]["RetailDashboardToday"];
+        };
+        /** @description The last 30 days ending today, one entry a day, oldest first */
+        RetailDashboardDay: {
+            /** Format: date */
+            date?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers
+             */
+            gross_profit_minor?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        RetailDashboardShop: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            last30_sales_minor?: number;
+            /** Format: int64 */
+            last7_sales_minor?: number;
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read
+             */
+            low_stock?: number;
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read
+             */
+            out_of_stock?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch
+             */
+            stock_at_cost_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.stock.read
+             */
+            stock_at_price_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch
+             */
+            today_gross_profit_minor?: number;
+            /** Format: int64 */
+            today_sales_minor?: number;
+        };
+        /** @description Present only with retail.stock.read */
+        RetailDashboardStock: {
+            /**
+             * Format: int32
+             * @description Active items above zero and at or below low_stock_threshold (ADR-029)
+             */
+            low_stock?: number;
+            low_stock_threshold?: string;
+            /**
+             * Format: int32
+             * @description Active items whose balance is zero or less, in every branch reported
+             */
+            out_of_stock?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers; stock above zero at the current cost
+             */
+            value_at_cost_minor?: number;
+            /** Format: int64 */
+            value_at_price_minor?: number;
+        };
+        RetailDashboardToday: {
+            /**
+             * Format: int64
+             * @description Sales paid at the sale: cash, mobile money or bank
+             */
+            cash_minor?: number;
+            /**
+             * Format: int64
+             * @description Sales on credit, whether or not paid since
+             */
+            credit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots
+             */
+            gross_profit_minor?: number;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
         };
         /** @description Stock on hand with no sale in the branch in the last 90 days */
         RetailDeadStock: {
@@ -7953,6 +8085,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailCreditControl"];
+                };
+            };
+        };
+    };
+    getRetailDashboard: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailDashboard"];
                 };
             };
         };

@@ -16,6 +16,7 @@ export type CreditControl = S['RetailCreditControl'];
 export type Ageing = S['RetailAgeing'];
 export type Evaluation = S['RetailBusinessEvaluation'];
 export type EvaluationBranch = S['RetailEvaluationBranch'];
+export type Dashboard = S['RetailDashboard'];
 export type Margins = S['RetailMargins'];
 export type MarginRow = S['RetailMarginRow'];
 export type PriceChangeImpact = S['RetailPriceChangeImpact'];
@@ -65,5 +66,8 @@ export const retailAnalytics = {
         params: { query: { branch_id: branchId ? [branchId] : undefined, from, to, top } },
       }),
     );
+  },
+  async dashboard({ branchId }: { branchId?: string }): Promise<Dashboard> {
+    return unwrap(await api.GET('/api/v1/retail/reports/dashboard', { params: { query: { branch_id: branchId ? [branchId] : undefined } } }));
   },
 };

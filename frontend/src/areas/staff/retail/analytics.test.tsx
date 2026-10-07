@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CreditControl, Evaluation, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
+import type { CreditControl, Dashboard, Evaluation, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Bars, Sparkline, rangeProblem } from './analytics-ui';
 import { CreditControlView } from './credit-control';
+import { DashboardView } from './dashboard';
 import { EvaluationView } from './evaluation';
 import { canUse } from './permissions';
 import { MarginsView } from './margins';
@@ -269,5 +270,61 @@ describe('business evaluation', () => {
     const html = page('sales', <Gate screen="evaluation" title="Business evaluation"><p>SECRET-CONTENT</p></Gate>);
     expect(html).toContain('You do not have access');
     expect(html).not.toContain('SECRET-CONTENT');
+  });
+});
+
+describe('owner dashboard', () => {
+  const days = Array.from({ length: 30 }, (_, i) => ({ date: `2026-09-${String(8 + i).padStart(2, '0')}`, sales_minor: i * 100, gross_profit_minor: i * 30 }));
+  const full: Dashboard = {
+    date: '2026-10-07', currency: 'UGX', profit_visible: true,
+    today: { sales_minor: 3600, sale_count: 3, cash_minor: 2100, credit_minor: 1500, gross_profit_minor: 1200 },
+    days, last7_sales_minor: 6600, last30_sales_minor: 7500, last7_gross_profit_minor: 2200, last30_gross_profit_minor: 2500,
+    stock: { value_at_price_minor: 47050, value_at_cost_minor: 31100, out_of_stock: 1, low_stock: 2, low_stock_threshold: '5.000' },
+    shops: [{ branch_id: 'b1', today_sales_minor: 2100, last7_sales_minor: 5100, last30_sales_minor: 6000, today_gross_profit_minor: 700, stock_at_price_minor: 33550, stock_at_cost_minor: 22100, out_of_stock: 0, low_stock: 2 }],
+  };
+  const nameOf = (id?: string) => (id === 'b1' ? 'Head office' : 'Branch');
+
+  /** What a seller with sale and stock read gets: no key holding cost or profit. */
+  function seller(): Dashboard {
+    return JSON.parse(JSON.stringify({ ...full, profit_visible: false }, (key, value) => (/cost|profit/.test(key) && key !== 'profit_visible' ? undefined : value))) as Dashboard;
+  }
+
+  it('shows today, cash against credit, the sparklines, stock, shops and profit for a profit reader', () => {
+    const html = renderToString(<DashboardView data={full} nameOf={nameOf} />);
+    expect(html).toContain('Today, 2026-10-07');
+    expect(html).toContain('UGX 3,600');
+    expect(html).toContain('On credit');
+    expect(html).toContain('Profit today');
+    expect(html).toContain('UGX 1,200');
+    expect(html).toContain('Stock at cost');
+    expect(html).toContain('Head office');
+    expect(html).toContain('Last 7 days');
+    expect(html).toContain('Last 30 days');
+    expect(html.match(/<svg/g)?.length).toBe(2);
+    expect(html).not.toContain('style=');
+  });
+
+  it('leaves clearly marked placeholders for banked against expected and savings, with no number', () => {
+    const html = renderToString(<DashboardView data={full} nameOf={nameOf} />);
+    expect(html).toContain('Banked against expected');
+    expect(html).toContain('Savings');
+    expect(html.match(/data-placeholder="cash-book"/g)?.length).toBe(2);
+    expect(html).toContain('It arrives with the cash book.');
+  });
+
+  it('shows the sales and stock parts and nothing of cost or profit to a seller', () => {
+    const html = renderToString(<DashboardView data={seller()} nameOf={nameOf} />);
+    expect(html).toContain('UGX 3,600');
+    expect(html).toContain('Stock at selling price');
+    expect(html).not.toMatch(/profit|cost/i);
+    expect(html).not.toContain('1,200');
+    expect(html).not.toContain('31,100');
+  });
+
+  it('shows only the sales parts when stock is not readable', () => {
+    const html = renderToString(<DashboardView data={{ ...seller(), stock: undefined, shops: [{ branch_id: 'b1', today_sales_minor: 2100, last7_sales_minor: 5100, last30_sales_minor: 6000 }] }} nameOf={nameOf} />);
+    expect(html).toContain('Sales today');
+    expect(html).not.toContain('Stock at selling price');
+    expect(html).not.toContain('Out / low');
   });
 });

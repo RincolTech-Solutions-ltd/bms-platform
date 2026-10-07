@@ -1,13 +1,16 @@
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { icons } from '../../../components/icons';
 import { useStaff } from '../context';
-import { screensFor, showRetail } from './permissions';
+import { RetailDashboard } from './dashboard';
+import { canUse, screensFor, showRetail } from './permissions';
 
 // The Retail landing page: one big tile per screen the session may use. Nothing else is listed.
 
 function RetailHome() {
   const { me } = useStaff();
   const screens = showRetail(me) ? screensFor(me) : [];
+  // The dashboard is a sales read; its profit and stock parts depend on the other permissions.
+  const dashboard = showRetail(me) && canUse(me, 'salesHistory');
   return (
     <main className="rt">
       <div className="page-header">
@@ -16,6 +19,7 @@ function RetailHome() {
           <p>What would you like to do?</p>
         </div>
       </div>
+      {dashboard && <RetailDashboard />}
       {screens.length === 0 && <p className="empty-state">You do not have access to any retail pages.</p>}
       <ul className="tile-grid">
         {screens.map((s) => (

@@ -26,6 +26,7 @@ class ReportsController {
     private final StockHealthService stockHealth;
     private final CreditService credit;
     private final EvaluationService evaluation;
+    private final DashboardService dashboard;
 
     ReportsController(
             ReportsService service,
@@ -33,13 +34,15 @@ class ReportsController {
             MarginService margins,
             StockHealthService stockHealth,
             CreditService credit,
-            EvaluationService evaluation) {
+            EvaluationService evaluation,
+            DashboardService dashboard) {
         this.service = service;
         this.salesAnalysis = salesAnalysis;
         this.margins = margins;
         this.stockHealth = stockHealth;
         this.credit = credit;
         this.evaluation = evaluation;
+        this.dashboard = dashboard;
     }
 
     @GetMapping("/valuation")
@@ -132,5 +135,14 @@ class ReportsController {
             @RequestParam(name = "to", required = false) LocalDate to,
             @RequestParam(name = "top", required = false) Integer top) {
         return evaluation.evaluate(branchIds, from, to, top);
+    }
+
+    @GetMapping("/dashboard")
+    @RequiresPermission("retail.sale.read")
+    @Operation(
+            summary = "Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149)",
+            operationId = "getRetailDashboard")
+    DashboardApi.Report dashboard(@RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
+        return dashboard.dashboard(branchIds);
     }
 }

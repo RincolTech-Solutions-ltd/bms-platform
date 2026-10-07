@@ -3439,6 +3439,175 @@
           }
         }
       },
+      "RetailDashboard" : {
+        "properties" : {
+          "currency" : {
+            "type" : "string"
+          },
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "days" : {
+            "description" : "The last 30 days ending today, one entry a day, oldest first",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDashboardDay"
+            },
+            "type" : "array"
+          },
+          "last30_gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last30_sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last7_gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last7_sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "profit_visible" : {
+            "description" : "True when profit figures are included",
+            "type" : "boolean"
+          },
+          "shops" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDashboardShop"
+            },
+            "type" : "array"
+          },
+          "stock" : {
+            "$ref" : "#/components/schemas/RetailDashboardStock"
+          },
+          "today" : {
+            "$ref" : "#/components/schemas/RetailDashboardToday"
+          }
+        }
+      },
+      "RetailDashboardDay" : {
+        "description" : "The last 30 days ending today, one entry a day, oldest first",
+        "properties" : {
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDashboardShop" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "last30_sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last7_sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "low_stock" : {
+            "description" : "Present only with retail.stock.read",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "out_of_stock" : {
+            "description" : "Present only with retail.stock.read",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stock_at_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "stock_at_price_minor" : {
+            "description" : "Present only with retail.stock.read",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "today_gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in this branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "today_sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDashboardStock" : {
+        "description" : "Present only with retail.stock.read",
+        "properties" : {
+          "low_stock" : {
+            "description" : "Active items above zero and at or below low_stock_threshold (ADR-029)",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "low_stock_threshold" : {
+            "type" : "string"
+          },
+          "out_of_stock" : {
+            "description" : "Active items whose balance is zero or less, in every branch reported",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "value_at_cost_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers; stock above zero at the current cost",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "value_at_price_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailDashboardToday" : {
+        "properties" : {
+          "cash_minor" : {
+            "description" : "Sales paid at the sale: cash, mobile money or bank",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "credit_minor" : {
+            "description" : "Sales on credit, whether or not paid since",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gross_profit_minor" : {
+            "description" : "Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailDeadStock" : {
         "description" : "Stock on hand with no sale in the branch in the last 90 days",
         "properties" : {
@@ -10742,6 +10911,37 @@
           }
         },
         "summary" : "Outstanding credit by buyer with ageing, the overdue list and payments received (issue #149)",
+        "tags" : [ "retail-reports" ]
+      }
+    },
+    "/api/v1/retail/reports/dashboard" : {
+      "get" : {
+        "operationId" : "getRetailDashboard",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailDashboard"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149)",
         "tags" : [ "retail-reports" ]
       }
     },
