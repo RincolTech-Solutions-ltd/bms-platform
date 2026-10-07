@@ -24,16 +24,19 @@ class ReportsController {
     private final SalesAnalysisService salesAnalysis;
     private final MarginService margins;
     private final StockHealthService stockHealth;
+    private final CreditService credit;
 
     ReportsController(
             ReportsService service,
             SalesAnalysisService salesAnalysis,
             MarginService margins,
-            StockHealthService stockHealth) {
+            StockHealthService stockHealth,
+            CreditService credit) {
         this.service = service;
         this.salesAnalysis = salesAnalysis;
         this.margins = margins;
         this.stockHealth = stockHealth;
+        this.credit = credit;
     }
 
     @GetMapping("/valuation")
@@ -99,5 +102,19 @@ class ReportsController {
             @RequestParam(name = "lead_days", required = false) Integer leadDays,
             @RequestParam(name = "cover_days", required = false) Integer coverDays) {
         return stockHealth.report(branchIds, from, to, top, leadDays, coverDays);
+    }
+
+    @GetMapping("/credit-control")
+    @RequiresPermission("retail.sale.read")
+    @Operation(
+            summary = "Outstanding credit by buyer with ageing, the overdue list and payments received (issue #149)",
+            operationId = "getRetailCreditControl")
+    CreditApi.Report creditControl(
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "from", required = false) LocalDate from,
+            @RequestParam(name = "to", required = false) LocalDate to,
+            @RequestParam(name = "top", required = false) Integer top,
+            @RequestParam(name = "sort", required = false) String sort) {
+        return credit.report(branchIds, from, to, top, sort);
     }
 }

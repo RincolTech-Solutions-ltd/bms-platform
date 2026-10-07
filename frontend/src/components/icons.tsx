@@ -124,6 +124,12 @@ export const icons = {
       <path d="M3 12h4l3-8 4 16 3-8h4" />
     </Svg>
   ),
+  creditControl: (
+    <Svg>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18M7 15h4" />
+    </Svg>
+  ),
   user: (
     <Svg>
       <circle cx="12" cy="8" r="4" />

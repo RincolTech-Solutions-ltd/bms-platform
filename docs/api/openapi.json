@@ -2890,6 +2890,35 @@
           }
         }
       },
+      "RetailAgeing" : {
+        "description" : "What is owed on completed credit sales, by days past the due date as of today; a sale with no due date counts as not yet due",
+        "properties" : {
+          "days1_to30_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "days31_to60_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "days61_to90_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "not_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "over90_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "owed_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailAllBranchesRow" : {
         "description" : "One product with its balance in every branch of the page",
         "properties" : {
@@ -3106,6 +3135,99 @@
           },
           "unit" : {
             "type" : "string"
+          }
+        }
+      },
+      "RetailCreditBuyer" : {
+        "description" : "Buyers owing the most first",
+        "properties" : {
+          "ageing" : {
+            "$ref" : "#/components/schemas/RetailAgeing"
+          },
+          "customer_id" : {
+            "description" : "The credit buyer's id; absent for a buyer who was typed in by name",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "oldest_overdue_days" : {
+            "description" : "Days past the due date of the oldest overdue sale; absent when none is overdue",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sale_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailCreditControl" : {
+        "properties" : {
+          "as_of" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "buyer_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "buyers" : {
+            "description" : "Buyers owing the most first",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailCreditBuyer"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "from" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "overdue" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailOverdueSale"
+            },
+            "type" : "array"
+          },
+          "overdue_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "payments" : {
+            "description" : "Payments on credit sales received in the range, by day and method",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPaymentDay"
+            },
+            "type" : "array"
+          },
+          "payments_by_method" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPaymentMethodTotal"
+            },
+            "type" : "array"
+          },
+          "payments_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sort" : {
+            "description" : "amount or age",
+            "type" : "string"
+          },
+          "to" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "top" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/RetailAgeing"
           }
         }
       },
@@ -3526,6 +3648,48 @@
           }
         }
       },
+      "RetailOverdueSale" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "buyer_name" : {
+            "type" : "string"
+          },
+          "customer_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "days_overdue" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "due_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "outstanding_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sale_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_no" : {
+            "type" : "string"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailPayment" : {
         "properties" : {
           "amount_minor" : {
@@ -3564,6 +3728,26 @@
           }
         }
       },
+      "RetailPaymentDay" : {
+        "description" : "Payments on credit sales received in the range, by day and method",
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "method" : {
+            "type" : "string"
+          }
+        }
+      },
       "RetailPaymentList" : {
         "properties" : {
           "items" : {
@@ -3571,6 +3755,21 @@
               "$ref" : "#/components/schemas/RetailPayment"
             },
             "type" : "array"
+          }
+        }
+      },
+      "RetailPaymentMethodTotal" : {
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "method" : {
+            "type" : "string"
           }
         }
       },
@@ -10227,6 +10426,68 @@
         },
         "summary" : "Record a restock: prices, history, movements and journals in one transaction (FR-RET-06); M",
         "tags" : [ "retail-purchasing" ]
+      }
+    },
+    "/api/v1/retail/reports/credit-control" : {
+      "get" : {
+        "operationId" : "getRetailCreditControl",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "top",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "sort",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailCreditControl"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Outstanding credit by buyer with ageing, the overdue list and payments received (issue #149)",
+        "tags" : [ "retail-reports" ]
       }
     },
     "/api/v1/retail/reports/margins" : {

@@ -2,10 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
+import type { CreditControl, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Bars, Sparkline, rangeProblem } from './analytics-ui';
+import { CreditControlView } from './credit-control';
 import { canUse } from './permissions';
 import { MarginsView } from './margins';
 import { SalesAnalysisView } from './sales-analysis';
@@ -189,5 +190,44 @@ describe('stock health', () => {
     expect(canUse({ permissions: ['retail.sale.read'] }, 'stockHealth')).toBe(false);
     const capped: StockHealth = { ...health, cover: { total: 1, items: [{ ...(health.cover?.items?.[0] ?? {}), days_of_cover: '365.0', capped: true }] } };
     expect(renderToString(<StockHealthView data={capped} nameOf={nameOf} />)).toContain('over 365.0 days');
+  });
+});
+
+describe('credit control', () => {
+  const ageing = { owed_minor: 11000, not_due_minor: 3000, days1_to30_minor: 4500, days31_to60_minor: 1500, days61_to90_minor: 0, over90_minor: 2000 };
+  const credit: CreditControl = {
+    from: '2026-09-08', to: '2026-10-07', as_of: '2026-10-07', currency: 'UGX', top: 20, totals: ageing, buyer_count: 2, sort: 'amount',
+    buyers: [
+      { name: 'Test Buyer 01', sale_count: 3, ageing: { ...ageing, owed_minor: 7500, over90_minor: 0, days31_to60_minor: 0 }, oldest_overdue_days: 5 },
+      { customer_id: 'c1', name: 'Test Customer Zed', sale_count: 2, ageing: { ...ageing, owed_minor: 3500, not_due_minor: 0, days1_to30_minor: 0 }, oldest_overdue_days: 95 },
+    ],
+    overdue_count: 3,
+    overdue: [{ sale_id: 's1', sale_no: 'S-0001', branch_id: 'b1', buyer_name: 'Test Buyer 01', sale_date: '2026-09-27', due_date: '2026-10-02', days_overdue: 5, total_minor: 4500, outstanding_minor: 4500 }],
+    payments: [{ date: '2026-10-07', method: 'cash', count: 1, amount_minor: 1000 }, { date: '2026-10-07', method: 'mobile_money', count: 1, amount_minor: 1500 }],
+    payments_by_method: [{ method: 'cash', count: 1, amount_minor: 1000 }, { method: 'mobile_money', count: 1, amount_minor: 1500 }],
+    payments_minor: 2500,
+  };
+  const nameOf = (id?: string) => (id === 'b1' ? 'Head office' : 'Branch');
+
+  it('shows what is owed with the ageing, the overdue list and the payments by method', () => {
+    const html = renderToString(<CreditControlView data={credit} nameOf={nameOf} sort="amount" />);
+    expect(html).toContain('Owed by credit buyers UGX 11,000');
+    expect(html).toContain('Over 90 days late');
+    expect(html).toContain('Test Customer Zed');
+    expect(html).toContain('S-0001, Head office');
+    expect(html).toContain('Showing 1 of 3');
+    expect(html).toContain('Mobile money');
+    expect(html).toContain('Received UGX 2,500');
+  });
+
+  it('says plainly when nobody owes and nothing was paid, and never shows cost or profit', () => {
+    const none: CreditControl = { ...credit, totals: { owed_minor: 0 }, buyer_count: 0, buyers: [], overdue: [], overdue_count: 0, payments: [], payments_by_method: [], payments_minor: 0 };
+    const html = renderToString(<CreditControlView data={none} nameOf={nameOf} sort="age" />);
+    expect(html).toContain('Nobody owes anything.');
+    expect(html).toContain('Nothing is overdue.');
+    expect(html).toContain('No payment was received in this range.');
+    expect(html).not.toMatch(/cost|profit|margin/i);
+    expect(canUse(mockMe('sales'), 'creditControl')).toBe(true);
+    expect(canUse({ permissions: ['retail.stock.read'] }, 'creditControl')).toBe(false);
   });
 });

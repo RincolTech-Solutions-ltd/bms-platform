@@ -1605,6 +1605,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/credit-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outstanding credit by buyer with ageing, the overdue list and payments received (issue #149) */
+        get: operations["getRetailCreditControl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/margins": {
         parameters: {
             query?: never;
@@ -3303,6 +3320,21 @@ export interface components {
             member_no?: string;
             relationship?: string;
         };
+        /** @description What is owed on completed credit sales, by days past the due date as of today; a sale with no due date counts as not yet due */
+        RetailAgeing: {
+            /** Format: int64 */
+            days1_to30_minor?: number;
+            /** Format: int64 */
+            days31_to60_minor?: number;
+            /** Format: int64 */
+            days61_to90_minor?: number;
+            /** Format: int64 */
+            not_due_minor?: number;
+            /** Format: int64 */
+            over90_minor?: number;
+            /** Format: int64 */
+            owed_minor?: number;
+        };
         /** @description One product with its balance in every branch of the page */
         RetailAllBranchesRow: {
             /** @description One entry per branch of the page, in the page's branch order */
@@ -3404,6 +3436,49 @@ export interface components {
             /** @description Reorder rows only: units to buy to reach cover_days of cover at this pace */
             suggested_qty?: string;
             unit?: string;
+        };
+        /** @description Buyers owing the most first */
+        RetailCreditBuyer: {
+            ageing?: components["schemas"]["RetailAgeing"];
+            /**
+             * Format: uuid
+             * @description The credit buyer's id; absent for a buyer who was typed in by name
+             */
+            customer_id?: string;
+            name?: string;
+            /**
+             * Format: int32
+             * @description Days past the due date of the oldest overdue sale; absent when none is overdue
+             */
+            oldest_overdue_days?: number;
+            /** Format: int32 */
+            sale_count?: number;
+        };
+        RetailCreditControl: {
+            /** Format: date */
+            as_of?: string;
+            /** Format: int32 */
+            buyer_count?: number;
+            /** @description Buyers owing the most first */
+            buyers?: components["schemas"]["RetailCreditBuyer"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            overdue?: components["schemas"]["RetailOverdueSale"][];
+            /** Format: int32 */
+            overdue_count?: number;
+            /** @description Payments on credit sales received in the range, by day and method */
+            payments?: components["schemas"]["RetailPaymentDay"][];
+            payments_by_method?: components["schemas"]["RetailPaymentMethodTotal"][];
+            /** Format: int64 */
+            payments_minor?: number;
+            /** @description amount or age */
+            sort?: string;
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            top?: number;
+            totals?: components["schemas"]["RetailAgeing"];
         };
         RetailCustomer: {
             /**
@@ -3613,6 +3688,26 @@ export interface components {
             /** Format: int64 */
             total_minor?: number;
         };
+        RetailOverdueSale: {
+            /** Format: uuid */
+            branch_id?: string;
+            buyer_name?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: int32 */
+            days_overdue?: number;
+            /** Format: date */
+            due_date?: string;
+            /** Format: int64 */
+            outstanding_minor?: number;
+            /** Format: date */
+            sale_date?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
         RetailPayment: {
             /** Format: int64 */
             amount_minor?: number;
@@ -3631,8 +3726,25 @@ export interface components {
             /** Format: uuid */
             sale_id?: string;
         };
+        /** @description Payments on credit sales received in the range, by day and method */
+        RetailPaymentDay: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: int32 */
+            count?: number;
+            /** Format: date */
+            date?: string;
+            method?: string;
+        };
         RetailPaymentList: {
             items?: components["schemas"]["RetailPayment"][];
+        };
+        RetailPaymentMethodTotal: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: int32 */
+            count?: number;
+            method?: string;
         };
         RetailPaymentRequest: {
             /** Format: int64 */
@@ -7670,6 +7782,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
+    getRetailCreditControl: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                top?: number;
+                sort?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCreditControl"];
                 };
             };
         };
