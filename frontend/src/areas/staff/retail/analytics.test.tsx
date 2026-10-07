@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { CreditControl, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
+import type { CreditControl, Evaluation, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Bars, Sparkline, rangeProblem } from './analytics-ui';
 import { CreditControlView } from './credit-control';
+import { EvaluationView } from './evaluation';
 import { canUse } from './permissions';
 import { MarginsView } from './margins';
 import { SalesAnalysisView } from './sales-analysis';
@@ -229,5 +230,44 @@ describe('credit control', () => {
     expect(html).not.toMatch(/cost|profit|margin/i);
     expect(canUse(mockMe('sales'), 'creditControl')).toBe(true);
     expect(canUse({ permissions: ['retail.stock.read'] }, 'creditControl')).toBe(false);
+  });
+});
+
+describe('business evaluation', () => {
+  const stockOf = { at_cost_minor: 23000, at_price_minor: 34900, expected_profit_minor: 11900, over_cost_bp: 5174 };
+  const run = { sales_minor: 3900, profit_minor: 1300, avg_daily_sales_minor: 130, avg_daily_profit_minor: 43, days_of_stock: '268.5', days_of_stock_capped: false };
+  const data: Evaluation = {
+    from: '2026-09-08', to: '2026-10-07', currency: 'UGX', top: 10, run_rate_days: 30,
+    note: 'An estimate from today\'s prices and the last 30 days of sales. It is not a forecast or a promise.',
+    total: { period: { sales_minor: 5400, profit_minor: 1800, margin_bp: 3333 }, stock: { ...stockOf, at_price_minor: 48400 }, run_rate: run },
+    branches: [{
+      branch_id: 'b1', period: { sales_minor: 3900, profit_minor: 1300 }, stock: stockOf, run_rate: run,
+      categories: [{
+        category_id: 'c1', category: 'Lighting', period: { sales_minor: 3000, profit_minor: 1000 }, stock: stockOf, products_total: 2,
+        products: [{ product_id: 'p1', code: 'ANA-1', description: 'Test Product ANA-1', unit: 'piece', qty_on_hand: '18.000', period: { sales_minor: 3000, profit_minor: 1000 }, stock: { at_cost_minor: 18000, at_price_minor: 27000, expected_profit_minor: 9000, over_cost_bp: 5000 } }],
+      }],
+    }],
+  };
+  const nameOf = (id?: string) => (id === 'b1' ? 'Head office' : 'Branch');
+
+  it('says it is an estimate and shows profit to date, expected profit and the pace', () => {
+    const html = renderToString(<EvaluationView data={data} nameOf={nameOf} />);
+    expect(html).toContain('It is not a forecast or a promise.');
+    expect(html).toContain('Head office');
+    expect(html).toContain('UGX 11,900');
+    expect(html).toContain('51.74%');
+    expect(html).toContain('268.5 days');
+    expect(html).toContain('Lighting');
+    expect(html).toContain('Test Product ANA-1');
+    expect(html).toContain('Showing 1 of 2 items');
+  });
+
+  it('is for retail.profit.read only', () => {
+    expect(canUse(mockMe('sales'), 'evaluation')).toBe(false);
+    expect(canUse({ permissions: ['retail.sale.read', 'retail.stock.read'] }, 'evaluation')).toBe(false);
+    expect(canUse({ permissions: ['retail.profit.read'] }, 'evaluation')).toBe(true);
+    const html = page('sales', <Gate screen="evaluation" title="Business evaluation"><p>SECRET-CONTENT</p></Gate>);
+    expect(html).toContain('You do not have access');
+    expect(html).not.toContain('SECRET-CONTENT');
   });
 });

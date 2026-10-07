@@ -1605,6 +1605,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/business-evaluation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profit to date, expected profit of the stock on hand and a 30 day run rate (issue #149) */
+        get: operations["getRetailBusinessEvaluation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/credit-control": {
         parameters: {
             query?: never;
@@ -3380,6 +3397,21 @@ export interface components {
             /** @example 10 */
             qty: string;
         };
+        RetailBusinessEvaluation: {
+            branches?: components["schemas"]["RetailEvaluationBranch"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            /** @description A plain statement that these are estimates, not forecasts */
+            note?: string;
+            /** Format: int32 */
+            run_rate_days?: number;
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            top?: number;
+            total?: components["schemas"]["RetailEvaluationTotal"];
+        };
         RetailCategory: {
             active?: boolean;
             /** Format: uuid */
@@ -3609,6 +3641,94 @@ export interface components {
             value_at_cost_minor?: number;
             /** Format: int64 */
             value_at_price_minor?: number;
+        };
+        RetailEvaluationBranch: {
+            /** Format: uuid */
+            branch_id?: string;
+            categories?: components["schemas"]["RetailEvaluationCategory"][];
+            period?: components["schemas"]["RetailEvaluationPeriod"];
+            run_rate?: components["schemas"]["RetailEvaluationRunRate"];
+            stock?: components["schemas"]["RetailEvaluationStock"];
+        };
+        RetailEvaluationCategory: {
+            category?: string;
+            /** Format: uuid */
+            category_id?: string;
+            period?: components["schemas"]["RetailEvaluationPeriod"];
+            /** @description The largest expected profit first, at most top */
+            products?: components["schemas"]["RetailEvaluationProduct"][];
+            /**
+             * Format: int32
+             * @description Items in the category with sales in the period or stock, before the row limit
+             */
+            products_total?: number;
+            stock?: components["schemas"]["RetailEvaluationStock"];
+        };
+        /** @description What was sold in the chosen period, from the sale line snapshots */
+        RetailEvaluationPeriod: {
+            /**
+             * Format: int64
+             * @description Profit over sales in basis points, half up; absent when sales are not above zero
+             */
+            margin_bp?: number;
+            /**
+             * Format: int64
+             * @description Sales less the cost snapshots of the sale lines; usage and damage are not in it
+             */
+            profit_minor?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        /** @description The largest expected profit first, at most top */
+        RetailEvaluationProduct: {
+            code?: string;
+            description?: string;
+            period?: components["schemas"]["RetailEvaluationPeriod"];
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            stock?: components["schemas"]["RetailEvaluationStock"];
+            unit?: string;
+        };
+        /** @description The last 30 days of sales as a daily pace */
+        RetailEvaluationRunRate: {
+            /** Format: int64 */
+            avg_daily_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Sales over 30, rounded half up to the minor unit
+             */
+            avg_daily_sales_minor?: number;
+            /** @description Stock at price over the daily sales, one place; absent when nothing sold */
+            days_of_stock?: string;
+            /** @description True when the days of stock are over 365 and show 365.0 */
+            days_of_stock_capped?: boolean;
+            /** Format: int64 */
+            profit_minor?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        /** @description The stock on hand valued at today's prices; stock at or below zero is left out */
+        RetailEvaluationStock: {
+            /** Format: int64 */
+            at_cost_minor?: number;
+            /** Format: int64 */
+            at_price_minor?: number;
+            /**
+             * Format: int64
+             * @description Stock at price less stock at cost
+             */
+            expected_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Expected profit over stock at cost in basis points, half up; absent when cost is zero
+             */
+            over_cost_bp?: number;
+        };
+        RetailEvaluationTotal: {
+            period?: components["schemas"]["RetailEvaluationPeriod"];
+            run_rate?: components["schemas"]["RetailEvaluationRunRate"];
+            stock?: components["schemas"]["RetailEvaluationStock"];
         };
         RetailMarginBelowTarget: {
             items?: components["schemas"]["RetailMarginRow"][];
@@ -7782,6 +7902,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
+    getRetailBusinessEvaluation: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                top?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBusinessEvaluation"];
                 };
             };
         };

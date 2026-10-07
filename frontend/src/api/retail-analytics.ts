@@ -14,6 +14,8 @@ export type StockHealth = S['RetailStockHealth'];
 export type CoverRow = S['RetailCoverRow'];
 export type CreditControl = S['RetailCreditControl'];
 export type Ageing = S['RetailAgeing'];
+export type Evaluation = S['RetailBusinessEvaluation'];
+export type EvaluationBranch = S['RetailEvaluationBranch'];
 export type Margins = S['RetailMargins'];
 export type MarginRow = S['RetailMarginRow'];
 export type PriceChangeImpact = S['RetailPriceChangeImpact'];
@@ -54,6 +56,13 @@ export const retailAnalytics = {
     return unwrap(
       await api.GET('/api/v1/retail/reports/credit-control', {
         params: { query: { branch_id: branchId ? [branchId] : undefined, from, to, top, sort } },
+      }),
+    );
+  },
+  async evaluation({ branchId, from, to, top }: { branchId?: string; from: string; to: string; top: number }): Promise<Evaluation> {
+    return unwrap(
+      await api.GET('/api/v1/retail/reports/business-evaluation', {
+        params: { query: { branch_id: branchId ? [branchId] : undefined, from, to, top } },
       }),
     );
   },

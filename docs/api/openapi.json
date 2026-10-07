@@ -3020,6 +3020,42 @@
         },
         "required" : [ "branch_id", "qty" ]
       },
+      "RetailBusinessEvaluation" : {
+        "properties" : {
+          "branches" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailEvaluationBranch"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "from" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "note" : {
+            "description" : "A plain statement that these are estimates, not forecasts",
+            "type" : "string"
+          },
+          "run_rate_days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "top" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "total" : {
+            "$ref" : "#/components/schemas/RetailEvaluationTotal"
+          }
+        }
+      },
       "RetailCategory" : {
         "properties" : {
           "active" : {
@@ -3490,6 +3526,170 @@
           "value_at_price_minor" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailEvaluationBranch" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "categories" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailEvaluationCategory"
+            },
+            "type" : "array"
+          },
+          "period" : {
+            "$ref" : "#/components/schemas/RetailEvaluationPeriod"
+          },
+          "run_rate" : {
+            "$ref" : "#/components/schemas/RetailEvaluationRunRate"
+          },
+          "stock" : {
+            "$ref" : "#/components/schemas/RetailEvaluationStock"
+          }
+        }
+      },
+      "RetailEvaluationCategory" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "category_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "period" : {
+            "$ref" : "#/components/schemas/RetailEvaluationPeriod"
+          },
+          "products" : {
+            "description" : "The largest expected profit first, at most top",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailEvaluationProduct"
+            },
+            "type" : "array"
+          },
+          "products_total" : {
+            "description" : "Items in the category with sales in the period or stock, before the row limit",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stock" : {
+            "$ref" : "#/components/schemas/RetailEvaluationStock"
+          }
+        }
+      },
+      "RetailEvaluationPeriod" : {
+        "description" : "What was sold in the chosen period, from the sale line snapshots",
+        "properties" : {
+          "margin_bp" : {
+            "description" : "Profit over sales in basis points, half up; absent when sales are not above zero",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "profit_minor" : {
+            "description" : "Sales less the cost snapshots of the sale lines; usage and damage are not in it",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailEvaluationProduct" : {
+        "description" : "The largest expected profit first, at most top",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "period" : {
+            "$ref" : "#/components/schemas/RetailEvaluationPeriod"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "type" : "string"
+          },
+          "stock" : {
+            "$ref" : "#/components/schemas/RetailEvaluationStock"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailEvaluationRunRate" : {
+        "description" : "The last 30 days of sales as a daily pace",
+        "properties" : {
+          "avg_daily_profit_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "avg_daily_sales_minor" : {
+            "description" : "Sales over 30, rounded half up to the minor unit",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "days_of_stock" : {
+            "description" : "Stock at price over the daily sales, one place; absent when nothing sold",
+            "type" : "string"
+          },
+          "days_of_stock_capped" : {
+            "description" : "True when the days of stock are over 365 and show 365.0",
+            "type" : "boolean"
+          },
+          "profit_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailEvaluationStock" : {
+        "description" : "The stock on hand valued at today's prices; stock at or below zero is left out",
+        "properties" : {
+          "at_cost_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "at_price_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "expected_profit_minor" : {
+            "description" : "Stock at price less stock at cost",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "over_cost_bp" : {
+            "description" : "Expected profit over stock at cost in basis points, half up; absent when cost is zero",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailEvaluationTotal" : {
+        "properties" : {
+          "period" : {
+            "$ref" : "#/components/schemas/RetailEvaluationPeriod"
+          },
+          "run_rate" : {
+            "$ref" : "#/components/schemas/RetailEvaluationRunRate"
+          },
+          "stock" : {
+            "$ref" : "#/components/schemas/RetailEvaluationStock"
           }
         }
       },
@@ -10426,6 +10626,61 @@
         },
         "summary" : "Record a restock: prices, history, movements and journals in one transaction (FR-RET-06); M",
         "tags" : [ "retail-purchasing" ]
+      }
+    },
+    "/api/v1/retail/reports/business-evaluation" : {
+      "get" : {
+        "operationId" : "getRetailBusinessEvaluation",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "top",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBusinessEvaluation"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Profit to date, expected profit of the stock on hand and a 30 day run rate (issue #149)",
+        "tags" : [ "retail-reports" ]
       }
     },
     "/api/v1/retail/reports/credit-control" : {

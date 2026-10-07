@@ -130,6 +130,11 @@ export const icons = {
       <path d="M3 10h18M7 15h4" />
     </Svg>
   ),
+  evaluation: (
+    <Svg>
+      <path d="M4 20V8l5 4 4-8 7 6v10z" />
+    </Svg>
+  ),
   user: (
     <Svg>
       <circle cx="12" cy="8" r="4" />

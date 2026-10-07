@@ -25,18 +25,21 @@ class ReportsController {
     private final MarginService margins;
     private final StockHealthService stockHealth;
     private final CreditService credit;
+    private final EvaluationService evaluation;
 
     ReportsController(
             ReportsService service,
             SalesAnalysisService salesAnalysis,
             MarginService margins,
             StockHealthService stockHealth,
-            CreditService credit) {
+            CreditService credit,
+            EvaluationService evaluation) {
         this.service = service;
         this.salesAnalysis = salesAnalysis;
         this.margins = margins;
         this.stockHealth = stockHealth;
         this.credit = credit;
+        this.evaluation = evaluation;
     }
 
     @GetMapping("/valuation")
@@ -116,5 +119,18 @@ class ReportsController {
             @RequestParam(name = "top", required = false) Integer top,
             @RequestParam(name = "sort", required = false) String sort) {
         return credit.report(branchIds, from, to, top, sort);
+    }
+
+    @GetMapping("/business-evaluation")
+    @RequiresPermission("retail.profit.read")
+    @Operation(
+            summary = "Profit to date, expected profit of the stock on hand and a 30 day run rate (issue #149)",
+            operationId = "getRetailBusinessEvaluation")
+    EvaluationApi.Report businessEvaluation(
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "from", required = false) LocalDate from,
+            @RequestParam(name = "to", required = false) LocalDate to,
+            @RequestParam(name = "top", required = false) Integer top) {
+        return evaluation.evaluate(branchIds, from, to, top);
     }
 }
