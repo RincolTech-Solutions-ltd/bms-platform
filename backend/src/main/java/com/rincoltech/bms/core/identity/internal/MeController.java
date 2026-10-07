@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.identity.internal;
 
 import com.rincoltech.bms.core.identity.internal.TourProgress.TourStateRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.MeBranch;
+import com.rincoltech.bms.core.identity.internal.UserApi.MePermissionScope;
 import com.rincoltech.bms.core.identity.internal.UserApi.MeResponse;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleCatalogue;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleResponse;
@@ -16,6 +17,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -76,6 +79,7 @@ class MeController {
                 user.phoneE164(),
                 user.roles(),
                 principal.permissions().stream().sorted().toList(),
+                permissionScopes(principal),
                 principal.allBranches(),
                 workable,
                 defaultBranch,
@@ -97,6 +101,20 @@ class MeController {
             @PathVariable("tour_id") String tourId, @Valid @RequestBody TourStateRequest request) {
         tours.record(CurrentPrincipal.require().userId(), tourId, request);
         return ResponseEntity.noContent().build();
+    }
+
+    private static Map<String, MePermissionScope> permissionScopes(Principal principal) {
+        Map<String, MePermissionScope> out = new TreeMap<>();
+        principal
+                .scopes()
+                .forEach((permission, scope) -> out.put(
+                        permission,
+                        new MePermissionScope(
+                                scope.all(),
+                                scope.all()
+                                        ? List.of()
+                                        : scope.branchIds().stream().sorted().toList())));
+        return out;
     }
 
     @GetMapping("/roles")

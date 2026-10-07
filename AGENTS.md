@@ -299,6 +299,7 @@ Accepted (this list is the ADR index):
   (spec `docs/specs/self-onboarding-and-subscriptions.md`; build step 1 is #89)
 - ADR-025 First run signs the invitee in; guided tours are data with per-user progress on the server
   (proposed, #19 and #86)
+- ADR-029 One fixed low stock threshold for retail, a per-tenant settings group later (#145)
 
 Pending (cite only as "pending ADR-NNN"):
 

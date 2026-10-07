@@ -70,6 +70,10 @@ final class UserApi {
     @Schema(name = "MeBranch")
     record MeBranch(UUID id, String code, String name, boolean isHeadOffice) {}
 
+    /** Where one permission applies: every branch, or the listed ones (ADR-017). */
+    @Schema(name = "MePermissionScope")
+    record MePermissionScope(boolean allBranches, List<UUID> branchIds) {}
+
     /**
      * What the frontend shows and hides by (chapter 8 section 8.3.3), and the branches the user can
      * switch between (FR-BR-03). {@code all_branches} lets the user pick "All branches" (FR-BR-04).
@@ -83,6 +87,10 @@ final class UserApi {
             String phoneE164,
             List<RoleAssignment> roles,
             List<String> permissions,
+
+            @Schema(description = "Per permission key, the branches it applies in")
+            Map<String, MePermissionScope> permissionScopes,
+
             boolean allBranches,
             List<MeBranch> branches,
             UUID defaultBranchId,
