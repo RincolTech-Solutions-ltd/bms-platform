@@ -274,6 +274,15 @@
   height: auto;
 }
 
+/* A scanner needs the darkest text colour on white, whatever the tenant colour is. */
+.qr-code .qr-light {
+  fill: var(--color-surface);
+}
+
+.qr-code .qr-dark {
+  fill: var(--rt-grey-900);
+}
+
 .manual-key summary {
   display: flex;
   align-items: center;

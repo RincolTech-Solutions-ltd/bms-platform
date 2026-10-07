@@ -116,8 +116,8 @@ export function QrCode({ value, label }: { value: string; label: string }) {
   }, [value]);
   return (
     <svg className="qr-code" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label} shapeRendering="crispEdges">
-      <rect width={size} height={size} fill="#ffffff" />
-      <path d={d} fill="#000000" />
+      <rect className="qr-light" width={size} height={size} />
+      <path className="qr-dark" d={d} />
     </svg>
   );
 }

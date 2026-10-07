@@ -130,7 +130,8 @@ describe('the QR code', () => {
   it('is drawn in the browser as one SVG path, with no network and no style attribute', () => {
     const html = renderToStaticMarkup(<QrCode value={enrolment.otpauth_uri} label="QR" />);
     expect(html).toMatch(/^<svg class="qr-code" viewBox="0 0 \d+ \d+"/);
-    expect(html).toContain('<path d="M');
+    expect(html).toContain('<path class="qr-dark" d="M');
+    expect(html).not.toMatch(/fill="#/);
     expect(html).not.toMatch(/https?:|style=/);
   });
 });
