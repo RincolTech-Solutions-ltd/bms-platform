@@ -108,6 +108,7 @@ core.payments         -> core.ledger, core.notifications (booking is delegated t
 core.reporting        -> core.documents
 lending               -> any core module
 lending.loans         -> lending.members, lending.products, lending.collateral, lending.savings (transfer)
+lending.seed          -> lending.loans (LoanServicing)
 lending.collections   -> lending.loans, lending.members
 lending.savings       -> lending.members
 lending.investments   -> lending.members, lending.savings (monthly return credit)
@@ -184,7 +185,8 @@ to other modules.
 | `core.operations` | `...core.operations` | `/version`, the migrations readiness check, the database role guard |
 | `lending.manifest` | `...lending.manifest` | The lending module's registration (`ModuleManifest`) |
 | `lending.collateral` | `...lending.collateral` | The collateral register: items, valuations, the append-only custody timeline, photos and scans, and `collateral_release` as an approval action (#13) |
-| `lending.loans` | `...lending.loans` | Origination so far: draft, edit, guarantors, collateral pledges, submit, return, cancel, the status history; registers `CollateralPledges` so pledged items are not released (#41) |
+| `lending.loans` | `...lending.loans` | Origination: draft, edit, guarantors, collateral pledges, submit, return, cancel, appraisal, decision, the status history; registers `CollateralPledges` so pledged items are not released (#41 to #43). Servicing (#108, ADR-026): disbursement, schedule, repayments with R-ALLOC, payoff quote, reversal with re-allocation, closure, write-off and recovery, each posting through `post_entry`; registers the `loan_disbursement`, `repayment_reversal` and `loan_write_off` approval actions; `LoanServicing`, the port for commands without a principal |
+| `lending.seed` | `...lending.seed` | The `seed-lending` command: fabricated members, products, applications and serviced loans for one empty staging tenant, through `LoanServicing` (#108, ADR-026) |
 | `lending.products` | `...lending.products` | Loan products with immutable versions and fees, archive; `ScheduleCalculator`, the public home of rules R-ROUND, R-TERM, R-RATE, R-FLAT and R-DECL; the schedule preview (#40) |
 | `lending.members` | `...lending.members` | Members: the reference vertical slice; edit, duplicate check, KYC decision, blacklist, status (#10); next of kin, links and the relationship panel (#11) |
 
@@ -234,7 +236,12 @@ a step by permission, module and feature flag, when a tour starts, the focus tra
 runtime in the staff layout and the Help entry in the staff bar). A step anchors to a
 `data-tour="<id>"` attribute on a screen, never a CSS class; `tours.test.tsx` renders each step's
 screen and fails when the anchor is gone. A new module adds its steps to `tours.ts`; a feature not
-built yet keeps its steps behind a flag in `FEATURES` until its slice switches it on. Money is formatted only in
+built yet keeps its steps behind a flag in `FEATURES` until its slice switches it on (billing,
+payments, trial, agents, the staff screen and the insights pages are all off today). The first-run
+tours cover set-up, retail selling, stock-take and the catalogue, and the loan list with its
+applications filter; page tours, started from Help, cover the sale, stock, stock-take, catalogue,
+set-up, loans and loan pages. A page tour's `page` may hold a `$name` segment that matches any one
+path segment, so one tour serves every loan. Money is formatted only in
 `components/`, from integer minor units and the currency exponent.
 
 ## 5.7 Where the retail vertical will fit

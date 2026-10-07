@@ -61,11 +61,26 @@ const retailTransferRoute = retailScreen('/transfer').lazy(() => import('../area
 const retailTransfersRoute = retailScreen('/transfers').lazy(() => import('../areas/staff/retail/transfers').then((m) => m.Route));
 const retailValuationRoute = retailScreen('/valuation').lazy(() => import('../areas/staff/retail/profit').then((m) => m.ValuationRoute));
 const retailProfitRoute = retailScreen('/profit').lazy(() => import('../areas/staff/retail/profit').then((m) => m.Route));
+const retailCatalogueRoute = retailScreen('/catalogue').lazy(() => import('../areas/staff/retail/catalogue').then((m) => m.Route));
+const retailProductsRoute = retailScreen('/catalogue/products').lazy(() => import('../areas/staff/retail/catalogue-products').then((m) => m.ProductsRoute));
+const retailCategoriesRoute = retailScreen('/catalogue/categories').lazy(() => import('../areas/staff/retail/catalogue-lists').then((m) => m.CategoriesRoute));
+const retailUnitsRoute = retailScreen('/catalogue/units').lazy(() => import('../areas/staff/retail/catalogue-lists').then((m) => m.UnitsRoute));
+const retailSuppliersRoute = retailScreen('/catalogue/suppliers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.SuppliersRoute));
+const retailImportRoute = retailScreen('/catalogue/import').lazy(() => import('../areas/staff/retail/catalogue-import').then((m) => m.ImportRoute));
+const retailBuyersRoute = retailScreen('/catalogue/buyers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.BuyersRoute));
 
 // The living style page (#106): every component and illustration, for development builds and the
 // platform host only (the page itself checks); a chunk of its own, so no tenant downloads it.
 const styleRoute = createRoute({ getParentRoute: () => rootRoute, path: '/style' }).lazy(() =>
   import('../areas/style/route').then((m) => m.Route),
+);
+
+const staffLendingRoute = createRoute({ getParentRoute: () => staffRoute, path: '/lending', component: Outlet });
+const lendingLoansRoute = createRoute({ getParentRoute: () => staffLendingRoute, path: '/' }).lazy(() =>
+  import('../areas/staff/lending/loans').then((m) => m.Route),
+);
+const lendingLoanRoute = createRoute({ getParentRoute: () => staffLendingRoute, path: '/loans/$loanId' }).lazy(() =>
+  import('../areas/staff/lending/loan').then((m) => m.Route),
 );
 
 const signUpRoute = createRoute({ getParentRoute: () => rootRoute, path: '/sign-up' }).lazy(() =>
@@ -120,7 +135,14 @@ export const router = createRouter({
         retailTransfersRoute,
         retailValuationRoute,
         retailProfitRoute,
-      ])]),
+        retailCatalogueRoute,
+        retailProductsRoute,
+        retailCategoriesRoute,
+        retailUnitsRoute,
+        retailSuppliersRoute,
+        retailBuyersRoute,
+        retailImportRoute,
+      ]), staffLendingRoute.addChildren([lendingLoansRoute, lendingLoanRoute])]),
     memberRoute,
     styleRoute,
     signUpRoute,

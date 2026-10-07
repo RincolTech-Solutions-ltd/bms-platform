@@ -51,21 +51,31 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `import-retail` command (`V20`, `docs/runbooks/import-retail.md`) and the phone-first retail
   screens on the real API (`docs/specs/retail-ui-notes.md`). Stock transfers between branches
   (issue #84, ADR-020 amendment) add `V22`. The database optimisation (issue #107, ADR-028) adds
-  `V26` (indexes and a fillfactor only), and the first-run preferences (issue #19, ADR-025) add
-  `V27`. `V24` is never used, and `V25` is held by the open loan servicing branch (#126), which must
-  take a number above `V27`.
-  Flyway runs with `outOfOrder` off, so a new migration takes a number above the highest one on any
-  open branch (`V28` next).
+  `V26` (indexes and a fillfactor only; `V24`, `V25` and `V27` stay unused, since a number below
+  an applied one can never run). The retail catalogue management (issue #146) takes `V28`. Lending increment 5,
+  disbursement and repayments (issue #108, ADR-026), takes `V29`. Flyway runs with `outOfOrder`
+  off, so a new migration takes a number above the highest one on any open branch. `V30` is held by
+  the open savings branch (#179), and the first-run preferences (issue #19, ADR-025) take `V31`
+  (`V32` next).
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator
   sign-in, applications queue, Activate through `TenantProvisioning`, messages not sent); the
   outbox sender job with SMTP and Telegram senders, off until their `BMS_SMTP_*`, `BMS_MAIL_FROM`
   and `BMS_TELEGRAM_*` variables are set.
+- **Built (increment 5, issue #108, ADR-026):** migration `V29` (schedule items, loan transactions,
+  repayment allocations); disbursement with the `loan_disbursement` approval action and fee
+  handling; schedules from the disbursement date; repayments allocated by R-ALLOC with overpayment
+  credit; payoff quote; reversal with re-allocation (`repayment_reversal`); automatic closure;
+  write-off (`loan_write_off`) and recovery; every money event posting through `post_entry` with
+  receipt and voucher numbers; the staff loan screens (`docs/specs/lending-ui-notes.md`); and the
+  `seed-lending` command for a fabricated staging loan book (`docs/runbooks/seed-lending.md`).
+  Deferred: arrears job, penalties, waivers and SMS (increment 6), import (7), reports and the
+  receipt, voucher and statement PDFs (8 and a documents follow-up).
 - **First run and guided tours (issues #19 and #86, ADR-025):** accepting an invitation signs the
   user in; the PWA walks a new user through password, an optional second factor and recovery codes;
   role aware spotlight tours (`frontend/src/tour/`) start once and replay from Help, with per-user
-  progress in `users.preferences` (`V27`). A new screen adds `data-tour` anchors and its steps.
+  progress in `users.preferences` (`V31`). A new screen adds `data-tour` anchors and its steps.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -142,6 +152,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending` products | Loan products and versions | PRD | 6.7 | 7.11.12 |
 | `lending` loans | Origination, schedules, disbursement, repayments, arrears, closure | ORG, DIS, REP, ARR, LCL; 3.4 | 6.7 | 7.11.13 |
 | `lending` collateral | Collateral register | COL | 6.7 | 7.11.14 |
+| `lending.seed` | The `seed-lending` command: fabricated loan book for one empty staging tenant (ADR-026) | none | none (writes 6.7 tables) | none (a command, `docs/runbooks/seed-lending.md`) |
 | `lending` savings | Savings | SAV | 6.7 | 7.11.15 |
 | `lending` investments | Investments | INV | 6.7 | 7.11.16 |
 | `lending` collections | Due lists, arrears, actions | CLN | 6.7 | 7.11.17 |
@@ -152,6 +163,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `retail.sales` | Sales with snapshots, voids, credit buyers, payments | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
 | `retail.purchasing` | Suppliers, restocks that set prices atomically | RET-06, RET-11 | 6.11 | 7.11.20 |
 | `retail.reports` | Valuation, revaluation difference, daily profit | RET-09, RET-10 | 6.11.3 | 7.11.20 |
+| `retail.cashbook` (proposed, ADR-022, not built) | Daily savings, cash banked, withdrawals, expenses, advances to owner or company, cash reports | FR-RET-17 to FR-RET-32 | 6.11.5 | 7.11.21 |
 | `retail.imports` | The one-off `import-retail` command: pilot history, legacy balances, opening journals; `retail_import_refs` | RET-12; chapter 13 section 13.13 | 6.11.4 | none (a command, `docs/runbooks/import-retail.md`) |
 
 ## How to run it
@@ -299,10 +311,14 @@ Accepted (this list is the ADR index):
 - ADR-019 Collateral release as an approval action, and the interim duplicate pledge rule (proposed, #24)
 - ADR-020 Retail vertical brought forward; stock as append-only movements; retail events post to the
   ledger (proposed, #50)
+- ADR-022 Retail cash book: savings reserve, banking, expenses, withdrawals and owner advances
+  (proposed, issue #147, design only; spec `docs/specs/retail-cash-book.md`)
 - ADR-024 Self-onboarding with operator verification, per-module subscriptions and manual payments
   (spec `docs/specs/self-onboarding-and-subscriptions.md`; build step 1 is #89)
 - ADR-025 First run signs the invitee in; guided tours are data with per-user progress on the server
   (proposed, #19 and #86)
+- ADR-026 Loan servicing: allocation rows by repayment, replay on reversal, default payment method
+  accounts and a servicing port for commands (proposed, #108)
 - ADR-028 Database performance: measured on 25 times the data, covering indexes, the plain tenant
   policy kept, connection timeouts (proposed, #107)
 - ADR-029 One fixed low stock threshold for retail, a per-tenant settings group later (#145)

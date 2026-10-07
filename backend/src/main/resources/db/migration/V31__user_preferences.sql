@@ -1,4 +1,4 @@
--- V27: a small per-user preference document (issue #19, ADR-025).
+-- V31: a small per-user preference document (issue #19, ADR-025).
 --
 -- Additive only (chapter 6 section 6.9): one column on users with a default, so every existing row
 -- is valid and no running code reads it yet. The document holds what a user chose for themselves

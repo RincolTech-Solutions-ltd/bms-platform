@@ -10,6 +10,11 @@ import type { Tour, TourStep } from './model';
 const SETTINGS = 'core.settings.manage';
 const SELL = 'retail.sale.create';
 const RESTOCK = 'retail.purchase.create';
+const STOCKTAKE = ['retail.stocktake.commit', 'retail.stock.read'];
+const CATALOGUE = ['retail.catalogue.manage', 'retail.customer.manage'];
+const LOANS = 'lending.loans.read';
+const DISBURSE = 'lending.disbursements.request';
+const REPAY = 'lending.repayments.create';
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
@@ -22,6 +27,45 @@ const help: TourStep = {
   body: 'Lost? Tap Help to take this tour again, or to see a short tour of the page you are on.',
 };
 
+const insights: TourStep = {
+  id: 'insights',
+  route: '/staff/insights',
+  target: 'insights-summary',
+  feature: 'insights',
+  title: 'How the business is doing',
+  body: 'See your sales and loans over time, and what changed this week.',
+};
+
+const loans: TourStep = {
+  id: 'loans',
+  target: 'nav-lending',
+  module: 'lending',
+  needs: [LOANS],
+  optional: true,
+  title: 'Loans',
+  body: 'Find any loan here, from the application to the last payment.',
+};
+
+const loanSearch: TourStep = {
+  id: 'loan-search',
+  route: '/staff/lending',
+  target: 'loan-search',
+  module: 'lending',
+  needs: [LOANS],
+  title: 'Find a loan',
+  body: 'Type the loan number, the member number or a name, then tap Search.',
+};
+
+const loanApplications: TourStep = {
+  id: 'loan-applications',
+  route: '/staff/lending',
+  target: 'loan-status',
+  module: 'lending',
+  needs: [LOANS],
+  title: 'Applications',
+  body: 'Pick Submitted or Appraised to see applications waiting for a decision. Pick Approved to see loans ready to pay out.',
+};
+
 const branch: TourStep = {
   id: 'branch',
   target: 'branch-picker',
@@ -29,9 +73,11 @@ const branch: TourStep = {
   body: 'Pick the branch you are working in. What you see and record follows this choice.',
 };
 
+// A tenant admin, invited by a colleague or activated from the public sign-up (ADR-024), lands on
+// the set-up checklist after the first run, and this tour starts there.
 export const adminWelcome: Tour = {
   id: 'admin-welcome',
-  version: 1,
+  version: 2,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -48,6 +94,13 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'Your set-up checklist',
       body: 'This list shows what is left to set up. Work through it at your own pace.',
+    },
+    {
+      id: 'name',
+      route: '/staff/setup',
+      target: 'setup-name',
+      title: 'Your business name',
+      body: 'Check the name your customers know you by. It shows on every page and receipt.',
     },
     {
       id: 'logo',
@@ -119,6 +172,16 @@ export const adminWelcome: Tour = {
       body: 'Record sales, check stock and restock from here. One big button for each job.',
     },
     {
+      id: 'catalogue',
+      route: '/staff/retail',
+      target: 'retail-catalogue',
+      module: 'retail',
+      needsAny: CATALOGUE,
+      optional: true,
+      title: 'Your items and prices',
+      body: 'Add items, change prices, and keep your suppliers and credit buyers here.',
+    },
+    {
       id: 'lending',
       route: '/staff',
       target: 'lending-members',
@@ -127,6 +190,7 @@ export const adminWelcome: Tour = {
       title: 'Your members',
       body: 'Your members are listed here, for the branch you picked.',
     },
+    loans,
     {
       id: 'approvals',
       target: 'nav-approvals',
@@ -135,13 +199,14 @@ export const adminWelcome: Tour = {
       title: 'Approvals',
       body: 'Some actions need a second person to agree. They wait for you here.',
     },
+    insights,
     help,
   ],
 };
 
 export const retailSales: Tour = {
   id: 'retail-sales',
-  version: 1,
+  version: 2,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -226,6 +291,16 @@ export const retailSales: Tour = {
       body: 'Tell your manager when an item runs low. They record new stock when it arrives.',
     },
     {
+      id: 'stocktake',
+      route: '/staff/retail',
+      target: 'retail-stocktake',
+      module: 'retail',
+      needs: STOCKTAKE,
+      optional: true,
+      title: 'Count the stock',
+      body: 'When you count the shelf, enter the numbers here. Your manager sees any difference.',
+    },
+    {
       id: 'shortcuts',
       route: '/staff/retail',
       target: 'retail-nav',
@@ -240,7 +315,7 @@ export const retailSales: Tour = {
 
 export const staffWelcome: Tour = {
   id: 'staff-welcome',
-  version: 1,
+  version: 2,
   title: 'Welcome tour',
   audience: (me) => !isTenantAdmin(me) && !isSeller(me),
   autoStart: true,
@@ -260,6 +335,9 @@ export const staffWelcome: Tour = {
       title: 'Members',
       body: 'Your members are listed here, for the branch you picked.',
     },
+    loans,
+    loanSearch,
+    loanApplications,
     {
       id: 'approvals',
       target: 'nav-approvals',
@@ -310,12 +388,6 @@ export const setupPage: Tour = {
   steps: [
     ...adminWelcome.steps.filter((s) => s.route === '/staff/setup'),
     {
-      id: 'name',
-      target: 'setup-name',
-      title: 'Your business name',
-      body: 'This name shows at the top of every page. Type it as your customers know it.',
-    },
-    {
       id: 'save',
       target: 'setup-save',
       title: 'Save',
@@ -324,5 +396,128 @@ export const setupPage: Tour = {
   ],
 };
 
+export const loansPage: Tour = {
+  id: 'page-loans',
+  version: 1,
+  title: 'This page: loans',
+  audience: (me) => held(me, LOANS),
+  autoStart: false,
+  page: '/staff/lending',
+  steps: [
+    { ...loanSearch, route: undefined },
+    { ...loanApplications, route: undefined },
+  ],
+};
+
+export const loanPage: Tour = {
+  id: 'page-loan',
+  version: 1,
+  title: 'This page: one loan',
+  audience: (me) => held(me, LOANS),
+  autoStart: false,
+  page: '/staff/lending/loans/$loanId',
+  steps: [
+    {
+      id: 'actions',
+      target: 'loan-actions',
+      optional: true,
+      title: 'What you can do',
+      body: 'The buttons here change with the loan. You only see what your role allows.',
+    },
+    {
+      id: 'disburse',
+      target: 'loan-disburse',
+      needs: [DISBURSE],
+      optional: true,
+      title: 'Pay out the loan',
+      body: 'An approved loan is paid out here. A second person agrees before the money moves.',
+    },
+    {
+      id: 'repay',
+      target: 'loan-repay',
+      needs: [REPAY],
+      optional: true,
+      title: 'Record a payment',
+      body: 'Enter what the member paid and how. You get a receipt number to give them.',
+    },
+    {
+      id: 'balances',
+      target: 'loan-balances',
+      optional: true,
+      title: 'What is owed',
+      body: 'See what is still owed, what is late and when the next payment is due.',
+    },
+    {
+      id: 'schedule',
+      target: 'loan-schedule',
+      title: 'The schedule',
+      body: 'Each payment the member should make, and what has been paid so far.',
+    },
+    {
+      id: 'transactions',
+      target: 'loan-transactions',
+      title: 'Money in and out',
+      body: 'Every payout and payment on this loan, with its receipt number.',
+    },
+  ],
+};
+
+export const cataloguePage: Tour = {
+  id: 'page-catalogue',
+  version: 1,
+  title: 'This page: catalogue',
+  audience: (me) => CATALOGUE.some((p) => held(me, p)),
+  autoStart: false,
+  page: '/staff/retail/catalogue',
+  steps: [
+    {
+      id: 'links',
+      target: 'catalogue-links',
+      title: 'Your lists',
+      body: 'Each list the shop keeps has a button here. You see the ones your role allows.',
+    },
+    {
+      id: 'products',
+      target: 'catalogue-products',
+      optional: true,
+      title: 'Items and prices',
+      body: 'Add a new item or change a price here. Old prices are kept.',
+    },
+    {
+      id: 'importer',
+      target: 'catalogue-importer',
+      needs: [SETTINGS, 'retail.catalogue.manage'],
+      optional: true,
+      title: 'Many items at once',
+      body: 'Have a long list in a spreadsheet? Import it here and check it before saving.',
+    },
+  ],
+};
+
+export const stocktakePage: Tour = {
+  id: 'page-stocktake',
+  version: 1,
+  title: 'This page: stock-take',
+  audience: (me) => STOCKTAKE.every((p) => held(me, p)),
+  autoStart: false,
+  page: '/staff/retail/stocktake',
+  steps: [
+    {
+      id: 'count',
+      target: 'count-search',
+      title: 'Count each item',
+      body: 'Find an item and type how many you counted. Leave an item blank to skip it.',
+    },
+    {
+      id: 'review',
+      target: 'count-review',
+      title: 'Check before saving',
+      body: 'Tap Review to see what differs. Nothing changes until you commit the count.',
+    },
+  ],
+};
+
 /** Every tour, in the order the first matching auto tour is chosen. */
-export const TOURS: readonly Tour[] = [adminWelcome, retailSales, staffWelcome, salePage, stockPage, setupPage];
+export const TOURS: readonly Tour[] = [
+  adminWelcome, retailSales, staffWelcome, salePage, stockPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
+];

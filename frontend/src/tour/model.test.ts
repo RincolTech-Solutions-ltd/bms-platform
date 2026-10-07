@@ -111,6 +111,11 @@ describe('choosing the tour', () => {
     expect(pageTourFor(TOURS, CASHIER, '/staff/retail/sale')).toBeUndefined();
     expect(pageTourFor(TOURS, ADMIN, '/staff/setup')?.id).toBe('page-setup');
     expect(pageTourFor(TOURS, ADMIN, '/staff/approvals')).toBeUndefined();
+    // A $name segment stands for one segment: any loan, but not the list or a deeper page.
+    const OFFICER = me(['lending.loans.read']);
+    expect(pageTourFor(TOURS, OFFICER, '/staff/lending/loans/00000000-0000-4000-8000-0000000000a1')?.id).toBe('page-loan');
+    expect(pageTourFor(TOURS, OFFICER, '/staff/lending')?.id).toBe('page-loans');
+    expect(pageTourFor(TOURS, OFFICER, '/staff/lending/loans/x/y')).toBeUndefined();
   });
 
   it('has unique tour ids that the server accepts, and unique step ids per tour', () => {

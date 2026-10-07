@@ -25,6 +25,8 @@ export const FEATURES = {
   agents: false,
   /** The staff screen: invite a person, give them roles (no issue yet; the API exists). */
   staffAdmin: false,
+  /** The insights pages: trends from the data already kept (#156, not merged yet). */
+  insights: false,
 } satisfies Record<string, boolean>;
 
 export type Feature = keyof typeof FEATURES;
@@ -65,7 +67,7 @@ export interface Tour {
   audience: (me: Me) => boolean;
   /** Starts by itself on first sign-in; false for page tours, which only start from Help. */
   autoStart: boolean;
-  /** For a page tour: the page it explains. */
+  /** For a page tour: the page it explains. A `$name` segment matches any one segment. */
   page?: string;
   steps: readonly TourStep[];
 }
@@ -107,8 +109,12 @@ export function mainTourFor(tours: readonly Tour[], me: Me): Tour | undefined {
 
 /** The page tour for the page the user is on, if this user may see it. */
 export function pageTourFor(tours: readonly Tour[], me: Me, pathname: string): Tour | undefined {
-  const path = pathname.replace(/\/+$/, '') || '/';
-  return tours.find((tour) => tour.page === path && tour.audience(me) && stepsFor(tour, me).length > 0);
+  const path = (pathname.replace(/\/+$/, '') || '/').split('/');
+  const matches = (page: string) => {
+    const want = page.split('/');
+    return want.length === path.length && want.every((part, i) => part.startsWith('$') || part === path[i]);
+  };
+  return tours.find((tour) => tour.page !== undefined && matches(tour.page) && tour.audience(me) && stepsFor(tour, me).length > 0);
 }
 
 /**
