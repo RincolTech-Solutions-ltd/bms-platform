@@ -8,7 +8,7 @@ import type { Me } from '../../../api/client';
 export const PROFIT = 'retail.profit.read';
 
 export type RetailScreen =
-  | 'sale' | 'creditSales' | 'salesHistory' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis'
+  | 'sale' | 'creditSales' | 'salesHistory' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins'
   | 'catalogue' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer';
 
 /** The catalogue management screens (#146); the Catalogue tile opens when any of them may be used. */
@@ -33,6 +33,7 @@ const NEEDS: Record<RetailScreen, string[]> = {
   profit: [PROFIT],
   // The analytics reports (issue #149); profit columns arrive only with retail.profit.read.
   salesAnalysis: ['retail.sale.read'],
+  margins: [PROFIT],
   // The Catalogue home needs nothing itself: canUse opens it when any screen under it may be used.
   catalogue: [],
   // The lists these screens read are stock, purchase and sale reads; changing them needs the manage permissions.
@@ -109,6 +110,7 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'valuation', path: '/staff/retail/valuation', label: 'Stock value', hint: 'Stock at cost and at price' },
   { screen: 'profit', path: '/staff/retail/profit', label: 'Daily profit', hint: 'Profit per day' },
   { screen: 'salesAnalysis', path: '/staff/retail/sales-analysis', label: 'Sales analysis', hint: 'Sales by day, shop, item and seller' },
+  { screen: 'margins', path: '/staff/retail/margins', label: 'Margins', hint: 'Profit by item, low margins, price changes' },
   { screen: 'catalogue', path: '/staff/retail/catalogue', label: 'Catalogue', hint: 'Items, categories, units, suppliers and credit buyers' },
 ];
 

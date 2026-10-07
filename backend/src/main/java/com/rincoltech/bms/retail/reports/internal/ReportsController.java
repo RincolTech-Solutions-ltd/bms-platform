@@ -22,10 +22,12 @@ class ReportsController {
 
     private final ReportsService service;
     private final SalesAnalysisService salesAnalysis;
+    private final MarginService margins;
 
-    ReportsController(ReportsService service, SalesAnalysisService salesAnalysis) {
+    ReportsController(ReportsService service, SalesAnalysisService salesAnalysis, MarginService margins) {
         this.service = service;
         this.salesAnalysis = salesAnalysis;
+        this.margins = margins;
     }
 
     @GetMapping("/valuation")
@@ -62,5 +64,19 @@ class ReportsController {
             @RequestParam(name = "top", required = false) Integer top,
             @RequestParam(name = "slow_days", required = false) Integer slowDays) {
         return salesAnalysis.analyse(branchIds, from, to, group, top, slowDays);
+    }
+
+    @GetMapping("/margins")
+    @RequiresPermission("retail.profit.read")
+    @Operation(
+            summary = "Profit and margin by item and category, items under a target, price change impact (issue #149)",
+            operationId = "getRetailMargins")
+    MarginApi.Report margins(
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "from", required = false) LocalDate from,
+            @RequestParam(name = "to", required = false) LocalDate to,
+            @RequestParam(name = "top", required = false) Integer top,
+            @RequestParam(name = "target_bp", required = false) Integer targetBp) {
+        return margins.margins(branchIds, from, to, top, targetBp);
     }
 }

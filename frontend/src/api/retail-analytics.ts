@@ -10,6 +10,9 @@ type S = components['schemas'];
 export type SalesAnalysis = S['RetailSalesAnalysis'];
 export type AnalysisRow = S['RetailSalesAnalysisRow'];
 export type StockedItem = S['RetailStockedItem'];
+export type Margins = S['RetailMargins'];
+export type MarginRow = S['RetailMarginRow'];
+export type PriceChangeImpact = S['RetailPriceChangeImpact'];
 
 export interface SalesAnalysisQuery {
   /** One branch; absent means every branch the caller may read. */
@@ -26,6 +29,13 @@ export const retailAnalytics = {
     return unwrap(
       await api.GET('/api/v1/retail/reports/sales-analysis', {
         params: { query: { branch_id: branchId ? [branchId] : undefined, from, to, group, top, slow_days: slowDays } },
+      }),
+    );
+  },
+  async margins({ branchId, from, to, top, targetBp }: { branchId?: string; from: string; to: string; top: number; targetBp: number }): Promise<Margins> {
+    return unwrap(
+      await api.GET('/api/v1/retail/reports/margins', {
+        params: { query: { branch_id: branchId ? [branchId] : undefined, from, to, top, target_bp: targetBp } },
       }),
     );
   },

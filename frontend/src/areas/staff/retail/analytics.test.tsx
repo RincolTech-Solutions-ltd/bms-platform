@@ -2,11 +2,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { SalesAnalysis } from '../../../api/retail-analytics';
+import type { Margins, SalesAnalysis } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { Bars, Sparkline, rangeProblem } from './analytics-ui';
 import { canUse } from './permissions';
+import { MarginsView } from './margins';
 import { SalesAnalysisView } from './sales-analysis';
 import { Gate } from './ui';
 
@@ -105,5 +106,41 @@ describe('analytics pieces', () => {
     expect(html).toContain('aria-label="Sales, last 3 days"');
     expect(html).toContain('points="0.00,22.00 50.00,12.00 100.00,2.00"');
     expect(html).not.toContain('style=');
+  });
+});
+
+describe('margins', () => {
+  const margins: Margins = {
+    from: '2026-09-08', to: '2026-10-07', currency: 'UGX', top: 10, target_bp: 2000,
+    totals: { sales_minor: 6400, cost_minor: 4500, profit_minor: 1900, margin_bp: 2969 },
+    by_product: [{ id: 'p1', code: 'ANA-1', label: 'Test Product ANA-1', unit: 'piece', qty: '3.000', sales_minor: 4500, cost_minor: 3000, profit_minor: 1500, margin_bp: 3333 }],
+    by_category: [{ id: 'c1', label: 'Lighting', qty: '3.000', sales_minor: 4500, cost_minor: 3000, profit_minor: 1500, margin_bp: 3333 }],
+    below_target: { total: 2, items: [{ id: 'p5', code: 'ANA-5', label: 'Test Product ANA-5', unit: 'piece', qty: '1.000', sales_minor: 1000, cost_minor: 900, profit_minor: 100, margin_bp: 1000 }] },
+    price_changes: {
+      total: 1,
+      items: [{
+        product_id: 'p1', code: 'ANA-1', description: 'Test Product ANA-1', unit: 'piece', changed_on: '2026-10-07', old_sell_minor: 1500, new_sell_minor: 2000,
+        days_before: 29, days_after: 1, units_before: '2.000', units_after: '2.000', sales_before_minor: 3000, sales_after_minor: 3500, margin_before_bp: 3333, margin_after_bp: 2000,
+      }],
+    },
+  };
+
+  it('shows margins, the target, the items under it and the price change impact', () => {
+    const html = renderToString(<MarginsView data={margins} />);
+    expect(html).toContain('Sold below 20% margin');
+    expect(html).toContain('29.69%');
+    expect(html).toContain('Test Product ANA-5');
+    expect(html).toContain('10%');
+    expect(html).toContain('UGX 1,500 to UGX 2,000 on 2026-10-07');
+    expect(html).toContain('33.33%');
+    expect(html).toContain('Showing 1 of 2');
+  });
+
+  it('is closed without retail.profit.read', () => {
+    expect(canUse(mockMe('sales'), 'margins')).toBe(false);
+    expect(canUse(mockMe('admin'), 'margins')).toBe(true);
+    const html = page('sales', <Gate screen="margins" title="Margins"><p>SECRET-CONTENT</p></Gate>);
+    expect(html).toContain('You do not have access');
+    expect(html).not.toContain('SECRET-CONTENT');
   });
 });

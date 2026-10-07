@@ -3220,6 +3220,126 @@
           }
         }
       },
+      "RetailMarginBelowTarget" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailMarginRow"
+            },
+            "type" : "array"
+          },
+          "total" : {
+            "description" : "How many items are below the target, before the row limit",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailMarginRow" : {
+        "description" : "One item or category; code and unit are set for an item only",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "cost_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "margin_bp" : {
+            "description" : "Absent when the item sold for nothing",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "profit_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "qty" : {
+            "type" : "string"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailMarginTotals" : {
+        "properties" : {
+          "cost_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "margin_bp" : {
+            "description" : "Profit over sales in basis points, half up; absent when sales are not above zero",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "profit_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailMargins" : {
+        "properties" : {
+          "below_target" : {
+            "$ref" : "#/components/schemas/RetailMarginBelowTarget"
+          },
+          "by_category" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailMarginRow"
+            },
+            "type" : "array"
+          },
+          "by_product" : {
+            "description" : "The top items by profit",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailMarginRow"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "from" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "price_changes" : {
+            "$ref" : "#/components/schemas/RetailPriceChanges"
+          },
+          "target_bp" : {
+            "description" : "The margin target in basis points; 2000 is 20 percent",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "top" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/RetailMarginTotals"
+          }
+        }
+      },
       "RetailOpenSale" : {
         "properties" : {
           "balance_minor" : {
@@ -3383,6 +3503,84 @@
           "source_id" : {
             "format" : "uuid",
             "type" : "string"
+          }
+        }
+      },
+      "RetailPriceChangeImpact" : {
+        "description" : "An item whose sell price changed in the range: the last change decides the split, the figures before it are from the start of the range, those from it are to the end of the range. Cost is the snapshot on each sale line, never the current cost.",
+        "properties" : {
+          "changed_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "days_after" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "days_before" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "margin_after_bp" : {
+            "description" : "Absent when nothing sold from the change",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "margin_before_bp" : {
+            "description" : "Absent when nothing sold before the change",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "new_sell_minor" : {
+            "description" : "The sell price after the last change in the range",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "old_sell_minor" : {
+            "description" : "The sell price before the first change in the range",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sales_after_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_before_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "units_after" : {
+            "type" : "string"
+          },
+          "units_before" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailPriceChanges" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPriceChangeImpact"
+            },
+            "type" : "array"
+          },
+          "total" : {
+            "format" : "int32",
+            "type" : "integer"
           }
         }
       },
@@ -9777,6 +9975,69 @@
         },
         "summary" : "Record a restock: prices, history, movements and journals in one transaction (FR-RET-06); M",
         "tags" : [ "retail-purchasing" ]
+      }
+    },
+    "/api/v1/retail/reports/margins" : {
+      "get" : {
+        "operationId" : "getRetailMargins",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "from",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "top",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "target_bp",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailMargins"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Profit and margin by item and category, items under a target, price change impact (issue #149)",
+        "tags" : [ "retail-reports" ]
       }
     },
     "/api/v1/retail/reports/profit/daily" : {

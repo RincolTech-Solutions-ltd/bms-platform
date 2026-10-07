@@ -112,6 +112,13 @@ export const icons = {
       <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
     </Svg>
   ),
+  margins: (
+    <Svg>
+      <path d="M19 5L5 19" />
+      <circle cx="7" cy="7" r="2.5" />
+      <circle cx="17" cy="17" r="2.5" />
+    </Svg>
+  ),
   user: (
     <Svg>
       <circle cx="12" cy="8" r="4" />

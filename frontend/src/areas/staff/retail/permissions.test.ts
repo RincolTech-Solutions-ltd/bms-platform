@@ -22,14 +22,14 @@ describe('retail permission gating', () => {
     expect(only('retail.purchase.create')).toEqual(['restock']);
     expect(only('retail.usage.report')).toEqual(['usage']);
     expect(only('retail.stock.read')).toEqual(['stock', 'transfers', 'valuation']);
-    expect(only('retail.profit.read')).toEqual(['profit']);
+    expect(only('retail.profit.read')).toEqual(['profit', 'margins']);
     expect(only('retail.sale.read')).toEqual(['creditSales', 'salesHistory', 'salesAnalysis']);
   });
 
   it('offers everything to an admin', () => {
     expect(canSeeProfit(admin)).toBe(true);
     expect(screensFor(admin).map((s) => s.screen)).toEqual(
-      ['sale', 'creditSales', 'salesHistory', 'restock', 'usage', 'stock', 'stocktake', 'transfer', 'transfers', 'valuation', 'profit', 'salesAnalysis', 'catalogue'],
+      ['sale', 'creditSales', 'salesHistory', 'restock', 'usage', 'stock', 'stocktake', 'transfer', 'transfers', 'valuation', 'profit', 'salesAnalysis', 'margins', 'catalogue'],
     );
   });
 

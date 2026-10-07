@@ -16,6 +16,7 @@ import com.rincoltech.bms.retail.reports.internal.SalesAnalysisApi.StockedItem;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisApi.Totals;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Agg;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Dimension;
+import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Order;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Stocked;
 import com.rincoltech.bms.retail.stock.Quantities;
 import java.time.DayOfWeek;
@@ -93,13 +94,13 @@ class SalesAnalysisService {
                 .toList();
 
         // Per branch, profit shows for the branches the caller may read it in.
-        List<Row> byBranch = repo.grouped(Dimension.BRANCH, filter, w.from(), w.to(), false, top).stream()
+        List<Row> byBranch = repo.grouped(Dimension.BRANCH, filter, w.from(), w.to(), Order.SALES, null, top).stream()
                 .map(a -> row(a, principal.may(PROFIT_READ, a.id())))
                 .toList();
-        List<Row> byCategory = rows(Dimension.CATEGORY, filter, w, false, top, profit);
-        List<Row> byProduct = rows(Dimension.PRODUCT, filter, w, false, top, profit);
-        List<Row> topByQuantity = rows(Dimension.PRODUCT, filter, w, true, top, profit);
-        List<Row> bySeller = rows(Dimension.SELLER, filter, w, false, top, profit);
+        List<Row> byCategory = rows(Dimension.CATEGORY, filter, w, Order.SALES, top, profit);
+        List<Row> byProduct = rows(Dimension.PRODUCT, filter, w, Order.SALES, top, profit);
+        List<Row> topByQuantity = rows(Dimension.PRODUCT, filter, w, Order.QTY, top, profit);
+        List<Row> bySeller = rows(Dimension.SELLER, filter, w, Order.SALES, top, profit);
 
         List<Stocked> slow = repo.slowMovers(filter, today.minusDays(slowDays - 1L), today, top);
         List<Stocked> unsold = repo.noSales(filter, w.from(), w.to(), top);
@@ -124,8 +125,8 @@ class SalesAnalysisService {
                 unsold.isEmpty() ? 0 : unsold.getFirst().total());
     }
 
-    private List<Row> rows(Dimension dimension, List<UUID> filter, Window w, boolean byQty, int top, boolean profit) {
-        return repo.grouped(dimension, filter, w.from(), w.to(), byQty, top).stream()
+    private List<Row> rows(Dimension dimension, List<UUID> filter, Window w, Order order, int top, boolean profit) {
+        return repo.grouped(dimension, filter, w.from(), w.to(), order, null, top).stream()
                 .map(a -> row(a, profit))
                 .toList();
     }

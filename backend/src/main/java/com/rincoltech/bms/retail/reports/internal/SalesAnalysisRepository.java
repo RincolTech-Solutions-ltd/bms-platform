@@ -33,7 +33,22 @@ class SalesAnalysisRepository {
 
     /** Sums over completed sales; {@code cost} is read here and leaves the module only for a profit reader. */
     record Agg(
-            UUID id, String code, String label, String unit, BigDecimal qty, long sales, long cost, long saleCount) {}
+            UUID id,
+            String code,
+            String label,
+            String unit,
+            BigDecimal qty,
+            long sales,
+            long cost,
+            long saleCount,
+            int total) {}
+
+    enum Order {
+        SALES,
+        QTY,
+        PROFIT,
+        MARGIN
+    }
 
     record Day(LocalDate day, long sales, long cost, long saleCount) {}
 
@@ -77,7 +92,7 @@ class SalesAnalysisRepository {
     /** The whole window as one row, so totals do not depend on the row limit of the lists. */
     Agg total(List<UUID> branchIds, LocalDate from, LocalDate to) {
         if (branchIds != null && branchIds.isEmpty()) {
-            return new Agg(null, null, null, null, BigDecimal.ZERO, 0, 0, 0);
+            return new Agg(null, null, null, null, BigDecimal.ZERO, 0, 0, 0, 0);
         }
         return jdbc.sql("SELECT coalesce(sum(l.qty), 0) AS qty, coalesce(sum(l.line_total_minor), 0) AS sales,"
                         + " coalesce(sum(l.line_cost_minor), 0) AS cost, count(DISTINCT s.id) AS sale_count"
@@ -91,13 +106,24 @@ class SalesAnalysisRepository {
                         rs.getBigDecimal("qty"),
                         rs.getLong("sales"),
                         rs.getLong("cost"),
-                        rs.getLong("sale_count")))
+                        rs.getLong("sale_count"),
+                        1))
                 .single();
     }
 
-    /** Sales grouped by a dimension, largest first ({@code byQty} orders by units instead), at most {@code limit} rows. */
+    /**
+     * Sales grouped by a dimension, in the given order (largest first; margin lowest first), at most
+     * {@code limit} rows. With {@code belowTargetBp} only groups whose margin is under that many basis
+     * points (a group that sold for nothing at a cost counts); {@link Agg#total} is the count before the limit.
+     */
     List<Agg> grouped(
-            Dimension dimension, List<UUID> branchIds, LocalDate from, LocalDate to, boolean byQty, int limit) {
+            Dimension dimension,
+            List<UUID> branchIds,
+            LocalDate from,
+            LocalDate to,
+            Order order,
+            Integer belowTargetBp,
+            int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -138,15 +164,27 @@ class SalesAnalysisRepository {
             case PRODUCT -> "p.id, p.code, p.description, u.name";
             default -> "s.created_by";
         };
-        String order = byQty
-                ? "sum(l.qty) DESC, sum(l.line_total_minor) DESC"
-                : "sum(l.line_total_minor) DESC, sum(l.qty) DESC";
+        String orderBy = switch (order) {
+            case QTY -> "sum(l.qty) DESC, sum(l.line_total_minor) DESC";
+            case PROFIT -> "sum(l.line_total_minor) - sum(l.line_cost_minor) DESC, sum(l.line_total_minor) DESC";
+            case MARGIN ->
+                "(sum(l.line_total_minor) - sum(l.line_cost_minor))::numeric"
+                        + " / nullif(sum(l.line_total_minor), 0) ASC NULLS FIRST, sum(l.line_total_minor) DESC";
+            default -> "sum(l.line_total_minor) DESC, sum(l.qty) DESC";
+        };
+        String having = "";
         Map<String, Object> params = params(branchIds, from, to);
+        if (belowTargetBp != null) {
+            having = " HAVING (sum(l.line_total_minor) - sum(l.line_cost_minor))::numeric * 10000"
+                    + " < :target::numeric * sum(l.line_total_minor)";
+            params.put("target", belowTargetBp);
+        }
         params.put("limit", limit);
         return jdbc.sql("SELECT " + key + " AS k, " + code + " AS code, " + label + " AS label, " + unit + " AS unit,"
                         + " sum(l.qty) AS qty, sum(l.line_total_minor) AS sales, sum(l.line_cost_minor) AS cost,"
-                        + " count(DISTINCT s.id) AS sale_count" + BASE + join + WHERE + branchClause(branchIds)
-                        + " GROUP BY " + groupBy + " ORDER BY " + order + ", 1 LIMIT :limit")
+                        + " count(DISTINCT s.id) AS sale_count, count(*) OVER () AS total"
+                        + BASE + join + WHERE + branchClause(branchIds)
+                        + " GROUP BY " + groupBy + having + " ORDER BY " + orderBy + ", 1 LIMIT :limit")
                 .params(params)
                 .query((rs, n) -> new Agg(
                         rs.getObject("k", UUID.class),
@@ -156,7 +194,8 @@ class SalesAnalysisRepository {
                         rs.getBigDecimal("qty"),
                         rs.getLong("sales"),
                         rs.getLong("cost"),
-                        rs.getLong("sale_count")))
+                        rs.getLong("sale_count"),
+                        rs.getInt("total")))
                 .list();
     }
 

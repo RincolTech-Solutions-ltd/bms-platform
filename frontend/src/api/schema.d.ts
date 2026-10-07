@@ -1605,6 +1605,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/margins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profit and margin by item and category, items under a target, price change impact (issue #149) */
+        get: operations["getRetailMargins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/profit/daily": {
         parameters: {
             query?: never;
@@ -3423,6 +3440,67 @@ export interface components {
             /** Format: int64 */
             usage_cost_minor?: number;
         };
+        RetailMarginBelowTarget: {
+            items?: components["schemas"]["RetailMarginRow"][];
+            /**
+             * Format: int32
+             * @description How many items are below the target, before the row limit
+             */
+            total?: number;
+        };
+        /** @description One item or category; code and unit are set for an item only */
+        RetailMarginRow: {
+            code?: string;
+            /** Format: int64 */
+            cost_minor?: number;
+            /** Format: uuid */
+            id?: string;
+            label?: string;
+            /**
+             * Format: int64
+             * @description Absent when the item sold for nothing
+             */
+            margin_bp?: number;
+            /** Format: int64 */
+            profit_minor?: number;
+            qty?: string;
+            /** Format: int64 */
+            sales_minor?: number;
+            unit?: string;
+        };
+        RetailMarginTotals: {
+            /** Format: int64 */
+            cost_minor?: number;
+            /**
+             * Format: int64
+             * @description Profit over sales in basis points, half up; absent when sales are not above zero
+             */
+            margin_bp?: number;
+            /** Format: int64 */
+            profit_minor?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        RetailMargins: {
+            below_target?: components["schemas"]["RetailMarginBelowTarget"];
+            by_category?: components["schemas"]["RetailMarginRow"][];
+            /** @description The top items by profit */
+            by_product?: components["schemas"]["RetailMarginRow"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            price_changes?: components["schemas"]["RetailPriceChanges"];
+            /**
+             * Format: int32
+             * @description The margin target in basis points; 2000 is 20 percent
+             */
+            target_bp?: number;
+            /** Format: date */
+            to?: string;
+            /** Format: int32 */
+            top?: number;
+            totals?: components["schemas"]["RetailMarginTotals"];
+        };
         RetailOpenSale: {
             /** Format: int64 */
             balance_minor?: number;
@@ -3505,6 +3583,51 @@ export interface components {
             source?: string;
             /** Format: uuid */
             source_id?: string;
+        };
+        /** @description An item whose sell price changed in the range: the last change decides the split, the figures before it are from the start of the range, those from it are to the end of the range. Cost is the snapshot on each sale line, never the current cost. */
+        RetailPriceChangeImpact: {
+            /** Format: date */
+            changed_on?: string;
+            code?: string;
+            /** Format: int32 */
+            days_after?: number;
+            /** Format: int32 */
+            days_before?: number;
+            description?: string;
+            /**
+             * Format: int64
+             * @description Absent when nothing sold from the change
+             */
+            margin_after_bp?: number;
+            /**
+             * Format: int64
+             * @description Absent when nothing sold before the change
+             */
+            margin_before_bp?: number;
+            /**
+             * Format: int64
+             * @description The sell price after the last change in the range
+             */
+            new_sell_minor?: number;
+            /**
+             * Format: int64
+             * @description The sell price before the first change in the range
+             */
+            old_sell_minor?: number;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: int64 */
+            sales_after_minor?: number;
+            /** Format: int64 */
+            sales_before_minor?: number;
+            unit?: string;
+            units_after?: string;
+            units_before?: string;
+        };
+        RetailPriceChanges: {
+            items?: components["schemas"]["RetailPriceChangeImpact"][];
+            /** Format: int32 */
+            total?: number;
         };
         /** @description At least one price; FR-RET-02 */
         RetailPriceEditRequest: {
@@ -7388,6 +7511,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
+    getRetailMargins: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                top?: number;
+                target_bp?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailMargins"];
                 };
             };
         };
