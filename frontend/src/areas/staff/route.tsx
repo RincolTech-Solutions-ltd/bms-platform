@@ -10,6 +10,7 @@ import { BrandLoader } from '../../components/states';
 import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
 import { showLending } from './lending/permissions';
+import { showSavings } from './lending/savings-permissions';
 import { RetailNav } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
 
@@ -106,7 +107,8 @@ export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: 
       <nav className="tabs" aria-label="Staff areas" data-tour="nav-areas">
         <Link to="/staff" activeOptions={{ exact: true }}>Home</Link>
         {permissions.includes('core.approvals.read') && <Link to="/staff/approvals" data-tour="nav-approvals">Approvals</Link>}
-        {showLending(me) && <Link to="/staff/lending" data-tour="nav-lending">Loans</Link>}
+        {showLending(me) && <Link to="/staff/lending" activeOptions={{ exact: true }} data-tour="nav-lending">Loans</Link>}
+        {showSavings(me) && <Link to="/staff/lending/savings">Savings</Link>}
         {showRetail(me) && <Link to="/staff/retail" data-tour="nav-retail">Retail</Link>}
         {permissions.includes('core.settings.manage') && <Link to="/staff/setup">Business set-up</Link>}
       </nav>
