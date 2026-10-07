@@ -50,22 +50,31 @@ function MarginTable({ title, rows, flag }: { title: string; rows: MarginRow[]; 
 }
 
 function Pace({ units, days }: { units?: string; days?: number }) {
-  return <>{showQty(units ?? '0')} in {days ?? 0} {days === 1 ? 'day' : 'days'}</>;
+  return <>{showQty(units ?? '0')} sold in {days ?? 0} {days === 1 ? 'day' : 'days'}</>;
 }
 
 function PriceChanges({ items }: { items: PriceChangeImpact[] }) {
   const phone = useIsPhone();
   if (items.length === 0) return <Empty>No selling price changed in this range.</Empty>;
+  if (phone) {
+    return (
+      <ul className="an-cards">
+        {items.map((c) => (
+          <li key={c.product_id} className="rt-card">
+            <strong>{c.description}</strong>
+            <span className="hint">{c.code}</span>
+            <p>Price {money(c.old_sell_minor ?? 0)} to {money(c.new_sell_minor ?? 0)} on {c.changed_on}</p>
+            <p>Before: <Pace units={c.units_before} days={c.days_before} />, margin {percentOrNone(c.margin_before_bp) || 'n/a'}</p>
+            <p>After: <Pace units={c.units_after} days={c.days_after} />, margin {percentOrNone(c.margin_after_bp) || 'n/a'}</p>
+          </li>
+        ))}
+      </ul>
+    );
+  }
   return (
     <div className="table-wrap" tabIndex={0}><table>
       <thead>
-        <tr>
-          <th>Item</th>
-          {!phone && <th className="num">Sold before</th>}
-          {!phone && <th className="num">Sold after</th>}
-          <th className="num">Margin before</th>
-          <th className="num">Margin after</th>
-        </tr>
+        <tr><th>Item</th><th className="num">Sold before</th><th className="num">Sold after</th><th className="num">Margin before</th><th className="num">Margin after</th></tr>
       </thead>
       <tbody>
         {items.map((c) => (
@@ -73,12 +82,11 @@ function PriceChanges({ items }: { items: PriceChangeImpact[] }) {
             <td>
               {c.description}<br />
               <span className="hint">{c.code}: {money(c.old_sell_minor ?? 0)} to {money(c.new_sell_minor ?? 0)} on {c.changed_on}</span>
-              {phone && <><br /><span className="hint">Before: <Pace units={c.units_before} days={c.days_before} />; after: <Pace units={c.units_after} days={c.days_after} /></span></>}
             </td>
-            {!phone && <td className="num"><Pace units={c.units_before} days={c.days_before} /></td>}
-            {!phone && <td className="num"><Pace units={c.units_after} days={c.days_after} /></td>}
-            <td className="num">{percentOrNone(c.margin_before_bp)}</td>
-            <td className="num">{percentOrNone(c.margin_after_bp)}</td>
+            <td className="num"><Pace units={c.units_before} days={c.days_before} /></td>
+            <td className="num"><Pace units={c.units_after} days={c.days_after} /></td>
+            <td className="num">{percentOrNone(c.margin_before_bp) || 'n/a'}</td>
+            <td className="num">{percentOrNone(c.margin_after_bp) || 'n/a'}</td>
           </tr>
         ))}
       </tbody>

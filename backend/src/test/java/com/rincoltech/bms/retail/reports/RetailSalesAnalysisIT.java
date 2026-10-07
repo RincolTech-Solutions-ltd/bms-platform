@@ -195,4 +195,33 @@ class RetailSalesAnalysisIT extends IntegrationTest {
         assertThat(api.get("/reports/sales-analysis?slow_days=181", ADMIN).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
+
+    @Test
+    void profitHeldAtOneBranchOnlyShowsForThatBranchAndNeverInAMixedFigure() {
+        Map<String, String> scopes = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
+        ResponseEntity<JsonNode> mixed = api.call(HttpMethod.GET, "/reports/sales-analysis", null, ADMIN, "*", scopes);
+        assertThat(mixed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode body = mixed.getBody();
+        assertThat(body.get("profit_visible").asBoolean()).isFalse();
+        assertThat(AnalyticsData.hasKey(body.get("totals"), "profit")).isFalse();
+        assertThat(AnalyticsData.hasKey(body.get("by_product"), "profit")).isFalse();
+        assertThat(AnalyticsData.hasKey(body.get("series"), "profit")).isFalse();
+        for (JsonNode row : body.get("by_branch")) {
+            boolean headOffice = row.get("id").asString().equals(t.headOffice().toString());
+            assertThat(row.has("gross_profit_minor")).as("branch row %s", row).isEqualTo(headOffice);
+        }
+        assertThat(body.toString()).doesNotContain("1800");
+
+        // Asking for head office alone is a report over a branch where the permission is held.
+        ResponseEntity<JsonNode> one = api.call(
+                HttpMethod.GET, "/reports/sales-analysis?branch_id=" + t.headOffice(), null, ADMIN, "*", scopes);
+        assertThat(one.getBody().get("profit_visible").asBoolean()).isTrue();
+        assertThat(one.getBody().get("totals").get("gross_profit_minor").asLong())
+                .isEqualTo(1_300);
+        // And for branch two alone, none, though the sales are the caller's to read.
+        ResponseEntity<JsonNode> other = api.call(
+                HttpMethod.GET, "/reports/sales-analysis?branch_id=" + t.secondBranch(), null, ADMIN, "*", scopes);
+        assertThat(other.getBody().get("totals").get("sales_minor").asLong()).isEqualTo(1_500);
+        assertThat(AnalyticsData.hasKey(other.getBody(), "gross")).isFalse();
+    }
 }

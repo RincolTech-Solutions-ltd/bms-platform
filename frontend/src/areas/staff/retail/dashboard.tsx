@@ -89,19 +89,23 @@ export function DashboardView({ data, nameOf, stockLink }: { data: Dashboard; na
               {!phone && <th className="num">30 days</th>}
               {shopProfit && !phone && <th className="num">Profit today</th>}
               {shopStock && !phone && <th className="num">Stock at price</th>}
-              {shopStock && <th className="num">Out / low</th>}
+              {shopStock && !phone && <th className="num">Out / low</th>}
             </tr>
           </thead>
           <tbody>
             {shops.map((s) => (
               <tr key={s.branch_id}>
-                <td>{nameOf(s.branch_id)}</td>
+                <td>
+                  {nameOf(s.branch_id)}
+                  {phone && s.out_of_stock !== undefined && <><br /><span className="hint">{s.out_of_stock} out, {s.low_stock ?? 0} low</span></>}
+                  {phone && s.today_gross_profit_minor !== undefined && <><br /><span className="hint">Profit today {money(s.today_gross_profit_minor)}</span></>}
+                </td>
                 <td className="num">{money(s.today_sales_minor ?? 0)}</td>
                 <td className="num">{money(s.last7_sales_minor ?? 0)}</td>
                 {!phone && <td className="num">{money(s.last30_sales_minor ?? 0)}</td>}
                 {shopProfit && !phone && <td className="num">{s.today_gross_profit_minor !== undefined ? money(s.today_gross_profit_minor) : ''}</td>}
                 {shopStock && !phone && <td className="num">{s.stock_at_price_minor !== undefined ? money(s.stock_at_price_minor) : ''}</td>}
-                {shopStock && <td className="num">{s.out_of_stock !== undefined ? `${s.out_of_stock} / ${s.low_stock ?? 0}` : ''}</td>}
+                {shopStock && !phone && <td className="num">{s.out_of_stock !== undefined ? `${s.out_of_stock} / ${s.low_stock ?? 0}` : ''}</td>}
               </tr>
             ))}
           </tbody>

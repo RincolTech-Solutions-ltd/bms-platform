@@ -3,7 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retailAnalytics, type AnalysisRow, type SalesAnalysis, type StockedItem } from '../../../api/retail-analytics';
 import { SkeletonList } from '../../../components/states';
-import { Bars, Choice, DateRange, Empty, Section, defaultRange, moneyOrNone, percentOrNone, rangeProblem } from './analytics-ui';
+import { Bars, Choice, DateRange, Empty, Section, Sparkline, defaultRange, moneyOrNone, percentOrNone, rangeProblem } from './analytics-ui';
 import { showQty } from './maths';
 import { Gate, Problem, money, useBranchView, useIsPhone } from './ui';
 
@@ -26,7 +26,7 @@ function RowsTable({ title, rows, profit }: { title: string; rows: AnalysisRow[]
           <th>{title}</th>
           {!phone && <th className="num">Sold</th>}
           <th className="num">Sales</th>
-          {profit && <th className="num">Profit</th>}
+          {profit && !phone && <th className="num">Profit</th>}
           {profit && !phone && <th className="num">Margin</th>}
         </tr>
       </thead>
@@ -39,8 +39,11 @@ function RowsTable({ title, rows, profit }: { title: string; rows: AnalysisRow[]
               {phone && <><br /><span className="hint">{showQty(r.qty ?? '0')}{r.unit ? ` ${r.unit}` : ''} sold{profit && r.margin_bp !== undefined ? `, margin ${percentOrNone(r.margin_bp)}` : ''}</span></>}
             </td>
             {!phone && <td className="num">{showQty(r.qty ?? '0')}{r.unit ? ` ${r.unit}` : ''}</td>}
-            <td className="num">{money(r.sales_minor ?? 0)}</td>
-            {profit && <td className="num">{moneyOrNone(r.gross_profit_minor)}</td>}
+            <td className="num">
+              {money(r.sales_minor ?? 0)}
+              {phone && profit && r.gross_profit_minor !== undefined && <><br /><span className="hint">profit {money(r.gross_profit_minor)}</span></>}
+            </td>
+            {profit && !phone && <td className="num">{moneyOrNone(r.gross_profit_minor)}</td>}
             {profit && !phone && <td className="num">{percentOrNone(r.margin_bp)}</td>}
           </tr>
         ))}
@@ -71,6 +74,7 @@ function Stocked({ items, total, empty }: { items: StockedItem[]; total: number;
 }
 
 export function SalesAnalysisView({ data }: { data: SalesAnalysis }) {
+  const phone = useIsPhone();
   const profit = data.profit_visible === true;
   const totals = data.totals ?? { sales_minor: 0, sale_count: 0 };
   const series = data.series ?? [];
@@ -89,19 +93,22 @@ export function SalesAnalysisView({ data }: { data: SalesAnalysis }) {
 
       <Section title="Over time">
         {series.length === 0 ? <Empty /> : (
-          <div className="table-wrap" tabIndex={0}><table>
-            <thead><tr><th>{periodName}</th><th className="num">Sales</th><th className="num">Number</th>{profit && <th className="num">Profit</th>}</tr></thead>
-            <tbody>
-              {series.map((p) => (
-                <tr key={p.period_start}>
-                  <td>{p.period_start}</td>
-                  <td className="num">{money(p.sales_minor ?? 0)}</td>
-                  <td className="num">{p.sale_count}</td>
-                  {profit && <td className="num">{moneyOrNone(p.gross_profit_minor)}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
+          <>
+            <Sparkline points={series.map((p) => p.sales_minor ?? 0)} label={`Sales by ${data.group ?? 'day'}, ${money(totals.sales_minor ?? 0)} in all`} />
+            <div className="table-wrap" tabIndex={0}><table>
+              <thead><tr><th>{periodName}</th>{!phone && <th className="num">Number</th>}<th className="num">Sales</th>{profit && <th className="num">Profit</th>}</tr></thead>
+              <tbody>
+                {series.map((p) => (
+                  <tr key={p.period_start}>
+                    <td>{p.period_start}{phone && <><br /><span className="hint">{p.sale_count} {p.sale_count === 1 ? 'sale' : 'sales'}</span></>}</td>
+                    {!phone && <td className="num">{p.sale_count}</td>}
+                    <td className="num">{money(p.sales_minor ?? 0)}</td>
+                    {profit && <td className="num">{moneyOrNone(p.gross_profit_minor)}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </>
         )}
       </Section>
 

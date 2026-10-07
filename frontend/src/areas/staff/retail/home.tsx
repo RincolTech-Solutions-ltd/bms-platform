@@ -11,15 +11,17 @@ function RetailHome() {
   const screens = showRetail(me) ? screensFor(me) : [];
   // The dashboard is a sales read; its profit and stock parts depend on the other permissions.
   const dashboard = showRetail(me) && canUse(me, 'salesHistory');
+  // The owner reads the figures first; a seller starts from the tiles (Record a sale) and finds them below.
+  const ownerFirst = canUse(me, 'profit');
   return (
-    <main className="rt">
+    <main className={dashboard ? 'rt rt-wide' : 'rt'}>
       <div className="page-header">
         <div>
           <h1>Retail</h1>
           <p>What would you like to do?</p>
         </div>
       </div>
-      {dashboard && <RetailDashboard />}
+      {dashboard && ownerFirst && <RetailDashboard />}
       {screens.length === 0 && <p className="empty-state">You do not have access to any retail pages.</p>}
       <ul className="tile-grid">
         {screens.map((s) => (
@@ -32,6 +34,7 @@ function RetailHome() {
           </li>
         ))}
       </ul>
+      {dashboard && !ownerFirst && <RetailDashboard />}
     </main>
   );
 }

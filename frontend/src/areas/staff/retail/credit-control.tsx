@@ -11,7 +11,7 @@ import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone } from '
 // total is above what was paid; overdue when the due date is before today). No cost or profit appears.
 
 const TOPS = [10, 20, 50, 100].map((n) => ({ value: n, label: `Top ${n}` }));
-const SORTS = [{ value: 'amount', label: 'Biggest amount first' }, { value: 'age', label: 'Oldest first' }] as const;
+const SORTS = [{ value: 'amount', label: 'Biggest first' }, { value: 'age', label: 'Oldest first' }] as const;
 
 const BUCKETS: { key: keyof Ageing; label: string }[] = [
   { key: 'not_due_minor', label: 'Not yet due' },

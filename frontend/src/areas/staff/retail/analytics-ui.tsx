@@ -64,6 +64,9 @@ export function Empty({ children = 'Nothing to show for this range.' }: { childr
   return <p className="empty-state">{children}</p>;
 }
 
+/** "1 report", "2 reports". */
+export const plural = (n: number | undefined, one: string, many = `${one}s`): string => `${n ?? 0} ${n === 1 ? one : many}`;
+
 /** A figure that is only there when the server sent it (a profit reader); empty cells otherwise. */
 export const moneyOrNone = (minor: number | undefined): string => (minor === undefined ? '' : money(minor));
 export const percentOrNone = (bp: number | undefined): string => (bp === undefined ? '' : showPercent(bp));

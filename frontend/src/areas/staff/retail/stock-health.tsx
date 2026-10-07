@@ -3,7 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { retailAnalytics, type CoverRow, type StockHealth } from '../../../api/retail-analytics';
 import { SkeletonList } from '../../../components/states';
-import { Choice, DateRange, Empty, Section, defaultRange, moneyOrNone, rangeProblem } from './analytics-ui';
+import { Choice, DateRange, Empty, Section, defaultRange, moneyOrNone, plural, rangeProblem } from './analytics-ui';
 import { showQty } from './maths';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone } from './ui';
 
@@ -49,6 +49,7 @@ function CoverTable({ rows, nameOf, reorder }: { rows: CoverRow[]; nameOf: NameO
 }
 
 export function StockHealthView({ data, nameOf }: { data: StockHealth; nameOf: NameOf }) {
+  const phone = useIsPhone();
   const dead = data.dead_stock;
   const withCost = data.profit_visible === true || (dead?.branches ?? []).some((b) => b.value_at_cost_minor !== undefined);
   const reorder = data.reorder ?? { items: [], total: 0 };
@@ -68,34 +69,46 @@ export function StockHealthView({ data, nameOf }: { data: StockHealth; nameOf: N
         {(dead?.branches ?? []).length === 0 ? <Empty>Everything in stock has sold lately.</Empty> : (
           <>
             <div className="table-wrap" tabIndex={0}><table>
-              <thead><tr><th>Branch</th><th className="num">Items</th><th className="num">At price</th>{withCost && <th className="num">At cost</th>}</tr></thead>
+              <thead><tr><th>Branch</th><th className="num">Items</th><th className="num">At price</th>{withCost && !phone && <th className="num">At cost</th>}</tr></thead>
               <tbody>
                 {(dead?.branches ?? []).map((b) => (
                   <tr key={b.branch_id}>
                     <td>{nameOf(b.branch_id)}</td>
                     <td className="num">{b.item_count}</td>
-                    <td className="num">{money(b.value_at_price_minor ?? 0)}</td>
-                    {withCost && <td className="num">{moneyOrNone(b.value_at_cost_minor)}</td>}
+                    <td className="num">
+                      {money(b.value_at_price_minor ?? 0)}
+                      {withCost && phone && b.value_at_cost_minor !== undefined && <><br /><span className="hint">cost {money(b.value_at_cost_minor)}</span></>}
+                    </td>
+                    {withCost && !phone && <td className="num">{moneyOrNone(b.value_at_cost_minor)}</td>}
                   </tr>
                 ))}
                 <tr>
                   <td><strong>All</strong></td>
                   <td className="num">{dead?.items_total}</td>
-                  <td className="num">{money(dead?.value_at_price_minor ?? 0)}</td>
-                  {withCost && <td className="num">{moneyOrNone(dead?.value_at_cost_minor)}</td>}
+                  <td className="num">
+                    {money(dead?.value_at_price_minor ?? 0)}
+                    {withCost && phone && dead?.value_at_cost_minor !== undefined && <><br /><span className="hint">cost {money(dead.value_at_cost_minor)}</span></>}
+                  </td>
+                  {withCost && !phone && <td className="num">{moneyOrNone(dead?.value_at_cost_minor)}</td>}
                 </tr>
               </tbody>
             </table></div>
             <p className="hint">The biggest by value at price:</p>
             <div className="table-wrap" tabIndex={0}><table>
-              <thead><tr><th>Item</th><th className="num">In stock</th><th className="num">At price</th>{withCost && <th className="num">At cost</th>}</tr></thead>
+              <thead><tr><th>Item</th>{!phone && <th className="num">In stock</th>}<th className="num">At price</th>{withCost && !phone && <th className="num">At cost</th>}</tr></thead>
               <tbody>
                 {(dead?.items ?? []).map((i) => (
                   <tr key={`${i.branch_id}-${i.product_id}`}>
-                    <td>{i.description}<br /><span className="hint">{i.code}, {nameOf(i.branch_id)}</span></td>
-                    <td className="num">{showQty(i.qty_on_hand ?? '0')} {i.unit}</td>
-                    <td className="num">{money(i.value_at_price_minor ?? 0)}</td>
-                    {withCost && <td className="num">{moneyOrNone(i.value_at_cost_minor)}</td>}
+                    <td>
+                      {i.description}<br /><span className="hint">{i.code}, {nameOf(i.branch_id)}</span>
+                      {phone && <><br /><span className="hint">{showQty(i.qty_on_hand ?? '0')} {i.unit} in stock</span></>}
+                    </td>
+                    {!phone && <td className="num">{showQty(i.qty_on_hand ?? '0')} {i.unit}</td>}
+                    <td className="num">
+                      {money(i.value_at_price_minor ?? 0)}
+                      {withCost && phone && i.value_at_cost_minor !== undefined && <><br /><span className="hint">cost {money(i.value_at_cost_minor)}</span></>}
+                    </td>
+                    {withCost && !phone && <td className="num">{moneyOrNone(i.value_at_cost_minor)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -104,25 +117,37 @@ export function StockHealthView({ data, nameOf }: { data: StockHealth; nameOf: N
         )}
       </Section>
       <Section title="Used, damaged and found missing" hint="In the date range. Usage and damage reports, and the differences stock-takes found.">
-        {shrink.length === 0 ? <Empty /> : (
+        {shrink.length === 0 ? <Empty /> : phone ? (
+          <ul className="an-cards">
+            {shrink.map((x) => (
+              <li key={x.branch_id} className="rt-card">
+                <strong>{nameOf(x.branch_id)}</strong>
+                <div className="rt-row"><span>Used</span><span className="num">{plural(x.used_reports, 'report')}</span></div>
+                <div className="rt-row"><span>Damaged</span><span className="num">{plural(x.damaged_reports, 'report')}</span></div>
+                <div className="rt-row"><span>Found missing</span><span className="num">{plural(x.short_lines, 'line')}</span></div>
+                {x.net_cost_minor !== undefined && <div className="rt-row"><span>Cost</span><span className="num">{money(x.net_cost_minor)}</span></div>}
+              </li>
+            ))}
+          </ul>
+        ) : (
           <div className="table-wrap" tabIndex={0}><table>
             <thead>
               <tr>
                 <th>Branch</th>
                 <th className="num">Used</th>
                 <th className="num">Damaged</th>
-                <th className="num">Missing</th>
+                <th className="num">Found missing</th>
                 {shrinkCost && <th className="num">Cost</th>}
               </tr>
             </thead>
             <tbody>
-              {shrink.map((s) => (
-                <tr key={s.branch_id}>
-                  <td>{nameOf(s.branch_id)}</td>
-                  <td className="num">{s.used_reports} reports</td>
-                  <td className="num">{s.damaged_reports} reports</td>
-                  <td className="num">{s.short_lines} lines</td>
-                  {shrinkCost && <td className="num">{moneyOrNone(s.net_cost_minor)}</td>}
+              {shrink.map((x) => (
+                <tr key={x.branch_id}>
+                  <td>{nameOf(x.branch_id)}</td>
+                  <td className="num">{plural(x.used_reports, 'report')}</td>
+                  <td className="num">{plural(x.damaged_reports, 'report')}</td>
+                  <td className="num">{plural(x.short_lines, 'line')}</td>
+                  {shrinkCost && <td className="num">{moneyOrNone(x.net_cost_minor)}</td>}
                 </tr>
               ))}
             </tbody>

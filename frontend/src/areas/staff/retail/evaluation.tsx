@@ -61,7 +61,7 @@ export function EvaluationView({ data, nameOf }: { data: Evaluation; nameOf: (id
                 <thead>
                   <tr>
                     <th>Item</th>
-                    <th className="num">Profit</th>
+                    {!phone && <th className="num">Profit</th>}
                     {!phone && <th className="num">In stock</th>}
                     <th className="num">Expected profit</th>
                     {!phone && <th className="num">Over cost</th>}
@@ -72,9 +72,9 @@ export function EvaluationView({ data, nameOf }: { data: Evaluation; nameOf: (id
                     <tr key={p.product_id}>
                       <td>
                         {p.description}<br /><span className="hint">{p.code}</span>
-                        {phone && <><br /><span className="hint">{showQty(p.qty_on_hand ?? '0')} {p.unit} in stock, {percentOrNone(p.stock?.over_cost_bp) || 'n/a'} over cost</span></>}
+                        {phone && <><br /><span className="hint">{showQty(p.qty_on_hand ?? '0')} {p.unit} in stock, {percentOrNone(p.stock?.over_cost_bp) || 'n/a'} over cost; profit so far {money(p.period?.profit_minor ?? 0)}</span></>}
                       </td>
-                      <td className="num">{money(p.period?.profit_minor ?? 0)}</td>
+                      {!phone && <td className="num">{money(p.period?.profit_minor ?? 0)}</td>}
                       {!phone && <td className="num">{showQty(p.qty_on_hand ?? '0')} {p.unit}</td>}
                       <td className="num">{money(p.stock?.expected_profit_minor ?? 0)}</td>
                       {!phone && <td className="num">{percentOrNone(p.stock?.over_cost_bp) || 'n/a'}</td>}

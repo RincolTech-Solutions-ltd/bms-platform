@@ -223,4 +223,24 @@ class RetailStockHealthIT extends IntegrationTest {
         assertThat(api.get("/reports/stock-health?cover_days=366", ADMIN).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
+
+    @Test
+    void costShowsPerBranchWhereProfitReadIsHeldAndTheOverallCostOnlyWhenEverywhere() {
+        Map<String, String> scopes = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
+        JsonNode r = api.call(HttpMethod.GET, "/reports/stock-health", null, ADMIN, "*", scopes)
+                .getBody();
+        assertThat(r.get("profit_visible").asBoolean()).isFalse();
+        JsonNode dead = r.get("dead_stock");
+        assertThat(dead.has("value_at_cost_minor")).isFalse();
+        for (JsonNode b : dead.get("branches")) {
+            boolean headOffice =
+                    b.get("branch_id").asString().equals(t.headOffice().toString());
+            assertThat(b.has("value_at_cost_minor")).isEqualTo(headOffice);
+        }
+        for (JsonNode s : r.get("shrinkage")) {
+            boolean headOffice =
+                    s.get("branch_id").asString().equals(t.headOffice().toString());
+            assertThat(s.has("net_cost_minor")).isEqualTo(headOffice);
+        }
+    }
 }
