@@ -36,7 +36,7 @@ function RowsTable({ title, rows, profit }: { title: string; rows: AnalysisRow[]
             <td>
               {r.label ?? 'Unknown'}
               {r.code && <><br /><span className="hint">{r.code}</span></>}
-              {phone && <><br /><span className="hint">{showQty(r.qty ?? '0')}{r.unit ? ` ${r.unit}` : ''} sold{profit && r.margin_bp !== undefined ? `, margin ${percentOrNone(r.margin_bp)}` : ''}</span></>}
+              {phone && <><br /><span className="hint">{showQty(r.qty ?? '0')}{r.unit ? ` ${r.unit}` : ''} sold{profit && r.margin_bp !== undefined && r.margin_bp !== null ? `, margin ${percentOrNone(r.margin_bp)}` : ''}</span></>}
             </td>
             {!phone && <td className="num">{showQty(r.qty ?? '0')}{r.unit ? ` ${r.unit}` : ''}</td>}
             <td className="num">
@@ -123,12 +123,16 @@ export function SalesAnalysisView({ data }: { data: SalesAnalysis }) {
       <Section title="By category"><RowsTable title="Category" rows={data.by_category ?? []} profit={profit} /></Section>
       <Section title="By seller"><RowsTable title="Seller" rows={data.by_seller ?? []} profit={profit} /></Section>
 
-      <Section title={`Slow movers: no sale in ${data.slow_days} days`} hint="Items you hold stock of that have not sold lately. Counted back from today, whatever the dates above.">
-        <Stocked items={data.slow_movers ?? []} total={data.slow_movers_total ?? 0} empty="Every item in stock has sold lately." />
-      </Section>
-      <Section title="No sales at all in this range" hint="Active items with no sale between the two dates, with what is in stock.">
-        <Stocked items={data.no_sales ?? []} total={data.no_sales_total ?? 0} empty="Every active item sold at least once." />
-      </Section>
+      {data.slow_movers !== undefined && (
+        <Section title={`Slow movers: no sale in ${data.slow_days} days`} hint="Items you hold stock of that have not sold lately. Counted back from today, whatever the dates above.">
+          <Stocked items={data.slow_movers ?? []} total={data.slow_movers_total ?? 0} empty="Every item in stock has sold lately." />
+        </Section>
+      )}
+      {data.no_sales !== undefined && (
+        <Section title="No sales at all in this range" hint="Active items with no sale between the two dates, with what is in stock.">
+          <Stocked items={data.no_sales ?? []} total={data.no_sales_total ?? 0} empty="Every active item sold at least once." />
+        </Section>
+      )}
     </>
   );
 }

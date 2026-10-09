@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class SalesAnalysisService {
 
+    static final String STOCK_READ = "retail.stock.read";
     static final int MIN_SLOW_DAYS = 7;
     static final int MAX_SLOW_DAYS = 180;
     private static final Set<String> GROUPS = Set.of("day", "week", "month");
@@ -102,8 +103,12 @@ class SalesAnalysisService {
         List<Row> topByQuantity = rows(Dimension.PRODUCT, filter, w, Order.QTY, top, profit);
         List<Row> bySeller = rows(Dimension.SELLER, filter, w, Order.SALES, top, profit);
 
-        List<Stocked> slow = repo.slowMovers(filter, today.minusDays(slowDays - 1L), today, top);
-        List<Stocked> unsold = repo.noSales(filter, w.from(), w.to(), top);
+        // The two stocked lists show quantities and their value at price, so they need retail.stock.read
+        // in the branches too; the branches both permissions cover. Without any, the lists are left out.
+        List<UUID> stockFilter = bothScopes(filter, principal.branchFilter(STOCK_READ, branchIds));
+        boolean stocked = stockFilter == null || !stockFilter.isEmpty();
+        List<Stocked> slow = stocked ? repo.slowMovers(stockFilter, today.minusDays(slowDays - 1L), today, top) : null;
+        List<Stocked> unsold = stocked ? repo.noSales(stockFilter, w.from(), w.to(), top) : null;
         return new Analysis(
                 w.from(),
                 w.to(),
@@ -119,10 +124,21 @@ class SalesAnalysisService {
                 topByQuantity,
                 bySeller,
                 slowDays,
-                slow.stream().map(SalesAnalysisService::item).toList(),
-                slow.isEmpty() ? 0 : slow.getFirst().total(),
-                unsold.stream().map(SalesAnalysisService::item).toList(),
-                unsold.isEmpty() ? 0 : unsold.getFirst().total());
+                stocked ? slow.stream().map(SalesAnalysisService::item).toList() : null,
+                stocked ? (slow.isEmpty() ? 0 : slow.getFirst().total()) : null,
+                stocked ? unsold.stream().map(SalesAnalysisService::item).toList() : null,
+                stocked ? (unsold.isEmpty() ? 0 : unsold.getFirst().total()) : null);
+    }
+
+    /** The branches in both filters; null means every branch, an empty list none. */
+    static List<UUID> bothScopes(List<UUID> sales, List<UUID> stock) {
+        if (sales == null) {
+            return stock;
+        }
+        if (stock == null) {
+            return sales;
+        }
+        return sales.stream().filter(stock::contains).toList();
     }
 
     private List<Row> rows(Dimension dimension, List<UUID> filter, Window w, Order order, int top, boolean profit) {

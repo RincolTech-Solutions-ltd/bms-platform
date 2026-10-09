@@ -24,8 +24,11 @@ import tools.jackson.databind.JsonNode;
  * 2 ANA-2 for cash (600, cost 400) and 1 ANA-1 on credit (1,500, cost 1,000); branch two sold 1 ANA-1 for
  * cash (1,500, cost 1,000). Today: 3,600, of which cash 2,100 and credit 1,500; profit 1,200. Yesterday 3,000;
  * ten days ago 900. Stock: head office 17 ANA-1, 15 ANA-2, 4 ANA-3 and 5 ANA-5 (cost 100, price 150): 33,550
- * at price, 22,100 at cost, two low (4 and 5 are at or below 5); branch two 9 ANA-1 and 0 ANA-4: 13,500 and
- * 9,000, one out of stock.
+ * at price, 22,100 at cost; branch two 9 ANA-1 and 0 ANA-4: 13,500 and 9,000. The counts follow the stock list
+ * rule: an active item with no balance row counts as zero, low includes out of stock, and All branches judges each
+ * item on its summed balance. Head office: ANA-4 out (never stocked there), ANA-3 and ANA-5 low, so 1 out and 3 low;
+ * branch two: only ANA-1 in stock, so 4 out and 4 low; all branches: ANA-4 totals 0, ANA-3 4 and ANA-5 5, so 1 out
+ * and 3 low.
  */
 class RetailDashboardIT extends IntegrationTest {
 
@@ -95,7 +98,7 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(stock.get("value_at_price_minor").asLong()).isEqualTo(47_050);
         assertThat(stock.get("value_at_cost_minor").asLong()).isEqualTo(31_100);
         assertThat(stock.get("out_of_stock").asInt()).isEqualTo(1);
-        assertThat(stock.get("low_stock").asInt()).isEqualTo(2);
+        assertThat(stock.get("low_stock").asInt()).isEqualTo(3);
         assertThat(stock.get("low_stock_threshold").asString()).isEqualTo("5.000");
 
         JsonNode hq = shop(r, t.headOffice());
@@ -105,10 +108,12 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(hq.get("today_gross_profit_minor").asLong()).isEqualTo(700);
         assertThat(hq.get("stock_at_price_minor").asLong()).isEqualTo(33_550);
         assertThat(hq.get("stock_at_cost_minor").asLong()).isEqualTo(22_100);
-        assertThat(hq.get("low_stock").asInt()).isEqualTo(2);
+        assertThat(hq.get("out_of_stock").asInt()).isEqualTo(1);
+        assertThat(hq.get("low_stock").asInt()).isEqualTo(3);
         JsonNode b2 = shop(r, t.secondBranch());
         assertThat(b2.get("today_sales_minor").asLong()).isEqualTo(1_500);
-        assertThat(b2.get("out_of_stock").asInt()).isEqualTo(1);
+        assertThat(b2.get("out_of_stock").asInt()).isEqualTo(4);
+        assertThat(b2.get("low_stock").asInt()).isEqualTo(4);
         assertThat(b2.get("stock_at_price_minor").asLong()).isEqualTo(13_500);
     }
 
@@ -164,6 +169,44 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(body.get("stock").get("value_at_price_minor").asLong()).isEqualTo(13_500);
         Map<String, Integer> counts = new HashMap<>();
         counts.put("out", body.get("stock").get("out_of_stock").asInt());
-        assertThat(counts.get("out")).isEqualTo(1);
+        assertThat(counts.get("out")).isEqualTo(4);
+        assertThat(body.get("stock").get("low_stock").asInt()).isEqualTo(4);
+    }
+
+    @Test
+    void theCountsEqualWhatTheStockListsShowForOneBranchAndForAllBranches() {
+        // One branch: the stock list of branch two, then the dashboard scoped to branch two.
+        for (String level : new String[] {"out", "low"}) {
+            int listed = api.get("/stock?branch_id=" + t.secondBranch() + "&stock_level=" + level + "&limit=100", ADMIN)
+                    .getBody()
+                    .get("items")
+                    .size();
+            ResponseEntity<JsonNode> scoped = api.call(
+                    HttpMethod.GET,
+                    "/reports/dashboard",
+                    null,
+                    ADMIN,
+                    t.secondBranch().toString(),
+                    Map.of());
+            assertThat(scoped.getBody()
+                            .get("stock")
+                            .get(level.equals("out") ? "out_of_stock" : "low_stock")
+                            .asInt())
+                    .as("branch two, %s", level)
+                    .isEqualTo(listed);
+        }
+        // All branches: the all-branches list judges each item on its total.
+        for (String level : new String[] {"out", "low"}) {
+            int listed = api.get("/stock/all-branches?stock_level=" + level + "&limit=100", ADMIN)
+                    .getBody()
+                    .get("items")
+                    .size();
+            assertThat(dashboard(ADMIN)
+                            .get("stock")
+                            .get(level.equals("out") ? "out_of_stock" : "low_stock")
+                            .asInt())
+                    .as("all branches, %s", level)
+                    .isEqualTo(listed);
+        }
     }
 }

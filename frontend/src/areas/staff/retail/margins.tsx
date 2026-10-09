@@ -40,7 +40,7 @@ function MarginTable({ title, rows, flag }: { title: string; rows: MarginRow[]; 
             {!phone && <td className="num">{money(r.cost_minor ?? 0)}</td>}
             <td className="num">{money(r.profit_minor ?? 0)}{(r.profit_minor ?? 0) < 0 ? ' (loss)' : ''}</td>
             <td className="num">
-              {flag !== undefined && (r.margin_bp === undefined || r.margin_bp < flag) ? <span className="rt-flag">{percentOrNone(r.margin_bp)}</span> : percentOrNone(r.margin_bp)}
+              {flag !== undefined && (r.margin_bp === undefined || r.margin_bp === null || r.margin_bp < flag) ? <span className="rt-flag">{percentOrNone(r.margin_bp) || 'n/a'}</span> : percentOrNone(r.margin_bp)}
             </td>
           </tr>
         ))}

@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 class DashboardService {
 
     static final String STOCK_READ = "retail.stock.read";
+    static final String SALE_READ = "retail.sale.read";
     /** The low stock threshold of ADR-029 (the stock lists report the same value as low_stock_threshold). */
     static final BigDecimal LOW_STOCK = new BigDecimal("5.000");
 
@@ -45,7 +46,7 @@ class DashboardService {
     @Transactional(readOnly = true)
     Report dashboard(List<UUID> branchIds) {
         Principal principal = CurrentPrincipal.require();
-        List<UUID> filter = principal.branchFilter("retail.sale.read", branchIds);
+        List<UUID> filter = principal.branchFilter(SALE_READ, branchIds);
         LocalDate today = clock.today(tenant.profile().timezone());
         boolean profit = AnalyticsSupport.profitVisible(principal, filter);
 
@@ -95,19 +96,17 @@ class DashboardService {
         if (stockRead) {
             long price = 0;
             long cost = 0;
-            int out = 0;
-            int low = 0;
             for (Position p : positions.values()) {
                 price = Math.addExact(price, p.atPrice());
                 cost = Math.addExact(cost, p.atCost());
-                out += p.out();
-                low += p.low();
             }
+            // As the stock list judges All branches: one balance per item, summed over the branches.
+            int[] counts = repo.counts(stockFilter, LOW_STOCK);
             stock = new Stock(
                     price,
                     AnalyticsSupport.profitVisible(principal, stockFilter) ? cost : null,
-                    out,
-                    low,
+                    counts[0],
+                    counts[1],
                     Quantities.format(LOW_STOCK));
         }
 
@@ -127,13 +126,15 @@ class DashboardService {
                 }
             }
             long[] t = sales.getOrDefault(today, new long[2]);
-            boolean cost = principal.may(PROFIT_READ, b);
+            // A shop outside the caller's sales scope carries no sales figures, not invented zeros.
+            boolean sold = principal.may(SALE_READ, b);
+            boolean cost = sold && principal.may(PROFIT_READ, b);
             Position p = principal.may(STOCK_READ, b) ? positions.get(b) : null;
             shops.add(new Shop(
                     b,
-                    t[0],
-                    s7,
-                    s30,
+                    sold ? t[0] : null,
+                    sold ? s7 : null,
+                    sold ? s30 : null,
                     cost ? t[0] - t[1] : null,
                     p == null ? null : p.atPrice(),
                     p != null && cost ? p.atCost() : null,

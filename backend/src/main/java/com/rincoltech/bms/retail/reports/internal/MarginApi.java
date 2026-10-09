@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.reports.internal;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.util.List;
@@ -11,6 +12,7 @@ final class MarginApi {
     private MarginApi() {}
 
     @Schema(name = "RetailMarginTotals")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Totals(
             long salesMinor,
             long costMinor,
@@ -20,6 +22,7 @@ final class MarginApi {
             Long marginBp) {}
 
     @Schema(name = "RetailMarginRow", description = "One item or category; code and unit are set for an item only")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Row(
             UUID id,
             String code,
@@ -34,6 +37,7 @@ final class MarginApi {
             Long marginBp) {}
 
     @Schema(name = "RetailMarginBelowTarget")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record BelowTarget(
             List<Row> items,
 
@@ -46,6 +50,7 @@ final class MarginApi {
                     "An item whose sell price changed in the range: the last change decides the split, the figures"
                             + " before it are from the start of the range, those from it are to the end of the range."
                             + " Cost is the snapshot on each sale line, never the current cost.")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record PriceChange(
             UUID productId,
             String code,
@@ -73,9 +78,11 @@ final class MarginApi {
             Long marginAfterBp) {}
 
     @Schema(name = "RetailPriceChanges")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record PriceChanges(List<PriceChange> items, int total) {}
 
     @Schema(name = "RetailMargins")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Report(
             LocalDate from,
             LocalDate to,

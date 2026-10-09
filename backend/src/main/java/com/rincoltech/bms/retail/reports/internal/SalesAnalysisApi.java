@@ -11,6 +11,9 @@ final class SalesAnalysisApi {
 
     static final String PROFIT_ONLY = "Present only with retail.profit.read in every branch the report covers";
 
+    static final String STOCK_ONLY =
+            "Present only with retail.stock.read and retail.sale.read in the branches the report covers";
+
     private SalesAnalysisApi() {}
 
     @Schema(name = "RetailSalesAnalysisTotals")
@@ -91,13 +94,15 @@ final class SalesAnalysisApi {
             List<Row> bySeller,
             int slowDays,
 
-            @Schema(description = "Items with stock on hand and no sale in the last slow_days days, as of today")
+            @Schema(
+                    description = "Items with stock on hand and no sale in the last slow_days days, as of today. "
+                            + STOCK_ONLY)
             List<StockedItem> slowMovers,
 
-            int slowMoversTotal,
+            @Schema(description = STOCK_ONLY) Integer slowMoversTotal,
 
-            @Schema(description = "Active items with no sale at all in the range")
+            @Schema(description = "Active items with no sale at all in the range. " + STOCK_ONLY)
             List<StockedItem> noSales,
 
-            int noSalesTotal) {}
+            @Schema(description = STOCK_ONLY) Integer noSalesTotal) {}
 }

@@ -10,6 +10,7 @@ import java.util.UUID;
 final class DashboardApi {
 
     static final String PROFIT_ONLY = "Present only with retail.profit.read in every branch the report covers";
+    static final String SALES_ONLY = "Present only with retail.sale.read in this branch";
     static final String STOCK_ONLY = "Present only with retail.stock.read";
 
     private DashboardApi() {}
@@ -44,10 +45,14 @@ final class DashboardApi {
             @Schema(description = PROFIT_ONLY + "; stock above zero at the current cost")
             Long valueAtCostMinor,
 
-            @Schema(description = "Active items whose balance is zero or less, in every branch reported")
+            @Schema(
+                    description =
+                            "Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported")
             int outOfStock,
 
-            @Schema(description = "Active items above zero and at or below low_stock_threshold (ADR-029)")
+            @Schema(
+                    description =
+                            "Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them")
             int lowStock,
 
             String lowStockThreshold) {}
@@ -56,9 +61,9 @@ final class DashboardApi {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Shop(
             UUID branchId,
-            long todaySalesMinor,
-            long last7SalesMinor,
-            long last30SalesMinor,
+            @Schema(description = SALES_ONLY) Long todaySalesMinor,
+            @Schema(description = SALES_ONLY) Long last7SalesMinor,
+            @Schema(description = SALES_ONLY) Long last30SalesMinor,
 
             @Schema(description = "Present only with retail.profit.read in this branch")
             Long todayGrossProfitMinor,

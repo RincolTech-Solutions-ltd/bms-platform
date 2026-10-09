@@ -6279,9 +6279,15 @@ export interface components {
         RetailDashboardShop: {
             /** Format: uuid */
             branch_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.sale.read in this branch
+             */
             last30_sales_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.sale.read in this branch
+             */
             last7_sales_minor?: number;
             /**
              * Format: int32
@@ -6308,20 +6314,23 @@ export interface components {
              * @description Present only with retail.profit.read in this branch
              */
             today_gross_profit_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.sale.read in this branch
+             */
             today_sales_minor?: number;
         };
         /** @description Present only with retail.stock.read */
         RetailDashboardStock: {
             /**
              * Format: int32
-             * @description Active items above zero and at or below low_stock_threshold (ADR-029)
+             * @description Active items at or below low_stock_threshold (ADR-029), out of stock ones included, as the stock list's low tab counts them
              */
             low_stock?: number;
             low_stock_threshold?: string;
             /**
              * Format: int32
-             * @description Active items whose balance is zero or less, in every branch reported
+             * @description Active items whose balance is zero or less, as the stock list judges it: a branch alone, or the sum over the branches reported
              */
             out_of_stock?: number;
             /**
@@ -7105,18 +7114,24 @@ export interface components {
             from?: string;
             /** @description day, week or month */
             group?: string;
-            /** @description Active items with no sale at all in the range */
+            /** @description Active items with no sale at all in the range. Present only with retail.stock.read and retail.sale.read in the branches the report covers */
             no_sales?: components["schemas"]["RetailStockedItem"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read and retail.sale.read in the branches the report covers
+             */
             no_sales_total?: number;
             /** @description True when cost and profit figures are included */
             profit_visible?: boolean;
             series?: components["schemas"]["RetailSalesAnalysisPeriod"][];
             /** Format: int32 */
             slow_days?: number;
-            /** @description Items with stock on hand and no sale in the last slow_days days, as of today */
+            /** @description Items with stock on hand and no sale in the last slow_days days, as of today. Present only with retail.stock.read and retail.sale.read in the branches the report covers */
             slow_movers?: components["schemas"]["RetailStockedItem"][];
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read and retail.sale.read in the branches the report covers
+             */
             slow_movers_total?: number;
             /** Format: date */
             to?: string;

@@ -124,6 +124,18 @@ class RetailSalesAnalysisIT extends IntegrationTest {
     }
 
     @Test
+    void theStockedListsNeedStockReadAndAreOtherwiseLeftOut() {
+        JsonNode saleOnly = analysis("", "retail.sale.read");
+        assertThat(saleOnly.get("totals").get("sales_minor").asLong()).isEqualTo(5_400);
+        assertThat(saleOnly.has("slow_movers")).isFalse();
+        assertThat(saleOnly.has("no_sales")).isFalse();
+        assertThat(AnalyticsData.hasKey(saleOnly, "qty_on_hand")).isFalse();
+        assertThat(AnalyticsData.hasKey(saleOnly, "stock_at_price")).isFalse();
+        // A seller with stock read keeps them.
+        assertThat(analysis("", SALES).has("slow_movers")).isTrue();
+    }
+
+    @Test
     void theRowLimitAppliesToListsButNotToTotals() {
         JsonNode a = analysis("?top=1", ADMIN);
         assertThat(a.get("by_product")).hasSize(1);

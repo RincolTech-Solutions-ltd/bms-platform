@@ -17,6 +17,7 @@ final class EvaluationApi {
     @Schema(
             name = "RetailEvaluationPeriod",
             description = "What was sold in the chosen period, from the sale line snapshots")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Period(
             long salesMinor,
 
@@ -29,6 +30,7 @@ final class EvaluationApi {
     @Schema(
             name = "RetailEvaluationStock",
             description = "The stock on hand valued at today's prices; stock at or below zero is left out")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Stock(
             long atCostMinor,
             long atPriceMinor,
@@ -59,6 +61,7 @@ final class EvaluationApi {
             boolean daysOfStockCapped) {}
 
     @Schema(name = "RetailEvaluationProduct")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Product(
             UUID productId,
             String code,
@@ -69,6 +72,7 @@ final class EvaluationApi {
             Stock stock) {}
 
     @Schema(name = "RetailEvaluationCategory")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Category(
             UUID categoryId,
             String category,
@@ -82,12 +86,15 @@ final class EvaluationApi {
             List<Product> products) {}
 
     @Schema(name = "RetailEvaluationBranch")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Branch(UUID branchId, Period period, Stock stock, RunRate runRate, List<Category> categories) {}
 
     @Schema(name = "RetailEvaluationTotal")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Total(Period period, Stock stock, RunRate runRate) {}
 
     @Schema(name = "RetailBusinessEvaluation")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Report(
             LocalDate from,
             LocalDate to,

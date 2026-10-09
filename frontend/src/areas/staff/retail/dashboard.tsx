@@ -100,9 +100,9 @@ export function DashboardView({ data, nameOf, stockLink }: { data: Dashboard; na
                   {phone && s.out_of_stock !== undefined && <><br /><span className="hint">{s.out_of_stock} out, {s.low_stock ?? 0} low</span></>}
                   {phone && s.today_gross_profit_minor !== undefined && <><br /><span className="hint">Profit today {money(s.today_gross_profit_minor)}</span></>}
                 </td>
-                <td className="num">{money(s.today_sales_minor ?? 0)}</td>
-                <td className="num">{money(s.last7_sales_minor ?? 0)}</td>
-                {!phone && <td className="num">{money(s.last30_sales_minor ?? 0)}</td>}
+                <td className="num">{s.today_sales_minor !== undefined ? money(s.today_sales_minor) : 'n/a'}</td>
+                <td className="num">{s.last7_sales_minor !== undefined ? money(s.last7_sales_minor) : 'n/a'}</td>
+                {!phone && <td className="num">{s.last30_sales_minor !== undefined ? money(s.last30_sales_minor) : 'n/a'}</td>}
                 {shopProfit && !phone && <td className="num">{s.today_gross_profit_minor !== undefined ? money(s.today_gross_profit_minor) : ''}</td>}
                 {shopStock && !phone && <td className="num">{s.stock_at_price_minor !== undefined ? money(s.stock_at_price_minor) : ''}</td>}
                 {shopStock && !phone && <td className="num">{s.out_of_stock !== undefined ? `${s.out_of_stock} / ${s.low_stock ?? 0}` : ''}</td>}

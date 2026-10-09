@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { CreditControl, Dashboard, Evaluation, Margins, SalesAnalysis, StockHealth } from '../../../api/retail-analytics';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { Bars, Sparkline, rangeProblem } from './analytics-ui';
+import { Bars, Sparkline, percentOrNone, rangeProblem } from './analytics-ui';
+import { showPercent } from './maths';
 import { CreditControlView } from './credit-control';
 import { DashboardView } from './dashboard';
 import { EvaluationView } from './evaluation';
@@ -64,6 +65,13 @@ describe('sales analysis', () => {
     expect(html).toContain('Test Product ANA-1');
     expect(html).toContain('Slow movers: no sale in 30 days');
     expect(html).toContain('Unknown');
+  });
+
+  it('leaves out the stocked lists when the server sent none (no stock read)', () => {
+    const noStock = { ...withProfit, slow_movers: undefined, slow_movers_total: undefined, no_sales: undefined, no_sales_total: undefined };
+    const html = renderToString(<SalesAnalysisView data={noStock} />);
+    expect(html).not.toContain('Slow movers');
+    expect(html).not.toContain('No sales at all in this range');
   });
 
   it('shows nothing of cost, profit or margin without them', () => {
@@ -138,6 +146,20 @@ describe('margins', () => {
     expect(html).toContain('UGX 1,500 to UGX 2,000 on 2026-10-07');
     expect(html).toContain('33.33%');
     expect(html).toContain('Showing 1 of 2');
+  });
+
+  it('treats a null margin like an absent one: no 0% where there is no base', () => {
+    const nulled = JSON.parse(JSON.stringify(margins)) as Margins;
+    const item = nulled.below_target?.items?.[0] as unknown as Record<string, unknown>;
+    item.margin_bp = null;
+    const change = nulled.price_changes?.items?.[0] as unknown as Record<string, unknown>;
+    change.margin_before_bp = null;
+    change.margin_after_bp = null;
+    const html = renderToString(<MarginsView data={nulled} />);
+    expect(html).not.toMatch(/>0%</);
+    expect(html).toContain('<span class="rt-flag">n/a</span>');
+    expect(percentOrNone(null)).toBe('');
+    expect(showPercent(null as unknown as undefined)).toBe('n/a');
   });
 
   it('is closed without retail.profit.read', () => {
@@ -319,6 +341,12 @@ describe('owner dashboard', () => {
     expect(html).not.toMatch(/profit|cost/i);
     expect(html).not.toContain('1,200');
     expect(html).not.toContain('31,100');
+  });
+
+  it('shows no invented zeros for a shop outside the sales scope', () => {
+    const html = renderToString(<DashboardView data={{ ...seller(), shops: [{ branch_id: 'b1', stock_at_price_minor: 33550, out_of_stock: 0, low_stock: 2 }] }} nameOf={nameOf} />);
+    expect(html).toContain('n/a');
+    expect(html).not.toContain('UGX 0');
   });
 
   it('shows only the sales parts when stock is not readable', () => {

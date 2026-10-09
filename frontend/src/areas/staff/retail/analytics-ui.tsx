@@ -68,8 +68,8 @@ export function Empty({ children = 'Nothing to show for this range.' }: { childr
 export const plural = (n: number | undefined, one: string, many = `${one}s`): string => `${n ?? 0} ${n === 1 ? one : many}`;
 
 /** A figure that is only there when the server sent it (a profit reader); empty cells otherwise. */
-export const moneyOrNone = (minor: number | undefined): string => (minor === undefined ? '' : money(minor));
-export const percentOrNone = (bp: number | undefined): string => (bp === undefined ? '' : showPercent(bp));
+export const moneyOrNone = (minor: number | null | undefined): string => (minor === undefined || minor === null ? '' : money(minor));
+export const percentOrNone = (bp: number | null | undefined): string => (bp === undefined || bp === null ? '' : showPercent(bp));
 
 /**
  * Horizontal bars, one per row, scaled to the largest value. The label and the figure are text, so
