@@ -100,6 +100,9 @@ body {
   --rt-grey-900: #1d2939;
   --rt-white: #ffffff;
   --rt-black: #000000;
+  /* Chart slots 2 and 3 of the insights page (#153), checked with slot 1 for colour vision deficiency. */
+  --rt-viz-orange: #eb6834;
+  --rt-viz-green: #1baf7a;
 
   /* The Rincol default of the shell's brand pair; a tenant colour replaces both inline. */
   --brand: var(--rt-blue-strong);
@@ -127,6 +130,7 @@ body {
   --color-warning: #b54708;
   --color-warning-tint: #fffaeb;
   --color-info-tint: var(--rt-blue-tint);
+  --color-scrim: rgba(16, 24, 40, 0.62); /* dims the page behind a guided tour step */
 
   /* Type */
   --font-sans: 'Open Sans Variable', 'Open Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;

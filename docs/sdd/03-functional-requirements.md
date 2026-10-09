@@ -38,12 +38,14 @@ A letter suffix (`FR-REP-04a`) splits one statement into separately testable par
 | INV | Investments | 3.25 |
 | CLN | Collections | 3.26 |
 | MSS | Member self-service | 3.27 |
-| RET | Retail vertical: catalogue, stock, sales, purchasing, valuation (ADR-020) | 3.28 |
+| RET | Retail vertical: catalogue, stock, sales, purchasing, valuation (ADR-020) and the cash book (ADR-022, proposed) | 3.28 |
 | ONB | Self-onboarding: sign-up, applications, operator activation (ADR-024) | 3.29 |
+| INS | Lending insights: brief, portfolio, revenue, members, digest (ADR-030) | 3.30 |
 
 **Phase column.** `MVP` is in the first release for the pilot tenant
 (`docs/specs/lending-mvp-scope.md` orders them). `P2` is planned after the MVP. `Later`
-is recorded so the design does not preclude it, and is not scheduled.
+is recorded so the design does not preclude it, and is not scheduled. `Cash book` is the retail cash
+book increment (ADR-022, proposed), built before the retail pilot cutover.
 
 **Normative calculation rules** (schedules, allocation, days past due, penalties,
 payoff) are in section 3.4. Requirements refer to them rather than restating them.
@@ -302,7 +304,7 @@ is dismissed (`setup_dismissed`, tenant wide).
 
 | ID | Requirement | Acceptance criteria | Phase |
 |---|---|---|---|
-| FR-IAM-01 | A tenant admin shall invite a staff user by email or phone, assign one or more roles, and set each role's branch scope (one or more branches, or all branches). The one-time link is shown once to the inviting admin in the API response and the UI, in addition to being sent through the notification port, so no flow waits for an email or SMS provider (accepted review item 1, PR #8). | The invitee receives a one-time link valid for 72 hours to set a password; the inviting admin sees the same link once, and showing it is audited (`core.invitation.link_revealed`, without the token). Until the link is used the user is `invited` and cannot sign in. A new link replaces the previous one. | MVP |
+| FR-IAM-01 | A tenant admin shall invite a staff user by email or phone, assign one or more roles, and set each role's branch scope (one or more branches, or all branches). The one-time link is shown once to the inviting admin in the API response and the UI, in addition to being sent through the notification port, so no flow waits for an email or SMS provider (accepted review item 1, PR #8). | The invitee receives a one-time link valid for 72 hours to set a password; the inviting admin sees the same link once, and showing it is audited (`core.invitation.link_revealed`, without the token). Until the link is used the user is `invited` and cannot sign in. A new link replaces the previous one. Using the link signs the user in, under the same second factor rules as a sign-in (ADR-025, issue #86). | MVP |
 | FR-IAM-02 | The system shall provide the fixed role catalogue in chapter 8 (tenant admin, branch manager, loan officer, cashier, accountant, auditor) and the member role. Permissions per role are fixed in the MVP. | The permission matrix in chapter 8 is seeded and a test asserts each role's permission set equals the matrix. Custom roles are `Later`. | MVP |
 | FR-IAM-03 | Every API endpoint shall declare exactly one required permission (or be explicitly public), and the check shall apply the principal's branch scope to the target record. | An architecture test fails if a route has no declared permission. For each permission, a test proves a role without it gets 403. | MVP |
 | FR-IAM-04 | Staff shall sign in with email or phone plus password. Passwords are at least 10 characters and are checked against a list of common passwords. | Wrong credentials return a generic error that does not reveal whether the account exists. | MVP |
@@ -314,6 +316,8 @@ is dismissed (`setup_dismissed`, tenant wide).
 | FR-IAM-10 | A user who is both staff and a member of the same tenant shall have two separate identities; staff permissions never apply in the member area and the reverse. | Tested with one person holding both identities. | P2 |
 | FR-IAM-11 | TOTP enrolment shall issue ten single-use recovery codes, shown once and stored as hashes only. A recovery code may be entered instead of a TOTP code at sign-in; the user may replace all codes with a current TOTP code (accepted review item 2, PR #8). | A used code is refused the second time; replacing the codes invalidates every old one; using a code and replacing the codes are audited. Failed codes count toward the lockout of FR-IAM-05. | MVP |
 | FR-IAM-12 | A tenant admin shall reset another staff user's second factor after a lost device; a tenant admin cannot reset their own. When a tenant's only admin is locked out, a platform operator resets that admin's second factor through the platform API (accepted review item 2, PR #8). | The reset clears the secret and the recovery codes and ends every session of the user at once; the next sign-in enrols again when the role requires it. The reset is audited in the tenant's audit log, and a platform reset also in the platform audit log. Not a maker-checker action (ADR-014). | MVP |
+| FR-IAM-13 | A newly invited staff user shall be guided through a first run in plain words, one action per screen: choose a password, then turn on two-step sign-in or skip it when the role does not require it, then save the recovery codes when it was turned on, and land on their home screen (issues #86 and #93, ADR-025). | The flow shows "Step N of 3", ties every label to its input, shows the password rules the server checks as a live checklist, offers a QR code drawn in the browser, an Open in authenticator link and the key in groups of four with Copy, maps server problem codes to plain sentences that take focus, and requires "I have saved these codes" before going on. A role that requires the second factor has no Skip. No token, key or code is put in the address bar or the console. Works at 360 px wide with 44 px targets. | MVP |
+| FR-IAM-14 | A staff user shall be offered a guided spotlight tour of the screens their role and their tenant's modules allow, started once on first sign-in and replayable from Help at any time, with a short tour of the current page where one exists (issue #19, ADR-025). | The tour is skippable, keyboard (Tab stays in the card, Escape closes, arrow keys move) and touch (swipe) friendly, announced to screen readers, and dims the page with CSS classes only. "Do not show this again" and finishing are stored per user on the server, so a tour does not start again on another device; a tour version bump shows a finished tour once more. A step whose anchor is hidden by a permission is skipped. Steps for features not built yet are registered behind flags that are off. | MVP |
 
 ## 3.8 Audit log (AUD)
 
@@ -562,6 +566,13 @@ loan, so every closed loan counts as closed on time in the repayment history rul
 | FR-DIS-04 | The schedule view shall show each item's due date, principal, interest, fees, penalties, amounts paid, waived, outstanding, and status (`pending`, `due`, `overdue`, `paid`, `partially_paid`, `waived`). | Totals row equals loan totals. | MVP |
 | FR-DIS-05 | A disbursement shall be reversible only by a maker-checker reversal within the same open period and only while no repayment exists; reversal posts a reversing journal and returns the loan to `approved`. | Reversal after a repayment fails with `has_repayments`. | P2 |
 
+Built in increment 5 (#108, ADR-026): FR-DIS-01 to FR-DIS-04. The disbursement date is today or
+earlier and its period must be open (`value_date_in_future`, `period_closed`); the payment method
+must have an active account (`payment_method_unmapped`). Deducted fees that would leave nothing to
+disburse are refused (`fees_exceed_principal`). An upfront fee posts its own entry and receipt in the
+disbursement's transaction. The voucher number is `VC-<branch code>-NNNNNN` (FR-DOC-04). The
+disbursement SMS and the voucher PDF are deferred (increment 6 and a documents follow-up).
+
 ## 3.20 Repayments (REP)
 
 | ID | Requirement | Acceptance criteria | Phase |
@@ -575,6 +586,16 @@ loan, so every closed loan counts as closed on time in the repayment history rul
 | FR-REP-06 | The payoff quote shall be available for any active loan and value date (R-PAYOFF). | Worked examples in tests for both methods. | MVP |
 | FR-REP-07 | Repayments may be recorded against a loan from any branch the cashier is scoped to; if the cashier's branch differs from the loan's branch, the journal follows ADR-004 (two entries through inter-branch clearing). | Both branch trial balances balance after a cross-branch repayment. | P2 |
 | FR-REP-08 | A member may repay from their savings balance by a transfer, recorded as a repayment with method `savings_transfer` and a matching savings withdrawal in one transaction. | Both ledgers move together. | P2 |
+
+Built in increment 5 (#108, ADR-026): FR-REP-01 to FR-REP-06. A value date after today
+(`value_date_in_future`), before the disbursement (`before_disbursement`) or before the loan's latest
+repayment (`before_last_repayment`, so allocation always follows value date order) is refused. The
+receipt number is `RC-<branch code>-NNNNNN`. A reversal is requested with a reason and always needs
+a checker; it replays the surviving repayments on the contracted schedule and writes the
+differences as allocation rows of the reversal; the journal is the mirror of the original when no
+other repayment moves, else one entry with the net difference. DPD, arrears and item statuses are
+recomputed at every money event; the nightly recomputation is increment 6 (FR-ARR-01). The receipt
+SMS and PDF are deferred.
 
 ## 3.21 Arrears and penalties (ARR)
 
@@ -595,6 +616,14 @@ loan, so every closed loan counts as closed on time in the repayment history rul
 | FR-LCL-04 | A branch manager shall request a restructure of an active loan: a new loan is created for the member with principal equal to the old loan's outstanding principal, with new terms; the old loan's unpaid interest, fees and penalties are carried to the new loan's first schedule item as memorandum `carried_arrears` (never capitalised into principal); on approval the old loan becomes `restructured` and links to the new loan. | Journal: principal moves between the two loans within loans receivable (no cash). Restructured loans are flagged in portfolio reports for 12 months. | P2 |
 | FR-LCL-05 | A top-up (new loan that repays an existing loan from its proceeds) shall be supported as a disbursement whose proceeds are partly applied to the old loan's payoff. | Both loans' journals post in one transaction. | Later |
 
+Built in increment 5 (#108, ADR-026): FR-LCL-01 to FR-LCL-03. Closure is automatic when a
+repayment settles every item; a reversal that leaves something unpaid reopens the loan (its released
+pledges stay released). Write-off is requested by an accountant with a reason (`loan_write_off`, no
+threshold), posts the outstanding principal, records every unpaid component in the items'
+`written_off_minor`, and zeroes the loan's outstanding columns; with no principal outstanding it is
+refused (`nothing_to_write_off`). A repayment on a written-off loan is recorded as a `recovery`
+with no allocation rows. The closure SMS is deferred to increment 6.
+
 ## 3.23 Collateral register (COL)
 
 | ID | Requirement | Acceptance criteria | Phase |
@@ -612,31 +641,101 @@ How the pilot tenant's savings products work is an open question
 (`docs/specs/lending-mvp-scope.md`). These requirements define a configurable product
 that covers common voluntary savings.
 
+**Built in increment 9 (issue #151, ADR-032, migration `V30`).** The rules below as built:
+
+- A product also carries withdrawal limits (`max_withdrawal_minor` per withdrawal and
+  `max_withdrawals_per_month` per calendar month, both optional) and a minimum balance for interest
+  (`min_balance_for_interest_minor`: a day or a month below it earns nothing). Its interest terms
+  (currency, rate, calculation, posting frequency, minimum for interest) cannot change once an
+  account uses it (`product_in_use`); a change is a new product. Archiving stops new accounts.
+- The first deposit on an account must reach the product's minimum opening balance
+  (`below_minimum_opening`). Opening an account moves no money.
+- A movement is dated today or earlier, not before the account opened, and after the last day the
+  nightly end of day has written (`value_date_closed`); a withdrawal is dated the day it executes.
+- A withdrawal may take at most the balance less any hold, the minimum balance and the withdrawal
+  fee (`insufficient_balance`), within the product's limits (`withdrawal_limit_exceeded`,
+  `withdrawal_count_exceeded`). The fee is its own movement and journal, linked to the withdrawal.
+  At or above the tenant's threshold it is the `savings_withdrawal` action; every check runs again
+  when the checker approves.
+- A deposit or a withdrawal (with its fee) can be reversed through `savings_reversal`, always with
+  a checker, while the account is not closed and, for a deposit, still holds it. Interest and fees
+  are not reversed on their own.
+- An account may be frozen and unfrozen with a reason by a holder of
+  `lending.savings.withdraw_approve`; a frozen or dormant account takes deposits but pays nothing out.
+- Interest: `minimum_monthly_balance` counts a month only when the account was open on every day of
+  it and the period covers all of it. Interest is dated the period end; when that month is closed
+  in the ledger the journal is dated the run date. Closing (FR-SAV-07) posts interest to yesterday,
+  dated the closing day, then pays out the whole balance with no fee.
+- Deposits and withdrawals by staff queue the `savings.deposit` and `savings.withdrawal` SMS of
+  chapter 11 section 11.3.1 in the outbox; no SMS is sent until an SMS sender exists
+  (pending ADR-013).
+
 | ID | Requirement | Acceptance criteria | Phase |
 |---|---|---|---|
 | FR-SAV-01 | A tenant admin shall create a savings product with: code, name, currency, interest rate (bp per year), interest calculation (`none`, `daily_balance`, `minimum_monthly_balance`), interest posting frequency (`monthly`, `quarterly`, `yearly`), minimum opening balance, minimum balance, withdrawal fee (flat), and dormancy days. | Validation per field. | P2 |
 | FR-SAV-02 | A loan officer shall open a savings account for a member on a product; the account number is `SV` plus 6 digits. | A member may hold several accounts. | P2 |
 | FR-SAV-03 | A cashier shall record deposits (idempotency key required) and withdrawals. A withdrawal may not take the balance below the minimum balance plus any hold. Withdrawals at or above the tenant threshold are maker-checker. | Tests for limit and threshold. | P2 |
 | FR-SAV-04 | Each transaction shall store the running balance after it, and the account balance shall be updated under a row lock. | 50 concurrent deposits produce the exact final balance. | P2 |
-| FR-SAV-05 | Interest shall be computed per product: `daily_balance` sums end-of-day balance x rate / 365 over the period; `minimum_monthly_balance` uses the lowest end-of-day balance in each month x rate / 12. Interest is rounded once per posting (R-ROUND) and posted on the last day of the posting period by the nightly job. | Worked examples with fabricated balances in tests; posting is idempotent per account and period. | P2 |
+| FR-SAV-05 | Interest shall be computed per product: `daily_balance` sums end-of-day balance x rate / 365 over the period; `minimum_monthly_balance` uses the lowest end-of-day balance in each month x rate / 12. Interest is rounded once per posting (R-ROUND) and posted on the last day of the posting period by the nightly job. | Worked examples with fabricated balances in tests; posting is idempotent per account and period. The nightly end of day writes one end-of-day balance per account and day and catches up missed days. | P2 |
 | FR-SAV-06 | An account with no member-initiated transaction for the product's dormancy days shall become `dormant`; withdrawals from a dormant account require a branch manager to reactivate it. | Tested. | P2 |
 | FR-SAV-07 | A member may close an account, withdrawing the whole balance after any final interest posting. | Closing posts interest to date first. | P2 |
 
 ## 3.25 Investments (INV)
 
-How the pilot tenant's investment products work is an open question. These requirements
-define a fixed-term investment where the member places money for an agreed term and
-return.
+How the pilot tenant's investment products work is still an open question (MVP scope, open
+question 3). These requirements define fixed-term and recurring investments where the member places
+money for an agreed term and return; the return rules are R-INV-1 to R-INV-6 below, and the
+decisions behind them ADR-031.
 
 | ID | Requirement | Acceptance criteria | Phase |
 |---|---|---|---|
-| FR-INV-01 | A tenant admin shall create an investment product with: code, name, currency, allowed terms (in months), return rate (bp per year), return payout (`at_maturity` or `monthly`), minimum and maximum amount, whether early withdrawal is allowed, and the early withdrawal rule (`forfeit_return`, or `reduced_rate_bp`). | Validation per field. | P2 |
-| FR-INV-02 | A loan officer, or a member from the portal, shall open an investment with product, amount and term; the account number is `IV` plus 6 digits and the status is `pending_funding`. | Portal-opened investments appear in a staff queue. | P2 |
-| FR-INV-03 | A cashier shall record funding (idempotency key required); the investment becomes `active` with a start date and a maturity date (start plus term, R-TERM month rule), and the agreed return is computed as `round(amount x rate x term_months / 12)`. | Posting per 6.6.3; investment certificate PDF queued. | P2 |
-| FR-INV-04 | For `monthly` payout, the nightly job shall pay the monthly return on each monthly anniversary as a payable to the member (credited to the member's savings account if they have one, else to investments payable for cash collection). | Idempotent per investment and month. | P2 |
-| FR-INV-05 | On the maturity date the nightly job shall mark the investment `matured` and post the return due. The member chooses `payout` (cashier pays principal plus unpaid return) or `rollover` (a new investment is created from principal, or principal plus return, on the current product terms). | Default when no choice is recorded within 7 days: stays `matured`, and a reminder is sent. | P2 |
-| FR-INV-06 | Early withdrawal, if the product allows it, shall be maker-checker and apply the product's early withdrawal rule. | Worked example for each rule. | P2 |
-| FR-INV-07 | The system shall send a maturity reminder 7 days before maturity. | Tested with fixed clock. | P2 |
+| FR-INV-01 | A tenant admin shall create an investment product with: code, name, currency, product type (`fixed_term` or `recurring`, FR-INV-08), allowed terms (in months), return rate (bp per year), return method (`flat` or `compound`, R-INV-2 and R-INV-3), payout frequency (`at_maturity`, `monthly` or `quarterly`), minimum and maximum amount, whether early withdrawal is allowed, the early withdrawal rule (`forfeit_return` or `reduced_rate` with its rate) and the early withdrawal penalty in bp of principal. An edit applies to investments opened afterwards; every investment keeps the terms it was opened on. | Validation per field; `compound` with a periodic payout is refused with `compounding_needs_maturity_payout`. | P2 |
+| FR-INV-02 | A loan officer, or a member from the portal, shall open an investment with product, amount and term, and optionally the maturity instruction; the account number is `IV` plus 6 digits and the status is `pending_funding`. A member may hold any number of investments. | The term must be one the product offers (`term_not_offered`) and the amount in its range (`amount_out_of_range`). Portal-opened investments appear in a staff queue (member portal, increment 11). | P2 |
+| FR-INV-03 | A cashier shall record funding (idempotency key required); at or above the tenant's threshold for `investment_funding` a checker approves it first (FR-APR-04). On execution the investment becomes `active` with a start date (the value date), a maturity date (start plus term, R-TERM month rule), the schedule of FR-INV-09, the agreed return (its total; flat: `round(amount x rate x term_months / 12)`) and a certificate number `IC` plus 6 digits. | Posting per 6.6.3. | P2 |
+| FR-INV-04 | The nightly job shall accrue each period's return on the period end date (return expense / returns payable) and, on a payout period (monthly, every third month, and the last), make the return accrued so far due; a cashier pays the due return (idempotency key required). Crediting a member's savings account instead is a follow-up now that savings exists (#151). | Idempotent per investment and period, also under concurrent runs. | P2 |
+| FR-INV-05 | On the maturity date the nightly job shall mark the investment `matured` after accruing its last period, then apply the member's instruction: `rollover_principal` or `rollover_all` creates a new investment from principal, or principal plus unpaid return, on the product's current terms and the same term, starting on the maturity date; `payout` (or no instruction on a fixed-term product) waits for the cashier to pay principal plus unpaid return. Staff may also roll a matured investment over by hand. A rollover the product no longer allows (archived, term or amount outside it) leaves the investment `matured`. | With no instruction recorded within 7 days of maturity the investment stays `matured` and a reminder is recorded. | P2 |
+| FR-INV-06 | Early withdrawal, if the product allows it, shall be maker-checker (no threshold) and settle by R-INV-6 on the business date of the approval. A quote is available before the request. | Worked example for each rule (golden tests). | P2 |
+| FR-INV-07 | The system shall record a maturity reminder 7 days before maturity, once per investment. Sending it by SMS waits for the SMS adapter (pending ADR-013). | Tested with fixed dates. | P2 |
+| FR-INV-08 | A `recurring` product shall renew itself at maturity: with no instruction recorded, principal and return roll over automatically (FR-INV-05). | Tested. | P2 |
+| FR-INV-09 | The accrual and payout schedule shall be generated at funding, one row per month of the term with its dates, the balance its return is computed on, the return, and whether it pays out; its dates and amounts never change afterwards. | A database trigger refuses a change. | P2 |
+| FR-INV-10 | Staff shall see, per investment, a certificate (its terms, agreed return and maturity value) and a statement of every money event with the principal and return payable after it, laid out to print. | The PDF copy in document storage is a documents follow-up. | P2 |
+| FR-INV-11 | A funding (only before anything else moves), a return payout or a maturity payout may be reversed once, with a reason and a checker (`investment_reversal`), by the mirror of its journal; the investment's balances and status return to what they were. Accruals, rollovers and early withdrawals are not reversed. | Tested. | P2 |
+| FR-INV-12 | Staff shall see the maturity ladder (what is matured and unpaid, and what falls due in 7, 30 and 90 days, principal and return) and the investment figures: balances, inflows, outflows, returns accrued, paid and rolled over, penalties, open investments, investors, and concentration by investor and product. | Figures from posted rows only (chapter 14 section 14.5). | P2 |
+
+### 3.25.1 Investment return rules (R-INV)
+
+**R-INV-1: periods.** Period `k` (1 to `n`, `n` the term in months) runs from the start date plus
+`k-1` months to the start date plus `k` months, each computed from the start date by the R-TERM
+month rule (clamped to the month's last day, never drifting): 31 January starts periods ending
+29 February (28 in a common year), 31 March, 30 April.
+
+**R-INV-2: flat.** The cumulative return after `k` months is `C(k) = round(P x rate_bp x k / 120000)`
+(R-ROUND, half up); period `k` earns `C(k) - C(k-1)`. The periods sum to `C(n)`, the agreed return
+of FR-INV-03, with no residue: 1,000,000 at 1000 bp for 3 months earns 8,333, 8,334 and 8,333.
+
+**R-INV-3: compound.** Monthly compounding, only with payout `at_maturity`: `B(0) = P`, period `k`
+earns `round(B(k-1) x rate_bp / 120000)` and `B(k) = B(k-1)` plus that return. The agreed return is
+`B(n) - P`: 1,000,000 at 1200 bp for 3 months earns 10,000, 10,100 and 10,201, total 30,301.
+
+**R-INV-4: payout.** `monthly`: every period pays out; `quarterly`: periods 3, 6, 9 and the last;
+`at_maturity`: the last. When a payout period is accrued, everything accrued so far is due.
+
+**R-INV-5: part periods.** A simple return at rate `r` from a start date to an end date: the whole
+months held by the R-TERM rule earn `r / 12` each; the remaining days earn `r / L` per day, where
+`L` is the length (365 or 366) of the calendar year the day falls in, the days split at 1 January.
+One rounding at the end, half up, on the exact fraction. 1,000,000 at 1200 bp from 15 January to
+1 March 2028 (one month and 15 days of a leap year) earns 10,000 + 120,000 x 15 / 366 = 14,918.
+
+**R-INV-6: early withdrawal.** On the withdrawal date `w` (after the job's accruals up to `w`):
+earned `E` = 0 for `forfeit_return`, or R-INV-5 from the start date to `w` at the reduced rate for
+`reduced_rate`; penalty `N = round(P x penalty_bp / 10000)`, capped so the cash is not negative;
+cash `= P - N + E - R`, where `R` is the return already paid. With `A` the return accrued, one entry
+posts: investments payable `P` and returns payable `A - R` / cash; return expense credited
+`A - E` (or debited `E - A`); penalty income `N`. Worked example 1: 1,000,000 monthly at 1200 bp,
+two months accrued and paid (20,000), forfeit with 200 bp penalty: cash 960,000, return expense
+credited 20,000, penalty income 20,000. Worked example 2: 1,000,000 at maturity at 1200 bp, four
+months accrued (40,000), reduced rate 600 bp after exactly four months: earned 20,000, return
+expense credited 20,000, cash 1,020,000.
 
 ## 3.26 Collections (CLN)
 
@@ -687,6 +786,24 @@ by `docs/specs/retail-pilot-data-dictionary.md`. `MVP` here is the retail first 
 | FR-RET-14 | Every retail write shall be audited. | Each create, edit, price change, sale, void, payment, purchase, usage report, stock-take commit, transfer and transfer void writes an `audit_log` row in its transaction. | MVP |
 | FR-RET-15 | Phone-first PWA screens shall cover the flows above, gated by permission. | Built in increment R6 against chapter 7 section 7.11.20. | MVP |
 | FR-RET-16 | A stock transfer shall move one or more products from a source branch to a different, active destination branch of the tenant in one transaction, at the source's current cost, with a business date (default today in the tenant's zone, not in the future) and an optional note. The caller acts on the source branch (`retail.stock.transfer`, ADR-017). Each line writes a `transfer_out` movement at the source and a `transfer_in` movement at the destination, both linked to the transfer, and the transfer posts one entry per branch through inter-branch clearing (ADR-004). A void moves the stock back and reverses both entries while the destination still holds what arrived (issue #84, ADR-020 amendment). | A quantity above the source's balance is refused with `insufficient_stock` and nothing is written; opposite transfers of the same products sent at the same time neither deadlock nor oversell; both branches' history shows a transfer, not an adjustment; each entry balances, the tenant's valuation at cost is unchanged and each branch's moves by the transfer's cost; the audit row and any response for a caller without `retail.profit.read` carry no cost; a replayed `Idempotency-Key` moves nothing again; a void after the destination sold, used or moved part of it is refused with `transfer_stock_moved`. | MVP |
+| FR-RET-17 | Expense categories and items shall be tenant data: a category maps to a ledger expense account, an item belongs to one category and may be flagged `requires_explanation` (the pilot's "others"). Beneficiaries and advance parties shall be one list of cash parties (name, optional contact, kind) that a permitted user can extend when recording. Nothing is deleted; a category, item or party is deactivated. | Names are unique ignoring case within their parent; an item of another category is refused (422 `item_not_in_category`); an inactive category or item cannot be chosen but still shows on old records; the lists need `retail.expense.manage`; no category list is hard coded (ADR-022 decision 17). | Cash book |
+| FR-RET-18 | Daily savings shall record, per branch and business date, the amount set aside. The server suggests the day's profit (FR-RET-10) times the tenant rate `retail.cashbook.savings_rate_bp` (default 5000), rounded half up and never below zero, and uses it when the request omits the amount. The suggestion is read through a call that returns an opaque `suggestion_token`, and the create echoes that token (FR-RET-19). The screen shows the day's total sold. One active record exists per branch per date. | A second active record for a branch and date is refused (409 `savings_exists`); a voided record frees the slot; the suggestion is worked by hand with fabricated figures including a loss day (suggestion zero) and a rate change; a branch outside the caller's scope is 404; an amount of zero is valid and posts nothing; the profit, the suggestion and every savings amount (`suggested_minor`, `amount_minor` on savings rows and in reports, `savings_minor`) are absent from every response without `retail.profit.read`, except the amount the writer just typed, echoed to that writer; a default taken by a caller without it is not echoed. | Cash book |
+| FR-RET-19 | A savings amount that differs from the suggestion (an overwrite) shall need a reason and `retail.savings.overwrite`, and shall be audited with its actor, branch, date and reason, without the amount, the suggestion or the profit. The overwrite is judged against the suggestion the caller was shown (the echoed `suggestion_token`), and a suggestion that changed since is refused with 409 `suggestion_changed`, never recorded as an overwrite. | A request with a changed amount and no reason is 422 `reason_required`; the audit row exists in the same transaction and carries only the flags `overwritten` and `default_applied` (a non-overwritten create stores `default_applied: true` and no amount, so no audit payload equals half the profit); a sale added between the form and the create changes the suggestion and the create is 409 `suggestion_changed` with the new token and writes nothing; a caller without `retail.profit.read` gets the token but no `suggested_minor`, and sending `amount_minor` (equal to the suggestion or not) is 422 `amount_requires_profit_access` with nothing written, so the answer is the same for every value and no amount can be probed; a caller with `retail.profit.read` but without `retail.savings.overwrite` sending a different amount gets 403 and sending the equal amount gets 201; `overwritten` is absent from the create response, the list rows and the savings report without `retail.profit.read`; a reader holding `core.audit.read` but not `retail.profit.read` cannot derive the profit from any audit payload (same method as RetailCostVisibilityIT); the record keeps `suggested_minor`, readable only with `retail.profit.read`. | Cash book |
+| FR-RET-20 | Recording savings shall post a transfer from cash on hand to the savings reserve, not an expense, in the record's branch, in the same transaction. | Debit `savings_reserve`, credit `cash_on_hand` for the amount; profit and the income statement are unchanged by it; a void posts the reversal; the two entries balance (database trigger). | Cash book |
+| FR-RET-21 | The system shall compute, per branch and business date, the expected amount to bank on the server: cash sales by `sale_date` plus cash payments on credit sales by `paid_on`, less cash sales voided on that day (every cash book record counts on its own business date and its reversal on the void date, so a past day is not restated; the voids of savings, expenses and advances add back, and of repayments subtract, on the void day), less cash purchases (restocks paid from the till, a total at cost) dated that day, less that day's savings, less cash expenses and advances paid out, plus cash advance repayments received. Credit, mobile money and bank sales are excluded. The banking form shall show it and prefill the amount banked with it. A caller without `retail.profit.read` is shown `cash_expected_minor` only, which is takings less cash sale voids, less cash expenses and advances paid out, plus cash repayments (with the expense, advance and repayment voids of the day), before cash purchases and before savings (purchase cost and savings are profit-derived, ADR-022 decision 13), and no figure net of them; `cash_purchases_minor`, `savings_minor` and the net `expected_minor` need `retail.profit.read`. | A day with one cash, one credit, one mobile money and one bank sale expects the cash sale only; a sale or an expense voided the same day nets to zero, a sale voided on a later day counts on its own day and reduces the void day through the `cash_sale_voids_minor` line, and a savings or expense record voided on a later day raises the void day through `savings_voids_minor` or `expense_voids_minor` and leaves its own day alone; the figure is identical in the form, the report and a direct computation from the rows; a client-sent expected amount is ignored; a back-dated sale changes the report but not the snapshot already stored on a banking record (`expected_minor`). | Cash book |
+| FR-RET-22 | Cash banked shall record the branch, business date, amount banked, the instant it was entered and the user, and post a transfer from cash on hand to bank. Several records per branch and date are allowed. The difference between banked and expected shall be flagged: `shortfall`, `surplus`, `ok` (within the tenant tolerance `retail.cashbook.tolerance_minor`, default 0) or `not_banked`. | Debit `bank`, credit `cash_on_hand`; banking above the cash on hand is accepted and flagged, never refused; two partial deposits sum in the report; the flag is worked for each of the four states with fabricated figures; a void posts the reversal. | Cash book |
+| FR-RET-23 | A banking report shall list, per branch and day, expected, banked, difference, flag, the running total of unbanked cash since the branch's first live day, and who entered each record. Days imported from the pilot are listed separately and are excluded from the running total, which starts at the first live day with nothing carried in. | The running total after each day equals the sum of expected less banked up to that day; imported historical days are shown separately, carry no running total and do not move the running total of the live days; the report respects branch scope; a user without `retail.cashbook.read` gets 403. | Cash book |
+| FR-RET-24 | Company expenses shall record the branch, business date, category, item, optional beneficiary, total cost, an explanation (required when the item requires one) and an optional receipt document, and post a debit to the category's expense account and a credit to cash on hand. | An expense with an item that requires explanation and none is refused (422 `explanation_required`); the expense account is the category's, or `operating_expenses` when none is mapped; the entry balances; a void posts the reversal; amounts are integers and at most 10^13. | Cash book |
+| FR-RET-25 | Cash withdrawn from the bank shall record the branch, business date and amount, need `retail.withdrawal.record` (owner or admin), and post a transfer from bank to cash on hand. | Debit `cash_on_hand`, credit `bank`; a sales user gets 403; a withdrawal above the bank balance is accepted with a `bank_balance_negative` warning in the response, never refused; a void posts the reversal. | Cash book |
+| FR-RET-26 | Advances to the owner or the company shall record the source branch, a party, who took the money (optional), principal, purpose and business date, with a sequential number, and shall not use the lending module. Repayments shall be recorded against an advance whose balance is above zero, by cash, mobile money or bank. The balance is principal less `repaid_minor`; `repaid_minor` is a stored running total that only the repayment insert and void change, in the same transaction, and the database refuses any value other than the sum of the non-voided repayments. | Debit `owner_advances` and credit the branch's cash on hand on payout; the reverse on a repayment; a repayment above the balance is refused (422 `repayment_exceeds_balance`) and a repayment against a settled advance is refused (422 `advance_settled`); the balance and the account move together, and `repaid_minor` equals the sum of non-voided repayments for every advance after concurrent repayments and voids (a direct UPDATE to another value is refused); an advance with repayments cannot be voided (409 `advance_has_repayments`); the module has no dependency on `lending.*` (`ModularityTest`); needs `retail.advance.create` and `retail.advance.repay` (owner or admin). | Cash book |
+| FR-RET-27 | A daily cash summary per branch and date shall show opening, cash takings, cash sale voids, the voids of the other cash book kinds (`savings_voids_minor`, `expense_voids_minor`, `advance_voids_minor`, `repayment_voids_minor`, `banking_voids_minor`, `withdrawal_voids_minor`, each on the day the void is made), cash purchases, savings set aside, expenses paid, advances paid out, advance repayments received, withdrawals received, cash banked and closing, the expected amount to bank, and the unbanked running total. Closing shall equal the ledger's cash on hand balance for the branch at the end of the day, any difference being shown as `other_movements_minor`. `cash_purchases_minor` (a total at cost) and every figure that embeds savings (`savings_minor`, opening, closing, `other_movements_minor`, expected to bank and the unbanked running total) is absent without `retail.profit.read`. | With fabricated data the closing equals the ledger balance and `other_movements_minor` is zero, including on a day holding a savings void and an expense void made for an earlier day, and on that earlier day; a manual journal to cash on hand shows as `other_movements_minor`; imported days show `ledger_basis: false`; profit, `cash_purchases_minor` and every figure embedding purchases or savings appear only with `retail.profit.read`; a cash restock changes `cash_expected_minor` for no caller without it (the figure is identical with and without the restock). | Cash book |
+| FR-RET-28 | Cash book records shall be voided, never deleted or edited. A void needs `retail.cashbook.void` and a reason, reverses each of the record's journal entries, and is audited. A void posts on the day it is made, never on the record's day, and a back-dated record posts on its own business date. Every cash book write shall be money-moving: it requires an `Idempotency-Key`, a branch within the caller's scope, a business date in the tenant's time zone that is not in the future, and integer minor units. | A replayed key returns the first response and posts once (`Idempotent-Replayed`); a missing key is 422 `idempotency_key_missing`; a second void is 409; no UPDATE or DELETE of an amount is possible for `bms_app` (guard trigger); a date after today in the tenant's zone is 422 `future_date`; a record at 23:50 local belongs to that local date. | Cash book |
+| FR-RET-29 | Reports shall cover the expenses by category and item for a branch and period with totals, the savings by branch and day, and the outstanding advances by party, each within the caller's branch scope. | Totals equal the sum of non-voided rows; every savings amount and any profit-derived column are absent without `retail.profit.read`; voided rows are excluded and a flag includes them; a worked example with fabricated figures is a golden test. | Cash book |
+| FR-RET-30 | The `import-retail` command shall import the pilot's cash book tabs (expense categories and items, parties, daily savings, expenses, cash banked, withdrawals, advances and their payments) as historical rows with no journals, and one opening journal per branch, dated the day before the first live day, for the cash, bank and savings reserve balances and one line per outstanding advance (with the advance as subledger). An imported advance takes the next live `advance_no`; the source id is never reused as the number. Re-running adds nothing. | A golden test on a fabricated fixture checks counts and sums, that no journal exists for a historical row, that the opening entry balances against `opening_balance_equity`, has one subledger line per outstanding advance and is dated the day before the first live day (so the first live day opens at the carried balance with `other_movements_minor` zero), that the next live advance number is above every imported one and no number repeats, and that a second run adds nothing; an unknown category or item is created as written and reported; a row with a bad date or amount is skipped and listed with its file and line. | Cash book |
+| FR-RET-31 | Phone-first PWA screens shall cover daily savings, cash banked, expenses, withdrawals, advances and repayments, the daily cash summary and the cash book reports, gated by permission, with the pilot's bottom bar order (Sales, Banked, Savings, Expenses, Advances) and the records grouped by shop, year and month. | Built after the API in the cash book increment; a user without a permission does not see its tab; the expense item list depends on the chosen category; the explanation field appears when the item requires it. | Cash book |
+| FR-RET-32 | Cash book permissions shall be seeded and mapped to the roles with branch scope (ADR-017): `retail.cashbook.read`, `retail.savings.record`, `retail.savings.overwrite`, `retail.banking.record`, `retail.expense.record`, `retail.expense.manage`, `retail.withdrawal.record`, `retail.advance.create`, `retail.advance.repay`, `retail.cashbook.void`. By default the tenant admin holds all ten and the sales role holds only read, savings record, banking record and expense record; `retail.savings.overwrite` is withheld from the sales role pending ADR-022 open question 5. Every write shall be audited. | `PermissionMatrixIT` compares the seeded rows with chapter 8; the sales role holds exactly its column; each create, void, overwrite and repayment writes an `audit_log` row in its transaction. | Cash book |
+
+FR-RET-17 to FR-RET-32 are the retail cash book (ADR-022, issue #147). Their phase `Cash book` means the cash book increment that precedes the pilot cutover. It is built with the ADR's stated defaults for the open questions the Owner has not answered. The pilot comparison is `docs/specs/retail-cash-book.md`.
 
 ## 3.29 Self-onboarding (ONB)
 
@@ -708,3 +825,20 @@ reminders and agents are later steps. An application is not a tenant.
 | FR-ONB-08 | A newly confirmed application shall write an operator alert to the outbox (FR-NTF-11) in the same transaction. | One alert set per application. | MVP |
 | FR-ONB-09 | A scheduled job shall expire applications whose email is not confirmed within 14 days and delete `rejected` and `expired` applications 90 days after they closed. | `OnboardingIT` with backdated rows. | MVP |
 
+## 3.30 Lending insights (INS)
+
+Live insights for lending tenants (issue #153, expectation 7 of the pilot brief; ADR-030). Every
+formula is in chapter 14 section 14.9 and `docs/specs/lending-insights-metrics.md`; every metric has
+a golden test that recomputes it from raw rows (chapter 15 section 15.7).
+
+| ID | Requirement | Acceptance criteria | Phase |
+|---|---|---|---|
+| FR-INS-01 | Staff with `lending.insights.read` shall see an Insights page whose figures are narrowed to their branch scope and, without `lending.insights.all_officers`, to the loans they are the responsible officer for, whatever the request asks. | `InsightsGoldenIT`: a branch-scoped user asking for another branch gets zeros; an officer asking for another officer gets their own figures. | MVP |
+| FR-INS-02 | A morning brief shall show for today: money out, money in, due today against collected on those dues, loans that fell into arrears today and loans that will pass 30 days late within 7 days, each with one plain sentence; disbursed and collected compare with the same weekday a week earlier. | Golden test against raw rows; sentences have no placeholder left and no dash. | MVP |
+| FR-INS-03 | The loan portfolio shall show principal outstanding, interest receivable, arrears, PAR 1, 30, 60 and 90 with the ageing buckets, disbursed and collected by day, week, month or year, the collection rate by period, loans by status, product, branch and officer, the ten largest arrears linked to the loan, expected collections for the next 7 and 30 days labelled as an estimate, write-offs and recoveries, repeat borrowers, average loan size, tenor and yield, and a 12-month trend of principal outstanding and PAR 30. | Golden tests over a range with partial months, a past month read from snapshots, a branch and an officer filter. | MVP |
+| FR-INS-04 | Revenue shall come from posted journal lines only: interest, fees, penalties, recoveries and write-off expense by product, branch and month, profit contribution and effective yield, with the last 12 months. | Golden test against the journal lines, per product and per month. | MVP |
+| FR-INS-05 | Member activity shall show new members, active borrowers, the applications funnel (applied, appraised, approved, disbursed) with conversions and the median time to decision, KYC completeness, credit score bands, dormant members and staff activity. | Golden test of the funnel against the loans. | MVP |
+| FR-INS-06 | Every number shall show its definition and open the rows that make it up; a user with `lending.insights.export` may download any such table as CSV (at most 10,000 rows), audited, with names reduced to initials for a user without `lending.members.read` and never a phone or ID number. | Drill-down rows sum to their number; the export test checks masking, the audit row and the 403. | MVP |
+| FR-INS-07 | Today's numbers shall be live and refresh every 60 seconds without websockets; a past date shall read `lending_loan_daily_snapshots`, written nightly until increment 6 takes it over; the page shall render in under a second on the staging stack with the fabricated seed scaled 20 times. | Snapshot rows equal an independent replay on past dates; `InsightsPerformanceIT` records the timings. | MVP |
+| FR-INS-08 | A tenant admin shall be able to switch on a daily plain-text digest for the whole tenant to up to five email addresses and one Telegram chat at a chosen hour; it is off by default and goes once a day through the outbox. | Unit and integration tests of the text, the settings and the idempotent queue. | MVP |
+| FR-INS-09 | Savings and investments shall add their panels (balances, inflows, outflows, interest and returns, dormant accounts, maturity ladder) through the `InsightsPanel` registry, computed by those modules from their posted rows, for a tenant that holds their data. | A tenant with savings accounts and investments gets both panels with every key of the metrics dictionary and values equal to `SavingsMetrics` and `InvestmentMetrics`; a tenant with neither gets no panel; an officer-narrowed request gets no panel. | P2 |

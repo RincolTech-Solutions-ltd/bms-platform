@@ -348,6 +348,173 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), transfer, t.tenantId())
                 .update();
+        // Loan servicing (increment 5, #108): a schedule item, a repayment on the fixture journal, its allocation.
+        UUID item = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_schedule_items (id, tenant_id, loan_id, item_no, due_date, principal_due_minor,
+                                                            interest_due_minor, status)
+                        VALUES (?, ?, ?, 1, DATE '2026-02-15', 100000, 10000, 'pending')
+                        """).params(item, t.tenantId(), loan).update();
+        UUID repayment = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor,
+                                                               currency, value_date, payment_method_key, receipt_no,
+                                                               journal_entry_id, source)
+                        VALUES (?, ?, ?, ?, 'repayment', 1000, 'UGX', DATE '2026-01-15', 'cash', 'RC-HQ-999999', ?, 'staff')
+                        """)
+                .params(repayment, t.tenantId(), t.headOffice(), loan, entry)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_repayment_allocations (id, tenant_id, transaction_id, applies_to_txn_id,
+                                                                   schedule_item_id, component, amount_minor)
+                        VALUES (?, ?, ?, ?, ?, 'principal', 1000)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), repayment, repayment, item)
+                .update();
+        // Savings (increment 9, #151): a product, an account, a deposit on the fixture journal, an
+        // end-of-day balance and an interest posting.
+        UUID savingsProduct = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_savings_products (id, tenant_id, code, name, currency, interest_rate_bp,
+                                                              interest_calc, interest_posting)
+                        VALUES (?, ?, 'SAVE', 'Test savings', 'UGX', 500, 'daily_balance', 'monthly')
+                        """).params(savingsProduct, t.tenantId()).update();
+        UUID savingsAccount = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_savings_accounts (id, tenant_id, branch_id, account_no, member_id, product_id,
+                                                              currency, status, balance_minor, opened_on, txn_count)
+                        VALUES (?, ?, ?, 'SV999999', ?, ?, 'UGX', 'active', 1000, DATE '2026-01-15', 1)
+                        """)
+                .params(savingsAccount, t.tenantId(), t.headOffice(), kinMember, savingsProduct)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_savings_transactions (id, tenant_id, branch_id, account_id, seq, txn_type,
+                            amount_minor, is_credit, currency, balance_after_minor, value_date, payment_method_key,
+                            receipt_no, journal_entry_id, source)
+                        VALUES (?, ?, ?, ?, 1, 'deposit', 1000, true, 'UGX', 1000, DATE '2026-01-15', 'cash',
+                                'RC-HQ-999998', ?, 'staff')
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), savingsAccount, entry)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_savings_daily_balances (tenant_id, account_id, business_date,
+                                                                    closing_balance_minor)
+                        VALUES (?, ?, DATE '2026-01-15', 1000)
+                        """).params(t.tenantId(), savingsAccount).update();
+        owner.sql("""
+                        INSERT INTO lending_savings_interest_postings (id, tenant_id, account_id, period_start, period_end,
+                                                                       interest_minor)
+                        VALUES (?, ?, ?, DATE '2026-01-15', DATE '2026-01-31', 0)
+                        """).params(UUID.randomUUID(), t.tenantId(), savingsAccount).update();
+        // Investments (increment 10, #152): a product, an investment, a schedule period and its accrual.
+        UUID investmentProduct = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_investment_products (id, tenant_id, code, name, currency, product_type,
+                            allowed_terms_months, return_rate_bp, return_method, payout_frequency, min_amount_minor, status)
+                        VALUES (?, ?, 'RLS', 'Test Investment Product', 'UGX', 'fixed_term', '{6}', 1200, 'flat',
+                                'monthly', 100000, 'active')
+                        """).params(investmentProduct, t.tenantId()).update();
+        UUID investment = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_investments (id, tenant_id, branch_id, account_no, member_id, product_id,
+                            currency, status, principal_minor, return_rate_bp, return_method, term_months,
+                            payout_frequency, product_type, early_withdrawal_allowed, start_date, maturity_date,
+                            agreed_return_minor, principal_held_minor, channel)
+                        SELECT ?, ?, ?, 'IV999999', id, ?, 'UGX', 'active', 1000000, 1200, 'flat', 6, 'monthly',
+                               'fixed_term', false, DATE '2026-01-15', DATE '2026-07-15', 60000, 1000000, 'staff'
+                          FROM lending_members WHERE tenant_id = ? LIMIT 1
+                        """)
+                .params(investment, t.tenantId(), t.headOffice(), investmentProduct, t.tenantId())
+                .update();
+        UUID accrual = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO lending_investment_transactions (id, tenant_id, branch_id, investment_id, txn_type,
+                            amount_minor, return_minor, currency, value_date, period_no, journal_entry_id, source)
+                        VALUES (?, ?, ?, ?, 'return_accrual', 10000, 10000, 'UGX', DATE '2026-02-15', 1, ?, 'system')
+                        """)
+                .params(accrual, t.tenantId(), t.headOffice(), investment, entry)
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_investment_schedule_items (id, tenant_id, investment_id, period_no,
+                            period_start, period_end, return_minor, opening_balance_minor, is_payout, status,
+                            accrued_txn_id)
+                        VALUES (?, ?, ?, 1, DATE '2026-01-15', DATE '2026-02-15', 10000, 1000000, true, 'accrued', ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), investment, accrual)
+                .update();
+        // Lending insights (#153): a daily snapshot row and the digest settings.
+        owner.sql("""
+                        INSERT INTO lending_loan_daily_snapshots (tenant_id, business_date, loan_id, branch_id,
+                            officer_user_id, product_id, principal_outstanding_minor, interest_outstanding_minor,
+                            arrears_minor, days_past_due, par_bucket)
+                        VALUES (?, DATE '2026-01-15', ?, ?, ?, ?, 100000, 10000, 0, 0, 'current')
+                        """).params(t.tenantId(), loan, t.headOffice(), user, product).update();
+        owner.sql("INSERT INTO lending_insights_digest_settings (id, tenant_id) VALUES (?, ?)")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        // The retail cash book (migration V34, #147).
+        UUID category = UUID.randomUUID();
+        UUID expenseItem = UUID.randomUUID();
+        UUID party = UUID.randomUUID();
+        UUID advance = UUID.randomUUID();
+        owner.sql("INSERT INTO retail_expense_categories (id, tenant_id, name) VALUES (?, ?, 'Test Category 01')")
+                .params(category, t.tenantId())
+                .update();
+        owner.sql(
+                        "INSERT INTO retail_expense_items (id, tenant_id, category_id, name) VALUES (?, ?, ?, 'Test Item 01')")
+                .params(expenseItem, t.tenantId(), category)
+                .update();
+        owner.sql("INSERT INTO retail_cash_parties (id, tenant_id, name, kind) VALUES (?, ?, 'Test Owner 01', 'owner')")
+                .params(party, t.tenantId())
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_daily_savings (id, tenant_id, branch_id, business_date, amount_minor, currency,
+                                                          occurred_at, recorded_by)
+                        VALUES (?, ?, ?, DATE '2026-01-15', 100, 'UGX', now(), ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), user)
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_cash_bankings (id, tenant_id, branch_id, business_date, amount_minor, currency,
+                                                          expected_minor, banked_at, recorded_by)
+                        VALUES (?, ?, ?, DATE '2026-01-15', 100, 'UGX', 100, now(), ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), user)
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_cash_withdrawals (id, tenant_id, branch_id, business_date, amount_minor, currency,
+                                                             withdrawn_at, recorded_by)
+                        VALUES (?, ?, ?, DATE '2026-01-15', 100, 'UGX', now(), ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), user)
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_expenses (id, tenant_id, branch_id, business_date, category_id, item_id,
+                                                     category_name, item_name, amount_minor, currency, occurred_at, recorded_by)
+                        VALUES (?, ?, ?, DATE '2026-01-15', ?, ?, 'Test Category 01', 'Test Item 01', 100, 'UGX', now(), ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), t.headOffice(), category, expenseItem, user)
+                .update();
+        // One statement, so the deferred repaid_minor check sees the advance and its repayment together.
+        owner.sql("""
+                        WITH a AS (INSERT INTO retail_advances (id, tenant_id, advance_no, branch_id, party_id, principal_minor,
+                                                                currency, business_date, repaid_minor, occurred_at, recorded_by)
+                                   VALUES (?, ?, 'RA00000001', ?, ?, 100, 'UGX', DATE '2026-01-15', 40, now(), ?) RETURNING id)
+                        INSERT INTO retail_advance_repayments (id, tenant_id, advance_id, branch_id, amount_minor, currency,
+                                                               method, paid_on, recorded_by)
+                        SELECT ?, ?, a.id, ?, 40, 'UGX', 'cash', DATE '2026-01-16', ? FROM a
+                        """)
+                .params(
+                        advance,
+                        t.tenantId(),
+                        t.headOffice(),
+                        party,
+                        user,
+                        UUID.randomUUID(),
+                        t.tenantId(),
+                        t.headOffice(),
+                        user)
+                .update();
     }
 
     static String randomHash() {
@@ -616,6 +783,27 @@ class RlsIsolationIT {
                         "INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type) VALUES (?, ?, 'system', 'test.fixture.created', 'test')")
                 .params(UUID.randomUUID(), a.tenantId())
                 .update();
+        // The loan servicing ledgers are append-only too (#108).
+        // The savings ledgers too (#151).
+        for (String table : List.of(
+                "lending_loan_transactions",
+                "lending_repayment_allocations",
+                "lending_savings_transactions",
+                "lending_savings_daily_balances",
+                "lending_savings_interest_postings",
+                "lending_investment_transactions")) {
+            assertThatThrownBy(() -> asApp(
+                            a.tenantId(),
+                            c -> count(c, "WITH d AS (DELETE FROM " + table + " RETURNING 1) SELECT count(*) FROM d")))
+                    .as(table)
+                    .hasStackTraceContaining("permission denied");
+            assertThatThrownBy(() -> TestDatabase.owner()
+                            .sql("DELETE FROM " + table + " WHERE tenant_id = ?")
+                            .param(a.tenantId())
+                            .update())
+                    .as(table)
+                    .hasStackTraceContaining("append-only");
+        }
         // Even the owner is refused unless a migration explicitly opts in.
         assertThatThrownBy(() -> TestDatabase.owner()
                         .sql("DELETE FROM audit_log WHERE tenant_id = ?")

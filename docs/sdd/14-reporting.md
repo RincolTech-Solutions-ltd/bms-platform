@@ -225,18 +225,54 @@ activity in 90 days.
 ### `lending.savings_balances`
 
 Parameters: `as_at`, branches, product. Per account: member, balance, status, last member
-transaction. Totals per product and branch reconcile to `member_savings`.
+transaction. Totals per product and branch reconcile to `member_savings`. Served as JSON by
+`GET /lending/savings-reports/balances` until the report catalogue serves files (#151): balances
+by value date from the movements, so they agree with the end-of-day balances of chapter 6.
 
 ### `lending.savings_movements`
 
 Parameters: date range, branches, product. Deposits, withdrawals, interest posted, fees,
-net movement; opening and closing totals.
+net movement; opening and closing totals. Served as JSON by `GET /lending/savings-reports/movements`
+(#151), per branch and product, with reversals into and out of accounts shown apart.
+
+The savings figures of the insights page (balances, inflows net of reversed deposits, outflows net
+of reversed withdrawals and fees, interest paid, dormant accounts) come from the same queries
+through the `SavingsMetrics` interface (ADR-032).
 
 ### `lending.investments_register`
 
 Parameters: `as_at`, branches, status. Per investment: member, principal, rate, start,
 maturity, agreed return, return due, return paid. A "maturing within N days" filter
 drives the payout planning view.
+
+Increment 10 (#152) serves it as the investments list (`GET /lending/investments` with
+`status`, `branch_id` and `maturing_within_days`); the catalogue entry and its CSV arrive with the
+reports increment.
+
+### `lending.investment_maturities` and the investment metrics (FR-INV-12)
+
+The maturity ladder: investments `active` or `matured` with principal held, by when they fall due
+from today: `overdue` (matured, not yet paid out), `0_7`, `8_30` and `31_90` days; per bucket the
+count, principal held, the return still owed at maturity (the agreed return less return paid; once
+matured, accrued less paid) and the total, so the owner can plan cash for payouts. The metrics for a
+date range and branches, each from posted rows only (ADR-031 decision 8):
+
+| Metric | Definition |
+|---|---|
+| `investments.balance` | Balance of `investments_payable` (2020) at the end date |
+| `investments.returns_payable` | Balance of `investment_returns_payable` (2021) at the end date |
+| `investments.inflows` | Fundings by value date in the range, less fundings reversed; rollovers are not new money |
+| `investments.outflows` | Return payouts, maturity payouts and early withdrawals paid in the range, less reversals |
+| `investments.returns_accrued` | Net debits to `investment_return_expense` (5020) in the range |
+| `investments.returns_paid` | The return part of payouts and early withdrawals in the range, less reversals |
+| `investments.returns_reinvested` | Unpaid returns moved into a new investment by a rollover in the range |
+| `investments.penalties` | Net credits to `investment_penalty_income` (4060) in the range |
+| `investments.open_count`, `investments.investor_count` | Open investments and the members holding them, now |
+
+Concentration: the ten largest investors and every product by principal held now, each with its
+share of the total in basis points. Served by `GET /lending/investments/maturities` and
+`GET /lending/investments/metrics`, and to other modules (the insights page of #153) through the
+module's `InvestmentMetrics` interface.
 
 ### `lending.collateral_register` (FR-COL-06)
 
@@ -279,6 +315,20 @@ the period by count and amount; portfolio outstanding by product and purpose; PA
 PAR90; interest rate range and weighted average per product (in bp, weighted by `PO`);
 loans written off in the period; savings held from members (total, number of accounts);
 investments held from members (total principal, number); number of branches and staff.
+
+## 14.9 Live insights (`lending.insights.*`, #153, ADR-030)
+
+The staff Insights page is not a catalogue report: it is computed per request, live for today,
+and refreshed every 60 seconds. It uses the definitions of this chapter: PAR, buckets and DPD of
+section 14.3, expected, collected on due and collection rate of `lending.expected_vs_collected`
+(section 14.4), with the reversal rule of section 14.1, and for a past date the snapshots of
+`lending_loan_daily_snapshots`. Its revenue figures come only from posted journal lines on the
+lending revenue accounts. In a series by period, a period's collection rate counts what was paid by
+the end of that period; the headline for the whole range counts what was paid by its end, as
+`lending.expected_vs_collected` does. Every metric, its formula and its source tables are listed in
+`docs/specs/lending-insights-metrics.md`; each has a golden test (chapter 15 section 15.7). Until
+the report runs of FR-RPT-04 exist, the insights drill-down tables are the CSV exports of these
+figures (FR-INS-06).
 
 ## 14.8 Test datasets
 

@@ -166,7 +166,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Set a password with the one-time invitation token (FR-IAM-01) */
+        /** Set a password with the one-time invitation token, then sign in (FR-IAM-01, issue #86) */
         post: operations["acceptInvitation"];
         delete?: never;
         options?: never;
@@ -485,6 +485,486 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/insights/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The morning brief: today's movements with one plain sentence each */
+        get: operations["getInsightsBrief"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The owner's daily digest settings (off by default) */
+        get: operations["getInsightsDigestSettings"];
+        /** Change the daily digest settings */
+        put: operations["updateInsightsDigestSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/digest/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The digest text as it would be sent now, for the whole tenant */
+        get: operations["previewInsightsDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Member activity: new members, the applications funnel, KYC, credit scores, dormancy, staff */
+        get: operations["getInsightsMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/panels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Panels registered by other modules (savings, investments), for a tenant with their data */
+        get: operations["getInsightsPanels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loan portfolio: outstanding, PAR and ageing, flows by period, collection rate, forecast, trend */
+        get: operations["getInsightsPortfolio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/revenue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Revenue from posted journal lines by product, branch and month, with effective yield */
+        get: operations["getInsightsRevenue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/tables/{table}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rows behind a number (drill-down), at most 200 */
+        get: operations["getInsightsTable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/insights/tables/{table}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The same table as CSV, at most 10,000 rows; names masked without member access; audited */
+        get: operations["exportInsightsTable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investment-products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List investment products */
+        get: operations["listInvestmentProducts"];
+        put?: never;
+        /** Create an investment product (FR-INV-01) */
+        post: operations["createInvestmentProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investment-products/return-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The return schedule an amount and term would get on a product (R-INV-1 to R-INV-4) */
+        post: operations["previewInvestmentReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investment-products/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An investment product */
+        get: operations["getInvestmentProduct"];
+        /** Edit an investment product; investments already opened keep their terms */
+        put: operations["updateInvestmentProduct"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investment-products/{product_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive an investment product */
+        post: operations["archiveInvestmentProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List investments in the caller's branch scope; q searches account number, member number or name (chapter 14 investments register) */
+        get: operations["listInvestments"];
+        put?: never;
+        /** Open an investment for a member, pending funding (FR-INV-02) */
+        post: operations["openInvestment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/maturities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The maturity ladder (overdue, 7, 30, 90 days) and the investments maturing (FR-INV-12) */
+        get: operations["listInvestmentMaturities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Balances, flows, returns accrued and paid, the ladder and concentration (FR-INV-12) */
+        get: operations["getInvestmentMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An investment with its balances */
+        get: operations["getInvestment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The investment certificate's data (FR-INV-10) */
+        get: operations["getInvestmentCertificate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/early-withdrawal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request an early withdrawal; always waits for a checker (FR-INV-06) */
+        post: operations["requestInvestmentEarlyWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/early-withdrawal-quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What an early withdrawal pays as at a date, today by default (FR-INV-06, R-INV-6) */
+        get: operations["getInvestmentEarlyWithdrawalQuote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/funding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record funding (FR-INV-03); 201 when executed below the threshold, 202 when it waits for a checker */
+        post: operations["requestInvestmentFunding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/maturity-instruction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Record the member's choice at maturity: payout or rollover (FR-INV-05) */
+        put: operations["setInvestmentMaturityInstruction"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/payout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pay a matured investment out: principal and unpaid return (FR-INV-05) */
+        post: operations["payInvestmentOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/return-payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pay the return that is due (FR-INV-04) */
+        post: operations["payInvestmentReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/rollover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Roll a matured investment over on the product's current terms (FR-INV-05) */
+        post: operations["rollInvestmentOver"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The accrual and payout schedule (FR-INV-09) */
+        get: operations["getInvestmentSchedule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every money event with the principal and return payable after it (FR-INV-10) */
+        get: operations["getInvestmentStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/investments/{investment_id}/transactions/{txn_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request the reversal of a funding, return payout or maturity payout (FR-INV-11) */
+        post: operations["requestInvestmentTransactionReversal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loan-products": {
         parameters: {
             query?: never;
@@ -578,7 +1058,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List loans in the caller's branch scope */
+        /** List loans in the caller's branch scope; q searches loan number, member number or name */
         get: operations["listLoans"];
         put?: never;
         /** Create a draft application (FR-ORG-01) */
@@ -676,6 +1156,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/disbursements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request disbursement of an approved loan (FR-DIS-01); 201 when executed below the threshold, 202 when it waits for a checker */
+        post: operations["requestLoanDisbursement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/guarantors": {
         parameters: {
             query?: never;
@@ -693,6 +1190,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/payoff-quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The payoff amount as at a value date, today by default (FR-REP-06) */
+        get: operations["getLoanPayoffQuote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/repayments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a repayment, allocated per R-ALLOC; a recovery on a written-off loan (FR-REP-01 to FR-REP-04, FR-LCL-03) */
+        post: operations["recordLoanRepayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/return": {
         parameters: {
             query?: never;
@@ -704,6 +1235,23 @@ export interface paths {
         put?: never;
         /** Return an application to draft with a note */
         post: operations["returnLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The repayment schedule with a totals row (FR-DIS-04) */
+        get: operations["getLoanSchedule"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -738,6 +1286,57 @@ export interface paths {
         put?: never;
         /** Submit a draft, freezing its terms (FR-ORG-03) */
         post: operations["submitLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The loan's money events with their allocations, newest first */
+        get: operations["listLoanTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/transactions/{txn_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request the reversal of a repayment or recovery, with a reason (FR-REP-05) */
+        post: operations["requestLoanTransactionReversal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/{loan_id}/write-off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request write-off of an active loan, with a reason (FR-LCL-02) */
+        post: operations["requestLoanWriteOff"];
         delete?: never;
         options?: never;
         head?: never;
@@ -919,6 +1518,264 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/savings-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List savings accounts in the caller's branch scope, by account number */
+        get: operations["listSavingsAccounts"];
+        put?: never;
+        /** Open a savings account for a member (FR-SAV-02); a member may hold several */
+        post: operations["openSavingsAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A savings account with its balance and accrued interest */
+        get: operations["getSavingsAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request closure (FR-SAV-07): interest to date, then the whole balance paid out */
+        post: operations["requestSavingsClosure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/deposits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a deposit (FR-SAV-03) */
+        post: operations["recordSavingsDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Freeze an account: no withdrawal or closure until unfrozen */
+        post: operations["freezeSavingsAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reactivate a dormant account (FR-SAV-06) */
+        post: operations["reactivateSavingsAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The account statement for a range of value dates; the last three months by default */
+        get: operations["getSavingsStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The account's movements with running balances, newest first (FR-SAV-04) */
+        get: operations["listSavingsTransactions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/transactions/{txn_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request the reversal of a deposit or a withdrawal (with its fee), with a reason; always checked */
+        post: operations["requestSavingsReversal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/unfreeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unfreeze an account */
+        post: operations["unfreezeSavingsAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-accounts/{account_id}/withdrawals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a withdrawal (FR-SAV-03); 201 when executed below the threshold, 202 when it waits for a checker */
+        post: operations["requestSavingsWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List savings products */
+        get: operations["listSavingsProducts"];
+        put?: never;
+        /** Create a savings product (FR-SAV-01) */
+        post: operations["createSavingsProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-products/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A savings product */
+        get: operations["getSavingsProduct"];
+        /** Update or archive a savings product; its interest terms are locked once an account uses it */
+        put: operations["updateSavingsProduct"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-reports/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Savings balances as at the end of a day (today by default), per account, with totals per product and branch */
+        get: operations["getSavingsBalancesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/savings-reports/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Savings movements by value date (this month by default): opening, deposits, withdrawals, interest, fees, reversals, closing */
+        get: operations["getSavingsMovementsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -929,6 +1786,23 @@ export interface paths {
         /** The signed-in user, permissions and branches (FR-BR-03) */
         get: operations["getMe"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/tours/{tour_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Record how the user left a guided tour (issue #19) */
+        put: operations["recordTourState"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1413,6 +2287,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/advances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Advances with their balances, newest first */
+        get: operations["listRetailAdvances"];
+        put?: never;
+        /** Record an advance to the owner or a related party (FR-RET-26); M */
+        post: operations["createRetailAdvance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advances/{advance_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An advance with its repayments */
+        get: operations["getRetailAdvance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advances/{advance_id}/repayments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a repayment of an advance (FR-RET-26); M */
+        post: operations["createRetailAdvanceRepayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advances/{advance_id}/repayments/{repayment_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a repayment and restore the balance (FR-RET-28); M */
+        post: operations["voidRetailAdvanceRepayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/advances/{advance_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void an advance that has no repayments (FR-RET-28); M */
+        post: operations["voidRetailAdvance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/bankings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Banking records, newest first */
+        get: operations["listRetailBankings"];
+        put?: never;
+        /** Record cash banked (FR-RET-22); M */
+        post: operations["createRetailBanking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/bankings/expected": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The amount expected to be banked for a shop and day (FR-RET-21) */
+        get: operations["getRetailBankingExpected"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/bankings/{banking_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a banking record (FR-RET-28); M */
+        post: operations["voidRetailBanking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/cash-parties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Beneficiaries and advance parties */
+        get: operations["listRetailCashParties"];
+        put?: never;
+        /** Add a beneficiary or advance party on the fly */
+        post: operations["createRetailCashParty"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/categories": {
         parameters: {
             query?: never;
@@ -1494,6 +2524,110 @@ export interface paths {
         get: operations["getRetailCustomerBalance"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expense-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expense categories with their items */
+        get: operations["listRetailExpenseCategories"];
+        put?: never;
+        /** Add an expense category (FR-RET-17) */
+        post: operations["createRetailExpenseCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expense-categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename, remap, switch off or reorder a category; needs If-Match */
+        patch: operations["updateRetailExpenseCategory"];
+        trace?: never;
+    };
+    "/api/v1/retail/expense-categories/{category_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add an item to a category */
+        post: operations["createRetailExpenseItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expense-categories/{category_id}/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename, switch off or flag an item as needing an explanation; needs If-Match */
+        patch: operations["updateRetailExpenseItem"];
+        trace?: never;
+    };
+    "/api/v1/retail/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expenses, newest first */
+        get: operations["listRetailExpenses"];
+        put?: never;
+        /** Record a company expense paid from the till (FR-RET-24); M */
+        post: operations["createRetailExpense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/expenses/{expense_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void an expense (FR-RET-28); M */
+        post: operations["voidRetailExpense"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1614,6 +2748,91 @@ export interface paths {
         };
         /** Profit to date, expected profit of the stock on hand and a 30 day run rate (issue #149) */
         get: operations["getRetailBusinessEvaluation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/cash/advances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Outstanding advances by party (FR-RET-29) */
+        get: operations["getRetailCashAdvancesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/cash/banking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expected against banked per shop and day, with the running unbanked total (FR-RET-23) */
+        get: operations["getRetailCashBankingReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/cash/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The daily cash summary per shop and day (FR-RET-27) */
+        get: operations["getRetailCashDailyReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/cash/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expenses by category, item, shop or month (FR-RET-29) */
+        get: operations["getRetailCashExpensesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/cash/savings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Savings per shop and day (FR-RET-29) */
+        get: operations["getRetailCashSavingsReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1805,6 +3024,58 @@ export interface paths {
         put?: never;
         /** Void a sale by reversal (FR-RET-04) */
         post: operations["voidRetailSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Savings records, newest first */
+        get: operations["listRetailSavings"];
+        put?: never;
+        /** Record the day's savings (FR-RET-18 to FR-RET-20); M */
+        post: operations["createRetailSavings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings/suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The day's savings suggestion token, and the suggestion with profit read (FR-RET-18) */
+        get: operations["getRetailSavingsSuggestion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/savings/{savings_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a savings record and free its day (FR-RET-28); M */
+        post: operations["voidRetailSavings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2046,6 +3317,41 @@ export interface paths {
         put?: never;
         /** Report stock used or damaged, valued at cost (FR-RET-07); M */
         post: operations["reportRetailUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/withdrawals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Withdrawals from the bank, newest first */
+        get: operations["listRetailWithdrawals"];
+        put?: never;
+        /** Record cash withdrawn from the bank (FR-RET-25); M */
+        post: operations["createRetailWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/withdrawals/{withdrawal_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a withdrawal (FR-RET-28); M */
+        post: operations["voidRetailWithdrawal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2596,6 +3902,11 @@ export interface components {
             /** @description Required when in_custody */
             storage_location?: string;
         };
+        CreateInvestmentProductRequest: {
+            code: string;
+            name: string;
+            terms: components["schemas"]["InvestmentProductTerms"];
+        };
         CreateLoanProductRequest: {
             code: string;
             name: string;
@@ -2674,6 +3985,12 @@ export interface components {
             /** Format: uuid */
             unit_id: string;
         };
+        CreateSavingsProductRequest: {
+            code: string;
+            /** @description The tenant's currency when omitted */
+            currency?: string;
+            terms: components["schemas"]["SavingsProductTerms"];
+        };
         CreateTenantRequest: {
             admin: components["schemas"]["FirstAdminRequest"];
             /** @description Default UGX */
@@ -2692,6 +4009,15 @@ export interface components {
             /** Format: uuid */
             head_office_branch_id?: string;
             tenant?: components["schemas"]["PlatformTenant"];
+        };
+        DisbursementRequest: {
+            /**
+             * Format: date
+             * @description Today or earlier, in an open period
+             */
+            disbursement_date: string;
+            external_reference?: string;
+            payment_method_key: string;
         };
         DownloadUrl: {
             /** Format: date-time */
@@ -2739,6 +4065,701 @@ export interface components {
             code: string;
             name: string;
         };
+        InsightsAgeingBucket: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            key?: string;
+            label?: string;
+            /** Format: int64 */
+            loans?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int64 */
+            share_bp?: number;
+        };
+        InsightsArrearsRow: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            /** Format: int32 */
+            days_past_due?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_name?: string;
+            member_no?: string;
+            officer_name?: string;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+        };
+        InsightsBreakdown: {
+            dimension?: string;
+            rows?: components["schemas"]["InsightsGroup"][];
+            title?: string;
+        };
+        InsightsBrief: {
+            /** Format: date */
+            as_of?: string;
+            currency?: string;
+            /** Format: date-time */
+            generated_at?: string;
+            metrics?: components["schemas"]["InsightsMetric"][];
+            /** @description One plain sentence per movement, in the order of the cards */
+            sentences?: string[];
+        };
+        InsightsColumn: {
+            key?: string;
+            /** @description text, money, count, date, days or basis_points */
+            kind?: string;
+            label?: string;
+        };
+        InsightsCountPoint: {
+            /** Format: int64 */
+            count?: number;
+            label?: string;
+            /** Format: date */
+            period_start?: string;
+        };
+        InsightsDayAmount: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date */
+            date?: string;
+        };
+        InsightsDigestPreview: {
+            /** Format: date */
+            as_of?: string;
+            subject?: string;
+            text?: string;
+        };
+        InsightsDigestSettings: {
+            email_recipients?: string[];
+            enabled?: boolean;
+            /** Format: date */
+            last_sent_on?: string;
+            /** Format: int32 */
+            send_hour?: number;
+            telegram_chat_id?: string;
+            /** Format: int32 */
+            version?: number;
+        };
+        InsightsDigestSettingsRequest: {
+            email_recipients: string[];
+            enabled: boolean;
+            /** Format: int32 */
+            send_hour: number;
+            telegram_chat_id?: string;
+        };
+        InsightsDrill: {
+            params?: {
+                [key: string]: string;
+            };
+            table?: string;
+        };
+        InsightsFunnelStage: {
+            /** Format: int64 */
+            conversion_bp?: number;
+            /** Format: int64 */
+            count?: number;
+            drill?: components["schemas"]["InsightsDrill"];
+            key?: string;
+            label?: string;
+        };
+        InsightsGroup: {
+            key?: string;
+            label?: string;
+            /** Format: int64 */
+            loans?: number;
+            /** Format: int64 */
+            par30_bp?: number;
+            /** Format: int64 */
+            par30_minor?: number;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+        };
+        InsightsMembers: {
+            /** Format: date */
+            from?: string;
+            funnel?: components["schemas"]["InsightsFunnelStage"][];
+            /** Format: date-time */
+            generated_at?: string;
+            grain?: string;
+            kyc?: components["schemas"]["InsightsSlice"][];
+            metrics?: components["schemas"]["InsightsMetric"][];
+            new_members?: components["schemas"]["InsightsCountPoint"][];
+            score_bands?: components["schemas"]["InsightsSlice"][];
+            staff?: components["schemas"]["InsightsStaffRow"][];
+            /** Format: date */
+            to?: string;
+        };
+        InsightsMetric: {
+            currency?: string;
+            definition?: string;
+            drill?: components["schemas"]["InsightsDrill"];
+            key?: string;
+            kind?: string;
+            label?: string;
+            /** Format: int64 */
+            value?: number;
+        };
+        InsightsPanel: {
+            key?: string;
+            metrics?: components["schemas"]["InsightsMetric"][];
+            title?: string;
+        };
+        InsightsPanels: {
+            panels?: components["schemas"]["InsightsPanel"][];
+        };
+        InsightsPeriod: {
+            /** Format: int64 */
+            collected_minor?: number;
+            /** Format: int64 */
+            collected_on_due_minor?: number;
+            /** Format: int64 */
+            collection_rate_bp?: number;
+            /** Format: int64 */
+            disbursed_count?: number;
+            /** Format: int64 */
+            disbursed_minor?: number;
+            /** Format: int64 */
+            expected_minor?: number;
+            label?: string;
+            /** Format: date */
+            period_end?: string;
+            /** Format: date */
+            period_start?: string;
+        };
+        InsightsPortfolio: {
+            ageing?: components["schemas"]["InsightsAgeingBucket"][];
+            breakdowns?: components["schemas"]["InsightsBreakdown"][];
+            currency?: string;
+            forecast?: components["schemas"]["InsightsDayAmount"][];
+            /** Format: date */
+            from?: string;
+            /** Format: date-time */
+            generated_at?: string;
+            grain?: string;
+            metrics?: components["schemas"]["InsightsMetric"][];
+            series?: components["schemas"]["InsightsPeriod"][];
+            /**
+             * Format: date
+             * @description The date the stock figures (outstanding, PAR, ageing, breakdowns) are for
+             */
+            stock_as_of?: string;
+            /** @description live (today), snapshot (a past date) or none (no snapshot for that date yet) */
+            stock_source?: string;
+            /** Format: date */
+            to?: string;
+            top_arrears?: components["schemas"]["InsightsArrearsRow"][];
+            trend?: components["schemas"]["InsightsTrendPoint"][];
+        };
+        InsightsRevenue: {
+            by_branch?: components["schemas"]["InsightsRevenueRow"][];
+            by_product?: components["schemas"]["InsightsRevenueRow"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            /** Format: date-time */
+            generated_at?: string;
+            metrics?: components["schemas"]["InsightsMetric"][];
+            months?: components["schemas"]["InsightsRevenueMonth"][];
+            /** Format: date */
+            to?: string;
+        };
+        InsightsRevenueMonth: {
+            /** Format: int64 */
+            contribution_minor?: number;
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: int64 */
+            interest_minor?: number;
+            label?: string;
+            /** Format: date */
+            month?: string;
+            /** Format: int64 */
+            penalties_minor?: number;
+            /** Format: int64 */
+            recovered_minor?: number;
+            /** Format: int64 */
+            write_off_expense_minor?: number;
+        };
+        InsightsRevenueRow: {
+            /** Format: int64 */
+            contribution_minor?: number;
+            /** Format: int64 */
+            effective_yield_bp?: number;
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: int64 */
+            interest_minor?: number;
+            key?: string;
+            label?: string;
+            /** Format: int64 */
+            penalties_minor?: number;
+            /** Format: int64 */
+            recovered_minor?: number;
+            /** Format: int64 */
+            write_off_expense_minor?: number;
+        };
+        InsightsSlice: {
+            /** Format: int64 */
+            count?: number;
+            key?: string;
+            label?: string;
+        };
+        InsightsStaffRow: {
+            /** Format: int64 */
+            applications_submitted?: number;
+            /** Format: int64 */
+            appraisals?: number;
+            /** Format: int64 */
+            disbursements?: number;
+            /** Format: int64 */
+            members_registered?: number;
+            name?: string;
+            /** Format: int64 */
+            repayments_recorded?: number;
+            /** Format: uuid */
+            user_id?: string;
+        };
+        InsightsTable: {
+            columns?: components["schemas"]["InsightsColumn"][];
+            currency?: string;
+            key?: string;
+            /** @description Cells as strings in column order; money in integer minor units */
+            rows?: string[][];
+            title?: string;
+            /** @description True when the table stopped at the row limit */
+            truncated?: boolean;
+        };
+        InsightsTrendPoint: {
+            /** Format: int64 */
+            active_loans?: number;
+            /** Format: date */
+            date?: string;
+            label?: string;
+            /** Format: int64 */
+            par30_bp?: number;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+            /** @description snapshot for a past month end, live for today, none when no snapshot exists */
+            source?: string;
+        };
+        Investment: {
+            account_no?: string;
+            /** Format: int64 */
+            agreed_return_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            certificate_no?: string;
+            channel?: string;
+            /** Format: date */
+            closed_on?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            early_withdrawal_allowed?: boolean;
+            /** Format: int32 */
+            early_withdrawal_penalty_bp?: number;
+            /** Format: int32 */
+            early_withdrawal_rate_bp?: number;
+            early_withdrawal_rule?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: date */
+            maturity_date?: string;
+            maturity_instruction?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_name?: string;
+            member_no?: string;
+            payout_frequency?: string;
+            /** Format: uuid */
+            pending_approval_id?: string;
+            /** Format: date */
+            post_maturity_reminded_on?: string;
+            /** Format: date */
+            pre_maturity_reminded_on?: string;
+            /** Format: int64 */
+            principal_held_minor?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            product_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            product_name?: string;
+            product_type?: string;
+            /** Format: int64 */
+            return_accrued_minor?: number;
+            /**
+             * Format: int64
+             * @description Return due and not yet paid: what a return payout pays now
+             */
+            return_available_minor?: number;
+            /** Format: int64 */
+            return_due_minor?: number;
+            return_method?: string;
+            /** Format: int64 */
+            return_paid_minor?: number;
+            /** Format: int32 */
+            return_rate_bp?: number;
+            /** Format: uuid */
+            rolled_over_from_id?: string;
+            /** Format: uuid */
+            rolled_over_to_id?: string;
+            /** Format: date */
+            start_date?: string;
+            status?: string;
+            /** Format: int32 */
+            term_months?: number;
+            /** Format: int32 */
+            version?: number;
+        };
+        /** @description executed: the action took effect now (below the tenant's threshold); otherwise it waits for a checker as approval_request_id */
+        InvestmentActionOutcome: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            executed?: boolean;
+            /** Format: uuid */
+            investment_id?: string;
+            investment_status?: string;
+        };
+        /** @description FR-INV-10: the data of the printed certificate */
+        InvestmentCertificate: {
+            account_no?: string;
+            /** Format: int64 */
+            agreed_return_minor?: number;
+            branch_name?: string;
+            certificate_no?: string;
+            currency?: string;
+            early_withdrawal_allowed?: boolean;
+            /** Format: int32 */
+            early_withdrawal_penalty_bp?: number;
+            /** Format: int32 */
+            early_withdrawal_rate_bp?: number;
+            early_withdrawal_rule?: string;
+            /** Format: date */
+            issued_on?: string;
+            /** Format: date */
+            maturity_date?: string;
+            maturity_instruction?: string;
+            /** Format: int64 */
+            maturity_value_minor?: number;
+            member_name?: string;
+            member_no?: string;
+            payout_frequency?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            product_name?: string;
+            return_method?: string;
+            /** Format: int32 */
+            return_rate_bp?: number;
+            /** Format: date */
+            start_date?: string;
+            tenant_name?: string;
+            /** Format: int32 */
+            term_months?: number;
+        };
+        /** @description R-INV-6 as at the value date */
+        InvestmentEarlyWithdrawalQuote: {
+            /** Format: int64 */
+            cash_minor?: number;
+            currency?: string;
+            /** Format: int64 */
+            earned_return_minor?: number;
+            /** Format: uuid */
+            investment_id?: string;
+            /** Format: int64 */
+            penalty_minor?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int64 */
+            return_accrued_minor?: number;
+            /** Format: int64 */
+            return_paid_minor?: number;
+            rule?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        InvestmentEarlyWithdrawalRequest: {
+            external_reference?: string;
+            payment_method_key: string;
+            reason: string;
+        };
+        InvestmentFundingRequest: {
+            external_reference?: string;
+            payment_method_key: string;
+            /**
+             * Format: date
+             * @description Today or earlier, in an open period
+             */
+            value_date: string;
+        };
+        InvestmentLadderBucket: {
+            bucket?: string;
+            /** Format: int32 */
+            count?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int64 */
+            return_minor?: number;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        InvestmentMaturities: {
+            /** Format: date */
+            as_of?: string;
+            currency?: string;
+            items?: components["schemas"]["InvestmentMaturity"][];
+            ladder?: components["schemas"]["InvestmentLadderBucket"][];
+        };
+        InvestmentMaturity: {
+            account_no?: string;
+            /** Format: int32 */
+            days_to_maturity?: number;
+            /** Format: uuid */
+            investment_id?: string;
+            /** Format: date */
+            maturity_date?: string;
+            maturity_instruction?: string;
+            member_name?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            product_name?: string;
+            /** Format: int64 */
+            return_minor?: number;
+            status?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        InvestmentMaturityInstructionRequest: {
+            instruction: string;
+        };
+        InvestmentMetric: {
+            currency?: string;
+            definition?: string;
+            key?: string;
+            kind?: string;
+            label?: string;
+            /** Format: int64 */
+            value?: number;
+        };
+        InvestmentMetrics: {
+            /** Format: date */
+            from?: string;
+            ladder?: components["schemas"]["InvestmentLadderBucket"][];
+            metrics?: components["schemas"]["InvestmentMetric"][];
+            products?: components["schemas"]["InvestmentShare"][];
+            /** Format: date */
+            to?: string;
+            top_investors?: components["schemas"]["InvestmentShare"][];
+            /** Format: int64 */
+            total_principal_minor?: number;
+        };
+        InvestmentPage: {
+            items?: components["schemas"]["Investment"][];
+            next_cursor?: string;
+        };
+        InvestmentPaymentRequest: {
+            external_reference?: string;
+            payment_method_key: string;
+        };
+        InvestmentProduct: {
+            allowed_terms_months?: number[];
+            code?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            early_withdrawal_allowed?: boolean;
+            /** Format: int32 */
+            early_withdrawal_penalty_bp?: number;
+            /** Format: int32 */
+            early_withdrawal_rate_bp?: number;
+            early_withdrawal_rule?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: int64 */
+            max_amount_minor?: number;
+            /** Format: int64 */
+            min_amount_minor?: number;
+            name?: string;
+            payout_frequency?: string;
+            product_type?: string;
+            return_method?: string;
+            /** Format: int32 */
+            return_rate_bp?: number;
+            status?: string;
+            /** Format: int32 */
+            version?: number;
+        };
+        InvestmentProductList: {
+            items?: components["schemas"]["InvestmentProduct"][];
+        };
+        InvestmentProductTerms: {
+            allowed_terms_months: number[];
+            early_withdrawal_allowed: boolean;
+            /**
+             * Format: int32
+             * @description Penalty on principal withdrawn early, in basis points
+             */
+            early_withdrawal_penalty_bp?: number;
+            /** Format: int32 */
+            early_withdrawal_rate_bp?: number;
+            early_withdrawal_rule?: string;
+            /** Format: int64 */
+            max_amount_minor?: number;
+            /** Format: int64 */
+            min_amount_minor: number;
+            payout_frequency: string;
+            /** @description recurring: renews itself at maturity unless the member asks for a payout (FR-INV-08) */
+            product_type: string;
+            /** @description compound: monthly, only with payout at_maturity (R-INV-3) */
+            return_method: string;
+            /**
+             * Format: int32
+             * @description Per year
+             */
+            return_rate_bp: number;
+        };
+        InvestmentReasonRequest: {
+            reason: string;
+        };
+        InvestmentReturnPreview: {
+            /** Format: int64 */
+            agreed_return_minor?: number;
+            /** Format: int64 */
+            amount_minor?: number;
+            currency?: string;
+            /** Format: date */
+            maturity_date?: string;
+            /** Format: int64 */
+            maturity_value_minor?: number;
+            payout_frequency?: string;
+            periods?: components["schemas"]["InvestmentSchedulePeriod"][];
+            return_method?: string;
+            /** Format: int32 */
+            return_rate_bp?: number;
+            /** Format: date */
+            start_date?: string;
+            /** Format: int32 */
+            term_months?: number;
+        };
+        InvestmentReturnPreviewRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: uuid */
+            product_id: string;
+            /**
+             * Format: date
+             * @description Today when omitted
+             */
+            start_date?: string;
+            /** Format: int32 */
+            term_months: number;
+        };
+        InvestmentRolloverRequest: {
+            mode: string;
+        };
+        InvestmentRolloverResult: {
+            next?: components["schemas"]["Investment"];
+            previous?: components["schemas"]["Investment"];
+        };
+        InvestmentSchedule: {
+            currency?: string;
+            /** Format: uuid */
+            investment_id?: string;
+            periods?: components["schemas"]["InvestmentSchedulePeriod"][];
+            /** Format: int64 */
+            total_return_minor?: number;
+        };
+        InvestmentSchedulePeriod: {
+            /** Format: int64 */
+            cumulative_return_minor?: number;
+            /** Format: int64 */
+            opening_balance_minor?: number;
+            payout?: boolean;
+            /** Format: date */
+            period_end?: string;
+            /** Format: int32 */
+            period_no?: number;
+            /** Format: date */
+            period_start?: string;
+            /** Format: int64 */
+            return_minor?: number;
+            status?: string;
+        };
+        InvestmentShare: {
+            /** Format: uuid */
+            id?: string;
+            label?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int32 */
+            share_bp?: number;
+        };
+        InvestmentStatement: {
+            investment?: components["schemas"]["Investment"];
+            lines?: components["schemas"]["InvestmentStatementLine"][];
+            /** Format: int64 */
+            principal_balance_minor?: number;
+            /** Format: int64 */
+            return_payable_minor?: number;
+        };
+        InvestmentStatementLine: {
+            /**
+             * Format: int64
+             * @description Principal held after this line
+             */
+            principal_balance_minor?: number;
+            /**
+             * Format: int64
+             * @description Return accrued and not paid after this line
+             */
+            return_payable_minor?: number;
+            transaction?: components["schemas"]["InvestmentTransaction"];
+        };
+        InvestmentTransaction: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            external_reference?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            investment_id?: string;
+            /** Format: uuid */
+            journal_entry_id?: string;
+            payment_method_key?: string;
+            /** Format: int64 */
+            penalty_minor?: number;
+            /** Format: int32 */
+            period_no?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            reason?: string;
+            receipt_no?: string;
+            /** Format: uuid */
+            recorded_by?: string;
+            /** Format: int64 */
+            return_minor?: number;
+            /** Format: uuid */
+            reversed_by_txn_id?: string;
+            /** Format: uuid */
+            reverses_txn_id?: string;
+            source?: string;
+            txn_type?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        InvestmentTransactionResult: {
+            investment?: components["schemas"]["Investment"];
+            transaction?: components["schemas"]["InvestmentTransaction"];
+        };
         InvitationLink: {
             /** Format: date-time */
             expires_at?: string;
@@ -2772,6 +4793,7 @@ export interface components {
             approved_principal_minor?: number;
             /** Format: int32 */
             approved_term_count?: number;
+            balances?: components["schemas"]["LoanBalances"];
             /** Format: uuid */
             branch_id?: string;
             cancelled_reason?: string;
@@ -2824,6 +4846,33 @@ export interface components {
             /** Format: int32 */
             version?: number;
         };
+        /** @description executed: the action took effect now (below the tenant's threshold); otherwise it waits for a checker as approval_request_id */
+        LoanActionOutcome: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            executed?: boolean;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_status?: string;
+        };
+        LoanAllocation: {
+            /**
+             * Format: int64
+             * @description Negative on a reversal's rows
+             */
+            amount_minor?: number;
+            /**
+             * Format: uuid
+             * @description The repayment whose money the row moves
+             */
+            applies_to_txn_id?: string;
+            component?: string;
+            /**
+             * Format: int32
+             * @description Null for an overpayment
+             */
+            item_no?: number;
+        };
         LoanAppraisal: {
             /** Format: uuid */
             appraised_by?: string;
@@ -2866,6 +4915,44 @@ export interface components {
             monthly_obligations_minor?: number;
             visit_notes?: string;
         };
+        /** @description FR-DIS-04, R-DPD: the loan's position as of its last money event */
+        LoanBalances: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            /** Format: date */
+            closed_on?: string;
+            /**
+             * Format: int64
+             * @description Overpayment held for the member (R-ALLOC step 4)
+             */
+            credit_balance_minor?: number;
+            /** Format: int32 */
+            days_past_due?: number;
+            /** Format: date */
+            disbursed_on?: string;
+            /** Format: int64 */
+            fees_outstanding_minor?: number;
+            /** Format: int64 */
+            interest_outstanding_minor?: number;
+            /** Format: date */
+            last_repayment_on?: string;
+            /** Format: date */
+            maturity_date?: string;
+            /** Format: date */
+            next_due_date?: string;
+            /** Format: int64 */
+            penalties_outstanding_minor?: number;
+            /** Format: int64 */
+            principal_disbursed_minor?: number;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+            /** Format: int64 */
+            total_outstanding_minor?: number;
+            /** Format: int64 */
+            total_paid_minor?: number;
+            /** Format: date */
+            written_off_on?: string;
+        };
         LoanDecisionRequest: {
             /**
              * Format: int64
@@ -2898,16 +4985,26 @@ export interface components {
             relationship?: string;
         };
         LoanListItem: {
+            /** Format: int64 */
+            approved_principal_minor?: number;
             /** Format: uuid */
             branch_id?: string;
             /** Format: date-time */
             created_at?: string;
             currency?: string;
+            /** Format: int32 */
+            days_past_due?: number;
+            /** Format: date */
+            disbursed_on?: string;
             /** Format: uuid */
             id?: string;
             loan_no?: string;
             /** Format: uuid */
             member_id?: string;
+            member_name?: string;
+            member_no?: string;
+            /** Format: date */
+            next_due_date?: string;
             /** Format: uuid */
             officer_user_id?: string;
             purpose_category?: string;
@@ -2916,6 +5013,8 @@ export interface components {
             /** Format: int32 */
             requested_term_count?: number;
             status?: string;
+            /** Format: int64 */
+            total_outstanding_minor?: number;
         };
         LoanNoteRequest: {
             note: string;
@@ -3062,6 +5161,17 @@ export interface components {
             /** Format: int32 */
             version_no?: number;
         };
+        LoanReasonRequest: {
+            reason: string;
+        };
+        /** @description FR-DIS-04: the items and a totals row that equals the loan totals */
+        LoanSchedule: {
+            currency?: string;
+            items?: components["schemas"]["LoanScheduleRow"][];
+            /** Format: uuid */
+            loan_id?: string;
+            totals?: components["schemas"]["LoanScheduleRow"];
+        };
         /** @description FR-ORG-03, FR-ORG-06: from the requested (once approved, the approved) terms and the proposed (else today's) date; display only */
         LoanScheduleItem: {
             /** Format: date */
@@ -3077,6 +5187,42 @@ export interface components {
             /** Format: int64 */
             total_minor?: number;
         };
+        LoanScheduleRow: {
+            /** Format: date */
+            due_date?: string;
+            /** Format: int64 */
+            fees_due_minor?: number;
+            /** Format: int64 */
+            fees_paid_minor?: number;
+            /** Format: int64 */
+            interest_due_minor?: number;
+            /** Format: int64 */
+            interest_paid_minor?: number;
+            /** Format: int32 */
+            no?: number;
+            /** Format: int64 */
+            outstanding_minor?: number;
+            /** Format: date */
+            paid_on?: string;
+            /** Format: int64 */
+            penalties_due_minor?: number;
+            /** Format: int64 */
+            penalties_paid_minor?: number;
+            /** Format: int64 */
+            principal_due_minor?: number;
+            /** Format: int64 */
+            principal_paid_minor?: number;
+            /** @description pending, due, overdue, partially_paid, paid, waived or written_off; null on totals */
+            status?: string;
+            /** Format: int64 */
+            total_due_minor?: number;
+            /** Format: int64 */
+            total_paid_minor?: number;
+            /** Format: int64 */
+            waived_minor?: number;
+            /** Format: int64 */
+            written_off_minor?: number;
+        };
         LoanStatusChange: {
             /** Format: date-time */
             at?: string;
@@ -3088,6 +5234,37 @@ export interface components {
         };
         LoanStatusHistory: {
             items?: components["schemas"]["LoanStatusChange"][];
+        };
+        LoanTransaction: {
+            allocations?: components["schemas"]["LoanAllocation"][];
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            external_reference?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            journal_entry_id?: string;
+            payment_method_key?: string;
+            reason?: string;
+            /** @description RC- receipt of a repayment or recovery, VC- voucher of a disbursement */
+            receipt_no?: string;
+            /** Format: uuid */
+            recorded_by?: string;
+            /** Format: uuid */
+            reversed_by_txn_id?: string;
+            /** Format: uuid */
+            reverses_txn_id?: string;
+            txn_type?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        LoanTransactionList: {
+            items?: components["schemas"]["LoanTransaction"][];
         };
         Me: {
             all_branches?: boolean;
@@ -3106,6 +5283,10 @@ export interface components {
             permissions?: string[];
             phone_e164?: string;
             roles?: components["schemas"]["RoleAssignment"][];
+            /** @description Guided tours the user finished or dismissed, by tour id (issue #19) */
+            tours?: {
+                [key: string]: components["schemas"]["TourState"];
+            };
             /** Format: int32 */
             unused_recovery_codes?: number;
             /** Format: uuid */
@@ -3257,6 +5438,28 @@ export interface components {
         NextOfKinList: {
             items?: components["schemas"]["NextOfKin"][];
         };
+        OpenInvestmentRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            maturity_instruction?: string;
+            /** Format: uuid */
+            member_id: string;
+            /** Format: uuid */
+            product_id: string;
+            /** Format: int32 */
+            term_months: number;
+        };
+        OpenSavingsAccountRequest: {
+            /**
+             * Format: uuid
+             * @description The member's home branch when omitted (FR-BR-05)
+             */
+            branch_id?: string;
+            /** Format: uuid */
+            member_id: string;
+            /** Format: uuid */
+            product_id: string;
+        };
         OutboxFailure: {
             /** Format: int32 */
             attempts?: number;
@@ -3281,6 +5484,26 @@ export interface components {
             /** @description Channels whose sender is configured; rows of the others stay pending */
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
+        };
+        /** @description R-PAYOFF as at value_date; rebate is interest not charged */
+        PayoffQuote: {
+            currency?: string;
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: int64 */
+            interest_minor?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            /** Format: int64 */
+            penalties_minor?: number;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int64 */
+            rebate_minor?: number;
+            /** Format: int64 */
+            total_minor?: number;
+            /** Format: date */
+            value_date?: string;
         };
         /** @description Limits only; prices are not stored in this repository */
         Plan: {
@@ -3354,6 +5577,95 @@ export interface components {
             member_no?: string;
             relationship?: string;
         };
+        RepaymentRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            external_reference?: string;
+            payment_method_key: string;
+            /**
+             * Format: date
+             * @description Today or earlier, not before the disbursement or the loan's latest repayment, in an open period
+             */
+            value_date: string;
+        };
+        RepaymentResult: {
+            balances?: components["schemas"]["LoanBalances"];
+            loan_status?: string;
+            transaction?: components["schemas"]["LoanTransaction"];
+        };
+        RetailAdvance: {
+            advance_no?: string;
+            /** Format: date-time */
+            at?: string;
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            currency?: string;
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            note?: string;
+            /** Format: uuid */
+            party_id?: string;
+            party_name?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            purpose?: string;
+            /** Format: int64 */
+            repaid_minor?: number;
+            repayments?: components["schemas"]["RetailRepayment"][];
+            taken_by_name?: string;
+            /** Format: uuid */
+            taken_by_party_id?: string;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+        };
+        RetailAdvancePage: {
+            items?: components["schemas"]["RetailAdvance"][];
+            next_cursor?: string;
+        };
+        RetailAdvanceParty: {
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: int64 */
+            count?: number;
+            /** Format: date */
+            oldest_advance_date?: string;
+            /** Format: uuid */
+            party_id?: string;
+            party_name?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            /** Format: int64 */
+            repaid_minor?: number;
+        };
+        RetailAdvanceReport: {
+            /** Format: int64 */
+            balance_minor?: number;
+            currency?: string;
+            items?: components["schemas"]["RetailAdvanceParty"][];
+        };
+        RetailAdvanceRequest: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            party_id: string;
+            /** Format: int64 */
+            principal_minor: number;
+            purpose?: string;
+            /** Format: uuid */
+            taken_by_party_id?: string;
+        };
         /** @description What is owed on completed credit sales, by days past the due date as of today; a sale with no due date counts as not yet due */
         RetailAgeing: {
             /** Format: int64 */
@@ -3400,6 +5712,163 @@ export interface components {
             low_stock_threshold?: string;
             next_cursor?: string;
         };
+        RetailBanking: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            at?: string;
+            /** Format: date-time */
+            banked_at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            currency?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            difference_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            expected_minor?: number;
+            /**
+             * @description Present only with retail.profit.read in the record's branch
+             * @enum {string}
+             */
+            flag?: "ok" | "shortfall" | "surplus" | "not_banked";
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            reference?: string;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+            /** @description Present only with retail.profit.read in the record's branch */
+            warnings?: string[];
+        };
+        RetailBankingDay: {
+            /** Format: int64 */
+            banked_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: int64 */
+            cash_expected_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            difference_minor?: number;
+            entries?: components["schemas"]["RetailBankingEntry"][];
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            expected_minor?: number;
+            /**
+             * @description Present only with retail.profit.read in the record's branch
+             * @enum {string}
+             */
+            flag?: "ok" | "shortfall" | "surplus" | "not_banked";
+            historical?: boolean;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch; absent on an imported day
+             */
+            unbanked_running_minor?: number;
+        };
+        RetailBankingEntry: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            banked_at?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            /** Format: uuid */
+            id?: string;
+            voided?: boolean;
+        };
+        RetailBankingExpected: {
+            /** Format: int64 */
+            advance_voids_minor?: number;
+            /** Format: int64 */
+            advances_out_minor?: number;
+            /** Format: int64 */
+            banked_so_far_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /**
+             * Format: int64
+             * @description Takings less voids, expenses and advances paid out, plus repayments; before cash purchases and savings, so it carries no cost and no profit
+             */
+            cash_expected_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            cash_purchases_minor?: number;
+            /** Format: int64 */
+            cash_sale_voids_minor?: number;
+            /** Format: int64 */
+            cash_takings_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            expected_minor?: number;
+            /** Format: int64 */
+            expense_voids_minor?: number;
+            /** Format: int64 */
+            expenses_minor?: number;
+            /** Format: int64 */
+            repayment_voids_minor?: number;
+            /** Format: int64 */
+            repayments_in_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            savings_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            savings_voids_minor?: number;
+        };
+        RetailBankingPage: {
+            items?: components["schemas"]["RetailBanking"][];
+            next_cursor?: string;
+        };
+        RetailBankingReport: {
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            items?: components["schemas"]["RetailBankingDay"][];
+            /** Format: date */
+            to?: string;
+        };
+        RetailBankingRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: date-time */
+            banked_at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            reference?: string;
+        };
         /** @description One entry per branch of the page, in the page's branch order */
         RetailBranchBalance: {
             /** Format: uuid */
@@ -3428,6 +5897,164 @@ export interface components {
             /** Format: int32 */
             top?: number;
             total?: components["schemas"]["RetailEvaluationTotal"];
+        };
+        RetailCashCategoryPatch: {
+            active?: boolean;
+            /**
+             * Format: uuid
+             * @description A postable expense account; send the nil UUID to go back to operating expenses
+             */
+            expense_account_id?: string;
+            name?: string;
+            /** Format: int32 */
+            sort_order?: number;
+        };
+        RetailCashCategoryRequest: {
+            /** Format: uuid */
+            expense_account_id?: string;
+            name: string;
+        };
+        RetailCashDailyReport: {
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            items?: components["schemas"]["RetailCashDailyRow"][];
+            /** Format: date */
+            to?: string;
+        };
+        RetailCashDailyRow: {
+            /** Format: int64 */
+            advance_voids_minor?: number;
+            /** Format: int64 */
+            advances_out_minor?: number;
+            /** Format: int64 */
+            banked_minor?: number;
+            /** Format: int64 */
+            banking_voids_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: int64 */
+            cash_expected_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            cash_purchases_minor?: number;
+            /** Format: int64 */
+            cash_sale_voids_minor?: number;
+            /** Format: int64 */
+            cash_takings_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            closing_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            daily_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            expected_to_bank_minor?: number;
+            /** Format: int64 */
+            expense_voids_minor?: number;
+            /** Format: int64 */
+            expenses_minor?: number;
+            historical?: boolean;
+            ledger_basis?: boolean;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            opening_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            other_movements_minor?: number;
+            /** Format: int64 */
+            repayment_voids_minor?: number;
+            /** Format: int64 */
+            repayments_in_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            savings_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            savings_voids_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            unbanked_running_minor?: number;
+            /** Format: int64 */
+            withdrawal_voids_minor?: number;
+            /** Format: int64 */
+            withdrawals_in_minor?: number;
+        };
+        RetailCashExpenseCategory: {
+            active?: boolean;
+            /** Format: uuid */
+            expense_account_id?: string;
+            /** Format: uuid */
+            id?: string;
+            items?: components["schemas"]["RetailCashExpenseItem"][];
+            name?: string;
+            /** Format: int32 */
+            sort_order?: number;
+            /** Format: int32 */
+            version?: number;
+        };
+        RetailCashExpenseCategoryList: {
+            items?: components["schemas"]["RetailCashExpenseCategory"][];
+        };
+        RetailCashExpenseItem: {
+            active?: boolean;
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            requires_explanation?: boolean;
+            /** Format: int32 */
+            version?: number;
+        };
+        RetailCashItemPatch: {
+            active?: boolean;
+            name?: string;
+            requires_explanation?: boolean;
+        };
+        RetailCashItemRequest: {
+            name: string;
+            requires_explanation?: boolean;
+        };
+        RetailCashParty: {
+            active?: boolean;
+            contact?: string;
+            /** Format: uuid */
+            id?: string;
+            kind?: string;
+            name?: string;
+        };
+        RetailCashPartyPage: {
+            items?: components["schemas"]["RetailCashParty"][];
+            next_cursor?: string;
+        };
+        RetailCashPartyRequest: {
+            contact?: string;
+            /** @enum {string} */
+            kind: "owner" | "staff" | "related_entity" | "supplier" | "other";
+            name: string;
+        };
+        RetailCashVoidRequest: {
+            reason: string;
         };
         RetailCategory: {
             active?: boolean;
@@ -3862,6 +6489,83 @@ export interface components {
             run_rate?: components["schemas"]["RetailEvaluationRunRate"];
             stock?: components["schemas"]["RetailEvaluationStock"];
         };
+        RetailExpense: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            /** Format: uuid */
+            category_id?: string;
+            category_name?: string;
+            currency?: string;
+            explanation?: string;
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            item_id?: string;
+            item_name?: string;
+            /** Format: uuid */
+            party_id?: string;
+            party_name?: string;
+            /** Format: uuid */
+            receipt_document_id?: string;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+        };
+        RetailExpenseGroup: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            count?: number;
+            key?: string;
+            label?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailExpensePage: {
+            items?: components["schemas"]["RetailExpense"][];
+            next_cursor?: string;
+        };
+        RetailExpenseReport: {
+            /** Format: int64 */
+            count?: number;
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            group_by?: string;
+            items?: components["schemas"]["RetailExpenseGroup"][];
+            /** Format: date */
+            to?: string;
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailExpenseRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            category_id: string;
+            explanation?: string;
+            /** Format: uuid */
+            item_id: string;
+            /** Format: uuid */
+            party_id?: string;
+            /** Format: uuid */
+            receipt_document_id?: string;
+        };
         RetailMarginBelowTarget: {
             items?: components["schemas"]["RetailMarginRow"][];
             /**
@@ -4238,6 +6942,48 @@ export interface components {
              */
             supplier_id?: string;
         };
+        RetailRepayment: {
+            /** Format: uuid */
+            advance_id?: string;
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            at?: string;
+            /**
+             * Format: int64
+             * @description The advance's balance after this repayment, on the create call only
+             */
+            balance_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            currency?: string;
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            method?: string;
+            /** Format: date */
+            paid_on?: string;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+        };
+        RetailRepaymentRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /**
+             * Format: uuid
+             * @description The branch that receives the money; defaults to the advance's branch
+             */
+            branch_id?: string;
+            /** @enum {string} */
+            method: "cash" | "mobile_money" | "bank";
+            /** Format: date */
+            paid_on?: string;
+        };
         RetailSale: {
             /** Format: int64 */
             balance_minor?: number;
@@ -4441,6 +7187,111 @@ export interface components {
             sale_count?: number;
             /** Format: int64 */
             sales_minor?: number;
+        };
+        RetailSavings: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            amount_minor?: number;
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            currency?: string;
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            /** @description Present only with retail.profit.read in the record's branch */
+            overwritten?: boolean;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            suggested_minor?: number;
+            /** Format: int64 */
+            total_sold_minor?: number;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+        };
+        RetailSavingsDay: {
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            amount_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            daily_profit_minor?: number;
+            /** @description Present only with retail.profit.read in the record's branch */
+            overwritten?: boolean;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            suggested_minor?: number;
+            /** Format: int64 */
+            total_sold_minor?: number;
+        };
+        RetailSavingsPage: {
+            items?: components["schemas"]["RetailSavings"][];
+            next_cursor?: string;
+        };
+        RetailSavingsReport: {
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            items?: components["schemas"]["RetailSavingsDay"][];
+            /** Format: date */
+            to?: string;
+        };
+        RetailSavingsRequest: {
+            /**
+             * Format: int64
+             * @description Needs retail.profit.read; omit to take the default
+             */
+            amount_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            overwrite_reason?: string;
+            suggestion_token: string;
+        };
+        RetailSavingsSuggestion: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            daily_profit_minor?: number;
+            /** Format: uuid */
+            existing_id?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the record's branch
+             */
+            suggested_minor?: number;
+            /** @description Opaque; echo it on the create call */
+            suggestion_token: string;
+            /** Format: int64 */
+            total_sold_minor?: number;
         };
         RetailShrinkageBranch: {
             /** Format: uuid */
@@ -4959,6 +7810,46 @@ export interface components {
         RetailVoidRequest: {
             reason: string;
         };
+        RetailWithdrawal: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            /** Format: uuid */
+            by?: string;
+            by_name?: string;
+            currency?: string;
+            historical?: boolean;
+            /** Format: uuid */
+            id?: string;
+            purpose?: string;
+            void_reason?: string;
+            voided?: boolean;
+            /** Format: date-time */
+            voided_at?: string;
+            warnings?: string[];
+            /** Format: date-time */
+            withdrawn_at?: string;
+        };
+        RetailWithdrawalPage: {
+            items?: components["schemas"]["RetailWithdrawal"][];
+            next_cursor?: string;
+        };
+        RetailWithdrawalRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            business_date?: string;
+            purpose?: string;
+            /** Format: date-time */
+            withdrawn_at?: string;
+        };
         Role: {
             key?: string;
             mfa_required?: boolean;
@@ -4979,6 +7870,326 @@ export interface components {
         };
         RoleCatalogue: {
             items?: components["schemas"]["Role"][];
+        };
+        SavingsAccount: {
+            account_no?: string;
+            /**
+             * Format: int64
+             * @description Interest earned since the last posting through balances_through, an estimate rounded for display; the posting rounds once over the whole period
+             */
+            accrued_interest_minor?: number;
+            /**
+             * Format: int64
+             * @description The most a withdrawal may take now: balance less hold, minimum balance and fee
+             */
+            available_minor?: number;
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: date */
+            balances_through?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            closed_on?: string;
+            currency?: string;
+            /** Format: int64 */
+            hold_minor?: number;
+            /** Format: uuid */
+            id?: string;
+            interest_calc?: string;
+            interest_posting?: string;
+            /** Format: int32 */
+            interest_rate_bp?: number;
+            /** Format: date */
+            last_interest_posted_to?: string;
+            /** Format: date */
+            last_member_txn_on?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_name?: string;
+            member_no?: string;
+            /** Format: int64 */
+            min_balance_minor?: number;
+            /** Format: date */
+            opened_on?: string;
+            product_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            product_name?: string;
+            /** @description active, dormant, frozen or closed */
+            status?: string;
+            status_reason?: string;
+            /** Format: int32 */
+            version?: number;
+            /** Format: int64 */
+            withdrawal_fee_minor?: number;
+        };
+        SavingsAccountPage: {
+            items?: components["schemas"]["SavingsAccount"][];
+            next_cursor?: string;
+        };
+        /** @description executed: the action took effect now (below the tenant's threshold); otherwise it waits for a checker as approval_request_id. transaction is the withdrawal when executed */
+        SavingsActionOutcome: {
+            account?: components["schemas"]["SavingsAccount"];
+            /** Format: uuid */
+            account_id?: string;
+            /** Format: uuid */
+            approval_request_id?: string;
+            executed?: boolean;
+            transaction?: components["schemas"]["SavingsTransaction"];
+        };
+        SavingsBalanceRow: {
+            /** Format: uuid */
+            account_id?: string;
+            account_no?: string;
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            last_member_txn_on?: string;
+            member_name?: string;
+            member_no?: string;
+            product_code?: string;
+            status?: string;
+        };
+        /** @description lending.savings_balances (chapter 14 section 14.5): balances as at the end of a day; totals per product and branch reconcile to member_savings */
+        SavingsBalancesReport: {
+            /** Format: date */
+            as_at?: string;
+            currency?: string;
+            rows?: components["schemas"]["SavingsBalanceRow"][];
+            /** Format: int64 */
+            total_minor?: number;
+            totals?: components["schemas"]["SavingsTotal"][];
+        };
+        SavingsCloseRequest: {
+            external_reference?: string;
+            payment_method_key: string;
+            reason?: string;
+        };
+        SavingsDepositResult: {
+            account?: components["schemas"]["SavingsAccount"];
+            transaction?: components["schemas"]["SavingsTransaction"];
+        };
+        SavingsMoneyRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            external_reference?: string;
+            payment_method_key: string;
+            /**
+             * Format: date
+             * @description Today when omitted; today or earlier, after the last day the nightly job has closed
+             */
+            value_date?: string;
+        };
+        SavingsMovementRow: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            closing_minor?: number;
+            /** Format: int64 */
+            deposits_minor?: number;
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: int64 */
+            interest_minor?: number;
+            /** Format: int64 */
+            net_minor?: number;
+            /** Format: int64 */
+            opening_minor?: number;
+            product_code?: string;
+            /** Format: int64 */
+            reversals_in_minor?: number;
+            /** Format: int64 */
+            reversals_out_minor?: number;
+            /** Format: int64 */
+            withdrawals_minor?: number;
+        };
+        /** @description lending.savings_movements (chapter 14 section 14.5): movements by value date in the range */
+        SavingsMovementsReport: {
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            rows?: components["schemas"]["SavingsMovementRow"][];
+            /** Format: date */
+            to?: string;
+            total?: components["schemas"]["SavingsMovementRow"];
+        };
+        SavingsProduct: {
+            /**
+             * Format: int64
+             * @description Accounts on the product; the interest fields are locked when above zero
+             */
+            accounts?: number;
+            code?: string;
+            currency?: string;
+            /** Format: int32 */
+            dormancy_days?: number;
+            /** Format: uuid */
+            id?: string;
+            interest_calc?: string;
+            interest_posting?: string;
+            /** Format: int32 */
+            interest_rate_bp?: number;
+            /** Format: int64 */
+            max_withdrawal_minor?: number;
+            /** Format: int32 */
+            max_withdrawals_per_month?: number;
+            /** Format: int64 */
+            min_balance_for_interest_minor?: number;
+            /** Format: int64 */
+            min_balance_minor?: number;
+            /** Format: int64 */
+            min_opening_balance_minor?: number;
+            name?: string;
+            status?: string;
+            /** Format: int32 */
+            version?: number;
+            /** Format: int64 */
+            withdrawal_fee_minor?: number;
+        };
+        SavingsProductList: {
+            items?: components["schemas"]["SavingsProduct"][];
+        };
+        /** @description FR-SAV-01: the product's rules */
+        SavingsProductTerms: {
+            /**
+             * Format: int32
+             * @description Days without a member deposit or withdrawal before the account is dormant (FR-SAV-06)
+             */
+            dormancy_days?: number;
+            interest_calc: string;
+            interest_posting: string;
+            /**
+             * Format: int32
+             * @description Per year, in basis points; 0 with interest_calc none
+             */
+            interest_rate_bp: number;
+            /**
+             * Format: int64
+             * @description The most one withdrawal may take; none when omitted
+             */
+            max_withdrawal_minor?: number;
+            /**
+             * Format: int32
+             * @description Withdrawals allowed per calendar month; none when omitted
+             */
+            max_withdrawals_per_month?: number;
+            /**
+             * Format: int64
+             * @description A day or month below this balance earns nothing; 0 when omitted
+             */
+            min_balance_for_interest_minor?: number;
+            /**
+             * Format: int64
+             * @description A withdrawal never takes the balance below this; 0 when omitted
+             */
+            min_balance_minor?: number;
+            /**
+             * Format: int64
+             * @description The first deposit's minimum; 0 when omitted
+             */
+            min_opening_balance_minor?: number;
+            name: string;
+            /**
+             * Format: int64
+             * @description Flat fee per withdrawal; 0 when omitted
+             */
+            withdrawal_fee_minor?: number;
+        };
+        SavingsReasonRequest: {
+            reason: string;
+        };
+        /** @description Movements recorded in the range by value date, in recording order */
+        SavingsStatement: {
+            /** Format: uuid */
+            account_id?: string;
+            account_no?: string;
+            /** Format: int64 */
+            closing_balance_minor?: number;
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            lines?: components["schemas"]["SavingsStatementLine"][];
+            member_name?: string;
+            member_no?: string;
+            /** Format: int64 */
+            opening_balance_minor?: number;
+            product_name?: string;
+            /** Format: date */
+            to?: string;
+            /** Format: int64 */
+            total_credits_minor?: number;
+            /** Format: int64 */
+            total_debits_minor?: number;
+        };
+        SavingsStatementLine: {
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: int64 */
+            credit_minor?: number;
+            /** Format: int64 */
+            debit_minor?: number;
+            description?: string;
+            receipt_no?: string;
+            /** Format: int32 */
+            seq?: number;
+            txn_type?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        SavingsTotal: {
+            /** Format: int64 */
+            accounts?: number;
+            /** Format: int64 */
+            balance_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            product_code?: string;
+        };
+        SavingsTransaction: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: int64 */
+            balance_after_minor?: number;
+            /** @description True when the money went into the account */
+            credit?: boolean;
+            currency?: string;
+            external_reference?: string;
+            /** Format: uuid */
+            id?: string;
+            payment_method_key?: string;
+            reason?: string;
+            receipt_no?: string;
+            /** Format: date-time */
+            recorded_at?: string;
+            /** Format: uuid */
+            related_txn_id?: string;
+            /** Format: uuid */
+            reversed_by_txn_id?: string;
+            /** Format: uuid */
+            reverses_txn_id?: string;
+            /** Format: int32 */
+            seq?: number;
+            source?: string;
+            /** @description deposit, withdrawal, interest, fee, transfer_in, transfer_out or reversal */
+            txn_type?: string;
+            /** Format: date */
+            value_date?: string;
+        };
+        SavingsTransactionPage: {
+            items?: components["schemas"]["SavingsTransaction"][];
+            next_cursor?: string;
+        };
+        /** @description Dated the day it executes: today, or the day a checker approves it */
+        SavingsWithdrawalRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            external_reference?: string;
+            payment_method_key: string;
         };
         SchedulePreview: {
             /**
@@ -5148,6 +8359,27 @@ export interface components {
             /** Format: int32 */
             version?: number;
         };
+        /** @description How the user left a guided tour, and its version then */
+        TourState: {
+            /** Format: date-time */
+            at?: string;
+            /** @enum {string} */
+            status?: "completed" | "dismissed";
+            /** Format: int32 */
+            version?: number;
+        };
+        TourStateRequest: {
+            /**
+             * @description completed: finished; dismissed: chose not to see it again
+             * @enum {string}
+             */
+            status: "completed" | "dismissed";
+            /**
+             * Format: int32
+             * @description The tour version the user saw; a higher one shows again
+             */
+            version?: number;
+        };
         /** @description Omitted fields are unchanged. The code never changes. */
         UpdateBranchRequest: {
             location?: string;
@@ -5161,6 +8393,10 @@ export interface components {
             owner_name?: string;
             owner_relationship?: string;
             reference_no?: string;
+        };
+        UpdateInvestmentProductRequest: {
+            name: string;
+            terms: components["schemas"]["InvestmentProductTerms"];
         };
         /** @description Draft only; omitted fields are unchanged */
         UpdateLoanRequest: {
@@ -5221,6 +8457,11 @@ export interface components {
             description?: string;
             /** Format: uuid */
             unit_id?: string;
+        };
+        /** @description The interest fields cannot change once an account uses the product */
+        UpdateSavingsProductRequest: {
+            status: string;
+            terms: components["schemas"]["SavingsProductTerms"];
         };
         UpdateTenantSettingsRequest: {
             allow_loans_before_kyc_verified?: boolean;
@@ -5517,7 +8758,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["SignInResponse"];
+                };
             };
         };
     };
@@ -6097,6 +9340,814 @@ export interface operations {
             };
         };
     };
+    getInsightsBrief: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsBrief"];
+                };
+            };
+        };
+    };
+    getInsightsDigestSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsDigestSettings"];
+                };
+            };
+        };
+    };
+    updateInsightsDigestSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightsDigestSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsDigestSettings"];
+                };
+            };
+        };
+    };
+    previewInsightsDigest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsDigestPreview"];
+                };
+            };
+        };
+    };
+    getInsightsMembers: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                grain?: string;
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsMembers"];
+                };
+            };
+        };
+    };
+    getInsightsPanels: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+                officer_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsPanels"];
+                };
+            };
+        };
+    };
+    getInsightsPortfolio: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                /** @description day, week, month or year; chosen from the range when absent */
+                grain?: string;
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsPortfolio"];
+                };
+            };
+        };
+    };
+    getInsightsRevenue: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsRevenue"];
+                };
+            };
+        };
+    };
+    getInsightsTable: {
+        parameters: {
+            query: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+                /** @description Table parameters: date, status, stage, account, min_dpd, max_dpd, bucket, days, group, key */
+                all: {
+                    [key: string]: string;
+                };
+            };
+            header?: never;
+            path: {
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsTable"];
+                };
+            };
+        };
+    };
+    exportInsightsTable: {
+        parameters: {
+            query: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+                officer_id?: string;
+                product_id?: string;
+                all: {
+                    [key: string]: string;
+                };
+            };
+            header?: never;
+            path: {
+                table: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+        };
+    };
+    listInvestmentProducts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentProductList"];
+                };
+            };
+        };
+    };
+    createInvestmentProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInvestmentProductRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentProduct"];
+                };
+            };
+        };
+    };
+    previewInvestmentReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentReturnPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentReturnPreview"];
+                };
+            };
+        };
+    };
+    getInvestmentProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentProduct"];
+                };
+            };
+        };
+    };
+    updateInvestmentProduct: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInvestmentProductRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentProduct"];
+                };
+            };
+        };
+    };
+    archiveInvestmentProduct: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentProduct"];
+                };
+            };
+        };
+    };
+    listInvestments: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                status?: string[];
+                member_id?: string;
+                product_id?: string;
+                maturing_within_days?: number;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentPage"];
+                };
+            };
+        };
+    };
+    openInvestment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenInvestmentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Investment"];
+                };
+            };
+        };
+    };
+    listInvestmentMaturities: {
+        parameters: {
+            query?: {
+                days?: number;
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentMaturities"];
+                };
+            };
+        };
+    };
+    getInvestmentMetrics: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentMetrics"];
+                };
+            };
+        };
+    };
+    getInvestment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Investment"];
+                };
+            };
+        };
+    };
+    getInvestmentCertificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentCertificate"];
+                };
+            };
+        };
+    };
+    requestInvestmentEarlyWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentEarlyWithdrawalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentActionOutcome"];
+                };
+            };
+        };
+    };
+    getInvestmentEarlyWithdrawalQuote: {
+        parameters: {
+            query?: {
+                value_date?: string;
+            };
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentEarlyWithdrawalQuote"];
+                };
+            };
+        };
+    };
+    requestInvestmentFunding: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentFundingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentActionOutcome"];
+                };
+            };
+        };
+    };
+    setInvestmentMaturityInstruction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentMaturityInstructionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Investment"];
+                };
+            };
+        };
+    };
+    payInvestmentOut: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentPaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentTransactionResult"];
+                };
+            };
+        };
+    };
+    payInvestmentReturn: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentPaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentTransactionResult"];
+                };
+            };
+        };
+    };
+    rollInvestmentOver: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentRolloverRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentRolloverResult"];
+                };
+            };
+        };
+    };
+    getInvestmentSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentSchedule"];
+                };
+            };
+        };
+    };
+    getInvestmentStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentStatement"];
+                };
+            };
+        };
+    };
+    requestInvestmentTransactionReversal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                investment_id: string;
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentActionOutcome"];
+                };
+            };
+        };
+    };
     listLoanProducts: {
         parameters: {
             query?: never;
@@ -6247,6 +10298,7 @@ export interface operations {
                 member_id?: string;
                 officer_user_id?: string;
                 product_id?: string;
+                q?: string;
                 limit?: number;
                 cursor?: string;
             };
@@ -6475,6 +10527,34 @@ export interface operations {
             };
         };
     };
+    requestLoanDisbursement: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisbursementRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
+                };
+            };
+        };
+    };
     setLoanGuarantors: {
         parameters: {
             query?: never;
@@ -6503,6 +10583,58 @@ export interface operations {
             };
         };
     };
+    getLoanPayoffQuote: {
+        parameters: {
+            query?: {
+                value_date?: string;
+            };
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PayoffQuote"];
+                };
+            };
+        };
+    };
+    recordLoanRepayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepaymentResult"];
+                };
+            };
+        };
+    };
     returnLoan: {
         parameters: {
             query?: never;
@@ -6527,6 +10659,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Loan"];
+                };
+            };
+        };
+    };
+    getLoanSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanSchedule"];
                 };
             };
         };
@@ -6573,6 +10727,85 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Loan"];
+                };
+            };
+        };
+    };
+    listLoanTransactions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanTransactionList"];
+                };
+            };
+        };
+    };
+    requestLoanTransactionReversal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
+                };
+            };
+        };
+    };
+    requestLoanWriteOff: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanActionOutcome"];
                 };
             };
         };
@@ -6958,6 +11191,464 @@ export interface operations {
             };
         };
     };
+    listSavingsAccounts: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                member_id?: string;
+                status?: string[];
+                product_id?: string;
+                q?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccountPage"];
+                };
+            };
+        };
+    };
+    openSavingsAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenSavingsAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccount"];
+                };
+            };
+        };
+    };
+    getSavingsAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccount"];
+                };
+            };
+        };
+    };
+    requestSavingsClosure: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsActionOutcome"];
+                };
+            };
+        };
+    };
+    recordSavingsDeposit: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsMoneyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsDepositResult"];
+                };
+            };
+        };
+    };
+    freezeSavingsAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccount"];
+                };
+            };
+        };
+    };
+    reactivateSavingsAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccount"];
+                };
+            };
+        };
+    };
+    getSavingsStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsStatement"];
+                };
+            };
+        };
+    };
+    listSavingsTransactions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsTransactionPage"];
+                };
+            };
+        };
+    };
+    requestSavingsReversal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                account_id: string;
+                txn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsActionOutcome"];
+                };
+            };
+        };
+    };
+    unfreezeSavingsAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsAccount"];
+                };
+            };
+        };
+    };
+    requestSavingsWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsWithdrawalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsActionOutcome"];
+                };
+            };
+        };
+    };
+    listSavingsProducts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsProductList"];
+                };
+            };
+        };
+    };
+    createSavingsProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSavingsProductRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsProduct"];
+                };
+            };
+        };
+    };
+    getSavingsProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsProduct"];
+                };
+            };
+        };
+    };
+    updateSavingsProduct: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSavingsProductRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsProduct"];
+                };
+            };
+        };
+    };
+    getSavingsBalancesReport: {
+        parameters: {
+            query?: {
+                as_at?: string;
+                branch_id?: string[];
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsBalancesReport"];
+                };
+            };
+        };
+    };
+    getSavingsMovementsReport: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                branch_id?: string[];
+                product_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsMovementsReport"];
+                };
+            };
+        };
+    };
     getMe: {
         parameters: {
             query?: never;
@@ -6975,6 +11666,30 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Me"];
                 };
+            };
+        };
+    };
+    recordTourState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tour_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TourStateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -7639,6 +12354,320 @@ export interface operations {
             };
         };
     };
+    listRetailAdvances: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                party_id?: string;
+                open_only?: boolean;
+                from?: string;
+                to?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvancePage"];
+                };
+            };
+        };
+    };
+    createRetailAdvance: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailAdvanceRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvance"];
+                };
+            };
+        };
+    };
+    getRetailAdvance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                advance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvance"];
+                };
+            };
+        };
+    };
+    createRetailAdvanceRepayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                advance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailRepaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailRepayment"];
+                };
+            };
+        };
+    };
+    voidRetailAdvanceRepayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                advance_id: string;
+                repayment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailRepayment"];
+                };
+            };
+        };
+    };
+    voidRetailAdvance: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                advance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvance"];
+                };
+            };
+        };
+    };
+    listRetailBankings: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                include_voided?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBankingPage"];
+                };
+            };
+        };
+    };
+    createRetailBanking: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailBankingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBanking"];
+                };
+            };
+        };
+    };
+    getRetailBankingExpected: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBankingExpected"];
+                };
+            };
+        };
+    };
+    voidRetailBanking: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                banking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBanking"];
+                };
+            };
+        };
+    };
+    listRetailCashParties: {
+        parameters: {
+            query?: {
+                query?: string;
+                kind?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashPartyPage"];
+                };
+            };
+        };
+    };
+    createRetailCashParty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashPartyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashParty"];
+                };
+            };
+        };
+    };
     listRetailCategories: {
         parameters: {
             query?: never;
@@ -7805,6 +12834,218 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailCustomerBalance"];
+                };
+            };
+        };
+    };
+    listRetailExpenseCategories: {
+        parameters: {
+            query?: {
+                active?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashExpenseCategoryList"];
+                };
+            };
+        };
+    };
+    createRetailExpenseCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashCategoryRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashExpenseCategory"];
+                };
+            };
+        };
+    };
+    updateRetailExpenseCategory: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                category_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashCategoryPatch"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashExpenseCategory"];
+                };
+            };
+        };
+    };
+    createRetailExpenseItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashItemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashExpenseItem"];
+                };
+            };
+        };
+    };
+    updateRetailExpenseItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                category_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashItemPatch"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashExpenseItem"];
+                };
+            };
+        };
+    };
+    listRetailExpenses: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                category_id?: string;
+                item_id?: string;
+                include_voided?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpensePage"];
+                };
+            };
+        };
+    };
+    createRetailExpense: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailExpenseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpense"];
+                };
+            };
+        };
+    };
+    voidRetailExpense: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpense"];
                 };
             };
         };
@@ -8059,6 +13300,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailBusinessEvaluation"];
+                };
+            };
+        };
+    };
+    getRetailCashAdvancesReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailAdvanceReport"];
+                };
+            };
+        };
+    };
+    getRetailCashBankingReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                flag?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBankingReport"];
+                };
+            };
+        };
+    };
+    getRetailCashDailyReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCashDailyReport"];
+                };
+            };
+        };
+    };
+    getRetailCashExpensesReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                group_by?: string;
+                include_voided?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailExpenseReport"];
+                };
+            };
+        };
+    };
+    getRetailCashSavingsReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsReport"];
                 };
             };
         };
@@ -8391,6 +13753,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSale"];
+                };
+            };
+        };
+    };
+    listRetailSavings: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                include_voided?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsPage"];
+                };
+            };
+        };
+    };
+    createRetailSavings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailSavingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavings"];
+                };
+            };
+        };
+    };
+    getRetailSavingsSuggestion: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavingsSuggestion"];
+                };
+            };
+        };
+    };
+    voidRetailSavings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                savings_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSavings"];
                 };
             };
         };
@@ -8812,6 +14278,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailUsageReport"];
+                };
+            };
+        };
+    };
+    listRetailWithdrawals: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                include_voided?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailWithdrawalPage"];
+                };
+            };
+        };
+    };
+    createRetailWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailWithdrawalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailWithdrawal"];
+                };
+            };
+        };
+    };
+    voidRetailWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                withdrawal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailCashVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailWithdrawal"];
                 };
             };
         };

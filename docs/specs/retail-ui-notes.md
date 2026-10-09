@@ -364,6 +364,31 @@ and shrinkage tables, a "Biggest amount first" choice cut short, the By shop tab
 (the home is the wide column when it carries the dashboard), and "1 reports". Not walked: a seller session (its
 screens are covered by the component tests and the API tests for the permission and the profit gating).
 
+## The cash book screens (#147)
+
+Savings, Banking, Banking report, Expenses, Expenses report, Expense lists, Cash withdrawals, Advances and Cash
+summary, each shown only with its permission (`docs/specs/retail-cash-book.md`). A real-stack run: the API on
+the dev profile over PostgreSQL migrated to V34, the PWA from the Vite dev server, headless Chromium at 360px and
+1280px, a real sign-in with TOTP, on a fabricated tenant ("Sample Shop (fabricated)", one head office, three
+products, five days of cash and mobile money sales, a cash restock, expenses, savings, two bankings, a
+withdrawal and an advance with a repayment). The cash book screens were opened at 360px and 1280px and none
+overflowed sideways; only ten captures are committed in `docs/ui/design-system/cashbook/` (not every screen at both
+widths: see its README), and the script is not committed. Notes:
+
+- The savings, banking and expenses screens follow the sale screen: one branch from the Branch box
+  (`BranchRequired` otherwise), the date in the business time zone, a success message and a toast. The toast is
+  its own small helper in `retail/toast.tsx`; the catalogue screens (#146) added `useToast` to `retail/ui.tsx`
+  meanwhile, and the two should be reconciled.
+- A caller without `retail.profit.read` sees the day's total sold and "Cash expected" only: no savings amount,
+  suggestion, profit, cash purchases, net expected amount, difference or running unbanked total, and the savings
+  form sends no amount.
+- The bottom bar now carries Retail plus up to five shortcuts in the pilot's order (Sale, Banked, Savings,
+  Expenses, Advances), so an administrator's bar no longer shows Stock and Restock; both stay on the Retail home.
+  Six items still fit at 360px.
+- The receipt photo is skipped: the frontend has no documents upload client yet.
+- The savings report endpoint (`GET /retail/reports/cash/savings`) is built but has no screen; the savings
+  records list covers it. CSV export of the reports waits for the report runs.
+
 ## Left to do
 
 - Void a sale and pay a credit sale screens; see `docs/specs/retail-ui-parity.md`.

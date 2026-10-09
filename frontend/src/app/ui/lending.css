@@ -1,0 +1,289 @@
+/*
+ * The staff lending screens (frontend/src/areas/staff/lending): the loans list, the loan page and
+ * its action forms. They reuse the retail page frame (.rt, .rt-card, .rt-primary, .rt-flag) and
+ * add only what a loan needs, with the shared tokens. No inline styles: the production CSP
+ * (style-src 'self') refuses them.
+ */
+
+.ln-search {
+  margin-bottom: var(--space-4);
+}
+
+.ln-search .rt-row {
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+
+/* A list of loans or transactions: one card per row, the whole card a 44px+ tap target. */
+.ln-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ln-list > li {
+  margin: var(--space-2) 0;
+}
+
+.rt.ln ul.ln-list:has(> li.rt-card) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ln-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: var(--tap);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.ln-item:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+}
+
+.ln-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.ln-item-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.ln-muted {
+  margin: var(--space-1) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ln-head p {
+  margin: var(--space-1) 0;
+}
+
+/* The actions on a loan: full-width buttons on a phone, a row from 720px. */
+.ln-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.ln-actions > button[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+/* Label and figure pairs: balances and the payoff quote. */
+.ln-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0 0;
+}
+
+.ln-facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ln-facts dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ln-facts .ln-strong {
+  color: var(--color-text);
+  font-weight: var(--weight-bold);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-2);
+}
+
+.ln textarea {
+  min-height: calc(var(--tap) * 2);
+}
+
+.ln fieldset + label,
+.ln form > button.btn-block {
+  margin-top: var(--space-3);
+}
+
+/*
+ * Savings (increment 9): the sub-navigation, the confirmation step of a money form and the
+ * statement's date range. The rest reuses the loan screens' classes above.
+ */
+.sv-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.sv-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.sv-nav a[aria-current='page'],
+.sv-nav a.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+.sv-confirm {
+  padding: var(--space-3) var(--space-4);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-accent-tint);
+}
+
+.sv-confirm h3 {
+  margin: 0 0 var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.sv-confirm ul {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-4);
+}
+
+.sv-confirm li {
+  margin: var(--space-1) 0;
+}
+
+.sv-confirm-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  gap: var(--space-2);
+}
+
+.sv-range {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+/*
+ * Investments (#152): the investments sub-menu, the maturity ladder, concentration shares and the
+ * printable certificate. Same tokens; the ladder is one column on a phone and four from 720px.
+ */
+
+.iv-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.iv-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.iv-nav a[aria-current='page'],
+.iv-nav a.active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+.iv-ladder {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iv-ladder > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.iv-ladder > li.iv-due {
+  border-color: var(--color-danger);
+}
+
+.iv-ladder strong {
+  font-size: var(--text-lg);
+}
+
+@media (min-width: 720px) {
+  .iv-ladder {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.iv-metric {
+  display: contents;
+}
+
+.iv-shares {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-4);
+}
+
+.iv-shares > li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ln-list button.ln-item {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+@media print {
+  .staff-bar,
+  .iv-nav,
+  .iv-no-print {
+    display: none;
+  }
+
+  .iv-print {
+    border: 0;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}

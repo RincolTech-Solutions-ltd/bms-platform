@@ -102,6 +102,15 @@ write and unbound-session tests cover it without a separate suite.
 | `RetailReportsIT` (#54) | Valuation at cost and at price per branch and product with totals, worked by hand, and a negative balance left by imported history flagged; the revaluation difference is zero until a cost changes and then equals the change times the quantity per branch; `as_of` before any movement is empty; daily profit per branch and day equals sales less cost snapshots less usage at cost plus the stock-take difference, excludes voids and ignores a later cost change; **stock-take differences (#121)**: a committed count of -1 on one item and +2 on another shows as its own line of the net value at cost (a loss is negative), period profit is sales less cost of sales less usage plus the net difference, the `stock_shrinkage` account of the ledger agrees with the report, a count at another branch is scoped by the caller's branches, and a sales user gets 403 with no trace of the field; a user signed in with the real `retail_sales` role sees only its branch, no cost, valuation at cost or inventory key anywhere in the body, and gets 403 on the profit report; profit comes from the sale lines, so a header changed through the owner switch leaves it unchanged, the header refuses every UPDATE but payment, void and entry ids, and a committed stock-take line refuses UPDATE (#68, review F10) (FR-RET-09, FR-RET-10, FR-RET-13) |
 | `RetailProductImportIT` (#146) | The CSV product import: a dry run reports added, skipped (an existing code, a code repeated in the file) and error rows with their line numbers and changes nothing; an apply with an error row adds nothing (422); an apply creates the items, their categories and units on demand, normalises a no-break space and a full-width code, reads a tab separated paste with a byte order mark, and a second apply skips every row (idempotent on the code, prices untouched); a caller without `core.settings.manage` or without `retail.catalogue.manage` gets 403; the cost column is refused (422) without `retail.profit.read` and stored with it and never shown to a caller without it; a missing column is refused in plain words; another tenant's codes are not seen; the audit rows hold no cost (FR-RET-01, FR-RET-14) |
 | `RetailCatalogueManagementIT` (#146) | Per endpoint and permission: a category and a unit are renamed (a name already used is 409, a blank one 422) and switched off, keep their products and show `product_count`, and cannot be chosen for a new product (422); a supplier is edited, its contact cleared and switched off, a restock to it is 422, and the audit holds the changes without the contact; a credit buyer's name and contact are edited, the list shows what is owed on credit sales in the caller's scope; every PATCH is 403 without its permission and 404 for an unknown id; a product code is normalised (no-break spaces stripped) so a duplicate is refused with a plain 409 and the product audit rows hold no cost (FR-RET-01, FR-RET-14) |
+| `RetailCashbookSavingsIT` (ADR-022) | FR-RET-18 to FR-RET-20 and FR-RET-28: the suggestion is half the day's profit worked by hand with fabricated figures, zero on a loss day, follows a changed `savings_rate_bp`; the omitted amount takes it; a second active record for a branch and date is 409 `savings_exists` and a void frees the day; an overwrite without `retail.savings.overwrite` (by a caller with `retail.profit.read`) is 403 and without a reason 422; a caller with neither `retail.profit.read` nor `retail.savings.overwrite` sending any `amount_minor`, equal to the suggestion or different, gets the same 422 `amount_requires_profit_access` and nothing is written (no oracle), and omitting it records the default; `overwritten` is absent on the create response, the list rows and the savings report without `retail.profit.read`; the audit row of a default-applied create and of an overwrite carries only the flags `overwritten` and `default_applied`, never the amount, the suggestion or the profit (read as a user with `core.audit.read` only, no payload equals half the profit); a response for a caller without `retail.profit.read` omits `suggested_minor`, every savings `amount_minor` and `savings_minor` in the savings list and report, the expected-to-bank answer and the daily summary and shows `cash_expected_minor` only (takings less cash sale voids and cash expenses and advances paid out, plus repayments, before purchases and savings) (the writer's own typed amount is echoed); a sale added between the suggestion and the create gives 409 `suggestion_changed` with the new token and writes nothing, and a stale token never records an overwrite; an amount of zero posts nothing; the entry is debit `savings_reserve`, credit `cash_on_hand` and profit is unchanged; a void reverses it; a replayed key posts once |
+| `RetailCashbookBankingIT` | FR-RET-21 to FR-RET-23: a day with a cash, a credit, a mobile money, a bank and a same-day voided sale expects the cash sale only; a cash restock bought that day and a cash sale voided on a later day reduce the expected amount of their own days (the earlier day is not restated); a cash payment on a credit sale counts on its `paid_on` day; savings, cash expenses, advances paid out and cash repayments move the expected amount; a cashier (holding `retail.banking.record` and `retail.cashbook.read`, no `retail.profit.read`) gets a `cash_expected_minor` that is identical with and without a cash restock that day, and no `cash_purchases_minor` in the expected answer, the banking report or the daily summary, while a `retail.profit.read` holder gets the component and the net `expected_minor`; the client cannot send it; the snapshot does not move after a back-dated sale; the four flags (`ok`, `shortfall`, `surplus`, `not_banked`) and the tolerance; two partial deposits sum; banking above cash is accepted and flagged; the running unbanked total over three days; a 23:50 local sale lands on its local date |
+| `RetailCashbookExpensesIT` | FR-RET-17, FR-RET-24: the item must belong to the category; an item that requires explanation without one is 422; the debit is the category's account and the fallback is `operating_expenses` (code 5900, and a tenant with lending's chart gets no second account); a rename leaves old records unchanged; a void reverses; the receipt document must be the tenant's |
+| `RetailCashbookAdvancesIT` | FR-RET-25, FR-RET-26: an advance posts debit `owner_advances`, credit cash and takes the next sequential number; partial and full repayments by each method; an overpayment and a payment on a settled advance are refused; `repaid_minor` and the account move together under concurrent repayments (two connections, one wins), `repaid_minor` equals the sum of non-voided repayments for every advance after repayments and voids, and a direct UPDATE of it is refused by the guard; a category mapped to a header, asset or inactive account is refused with `account_not_expense`; an advance with repayments cannot be voided; a withdrawal posts bank to cash and warns when the bank balance goes negative; a sales user is 403 on withdrawals, advances and repayments |
+| `RetailCashbookSummaryIT` | FR-RET-27, FR-RET-29: the daily cash summary closing equals the ledger `cash_on_hand` balance for the branch after a day of each event, with the fixture holding a cash purchase (a restock paid from the till), a cash sale voided on a later day than it was made, a savings record voided on a later day and an expense voided on a later day, so that the `cash_purchases_minor`, `cash_sale_voids_minor`, `savings_voids_minor` and `expense_voids_minor` lines are exercised and **closing equals the ledger on both the record's day and the void day**; a back-dated expense posts on its own business date; a manual journal to cash shows as `other_movements_minor`; imported days show `ledger_basis: false`; the expenses report totals by category and item equal the rows and exclude voids; profit columns absent without `retail.profit.read`; branch scope on every report |
+| `RetailCashbookGuardsIT` | FR-RET-28, FR-RET-32: no UPDATE or DELETE of an amount for `bms_app` on any cash book table, only the void columns once; a future business date is 422; every write needs `Idempotency-Key`; every write and void has an `audit_log` row in its transaction; `PermissionMatrixIT` covers the ten new permissions and the sales column |
+| `RetailCashbookImportIT` | FR-RET-30: a golden test on a fabricated fixture (`fixtures/retail/import-sample/` plus its `cashbook/` files, copied into one export) imports every cash book file, creates no journal for a historical row, posts one balanced opening entry per branch against `opening_balance_equity` with one `owner_advances` line and subledger per outstanding advance, dated the day before the first live day, so the first live day's opening equals it; a live advance after the import takes a number above every imported one and no two share a number; imported days are excluded from the unbanked running total; adds nothing on a second run, creates and reports an unknown category or item, skips and lists a duplicate savings day, a payment on an unknown advance, an overpayment, a bad or future date and a company party; `repaid_minor` equals the sum of the payments; the expected amount of each banked row is computed from the imported history; the dry run rolls back and gives the advance numbers back; an export without the cash book files imports as before (`RetailImportCommandTest` covers `--first-live-date`) |
+| `RetailCashbookRoutesIT` | FR-RET-28, FR-RET-32 over HTTP: every write and every void needs an `Idempotency-Key`, the sales role is refused withdrawals, advances, repayments, the lists and voids, a user without `retail.cashbook.read` gets 403 on every list and report, a future date is a field problem, and every write and void has its audit row |
+| `ModularityTest` | Adds that `retail.cashbook` declares exactly the allowed dependencies of ADR-022 decision 1 (`kernel`, `core.tenancy`, `core.audit`, `core.ledger`, `core.documents`, `retail.sales`, `retail.purchasing`, `retail.reports`, `retail.stock`), that `retail.imports` may depend on it and no other retail module may, and that it depends on no `lending.*` package and that no advance code path calls the lending module (ADR-022 decision 2) |
 | `RetailParityIT` (#145, #144) | The retail parity pass: stock rows carry the product's category and filter by `category_id`; the search on stock and products matches the category name; the valuation shows expected profit and its basis points per row, branch, category and total, worked by hand (3 items at head office, one more branch), with no percent when the cost is zero; without `retail.profit.read` the body holds no cost, profit or inventory key, and with the permission at one branch only the other branches, the overall total and the categories that span them show none; **All branches (#144)**: one row per product with a balance per branch, the total and the negative flag per cell, the negative-only, search and category filters, paging by code, the caller's branch scope (a caller scoped to head office sees only that column and never the other branch's id), cost only where profit is held in every listed branch, the single-branch stock read still asking a many-branch caller to name one (`branch_required`), and the valuation and daily profit without a branch splitting per branch; **low and out of stock (#145)**: `stock_level=out` keeps zero or less (a never-stocked product and a negative balance), `low` keeps 5 or fewer and so includes them, the page reports `low_stock_threshold`, the filter combines with search, an unknown level is 422, and in All branches the level is judged on the total; **sales filters (#145)**: payment method, product, buyer text, branch, status and date range narrow the list (and combine), an unknown method or status is 422, newest first reverses the order and pages without a repeat, and a branch-scoped sales user sees only their branch and no cost or profit; **owing filter, buyer search and cursor direction (review of #154)**: with 55 credit sales whose three oldest are overdue (one of them paid), `owing=overdue`, `owing` and `paid` return the right sales although none of the overdue ones is on the first newest-first page, a voided sale is never owing, overdue or paid, an unknown `owing` is 422, the buyer text also matches the linked customer's name, and a cursor issued for one `newest_first` direction is 422 for the other; an inactive branch that still holds a non-zero balance stays a column in All branches (negative flag and totals included) and an emptied inactive one drops out; another tenant's `category_id` finds nothing on stock, All branches and products and never appears in the valuation; a literal `%` or `_` in `buyer` and `query` is not a wildcard; a caller holding `retail.stock.read` and `retail.profit.read` at head office only gets the head office column with `cost_minor` and no trace of the other branch |
 | `RetailSalesAnalysisIT` (#149) | Totals, series (day, week, month), by branch, category, item and seller, top by quantity, slow movers over 7 and 30 days and items with no sale, worked by hand on the shared fabricated data (`AnalyticsData`); a voided sale does not count; the row limit never changes a total; no cost, profit or margin key without `retail.profit.read` and no audit row written; profit held at one branch (`X-Dev-Scopes`) shows for that branch only and never in a mixed figure; 403 without `retail.sale.read`; 366 days accepted and 367 refused |
 | `RetailMarginsIT` (#149) | Profit and margin by item and category from the line snapshots, the items below a target (default 2,000 basis points, lowest margin first, an exact limit), the price change impact split at the day of the last change using the snapshots, never the current cost; 403 for a seller and a stock reader with no figure in the body; branch scope; `target_bp` out of range is 422 |
@@ -144,15 +153,18 @@ write and unbound-session tests cover it without a separate suite.
 `MigrationOrderIT` runs `DatabaseMigrator` with Flyway's `outOfOrder` off, as every environment
 does, on a fresh PostgreSQL 16 container per case: every migration (V1 to V9 lending, V10 to V14
 retail, V20 the retail import references, V21 the lending follow-ups, V22 the retail stock
-transfers, V23 the onboarding applications and outbox of #89, V26 the indexes of #107) applies in
-order on an empty database; on a database already migrated to V9 with a lending tenant, exactly V10
-to V14, V20, V21, V22, V23 and V26 apply and that tenant can then switch retail on; a tenant that
-switched retail on at V21 gets the inter-branch clearing account (code 1190, system controlled)
-from V22 (#84); a database at V22 holding retail rows (a negative balance among them) keeps every
-row through V23 and V26, whose new indexes replace the old ones and whose balance table gets its
-fillfactor (#107); and no two migration files share a version (issue #71, review F6). V24 and V25
-are held by open branches (#123, #126), so V26 is applied after V23 here until they merge, and
-each adds its version to the list.
+transfers, V23 the onboarding applications and outbox of #89, V26 the indexes of #107, V28 the
+retail catalogue management of #146, V29 lending disbursement and repayments of #108, V31 the
+per-user preferences of #19) applies in order on an empty database; on a database already migrated
+to V9 with a lending tenant, exactly V10 to V14, V20, V21, V22, V23, V26, V28, V29 and V31 apply
+and that tenant can then switch retail on; a tenant that switched retail on at V21 gets the
+inter-branch clearing account (code 1190, system controlled) from V22 (#84); a database at V22
+holding retail rows (a negative balance among them) keeps every row through V23, V26, V28, V29 and
+V31, whose new indexes replace the old ones and whose balance table gets its fillfactor (#107); a
+database at V28 holding loans in draft, approved and cancelled takes exactly V29 and V31 and keeps
+them (#108); and no two migration files share a version (issue #71, review F6). V24, V25 and V27
+stay unused and V30 is held by the open savings branch (#179); a new migration takes a number above
+the highest applied one and adds its version to the list.
 
 ## 15.4.4 Query plans at scale
 
@@ -215,6 +227,54 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
   normalised exactly as the catalogue normalises them (review F9).
 - **Normalisation tables.** Every table of examples in chapter 13 section 13.6 is a
   parametrised unit test.
+- **Loan servicing golden tests** (`ServicingTest`, #108). Fabricated schedules from worked
+  examples B and C (built by `ScheduleCalculator`) run through R-ALLOC, R-PAYOFF (flat with and
+  without the rebate, declining), R-DPD and the FR-REP-05 replay; every allocation row, quote and
+  balance is asserted to the minor unit. `LoanServicingIT` then checks every journal line of each
+  event type of chapter 6 section 6.6.3 on PostgreSQL, idempotent retries, and after each test that
+  the trial balance balances and loans receivable equals each loan's principal outstanding.
+  `LendingSeedIT` checks the same for the fabricated seed.
+- **Savings interest golden tests** (`InterestTest`, #151, ADR-032). FR-SAV-05 worked by hand with
+  fabricated balances: daily balance over a month with three balances, the minimum balance for
+  interest, a half minor unit rounding up once (and thirty days that each round to zero summing to
+  15), minimum monthly balance over a quarter with a one-day dip, a part month at opening and at
+  closure, and the period ends. `SavingsEndOfDayIT` runs the end of day over fixed past dates on
+  PostgreSQL: the posted amounts to the unit, one end-of-day row per day, a rerun that posts
+  nothing, a movement dated into a closed day refused, and interest for a closed accounting month
+  booked on the run date. `SavingsIT` checks every savings journal line of chapter 6 section 6.6.3,
+  limits, fees, the checker above the threshold, reversal with the fee, freeze, dormancy,
+  reactivation, closure with interest to date, the statement and reports against the ledger, the
+  queued SMS, idempotent replays and branch scope, and after each test that `member_savings` equals
+  each account's balance and the last running balance. `SavingsConcurrencyIT` races two withdrawals
+  for one balance (exactly one succeeds) and 50 deposits (exact balance, unique gap-free `seq` and
+  receipts). `RlsIsolationIT` has a factory row in each savings table and checks the three savings
+  ledgers are append-only.
+- **Investment return golden tests** (`InvestmentReturnsTest`, #152, R-INV-1 to R-INV-6). Flat
+  schedules with their rounding residue, monthly compounding (rounding each month, over two years),
+  month-end clamping in a leap and a common year, quarterly payout periods, part periods counted
+  over 366 days in a leap year and split at 1 January, and both early withdrawal worked examples
+  with a penalty, each asserted to the minor unit. `InvestmentsIT` then checks every journal line of
+  each investment event of chapter 6 section 6.6.3 on PostgreSQL, funding with and without a checker,
+  the daily job run twice and three times at once (each period accrued once), two concurrent
+  payouts of one due return (exactly one pays), reversal rules, branch scope, idempotent retries,
+  the maturity ladder and the metrics, and after each test that the trial balance balances and both
+  investment liabilities equal each investment's balances. `LendingSeedIT` checks the seed's twelve
+  months of investment history the same way, and `RlsIsolationIT` covers the four new tables.
+- **Insights golden tests** (#153, FR-INS-01 to FR-INS-07). `InsightsGoldenIT` seeds a fabricated
+  year (`seed-lending --insights-demo`) and reverses a repayment that has a later one, then
+  `GoldenModel` recomputes every portfolio, brief and revenue metric from the raw rows (read as the
+  owner, summed in Java, no production code) and the API must match to the minor unit: over a
+  range with partial months, a past month read from the snapshots, a branch filter and a branch
+  scope, an officer without `lending.insights.all_officers`, and a second tenant that must never show
+  through. The snapshot rows of three past dates must equal an independent replay of the
+  allocations, and today's replay must equal the live reading. Drill-down rows must sum to their
+  number; the export must mask names without member access, be audited and refuse without the
+  permission. `InsightsRulesTest` holds hand-computed values: rounding, partial periods, the PAR
+  worked example of chapter 14, the per-period collection rate, the annualised yield, the revenue
+  components, the sentences, the CSV escaping, and that `docs/specs/lending-insights-metrics.md`
+  lists exactly the metric keys and tables the code defines. `InsightsDemoSeedIT` checks the demo
+  year's books and snapshots; `InsightsPerformanceIT` (opt in, `-Dinsights.perf=true`) times every
+  route on the seed scaled 20 times.
 - **Report golden tests.** Each report in chapter 14 runs over its fabricated dataset and
   is compared with a committed expected output (JSON), including the PAR worked example.
 - **Document golden tests.** Each PDF template renders fabricated data; the test compares
@@ -254,6 +314,16 @@ output changed.
   possible-repeat warning; decisions allowed per status and notes required; the Activate form
   labelled and not sent twice; the result and the repeat; failed messages masked with a retry and
   a warning for an unconfigured sender; the new routes on the shared shell).
+- First run and guided tours (FR-IAM-13, FR-IAM-14): `areas/auth/first-run.test.tsx` renders each
+  first-run step and error state; `tour/model.test.ts` covers step filtering by permission, module
+  and feature flag, the first-run and replay rules, the skip of a missing anchor, the focus trap,
+  keys and swipes, and the copy rules; `tour/tours.test.tsx` renders the screen of every step of
+  every tour as the user it is written for (a tenant admin, a seller, a shop manager, a cashier
+  and a loan officer, all fabricated; the loan page as an approved and an active loan, so both the
+  payout and the payment buttons are checked) and fails when a `data-tour` anchor is missing;
+  `tour/spotlight.test.tsx` checks the dialog semantics, the live region and that no style
+  attribute is written. `FirstRunIT` proves that accepting signs the user in only under the
+  sign-in rules and that tour progress is per user.
 - Bundle budget check for the member area (NFR-PERF-06).
 - Accessibility checks on key screens (NFR-ACC-01).
 

@@ -25,6 +25,7 @@ packages.
 | One React PWA with staff and member areas | ADR-009 |
 | Backend: Java 25, Spring Boot 4.1, Spring Modulith 2.1, Flyway | ADR-010 |
 | Retail vertical brought forward; stock as append-only movements; retail events post to the ledger | ADR-020 |
+| First run signs the invitee in; guided tours are data with per-user progress on the server | ADR-025 (proposed) |
 | Payment gateway | pending ADR-011 |
 | Credit scoring model beyond the rules-based default | pending ADR-012 |
 | SMS and USSD aggregator | pending ADR-013 |
@@ -80,7 +81,8 @@ lending           vertical module (ADR-001)
   loans           origination, appraisal, schedule, disbursement, repayment, arrears, closure
   collateral      register, valuations, custody
   savings         products, accounts, transactions, interest
-  investments     products, investments, returns, maturity
+  investments     products, investments, schedule, returns job, maturity, rollover, early
+                  withdrawal, reversal, certificate, statement, maturity ladder (ADR-031)
   collections     due list, arrears list, officer assignment, collection actions
   lending reports, lending import templates, lending posting rules, lending jobs
 retail            vertical module (future)
@@ -107,9 +109,16 @@ core.payments         -> core.ledger, core.notifications (booking is delegated t
 core.reporting        -> core.documents
 lending               -> any core module
 lending.loans         -> lending.members, lending.products, lending.collateral, lending.savings (transfer)
+lending.seed          -> lending.loans (LoanServicing), lending.savings (SavingsServicing),
+                         lending.investments (InvestmentServicing),
+                         lending.insights (InsightsSnapshots)
+lending.insights      -> core.tenancy, core.audit, core.jobs, core.notifications,
+                         lending.savings (SavingsMetrics), lending.investments (InvestmentMetrics)
+                         (reads the lending and ledger tables with SQL, read-only, under RLS; ADR-030)
 lending.collections   -> lending.loans, lending.members
-lending.savings       -> lending.members
-lending.investments   -> lending.members, lending.savings (monthly return credit)
+lending.savings       -> lending.members (member lookup, the receipt SMS phone; ADR-032)
+lending.investments   -> lending.members; lending.savings (monthly return credit) in a follow-up
+                         (increment 10 pays due returns in cash, ADR-031)
 lending.collateral    -> lending.members
 ```
 
@@ -183,7 +192,9 @@ to other modules.
 | `core.operations` | `...core.operations` | `/version`, the migrations readiness check, the database role guard |
 | `lending.manifest` | `...lending.manifest` | The lending module's registration (`ModuleManifest`) |
 | `lending.collateral` | `...lending.collateral` | The collateral register: items, valuations, the append-only custody timeline, photos and scans, and `collateral_release` as an approval action (#13) |
-| `lending.loans` | `...lending.loans` | Origination so far: draft, edit, guarantors, collateral pledges, submit, return, cancel, the status history; registers `CollateralPledges` so pledged items are not released (#41) |
+| `lending.loans` | `...lending.loans` | Origination: draft, edit, guarantors, collateral pledges, submit, return, cancel, appraisal, decision, the status history; registers `CollateralPledges` so pledged items are not released (#41 to #43). Servicing (#108, ADR-026): disbursement, schedule, repayments with R-ALLOC, payoff quote, reversal with re-allocation, closure, write-off and recovery, each posting through `post_entry`; registers the `loan_disbursement`, `repayment_reversal` and `loan_write_off` approval actions; `LoanServicing`, the port for commands without a principal |
+| `lending.seed` | `...lending.seed` | The `seed-lending` command: fabricated members, products, applications and serviced loans for one empty staging tenant, through `LoanServicing` (#108, ADR-026); with `--insights-demo [--scale N]`, twelve months of fabricated history and its snapshots (#153) |
+| `lending.insights` | `...lending.insights` | The insights read model (#153, ADR-030): the morning brief, portfolio, revenue from posted journal lines, member activity, drill-down tables and CSV export; the nightly `lending_loan_daily_snapshots` job until increment 6 owns it; the owner's daily digest through the outbox; `InsightsPanel`, the registry savings and investments plug into; `InsightsSnapshots`, the backfill port for the seed |
 | `lending.products` | `...lending.products` | Loan products with immutable versions and fees, archive; `ScheduleCalculator`, the public home of rules R-ROUND, R-TERM, R-RATE, R-FLAT and R-DECL; the schedule preview (#40) |
 | `lending.members` | `...lending.members` | Members: the reference vertical slice; edit, duplicate check, KYC decision, blacklist, status (#10); next of kin, links and the relationship panel (#11) |
 
@@ -225,7 +236,20 @@ frontend/src/
 ```
 
 Each area is a lazily loaded route tree. The staff area reads the principal's permissions
-from `/me` and hides actions the user cannot take. Money is formatted only in
+from `/me` and hides actions the user cannot take.
+
+Guided tours (FR-IAM-14, ADR-025) live in `frontend/src/tour/`: `model.ts` (the step type, who sees
+a step by permission, module and feature flag, when a tour starts, the focus trap and key rules),
+`tours.ts` (the tours as data), `spotlight.tsx` (the card and the dimmed layer) and `host.tsx` (the
+runtime in the staff layout and the Help entry in the staff bar). A step anchors to a
+`data-tour="<id>"` attribute on a screen, never a CSS class; `tours.test.tsx` renders each step's
+screen and fails when the anchor is gone. A new module adds its steps to `tours.ts`; a feature not
+built yet keeps its steps behind a flag in `FEATURES` until its slice switches it on (billing,
+payments, trial, agents, the staff screen and the insights pages are all off today). The first-run
+tours cover set-up, retail selling, stock-take and the catalogue, and the loan list with its
+applications filter; page tours, started from Help, cover the sale, stock, stock-take, catalogue,
+set-up, loans and loan pages. A page tour's `page` may hold a `$name` segment that matches any one
+path segment, so one tour serves every loan. Money is formatted only in
 `components/`, from integer minor units and the currency exponent.
 
 ## 5.7 Where the retail vertical will fit

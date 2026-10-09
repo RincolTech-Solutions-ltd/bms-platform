@@ -190,7 +190,7 @@ published under the platform host.
 | 404 | Not found or outside branch scope; `unknown_tenant`; `module_not_enabled`; `link_invalid` (an applicant link that is malformed, unknown, replaced or expired, one answer for all, ADR-024) |
 | 413 | `file_too_large`: an upload over 5 MB, or a logo over 1 MB (chapter 8 section 8.8) |
 | 415 | `unsupported_file_type`: an upload that is not JPEG, PNG or PDF by content (a logo: not PNG, JPEG or WebP, or an image that cannot be decoded) |
-| 409 | `version_conflict`, `idempotency_in_progress`, `invalid_status_transition`, `approval_already_pending`, `mfa_already_enrolled`, `mfa_not_enrolled`, `mfa_enrolment_not_started`, duplicates (`duplicate_nin`, `duplicate_import`, `collateral_already_pledged`, `duplicate_email`, `duplicate_phone`, `duplicate_branch_code`, `duplicate_slug`, `duplicate_product_code`); `transaction_conflict` (the database aborted the transaction as a deadlock victim or serialisation loser; nothing was saved, `Retry-After` is set and the same request may be retried with the same `Idempotency-Key`); `stock_moved_since_count` (a retail stock-take whose lines moved after the count so far that the adjustment would leave a negative balance; recount them); `application_state` (an onboarding decision or reply the application's status does not allow), `application_not_verified` (Activate before Verify), `outbox_not_failed` (send again on a row that has not failed), `outbox_too_old` (send again on a row older than its link's 7 day lifetime); `conflict` for any other unique or foreign key violation |
+| 409 | `version_conflict`, `idempotency_in_progress`, `invalid_status_transition`, `approval_already_pending`, `mfa_already_enrolled`, `mfa_not_enrolled`, `mfa_enrolment_not_started`, duplicates (`duplicate_nin`, the cash book's `duplicate_category`, `duplicate_item`, `duplicate_party`, `duplicate_import`, `collateral_already_pledged`, `duplicate_email`, `duplicate_phone`, `duplicate_branch_code`, `duplicate_slug`, `duplicate_product_code`); the cash book's `cash_record_voided` (any cash book record voided twice), `savings_exists` (a second active savings record for a branch and date), `suggestion_changed` (the savings suggestion changed since the form was shown; the body carries the new `suggestion_token`, ADR-022 decision 11) and `advance_has_repayments`; `transaction_conflict` (the database aborted the transaction as a deadlock victim or serialisation loser; nothing was saved, `Retry-After` is set and the same request may be retried with the same `Idempotency-Key`); `stock_moved_since_count` (a retail stock-take whose lines moved after the count so far that the adjustment would leave a negative balance; recount them); `application_state` (an onboarding decision or reply the application's status does not allow), `application_not_verified` (Activate before Verify), `outbox_not_failed` (send again on a row that has not failed), `outbox_too_old` (send again on a row older than its link's 7 day lifetime); `conflict` for any other unique or foreign key violation |
 | 422 | Validation and business rule failures (codes below) |
 | 423 | `tenant_suspended`, `account_locked` |
 | 428 | `precondition_required`: a `PATCH`, or a state transition or retail price edit, without `If-Match` (section 7.9) |
@@ -216,12 +216,12 @@ from identity, tenancy and approvals (increment 1): `weak_password`, `invitation
 `invitation_expired`, `invalid_mfa_code` (enrolment and recovery code replacement),
 `cannot_deactivate_self`, `cannot_reset_own_mfa`, `last_tenant_admin`, `not_a_tenant_admin`,
 `head_office_required`, `invalid_tenant`, `module_not_allowed`, `unknown_action_type`,
-`approval_execution_failed`; and from retail (ADR-020): `insufficient_stock`, `price_below_cost`; and from any money route: `amount_out_of_range` (exact arithmetic on minor units overflowed; every retail `*_minor` input is also bounded at 10^13 by validation and a database CHECK, review F7).
+`approval_execution_failed`; and from retail (ADR-020): `insufficient_stock`, `price_below_cost`; and from the retail cash book (ADR-022): `reason_required`, `explanation_required`, `item_not_in_category`, `category_inactive`, `account_not_expense`, `party_kind_not_allowed`, `suggestion_token_required`, `amount_requires_profit_access`, `repayment_exceeds_balance`, `advance_settled` and `branch_required`; and from any money route: `amount_out_of_range` (exact arithmetic on minor units overflowed; every retail `*_minor` input is also bounded at 10^13 by validation and a database CHECK, review F7).
 
 Entries of the `errors` array carry their own `code`: `invalid` (a Bean Validation failure;
 the message says which), `required`, `unknown_branch` (a branch that does not exist, is inactive
 or is outside the caller's scope, deliberately indistinguishable), `invalid_phone`,
-`invalid_nin`, `unknown_role`, `invalid_slug`, `weak_password`. Every response, success or error,
+`invalid_nin`, `unknown_role`, `invalid_slug`, `weak_password`, `future_date` (a business date after today in the tenant's time zone). Every response, success or error,
 carries the `X-Request-Id` header.
 
 ## 7.8 Idempotency (money-moving endpoints)
@@ -322,7 +322,7 @@ port (8081), which is never published outside the container network.
 | POST | `/auth/staff/mfa/enrol` | public (mfa_token), or signed in | Returns the TOTP secret and `otpauth` URI once |
 | POST | `/auth/staff/mfa/confirm` | public (mfa_token), or signed in | `{mfa_token?, code}` activates TOTP and returns ten recovery codes once; with the MFA token it also signs in. FR-IAM-11 |
 | POST | `/auth/staff/mfa/recovery-codes` | authenticated staff | `{code}` (a current TOTP code) replaces every recovery code; returns the new ones once. FR-IAM-11 |
-| POST | `/auth/staff/invitations/accept` | public (token) | `{token, password}`; 204. FR-IAM-01 |
+| POST | `/auth/staff/invitations/accept` | public (token) | `{token, password}`; sets the password and signs in: the same body as `/auth/staff/login` (`signed_in` with tokens, or `mfa_enrolment_required` with an MFA token when the role requires a second factor). FR-IAM-01, FR-IAM-13, ADR-025 |
 | POST | `/auth/staff/password/forgot` | public | Always 202. Not built yet |
 | POST | `/auth/staff/password/reset` | public (token) | Not built yet |
 | POST | `/auth/member/otp/request` | public | `{phone, purpose}`; always 202. FR-IAM-09 (P2) |
@@ -331,7 +331,8 @@ port (8081), which is never published outside the container network.
 | POST | `/auth/member/login` | public | `{phone, pin}` (P2) |
 | POST | `/auth/refresh` | refresh cookie | Rotates refresh token. FR-IAM-07 |
 | POST | `/auth/logout` | authenticated staff | Revokes the session family; clears the cookie |
-| GET | `/me` | authenticated staff | User, roles, permissions, `permission_scopes` (per permission key `{all_branches, branch_ids}`, so a screen offers only the branches where its permission is held, ADR-017), `all_branches`, the branches to switch between, the default branch, MFA state and unused recovery codes. FR-BR-03 |
+| GET | `/me` | authenticated staff | User, roles, permissions, `permission_scopes` (per permission key `{all_branches, branch_ids}`, so a screen offers only the branches where its permission is held, ADR-017), `all_branches`, the branches to switch between, the default branch, MFA state and unused recovery codes. Also `tours`: the guided tours the user finished or dismissed, by tour id (FR-IAM-14). FR-BR-03 |
+| PUT | `/me/tours/{tour_id}` | authenticated staff | `{status: completed \| dismissed, version}`; records how the caller left a guided tour; 204. Only the caller's own row; tour id is lower case words joined by hyphens, at most 64 tours per user (`tour_id_invalid`, `too_many_tours`). FR-IAM-14, ADR-025 |
 
 The refresh token never appears in a response body: it is the `__Host-bms_rt` cookie of section 7.4.1.
 
@@ -574,9 +575,33 @@ approver submitted or appraised the loan, FR-APR-03), `above_requested_principal
 reason `approval_expired` (FR-ORG-08), audited with actor kind `system`. Both `approved_at` and
 the expiry bound come from the business clock (AGENTS.md rule 7), never the database's `now()`.
 
+Built (#108, increment 5, ADR-026): disbursement, schedule, transactions, repayments, reversal,
+payoff quote and write-off. Every money-moving route requires `Idempotency-Key` (section 7.8; a
+replay answers `Idempotent-Replayed: true`). `POST .../disbursements` takes
+`{disbursement_date, payment_method_key, external_reference?}` on an `approved` loan and answers
+`LoanActionOutcome` `{loan_id, executed, approval_request_id, loan_status}`: 201 when it executed
+below the tenant's `loan_disbursement` threshold, else 202 with the pending request (checker
+`lending.disbursements.authorise`). `POST .../repayments` takes `{amount_minor, value_date,
+payment_method_key, external_reference?}` on an `active` loan (a `written_off` loan records a
+`recovery`) and answers 201 `RepaymentResult` `{transaction, loan_status, balances}` with the
+allocation rows. `POST .../transactions/{txn_id}/reverse` and `POST .../write-off` take `{reason}`
+and answer 202 with the pending request. `GET .../schedule` returns the items and a `totals` row;
+`GET .../transactions` returns every money event newest first with its allocation rows
+(`applies_to_txn_id`, `item_no`, `component`, `amount_minor`); `GET .../payoff-quote?value_date=`
+(today by default) returns principal, interest, fees, penalties, rebate and total. `GET` of a loan
+now carries `balances` (disbursed and maturity dates, outstanding by component, arrears, DPD, next
+due date, total paid, credit balance), and the list takes `q` (loan or member number by prefix,
+member name by any part) and returns the member's number and name, the outstanding total, DPD and
+the next due date. `payment_method_key` is `cash`, `bank`, `mtn_momo` or `airtel_money`. Codes (422
+unless stated): `value_date_in_future`, `before_disbursement`, `before_last_repayment`,
+`payment_method_unmapped`, `fees_exceed_principal`, `period_closed`, `not_reversible`,
+`nothing_to_write_off`, 409 `already_reversed`, 409 `invalid_status_transition` (a second
+disbursement, FR-DIS-03; a repayment on a closed loan; a quote on a loan that is not active), 409
+`approval_already_pending`, and the idempotency codes of section 7.8.
+
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/lending/loans` | `lending.loans.read` | Filters: `status`, `member_id`, `officer_user_id`, `product_id`, `dpd_from`, `dpd_to`, `disbursed_on_from/_to` |
+| GET | `/lending/loans` | `lending.loans.read` | Filters: `status`, `member_id`, `officer_user_id`, `product_id`, `q` (built); `dpd_from`, `dpd_to`, `disbursed_on_from/_to` (increment 8) |
 | POST | `/lending/loans` | `lending.loans.create` | Draft application. FR-ORG-01 |
 | GET | `/lending/loans/{loan_id}` | `lending.loans.read` | Includes balances, DPD, PAR bucket, guarantors, collateral |
 | PATCH | `/lending/loans/{loan_id}` | `lending.loans.create` | Draft only |
@@ -619,32 +644,67 @@ with the item's `ETag`; PATCH, events and release require `If-Match`. Release an
 
 ### 7.11.15 Lending: savings
 
+Built in increment 9 (issue #151, ADR-032). A withdrawal, a closure and a reversal answer 201 when
+executed and 202 when they wait for a checker (`SavingsActionOutcome`: `executed`,
+`approval_request_id`, the withdrawal `transaction` when executed, and the `account`). Every money
+route needs an `Idempotency-Key`; a replay answers `Idempotent-Replayed: true`. An account outside
+the caller's branch scope is a 404.
+
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET, POST | `/lending/savings-products` | `lending.savings.read` / `lending.savings_products.manage` | FR-SAV-01 |
-| GET | `/lending/savings-accounts` | `lending.savings.read` | |
-| POST | `/lending/savings-accounts` | `lending.savings.open` | FR-SAV-02 |
-| GET | `/lending/savings-accounts/{account_id}` | `lending.savings.read` | |
-| GET | `/lending/savings-accounts/{account_id}/transactions` | `lending.savings.read` | |
-| POST | `/lending/savings-accounts/{account_id}/deposits` | `lending.savings.deposit` | **M**. FR-SAV-03 |
-| POST | `/lending/savings-accounts/{account_id}/withdrawals` | `lending.savings.withdraw` | **M A** |
-| POST | `/lending/savings-accounts/{account_id}/transactions/{txn_id}/reverse` | `lending.savings.withdraw` | **M A** |
-| POST | `/lending/savings-accounts/{account_id}/reactivate` | `lending.savings.withdraw_approve` | FR-SAV-06 |
-| POST | `/lending/savings-accounts/{account_id}/close` | `lending.savings.withdraw` | **M A**. FR-SAV-07 |
+| GET, POST | `/lending/savings-products` | `lending.savings.read` / `lending.savings_products.manage` | FR-SAV-01. Body `{code, currency?, terms}`; 409 `duplicate_code` |
+| GET | `/lending/savings-products/{product_id}` | `lending.savings.read` | `ETag` is the version |
+| PUT | `/lending/savings-products/{product_id}` | `lending.savings_products.manage` | `If-Match`. `{terms, status}` (`active` or `archived`); 422 `product_in_use` for an interest change once an account uses it |
+| GET | `/lending/savings-accounts` | `lending.savings.read` | `branch_id` (repeatable), `member_id`, `status` (repeatable), `product_id`, `q` (account or member number by prefix, member name by part), `limit` (default 25, at most 100), `cursor`; by account number |
+| POST | `/lending/savings-accounts` | `lending.savings.open` | FR-SAV-02. `{member_id, product_id, branch_id?}`; the member's home branch by default (FR-BR-05). 422 `member_not_active`, `product_not_active` |
+| GET | `/lending/savings-accounts/{account_id}` | `lending.savings.read` | Balance, `available_minor` (what a withdrawal may take now), `accrued_interest_minor` (since the last posting, an estimate) |
+| GET | `/lending/savings-accounts/{account_id}/transactions` | `lending.savings.read` | Newest first with running balances; `limit` (default 50, at most 200), `cursor` |
+| GET | `/lending/savings-accounts/{account_id}/statement` | `lending.savings.read` | `from`, `to` (value dates; three months to today by default): opening, lines with running balance, totals, closing. 422 `invalid_range` |
+| POST | `/lending/savings-accounts/{account_id}/deposits` | `lending.savings.deposit` | **M**. FR-SAV-03. `{amount_minor, value_date?, payment_method_key, external_reference?}`; 201 `{transaction, account}`. 422 `below_minimum_opening`, `value_date_in_future`, `value_date_closed`, `before_opening`, `account_closed`, `payment_method_unmapped` |
+| POST | `/lending/savings-accounts/{account_id}/withdrawals` | `lending.savings.withdraw` | **M A** (`savings_withdrawal`). `{amount_minor, payment_method_key, external_reference?}`, dated the day it executes. 422 `insufficient_balance`, `withdrawal_limit_exceeded`, `withdrawal_count_exceeded`, `account_dormant`, `account_frozen`, `account_closed`; 409 `approval_already_pending` |
+| POST | `/lending/savings-accounts/{account_id}/transactions/{txn_id}/reverse` | `lending.savings.withdraw` | **M A** (`savings_reversal`, always checked). `{reason}`. A deposit or a withdrawal with its fee. 422 `not_reversible`, `insufficient_balance`; 409 `already_reversed` |
+| POST | `/lending/savings-accounts/{account_id}/reactivate` | `lending.savings.withdraw_approve` | FR-SAV-06. `{reason}`; dormant to active. 409 `invalid_status_transition` |
+| POST | `/lending/savings-accounts/{account_id}/freeze` | `lending.savings.withdraw_approve` | `{reason}`; active or dormant to frozen (ADR-032) |
+| POST | `/lending/savings-accounts/{account_id}/unfreeze` | `lending.savings.withdraw_approve` | `{reason}`; frozen to active |
+| POST | `/lending/savings-accounts/{account_id}/close` | `lending.savings.withdraw` | **M A** (`savings_withdrawal` with `close`). FR-SAV-07. `{payment_method_key, external_reference?, reason?}`: interest to date, then the whole balance paid out. 422 `account_on_hold` |
+| GET | `/lending/savings-reports/balances` | `lending.reports.members` | `lending.savings_balances` (chapter 14 section 14.5): `as_at` (today by default), `branch_id`, `product_id` |
+| GET | `/lending/savings-reports/movements` | `lending.reports.members` | `lending.savings_movements`: `from` (the first of the month by default), `to`, `branch_id`, `product_id` |
 
 ### 7.11.16 Lending: investments
 
+Built in increment 10 (#152, ADR-031). **M** marks a route that requires an `Idempotency-Key`;
+**A** a maker-checker action: 201 when it executed (below the tenant's threshold), 202 when it waits
+for a checker, with `approval_request_id`.
+
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET, POST | `/lending/investment-products` | `lending.investments.read` / `lending.investment_products.manage` | FR-INV-01 |
-| GET | `/lending/investments` | `lending.investments.read` | |
+| GET, POST | `/lending/investment-products` | `lending.investments.read` / `lending.investment_products.manage` | FR-INV-01, FR-INV-08 |
+| GET, PUT | `/lending/investment-products/{product_id}` | `lending.investments.read` / `lending.investment_products.manage` | PUT with `If-Match`; investments opened keep their terms |
+| POST | `/lending/investment-products/{product_id}/archive` | `lending.investment_products.manage` | `If-Match` |
+| POST | `/lending/investment-products/return-preview` | `lending.investments.read` | R-INV-1 to R-INV-4 for an amount and term |
+| GET | `/lending/investments` | `lending.investments.read` | Filters `branch_id`, `status`, `member_id` (the member tab), `product_id`, `maturing_within_days`, `q`; cursor. The investments register of chapter 14 |
 | POST | `/lending/investments` | `lending.investments.open` | FR-INV-02 |
-| GET | `/lending/investments/{investment_id}` | `lending.investments.read` | |
-| POST | `/lending/investments/{investment_id}/funding` | `lending.investments.fund` | **M**. FR-INV-03 |
+| GET | `/lending/investments/maturities` | `lending.investments.read` | FR-INV-12: the ladder (overdue, 0 to 7, 8 to 30, 31 to 90 days) and the investments maturing |
+| GET | `/lending/investments/metrics` | `lending.investments.read` | FR-INV-12: `from`, `to`, `branch_id`; metrics, ladder, concentration |
+| GET | `/lending/investments/{investment_id}` | `lending.investments.read` | Balances, `return_available_minor`, `pending_approval_id` |
 | PUT | `/lending/investments/{investment_id}/maturity-instruction` | `lending.investments.open` | FR-INV-05 |
-| POST | `/lending/investments/{investment_id}/payout` | `lending.investments.payout` | **M** |
-| POST | `/lending/investments/{investment_id}/rollover` | `lending.investments.payout` | **M** |
-| POST | `/lending/investments/{investment_id}/early-withdrawal` | `lending.investments.payout` | **M A**. FR-INV-06 |
+| POST | `/lending/investments/{investment_id}/funding` | `lending.investments.fund` | **M A** (`investment_funding`, threshold applies). FR-INV-03 |
+| GET | `/lending/investments/{investment_id}/schedule` | `lending.investments.read` | FR-INV-09 |
+| GET | `/lending/investments/{investment_id}/statement` | `lending.investments.read` | FR-INV-10 |
+| GET | `/lending/investments/{investment_id}/certificate` | `lending.investments.read` | FR-INV-10 |
+| POST | `/lending/investments/{investment_id}/return-payouts` | `lending.investments.payout` | **M**. FR-INV-04 |
+| POST | `/lending/investments/{investment_id}/payout` | `lending.investments.payout` | **M**. FR-INV-05 |
+| POST | `/lending/investments/{investment_id}/rollover` | `lending.investments.payout` | **M**. FR-INV-05 |
+| GET | `/lending/investments/{investment_id}/early-withdrawal-quote` | `lending.investments.read` | R-INV-6 as at `value_date` |
+| POST | `/lending/investments/{investment_id}/early-withdrawal` | `lending.investments.payout` | **M A** (`investment_early_withdrawal`, no threshold). FR-INV-06 |
+| POST | `/lending/investments/{investment_id}/transactions/{txn_id}/reverse` | `lending.investments.payout` | **M A** (`investment_reversal`, no threshold). FR-INV-11 |
+
+Codes (422 unless stated): `term_not_offered`, `amount_out_of_range`, `product_archived`,
+`member_not_active`, `member_not_found`, `compounding_needs_maturity_payout`, `value_date_in_future`,
+`value_date_out_of_range`, `no_return_due`, `early_withdrawal_not_allowed`, `investment_matured`,
+`before_start`, `nothing_to_pay`, `not_reversible`, `not_funded`, `payment_method_unmapped`,
+`period_closed`, 409 `duplicate_code`, 409 `already_reversed`, 409 `invalid_status_transition`, 409
+`approval_already_pending`, and the idempotency codes of section 7.8.
 
 ### 7.11.17 Lending: collections
 
@@ -783,6 +843,112 @@ destination branch: the same cost is posted to both branches' inventory accounts
 `/retail/stock/movements` show the lines as `transfer_out` and `transfer_in` with `source_type`
 `retail.transfer` and `source_id` the transfer; a void adds the opposite kinds with `source_type`
 `retail.transfer_void` and `reverses_movement_id` set.
+
+### 7.11.21 Retail cash book (`/retail`, ADR-022, issue #147)
+
+**Built** (issue #147; `docs/api/openapi.json` is generated from it). Not built: `format=csv` on the reports, because the report runs of section 7.11.8 do not exist yet.
+Refused with 404 `module_not_enabled` unless retail is switched on. Conventions are those of section
+7.11.20: snake_case, branch scope on every row (ADR-017, 404 outside scope), `*` fields absent (not
+null) without `retail.profit.read` (for the cash book that includes every savings amount, the cash restock total `cash_purchases_minor` and every figure net of them, ADR-022 decision 13), **M** requires `Idempotency-Key` (section 7.8). A request for one
+branch takes `branch_id`, or the caller's one branch when the permission's scope has exactly one;
+otherwise 422 `branch_required`. Dates are business dates in the tenant's zone, default today, never in
+the future (a record posts on its own `business_date`, which may be earlier than its `created_at`, and a void posts on the day it is made, shown as a `*_voids_minor` line on the void day and never rewriting the record's day, ADR-022 decision 9): a future date is a field problem, as in a transfer's `transfer_date`: 422 `validation_failed` with an `errors` entry `{field: business_date, code: future_date}` (the field is `paid_on`, `banked_at` or `withdrawn_at` on those routes). Every record in a response carries `by`, `at`, `voided`, `historical`.
+Every void takes `{reason}` (at most 300 characters), is **M**, needs `retail.cashbook.void` in the record's branch (404 outside scope), and is 409 `cash_record_voided` the
+second time (the `<thing>_voided` style of `sale_voided` and `transfer_voided`). A record imported from the pilot (`historical`) cannot be voided: 409 `historical_record` ("Imported records cannot be voided; correct them with a new record"), because imported rows have no journal to reverse; the same holds for an imported advance and an imported repayment.
+
+Lists and the expense setup (FR-RET-17):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/retail/expense-categories` | `retail.cashbook.read` | `{items: [{id, name, expense_account_id, active, items: [{id, name, requires_explanation, active}]}]}`; `active` filter |
+| POST | `/retail/expense-categories` | `retail.expense.manage` | `{name, expense_account_id?}`; 409 `duplicate_category`; `expense_account_id` must be a postable expense account (422 `account_not_expense`) |
+| PATCH | `/retail/expense-categories/{category_id}` | `retail.expense.manage` | `{name?, expense_account_id?, active?, sort_order?}`; requires `If-Match` (428 without, 409 `version_conflict` on a stale version); 409 `duplicate_category` |
+| POST | `/retail/expense-categories/{category_id}/items` | `retail.expense.manage` | `{name, requires_explanation?}`; 409 `duplicate_item` |
+| PATCH | `/retail/expense-categories/{category_id}/items/{item_id}` | `retail.expense.manage` | `{name?, requires_explanation?, active?}`; requires `If-Match` (428 without, 409 `version_conflict` on a stale version); 409 `duplicate_item` |
+| GET | `/retail/cash-parties` | `retail.cashbook.read` | `query`, `kind`, `limit` (default 50, at most 200), `cursor` |
+| POST | `/retail/cash-parties` | `retail.expense.record` (the route declares one permission); a party of kind `owner`, `staff` or `related_entity` also needs `retail.expense.manage` (403 `permission_denied` without it), while a beneficiary of kind `supplier` or `other` may be added on the fly with `retail.expense.record` alone | `{name, contact?, kind}`; `kind` one of `owner`, `staff`, `related_entity`, `supplier`, `other`; 409 `duplicate_party`; 422 `party_kind_not_allowed` when an advance names a `supplier` or `other` party |
+
+Daily savings (FR-RET-18 to FR-RET-20):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/retail/savings/suggestion` | `retail.savings.record` | `branch_id?`, `date?`. `{branch_id, business_date, total_sold_minor, suggestion_token, suggested_minor*, daily_profit_minor*, existing_id}`; `suggestion_token` is an opaque keyed hash of the suggestion (it reveals nothing, so every caller gets it); `suggested_minor` and the profit are `*`, absent without `retail.profit.read`; `existing_id` is the active record for the day, if any |
+| POST | `/retail/savings` | `retail.savings.record` | **M**. `{branch_id?, business_date?, suggestion_token, amount_minor?, overwrite_reason?}`; `suggestion_token` is the one the form was shown (422 `suggestion_token_required` when missing); an omitted amount takes the suggestion; a caller without `retail.profit.read` may not send `amount_minor` or `overwrite_reason` at all (422 `amount_requires_profit_access`, "only the default can be recorded without profit access"; the default is applied server-side, so no accepted-or-refused answer reveals the suggestion); a caller with `retail.profit.read` sending an amount differing from the suggestion the token stands for needs `retail.savings.overwrite` (403) and a reason (422 `reason_required`); if the suggestion has changed since the token was issued the answer is 409 `suggestion_changed` with the new `suggestion_token` (and `suggested_minor*`) and nothing is written, never a false overwrite; 409 `savings_exists`. The response echoes `amount_minor` to the writer only when the writer typed it; a default taken by a caller without `retail.profit.read` is not echoed (`amount_minor*`) |
+| GET | `/retail/savings` | `retail.cashbook.read` | `branch_id` (repeatable), `from`, `to`, `include_voided`, `limit` (default 50, at most 200), `cursor`; row `{id, branch_id, business_date, amount_minor*, total_sold_minor, overwritten*, suggested_minor*, by, at}` (a savings amount is profit-derived, ADR-022 decision 13, so without `retail.profit.read` the row shows that savings were recorded but not how much); grouped client-side by shop, year and month |
+| POST | `/retail/savings/{savings_id}/void` | `retail.cashbook.void` | Reverses the entry and frees the day |
+
+Cash banked (FR-RET-21 to FR-RET-23):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/retail/bankings/expected` | `retail.banking.record` | `branch_id?`, `date?`. `{branch_id, business_date, cash_takings_minor, cash_sale_voids_minor, expense_voids_minor, advance_voids_minor, repayment_voids_minor, cash_purchases_minor*, savings_minor*, savings_voids_minor*, expenses_minor, advances_out_minor, repayments_in_minor, cash_expected_minor, expected_minor*, banked_so_far_minor}`; `cash_expected_minor` is takings, less cash sale voids, less expenses and advances paid out, plus repayments (with the expense, advance and repayment voids of the day), **before cash purchases and before savings**, and is what a caller without `retail.profit.read` is shown; `cash_purchases_minor` (a total at cost), `savings_minor` and `expected_minor` (net of both) are `*`; the form shows it and prefills with `expected_minor` (or `cash_expected_minor` when that is all the caller may see, which for a cashier is the takings figure less their own till payments) |
+| POST | `/retail/bankings` | `retail.banking.record` | **M**. `{branch_id?, business_date?, amount_minor, banked_at?, reference?}`; stores `expected_minor`; response adds `difference_minor*`, `flag*` and `warnings*: [cash_below_banked?]` (gated like the other balance figures: cash on hand is net of savings and cash purchases, so the warning is absent without `retail.profit.read`; `bank_balance_negative` on withdrawals is not affected); stored `expected_minor*` is profit-gated too; never refused for exceeding cash |
+| GET | `/retail/bankings` | `retail.cashbook.read` | `branch_id`, `from`, `to`, `include_voided`, `limit` (default 50, at most 200), `cursor` |
+| POST | `/retail/bankings/{banking_id}/void` | `retail.cashbook.void` | |
+| POST | `/retail/withdrawals` | `retail.withdrawal.record` | **M**. `{branch_id?, business_date?, amount_minor, withdrawn_at?, purpose?}`; response may carry `warnings: [bank_balance_negative]` |
+| GET | `/retail/withdrawals` | `retail.cashbook.read` | Same filters, with `limit` (default 50, at most 200) and `cursor` |
+| POST | `/retail/withdrawals/{withdrawal_id}/void` | `retail.cashbook.void` | |
+
+Expenses (FR-RET-24):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | `/retail/expenses` | `retail.expense.record` | **M**. `{branch_id?, business_date?, category_id, item_id, party_id?, amount_minor, explanation?, receipt_document_id?}` (a receipt document must have been uploaded for an expense: subject type `retail.expense_receipt`; any other tenant document, a member's file included, is 422 `unknown_document`); 422 `item_not_in_category`, `explanation_required`, `category_inactive` |
+| GET | `/retail/expenses` | `retail.cashbook.read` | `branch_id`, `from`, `to`, `category_id`, `item_id`, `include_voided`, `limit`, `cursor` |
+| POST | `/retail/expenses/{expense_id}/void` | `retail.cashbook.void` | |
+
+Advances and repayments (FR-RET-26):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | `/retail/advances` | `retail.advance.create` | **M**. `{branch_id?, business_date?, party_id, taken_by_party_id?, principal_minor, purpose?}` (`taken_by_party_id` must also be an `owner`, `staff` or `related_entity` party, else 422 `party_kind_not_allowed`); response has `advance_no` |
+| GET | `/retail/advances` | `retail.cashbook.read` | `branch_id`, `party_id`, `open_only` (balance above zero, what the repayment form lists), `from`, `to`, `limit` (default 50, at most 200), `cursor`; row adds `repaid_minor`, `balance_minor` |
+| GET | `/retail/advances/{advance_id}` | `retail.cashbook.read` | With its repayments |
+| POST | `/retail/advances/{advance_id}/repayments` | `retail.advance.repay` | **M**. `{branch_id?, amount_minor, method: cash, mobile_money or bank, paid_on?}` (`branch_id` is the branch that receives the money, scoped, default the advance's branch); 422 `repayment_exceeds_balance`, `advance_settled`; returns the new balance |
+| POST | `/retail/advances/{advance_id}/void` | `retail.cashbook.void` | 409 `advance_has_repayments` |
+| POST | `/retail/advances/{advance_id}/repayments/{repayment_id}/void` | `retail.cashbook.void` | |
+
+Reports (FR-RET-23, FR-RET-27, FR-RET-29), all `branch_id` (repeatable, scoped), `from`, `to` (default
+the last 30 days, at most 366), also `format=csv` through the report runs of section 7.11.8:
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/retail/reports/cash/daily` | `retail.cashbook.read` | Per branch and day: `cash_takings_minor`, `cash_sale_voids_minor`, `expense_voids_minor`, `advance_voids_minor`, `repayment_voids_minor`, `banking_voids_minor`, `withdrawal_voids_minor`, `cash_purchases_minor*`, `expenses_minor`, `advances_out_minor`, `repayments_in_minor`, `withdrawals_in_minor`, `banked_minor`, `cash_expected_minor`, `ledger_basis`, `historical` (an imported day: no running total, see below), and the savings-embedding figures `opening_minor*`, `savings_minor*`, `savings_voids_minor*`, `closing_minor*`, `other_movements_minor*`, `expected_to_bank_minor*`, `unbanked_running_minor*`; `daily_profit_minor*` |
+| GET | `/retail/reports/cash/banking` | `retail.cashbook.read` | Per branch and day: `cash_expected_minor`, `banked_minor`, and `expected_minor*`, `difference_minor*`, `flag*` (`ok`, `shortfall`, `surplus`, `not_banked`), `unbanked_running_minor*` (all net of savings, so profit-gated), `entries: [{id, amount_minor, banked_at, by}]`; filter `flag`; an imported (historical) day has `historical: true` and no `unbanked_running_minor`, and does not count in the running total of the live days, which starts at the first live day |
+| GET | `/retail/reports/cash/expenses` | `retail.cashbook.read` | `group_by` (`category`, `item`, `branch`, `month`), totals, count; no voided rows |
+| GET | `/retail/reports/cash/savings` | `retail.cashbook.read` | Per branch and day `total_sold_minor`; `overwritten*`, `amount_minor*`, `suggested_minor*`, `daily_profit_minor*` |
+| GET | `/retail/reports/cash/advances` | `retail.cashbook.read` | Outstanding by party: principal, repaid, balance, oldest advance date |
+
+Error codes: the cash book's codes are listed in section 7.7 (409 `cash_record_voided`, `savings_exists`,
+`suggestion_changed`, `advance_has_repayments`, `historical_record`, `duplicate_category`, `duplicate_item`,
+`duplicate_party`; 422 `reason_required`, `explanation_required`, `item_not_in_category`,
+`category_inactive`, `account_not_expense`, `party_kind_not_allowed`, `suggestion_token_required`, `amount_requires_profit_access`,
+`repayment_exceeds_balance`, `advance_settled`, `branch_required`; the field code `future_date`). The cash book has no import endpoint; its history comes through the
+`import-retail` command (chapter 13 section 13.13).
+
+### 7.11.22 Lending: insights (`/lending/insights`, #153, ADR-030)
+
+Read-only. Every route takes the page filter: `from` and `to` (inclusive dates, default the first
+of this month to today; 422 `range_in_future`, `invalid_range`, `range_too_long` over five years),
+`branch_id` (repeatable; narrowed to the caller's scope of `lending.insights.read`), `officer_id`
+(ignored without `lending.insights.all_officers`: such a caller always gets their own loans) and
+`product_id`. Responses carry `Cache-Control: no-store`; the page polls every 60 seconds. Money is
+integer minor units, rates basis points (null over a zero denominator). Every metric is
+`{key, label, kind, value, currency, definition, drill: {table, params}}`; the keys and formulas are
+in `docs/specs/lending-insights-metrics.md`.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/lending/insights/brief` | `lending.insights.read` | Today: metrics and one sentence per movement (FR-INS-02) |
+| GET | `/lending/insights/portfolio` | `lending.insights.read` | `grain` (`day`, `week`, `month`, `year`; chosen from the range when absent; 422 `too_many_periods` over 120 periods). Metrics, the period `series`, `ageing`, `breakdowns` (product, branch, officer, status), `top_arrears`, the 30-day `forecast`, the 12-month `trend`; `stock_as_of` and `stock_source` (`live`, `snapshot`, `none`) (FR-INS-03) |
+| GET | `/lending/insights/revenue` | `lending.insights.read` | Metrics, `by_product`, `by_branch`, 12 `months`, from posted journal lines (FR-INS-04) |
+| GET | `/lending/insights/members` | `lending.insights.read` | `grain`. Metrics, `new_members`, `funnel`, `kyc`, `score_bands`, `staff` (FR-INS-05) |
+| GET | `/lending/insights/panels` | `lending.insights.read` | Panels registered by other modules: `savings` and `investments`, each only for a tenant with savings accounts or investments and never under a one-officer filter (FR-INS-09) |
+| GET | `/lending/insights/tables/{table}` | `lending.insights.read` | The rows behind a number, at most 200, `truncated` when more. Tables and their parameters (`date`, `status`, `stage`, `account`, `min_dpd`, `max_dpd`, `bucket`, `days`, `group`, `key`) in the metrics dictionary; 404 for an unknown table (FR-INS-06) |
+| GET | `/lending/insights/tables/{table}/export` | `lending.insights.export` | The same as `text/csv`, at most 10,000 rows, money in minor units with the currency in the header, names as initials without `lending.members.read`; audited `lending.insights.exported` |
+| GET | `/lending/insights/digest` | `core.settings.manage` | The digest settings with an `ETag` |
+| PUT | `/lending/insights/digest` | `core.settings.manage` | `{enabled, email_recipients (max 5), telegram_chat_id, send_hour}` with `If-Match`; 422 `digest_needs_recipient` when on with no recipient; 412 `version_mismatch`; audited (FR-INS-08) |
+| GET | `/lending/insights/digest/preview` | `core.settings.manage` | `{as_of, subject, text}`: the text the digest would send now |
 
 ## 7.12 Example: record a repayment
 

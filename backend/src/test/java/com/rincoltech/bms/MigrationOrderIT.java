@@ -2,10 +2,13 @@ package com.rincoltech.bms;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationState;
@@ -21,17 +24,44 @@ import org.testcontainers.utility.MountableFile;
  * V9 the loan appraisals of #42), V10 to V14 (retail R1 to R4, the price floor and the review
  * fixes), V20 (the retail import references), V21 (the lending review follow-ups), V22 (the retail
  * stock transfers of #84), V23 (the onboarding applications and the outbox of #89), V26 (the
- * indexes of #107) and V28 (the retail catalogue management of #146) apply in order on an empty
- * database, and on a
+ * indexes of #107), V28 (the retail catalogue management of #146), V29 (lending disbursement and
+ * repayments, #108), V30 (lending savings, #151) and V31 (the per-user preferences of #19) apply in order on an
+ * empty database, and on a
  * database a server already migrated to V9 before the retail work reached it, with
  * {@code outOfOrder} off exactly as {@link DatabaseMigrator} runs it. Each case gets its own
  * PostgreSQL 16 container initialised by {@code deploy/postgres/initdb/01-roles.sh}.
  */
 class MigrationOrderIT {
 
-    static final List<String> VERSIONS = List.of(
+    /** The migrations already merged and deployed: their numbers never change and none is removed. */
+    static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
-            "28");
+            "28", "29", "30", "31");
+
+    /** Every migration file on the classpath in numeric order: a new migration only adds its file. */
+    static final List<String> VERSIONS = discoveredVersions();
+
+    static List<String> discoveredVersions() {
+        try {
+            Path dir =
+                    Path.of(MigrationOrderIT.class.getResource("/db/migration").toURI());
+            try (Stream<Path> files = Files.list(dir)) {
+                return files.map(f -> f.getFileName().toString())
+                        .filter(n -> n.matches("V\\d+__.*\\.sql"))
+                        .map(n -> n.substring(1, n.indexOf("__")))
+                        .sorted(Comparator.comparingInt(Integer::parseInt))
+                        .toList();
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("cannot list the migrations", e);
+        }
+    }
+
+    @Test
+    void mergedMigrationsAreNeverRemovedOrRenumbered() {
+        assertThat(VERSIONS).startsWith(MERGED.toArray(String[]::new));
+        assertThat(VERSIONS).doesNotHaveDuplicates();
+    }
 
     @Test
     void everyMigrationAppliesInOrderOnAnEmptyDatabase() {
@@ -42,7 +72,7 @@ class MigrationOrderIT {
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("28");
+            assertThat(result.targetSchemaVersion).isEqualTo(VERSIONS.get(VERSIONS.size() - 1));
             assertThat(applied(postgres)).containsExactlyElementsOf(VERSIONS);
             assertThat(flyway(postgres, null).info().pending()).isEmpty();
         }
@@ -80,7 +110,7 @@ class MigrationOrderIT {
 
             assertThat(second.success).isTrue();
             assertThat(second.migrations.stream().map(m -> m.version).toList())
-                    .containsExactly("10", "11", "12", "13", "14", "20", "21", "22", "23", "26", "28");
+                    .containsExactlyElementsOf(VERSIONS.subList(VERSIONS.indexOf("10"), VERSIONS.size()));
             assertThat(applied(postgres)).containsExactlyElementsOf(VERSIONS);
             assertThat(flyway(postgres, null).info().pending()).isEmpty();
             // The tenant from V9 can switch retail on: its chart is seeded next to the lending one.
@@ -118,6 +148,123 @@ class MigrationOrderIT {
             DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
             assertThat(clearing(owner, tenant)).containsExactly("1190 true");
+        }
+    }
+
+    /**
+     * #108: staging already holds tenants with loans when V29 arrives. Its CHECKs on the loan balance
+     * columns hold for every row written before it (all zero), and its new tables start empty.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a database with loans across V29.
+     */
+    @Test
+    void servicingMigrationAppliesOnADatabaseThatAlreadyHoldsLoans() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            assertThat(flyway(postgres, "28").migrate().targetSchemaVersion).isEqualTo("28");
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            UUID branch = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID product = UUID.randomUUID();
+            UUID version = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v23', 'Test Tenant V23', '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            owner.sql(
+                            "INSERT INTO branches (id, tenant_id, code, name, is_head_office) VALUES (?, ?, 'HQ', 'Head Office', true)")
+                    .params(branch, tenant)
+                    .update();
+            owner.sql("""
+                            INSERT INTO lending_members (id, tenant_id, branch_id, member_no, full_name, phone_e164, id_type,
+                                currency, kyc_status, status, source)
+                            VALUES (?, ?, ?, 'M000001', 'Test Borrower 01', '+256700000001', 'none', 'UGX', 'verified',
+                                'active', 'staff')
+                            """).params(member, tenant, branch).update();
+            owner.sql(
+                            "INSERT INTO lending_loan_products (id, tenant_id, code, name, status) VALUES (?, ?, 'TEST', 'Test', 'active')")
+                    .params(product, tenant)
+                    .update();
+            owner.sql("""
+                            INSERT INTO lending_loan_product_versions (id, tenant_id, product_id, version_no, currency,
+                                interest_method, interest_rate_bp, rate_unit, term_unit, min_term_count, max_term_count,
+                                default_term_count, repayment_pattern, min_principal_minor, max_principal_minor, created_by)
+                            VALUES (?, ?, ?, 1, 'UGX', 'flat', 1000, 'per_term', 'month', 1, 3, 1, 'bullet', 100000,
+                                1000000, ?)
+                            """).params(version, tenant, product, UUID.randomUUID()).update();
+            for (String status : List.of("draft", "approved", "cancelled")) {
+                owner.sql("""
+                                INSERT INTO lending_loans (id, tenant_id, branch_id, loan_no, member_id, product_version_id,
+                                    officer_user_id, status, channel, purpose_category, currency,
+                                    requested_principal_minor, requested_term_count, term_unit, interest_method,
+                                    interest_rate_bp, rate_unit, repayment_pattern)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staff', 'business', 'UGX', 500000, 1, 'month', 'flat',
+                                    1000, 'per_term', 'bullet')
+                                """)
+                        .params(
+                                UUID.randomUUID(),
+                                tenant,
+                                branch,
+                                "LN-" + status,
+                                member,
+                                version,
+                                UUID.randomUUID(),
+                                status)
+                        .update();
+            }
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            assertThat(result.migrations.stream().map(m -> m.version).toList())
+                    .containsExactlyElementsOf(VERSIONS.subList(VERSIONS.indexOf("29"), VERSIONS.size()));
+            assertThat(owner.sql("SELECT count(*) FROM lending_loans WHERE tenant_id = ?")
+                            .param(tenant)
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(3);
+            assertThat(owner.sql("SELECT count(*) FROM lending_schedule_items")
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+        }
+    }
+
+    /**
+     * #151: V30 widens the outbox channel CHECK to accept SMS and adds the savings tables, so a
+     * database at V29 with a pending email keeps it, and an SMS row can then be queued.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates outbox rows across V30.
+     */
+    @Test
+    void savingsMigrationKeepsTheOutboxRowsOfADatabaseAtV29() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            assertThat(flyway(postgres, "29").migrate().targetSchemaVersion).isEqualTo("29");
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            String enqueue =
+                    "SELECT notification_outbox_enqueue(?, ?, ?, 'test.template', '{}'::jsonb, ?, NULL, NULL, now())";
+            owner.sql(enqueue)
+                    .params(UUID.randomUUID(), "email", "test@example.test", "test:v29")
+                    .query(Boolean.class)
+                    .single();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.migrations.stream().map(m -> m.version).toList())
+                    .containsExactlyElementsOf(VERSIONS.subList(VERSIONS.indexOf("30"), VERSIONS.size()));
+            assertThat(owner.sql(enqueue)
+                            .params(UUID.randomUUID(), "sms", "+256700000001", "test:v30")
+                            .query(Boolean.class)
+                            .single())
+                    .isTrue();
+            assertThat(owner.sql("SELECT channel FROM notification_outbox ORDER BY idempotency_key")
+                            .query(String.class)
+                            .list())
+                    .containsExactly("email", "sms");
         }
     }
 
@@ -173,7 +320,8 @@ class MigrationOrderIT {
             MigrateResult result =
                     DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
 
-            assertThat(result.migrations.stream().map(m -> m.version).toList()).containsExactly("23", "26", "28");
+            assertThat(result.migrations.stream().map(m -> m.version).toList())
+                    .containsExactlyElementsOf(VERSIONS.subList(VERSIONS.indexOf("23"), VERSIONS.size()));
             assertThat(owner.sql("SELECT qty::text FROM retail_stock_balances WHERE tenant_id = ?")
                             .param(tenant)
                             .query(String.class)

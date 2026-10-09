@@ -39,6 +39,17 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
   Enrolment is forced at first sign-in for roles that require it (`roles.mfa_required`: the
   tenant admin) and for platform operators, and for all staff when the tenant setting
   `require_mfa_all_staff` is on (FR-IAM-06).
+- **First run** (FR-IAM-13, ADR-025): accepting an invitation sets the password and signs the user
+  in through the same rules as a sign-in, so a role that requires the second factor is sent to
+  enrolment, never past it; a refused link signs nobody in. The PWA screens are: 1. Choose a
+  password (live checklist of the server's rules, show or hide). 2. Two-step sign-in: "Recommended,
+  not required" with Turn on and Skip for now, or, when the role requires it, the set-up with no Skip
+  (QR code drawn in the browser, Open in authenticator, the key in groups of four with Copy, a 6 digit
+  field with `inputmode=numeric` and `autocomplete=one-time-code`). 3. The ten recovery codes in a
+  grid with Copy all, Download as text and a required "I have saved these codes". Then the staff
+  home, where a new tenant admin lands on the set-up checklist and the first-run tour starts
+  (FR-IAM-14). The invitation token is removed from the address bar once used; no key or code is
+  logged. Whether tenant admins must enrol stays with issue #93.
 - **Recovery codes** (FR-IAM-11): enrolment issues ten single-use codes, shown once. A code is
   accepted in place of a TOTP code; the user can replace all of them with a current TOTP code.
   Failed codes count toward the lockout.
@@ -170,6 +181,8 @@ platform API and holds no tenant permissions.
 | `lending.investments.fund` | Y | Y | | Y | | | | |
 | `lending.investments.payout` | Y | Y | | Y | | | | |
 | `lending.investments.early_withdraw_approve` | Y | Y | | | Y | | | |
+| `lending.investments.fund_approve` | Y | Y | | | Y | | | |
+| `lending.investments.reverse_approve` | Y | Y | | | Y | | | |
 | `lending.investment_products.manage` | Y | | | | | | | |
 | `lending.collections.read` | Y | Y | Y | Y | Y | Y | | |
 | `lending.collections.log_action` | Y | Y | Y | Y | | | | |
@@ -178,6 +191,9 @@ platform API and holds no tenant permissions.
 | `lending.reports.collections` | Y | Y | Y | Y | Y | Y | | |
 | `lending.reports.members` | Y | Y | | | | Y | | |
 | `lending.reports.compliance` | Y | | | | Y | Y | | |
+| `lending.insights.read` | Y | Y | Y | | Y | Y | | |
+| `lending.insights.all_officers` | Y | Y | | | Y | Y | | |
+| `lending.insights.export` | Y | Y | Y | | Y | Y | | |
 | `member.self.read` | | | | | | | Y | |
 | `member.self.apply` | | | | | | | Y | |
 | `member.self.pay` | | | | | | | Y | |
@@ -194,11 +210,28 @@ platform API and holds no tenant permissions.
 | `retail.purchase.create` | Y | | | | | | | |
 | `retail.usage.report` | Y | | | | | | | Y |
 | `retail.profit.read` | Y | | | | | | | |
+| `retail.cashbook.read` | Y | | | | | | | Y |
+| `retail.savings.record` | Y | | | | | | | Y |
+| `retail.savings.overwrite` | Y | | | | | | | |
+| `retail.banking.record` | Y | | | | | | | Y |
+| `retail.expense.record` | Y | | | | | | | Y |
+| `retail.expense.manage` | Y | | | | | | | |
+| `retail.withdrawal.record` | Y | | | | | | | |
+| `retail.advance.create` | Y | | | | | | | |
+| `retail.advance.repay` | Y | | | | | | | |
+| `retail.cashbook.void` | Y | | | | | | | |
 
 Notes:
 
 - A loan officer running `lending.reports.collections` sees only loans where they are
   the responsible officer; branch managers and above see their branch scope.
+- Insights (#153, ADR-030): `lending.insights.read` opens the page in the user's branch scope.
+  Without `lending.insights.all_officers` (the loan officer) every figure, chart and table covers
+  only loans the user is the responsible officer for, and members they are the officer of; the
+  server enforces it whatever the request asks. `lending.insights.export` downloads a drill-down
+  table as CSV, audited as `lending.insights.exported`; a member name in an export is reduced to
+  initials unless the user holds `lending.members.read`, and no insights table carries a phone or
+  an ID number. The daily digest settings need `core.settings.manage`.
 - Branch managers approve loans, but never one they submitted or appraised (FR-APR-03).
 - Member ID images (`id_front`, `id_back`) need `lending.members.verify_kyc` in the member's
   branch, so tenant admins and branch managers, the people who verify KYC; photos and other member
@@ -218,6 +251,23 @@ Notes:
   user with profit read at branch A only sees no cost on branch B's stock, movements, sales or
   valuation (review F5); tenant-wide products and price history need it in any branch. The sales
   role holds no `core.*` permission; the PWA reads the user's branches from `/me`.
+- Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
+  `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
+  `retail.advance.*` permissions are rows of the matrix above, seeded by the cash book migration.
+  The tenant admin holds all ten. The sales role holds read, savings record, banking record and
+  expense record for its assigned branches, as the pilot does; it does **not** hold
+  `retail.savings.overwrite` by default, which is a default pending the Owner's answer to open
+  question 5, not a decision. Withdrawals and advances (both ways) are owner or admin only, a
+  deliberate change from the pilot, where every signed-in user could record advances and their
+  payments (open question 6). Adding a cash party of kind `owner`, `staff` or `related_entity` needs
+  `retail.expense.manage`; the sales role may add a beneficiary of kind `supplier` or `other` on the fly with
+  `retail.expense.record`. One rule covers every profit-derived figure: the day's profit, the
+  savings suggestion, `suggested_minor` and **every response field that carries a savings amount**
+  need `retail.profit.read` and are absent, not null, without it (a savings amount is half the
+  profit, so it leaks it), and so does `cash_purchases_minor` and every figure embedding it, because a restock total is a purchase total at cost (a caller without `retail.profit.read`, the sales role included, is shown `cash_expected_minor` only: takings less voids, expenses and advances paid out, plus repayments, before cash purchases and savings; ADR-022 decision 13, relaxable by the Owner, open question 8); a caller without `retail.profit.read` cannot send a savings amount at all (422 `amount_requires_profit_access`) and never sees `overwritten`; the audit payload of a savings record carries neither the amount nor
+  the suggestion (FR-RET-19, ADR-022 decision 12). Voiding needs `retail.cashbook.void`. No cash
+  book approval action is registered (open question 3); if one is, its row joins section 8.4 with a
+  threshold set first.
 - `retail.stock.transfer` (issue #84, migration V22, FR-RET-16) moves stock from one branch to
   another. It is money-moving (it posts an inventory entry at each branch) and goes to the roles
   that restock, which in the default roles is the tenant admin only. Its branch scope is checked
@@ -270,7 +320,8 @@ body, and compared digest to digest in constant time after the indexed lookup.
 
 - Every route declares exactly one permission (`@RequiresPermission`), or is explicitly marked
   public (`@PublicEndpoint`), or open to any signed-in principal of one kind
-  (`@AuthenticatedEndpoint`, for `/me`, sign-out and the caller's own recovery codes). A route
+  (`@AuthenticatedEndpoint`, for `/me`, the caller's own guided tour progress, sign-out and the
+  caller's own recovery codes). A route
   test enumerates all routes and fails on any undeclared route, and `PermissionMatrixIT` proves
   that for every route a principal holding every permission except the route's own gets 403
   (FR-IAM-03).
@@ -310,11 +361,33 @@ CHECK constraint as well as the service.
 | `manual_journal` | `core.journals.create` | `core.journals.approve` | No |
 | `period_close` | `core.periods.close` | `core.periods.approve_close` | No |
 | `savings_withdrawal` | `lending.savings.withdraw` | `lending.savings.withdraw_approve` | Yes |
+| `savings_reversal` | `lending.savings.withdraw` | `lending.savings.withdraw_approve` | No (always checked) |
+| `investment_funding` | `lending.investments.fund` | `lending.investments.fund_approve` | Yes |
 | `investment_early_withdrawal` | `lending.investments.payout` | `lending.investments.early_withdraw_approve` | No |
+| `investment_reversal` | `lending.investments.payout` | `lending.investments.reverse_approve` | No (always checked) |
 | `collateral_release` | `lending.collateral.release_request` | `lending.collateral.release_approve` | No |
 | `member_branch_transfer` | `lending.members.update` | `lending.members.transfer_approve` | No |
 | `import_commit` | `core.imports.manage` | `core.imports.approve_commit` | No |
 | `member_credit_refund` | `lending.repayments.create` | `lending.credits.refund_approve` | Yes |
+
+Registered so far: `collateral_release` (#13); `loan_disbursement`, `repayment_reversal` and
+`loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
+and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker
+permissions, `lending.investments.fund_approve` and `lending.investments.reverse_approve` (migration
+`V32`), granted like `lending.investments.early_withdraw_approve`; every other investment route
+declares a permission already in the matrix, and the route permission test covers them. Increment 5 needed no new permission: every route
+it adds declares a permission already in the matrix above (`lending.disbursements.request`,
+`lending.repayments.create`, `lending.repayments.reverse_request`, `lending.loans.write_off_request`,
+and `lending.loans.read` for the schedule, transactions and payoff quote), and the route permission
+test covers them. The `seed-lending` command has no route and no permission: it is refused in
+production and on any tenant holding data (`docs/runbooks/seed-lending.md`).
+
+Savings (#151, `lending.savings`, ADR-032) registers `savings_withdrawal` (a closure is the same
+action with `close` set, the threshold applying to the balance) and `savings_reversal`, added to the
+table above. It needed no new permission: freeze, unfreeze and reactivation of an account are direct
+actions with a reason that need `lending.savings.withdraw_approve`, the checker permission of
+`savings_withdrawal`; the two savings reports need `lending.reports.members`. A withdrawal's checks
+run again when the checker approves, on the account as it is then.
 
 Action types are contributed by the modules that own them (ADR-015): each is a registered
 `ApprovalAction` whose maker and checker permissions must equal its row above. Every

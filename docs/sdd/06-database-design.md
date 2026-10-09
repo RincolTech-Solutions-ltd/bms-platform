@@ -1,4 +1,7 @@
-# 6. Database Design
+**Built in migration `V34__retail_cash_book.sql` (issue #147).** Flyway runs with `outOfOrder` off, so
+the number is the next free one above every open branch (V24 to V28 were held by other open pull
+requests when it was written); the owner session renumbers it at merge time if another lands first.
+This section is its specification. # 6. Database Design
 
 **Status:** Draft · **Owner:** Hillary
 
@@ -66,6 +69,7 @@ tenant's timezone (`tenants.timezone`, default `Africa/Kampala`). Event instants
 `lending_loan_status_history`, `lending_loan_transactions`,
 `lending_repayment_allocations`, `lending_collateral_events`,
 `lending_collection_actions` (except `promise_status`), `lending_savings_transactions`,
+`lending_savings_daily_balances`, `lending_savings_interest_postings`,
 `lending_investment_transactions`, `import_issue_resolutions`.
 
 For these the application role is granted `SELECT, INSERT` only, and a trigger
@@ -261,8 +265,9 @@ expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
 ### `notification_outbox` (platform; no privilege for `bms_app`, definer functions only, ADR-024)
 
 One row per message to send (spec section 11, FR-NTF-09): `id uuid PK`, `channel` [`email`,
-`telegram`], `recipient varchar(320)` (an address, or `operator` for the Telegram operator chat,
-whose id stays in the environment), `template_key varchar(100)`, `params jsonb` (template values;
+`telegram`, `sms`] (`sms` from `V30` for the savings receipts; no sender exists yet, so those rows
+expire unsent after two days, ADR-032), `recipient varchar(320)` (an address, `operator` for the
+Telegram operator chat, whose id stays in the environment, or an E.164 phone for SMS), `template_key varchar(100)`, `params jsonb` (template values;
 cleared to `{}` once sent, because they can hold a one-time link), `status` [`pending`, `sent`,
 `failed`], `attempts integer`, `idempotency_key varchar(200) UNIQUE`, `throttle_key varchar(400)`
 (groups rows for a volume bound, for example `onboarding.verify:<mailbox>`), `expires_at` (when the
@@ -365,7 +370,9 @@ after values. Older logos stay in `documents` (rows are never deleted).
 `email varchar(320)`, `phone_e164 varchar(16)`, `status text NOT NULL` [`invited`,
 `active`, `deactivated`], `failed_login_count integer NOT NULL DEFAULT 0`,
 `locked_until timestamptz`, `mfa_enabled boolean NOT NULL DEFAULT false`,
-`last_login_at timestamptz`.
+`last_login_at timestamptz`, `preferences jsonb NOT NULL DEFAULT '{}'` (`V31`, ADR-025; CHECK it is
+an object). `preferences.tours` maps a guided tour id to `{status: completed | dismissed, version, at}`
+(FR-IAM-14); it holds only what the user chose for themselves, never anything a permission reads.
 Partial unique `(tenant_id, lower(email)) WHERE email IS NOT NULL AND kind = 'staff'`;
 partial unique `(tenant_id, phone_e164) WHERE kind = 'member'`.
 `CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)`.
@@ -469,7 +476,7 @@ action and subject.
 
 `tenant_id uuid`, `sequence_key text` (for example `member_no`, `loan_no`,
 `journal_no`, `receipt:<branch_code>`, `voucher:<branch_code>`, `savings_no`,
-`investment_no`), `next_value bigint NOT NULL DEFAULT 1`. PK `(tenant_id, sequence_key)`.
+`investment_no`, `investment_certificate`), `next_value bigint NOT NULL DEFAULT 1`. PK `(tenant_id, sequence_key)`.
 Numbers are taken with `UPDATE ... SET next_value = next_value + 1 RETURNING next_value - 1`
 in the business transaction, so they are gap-free (FR-DOC-04).
 
@@ -693,6 +700,7 @@ Codes are defaults; the tenant may renumber non-system accounts. `S` marks
 | 4030 | Loan fee income | income | `loan_fee_income` | |
 | 4040 | Bad debt recovered | income | `bad_debt_recovered` | |
 | 4050 | Savings fee income | income | `savings_fee_income` | |
+| 4060 | Investment penalty income | income | `investment_penalty_income` | |
 | 5000 | Expenses | expense (header) | | |
 | 5010 | Savings interest expense | expense | `savings_interest_expense` | |
 | 5020 | Investment return expense | expense | `investment_return_expense` | |
@@ -724,12 +732,16 @@ on lines touching `S` accounts carry the loan, savings account or investment id.
 | Savings deposit | PM | `member_savings` | FR-SAV-03 |
 | Savings withdrawal | `member_savings` | PM | FR-SAV-03 |
 | Savings withdrawal fee | `member_savings` | `savings_fee_income` | FR-SAV-01 |
-| Savings interest posting | `savings_interest_expense` | `member_savings` | FR-SAV-05 |
+| Savings interest posting | `savings_interest_expense` | `member_savings` | FR-SAV-05; dated the period end, or the run date when that month is closed (ADR-032) |
+| Savings reversal (deposit, withdrawal, fee) | Mirror of the original entry (a reversing entry) | | ADR-032 |
 | Investment funding | PM | `investments_payable` | FR-INV-03 |
-| Investment return due (monthly or at maturity) | `investment_return_expense` | `investment_returns_payable` | FR-INV-04, FR-INV-05 |
-| Monthly return credited to savings | `investment_returns_payable` | `member_savings` | FR-INV-04 |
-| Investment payout | `investments_payable` principal; `investment_returns_payable` unpaid return | PM total | FR-INV-05 |
-| Investment rollover | `investments_payable` (old); `investment_returns_payable` if rolled | `investments_payable` (new) | FR-INV-05 |
+| Investment return accrual (each period's end date, R-INV-2 and R-INV-3) | `investment_return_expense` | `investment_returns_payable` | FR-INV-04 |
+| Investment return payout (the due return) | `investment_returns_payable` | PM | FR-INV-04 |
+| Monthly return credited to savings (a follow-up, not built in increment 10) | `investment_returns_payable` | `member_savings` | FR-INV-04 |
+| Investment maturity payout | `investments_payable` principal; `investment_returns_payable` unpaid return | PM total | FR-INV-05 |
+| Investment rollover (dated the maturity date) | `investments_payable` (old); `investment_returns_payable` if rolled | `investments_payable` (new) | FR-INV-05, FR-INV-08 |
+| Investment early withdrawal (R-INV-6) | `investments_payable` principal; `investment_returns_payable` accrued less paid; `investment_return_expense` when earned exceeds accrued | PM cash; `investment_return_expense` when accrued exceeds earned; `investment_penalty_income` penalty | FR-INV-06 |
+| Investment reversal (funding, return payout, maturity payout) | Mirror of the original entry (a reversing entry) | | FR-INV-11 |
 | Unallocated receipt | PM | `unallocated_receipts` | FR-PAY-04 |
 | Gateway charge | `gateway_charges` | `gateway_clearing` | FR-PAY-06 |
 | Opening balances (import) | `loans_receivable` outstanding principal per loan | `opening_balance_equity` | FR-GL-09 |
@@ -1023,6 +1035,9 @@ item's value (`pledge_exceeds_value`).
 
 `CHECK` for each component: `paid + waived <= due`. Index `(tenant_id, due_date, status)`,
 `(tenant_id, loan_id, item_no)`.
+Built in `V29` (#108). The trigger `lending_schedule_items_guard` refuses any change of `loan_id`,
+`item_no`, `due_date` or the principal, interest and fee due once written; only the paid, waived,
+written-off, penalty and status columns move.
 
 ### `lending_loan_charges`
 
@@ -1046,7 +1061,8 @@ Partial unique `(tenant_id, schedule_item_id, period_no) WHERE charge_type = 'pe
 | `value_date` | `date NOT NULL` | |
 | `payment_method_key` | `text` | |
 | `external_reference` | `varchar(100)` | Mobile money or bank reference. |
-| `receipt_no` | `varchar(30)` | For repayments. |
+| `receipt_no` | `varchar(30)` | `RC-<branch>-NNNNNN` for a repayment, recovery or upfront fee; `VC-<branch>-NNNNNN` for a disbursement (FR-DOC-04). Partial unique `(tenant_id, receipt_no)`. |
+| `reason` | `text` | Reversal and write-off reason. |
 | `reverses_txn_id` | `uuid` | `UNIQUE (tenant_id, reverses_txn_id)` |
 | `journal_entry_id` | `uuid` | NULL only when `is_historic`. |
 | `approval_request_id` | `uuid` | |
@@ -1056,13 +1072,22 @@ Partial unique `(tenant_id, schedule_item_id, period_no) WHERE charge_type = 'pe
 | `recorded_by` | `uuid` | |
 
 Index `(tenant_id, loan_id, value_date)`, `(tenant_id, branch_id, value_date, txn_type)`.
+Built in `V29` (#108): `payment_method_key` is one of `cash`, `bank`, `mtn_momo`, `airtel_money`
+(ADR-026 maps each to a seeded account until FR-GL-08); `CHECK (is_historic OR journal_entry_id IS NOT
+NULL)`; `CHECK ((txn_type = 'reversal') = (reverses_txn_id IS NOT NULL))`; partial unique
+`(tenant_id, loan_id) WHERE txn_type = 'disbursement'` (FR-DIS-03).
 
 ### `lending_repayment_allocations` (append-only)
 
-`id`, `tenant_id`, `created_at`, `transaction_id uuid NOT NULL`,
-`schedule_item_id uuid` (NULL for `overpayment`), `component text NOT NULL`
-[`penalty`, `fee`, `interest`, `principal`, `overpayment`], `amount_minor bigint NOT NULL`
-(negative only on rows belonging to a `reversal` transaction).
+`id`, `tenant_id`, `created_at`, `transaction_id uuid NOT NULL` (the transaction that wrote the
+row), `applies_to_txn_id uuid NOT NULL` (the repayment whose money the row moves; equal to
+`transaction_id` on a repayment's own rows), `schedule_item_id uuid` (NULL exactly for
+`overpayment`), `component text NOT NULL` [`penalty`, `fee`, `interest`, `principal`, `overpayment`,
+`interest_rebate`], `amount_minor bigint NOT NULL` (`<> 0`; negative only on rows belonging to a
+`reversal` transaction, which writes the reversed repayment's rows negated and the differences of
+every later repayment it re-allocates, ADR-026). `interest_rebate` is the early settlement rebate of
+R-PAYOFF: interest waived, not cash. Indexes `(tenant_id, transaction_id)`,
+`(tenant_id, applies_to_txn_id)`. Built in `V29` (#108).
 
 ### `lending_loan_daily_snapshots`
 
@@ -1070,6 +1095,25 @@ Index `(tenant_id, loan_id, value_date)`, `(tenant_id, branch_id, value_date, tx
 uuid`, `product_id uuid`, `principal_outstanding_minor bigint`, `interest_outstanding_minor
 bigint`, `arrears_minor bigint`, `days_past_due integer`, `par_bucket text` [`current`,
 `1_30`, `31_60`, `61_90`, `over_90`]. PK `(tenant_id, business_date, loan_id)`. FR-ARR-02.
+Built in `V33` (#153, ADR-030) with `created_at`, composite foreign keys to the loan, branch and
+product, an index `(tenant_id, branch_id, business_date)` and grants `SELECT, INSERT, DELETE` (a
+rerun of a date deletes and rewrites it). One row per loan active at the end of the date: a past
+position is rebuilt from the allocation rows dated by their own transaction's value date. Written
+by the insights job `lending.insights-snapshot` until the arrears job of increment 6 takes it over.
+
+### `lending_insights_digest_settings` (RLS)
+
+(std) `enabled boolean NOT NULL DEFAULT false`, `email_recipients text[] NOT NULL DEFAULT '{}'`
+(at most 5), `telegram_chat_id varchar(21)` (digits, optional leading minus), `send_hour smallint
+NOT NULL DEFAULT 7` (0 to 23, tenant time zone), `last_sent_on date`, `updated_by uuid`.
+`UNIQUE (tenant_id)`. The owner's daily insights digest (FR-INS-08, ADR-030); no row means off.
+Built in `V33` (#153).
+
+`V33` also adds the insights indexes: `lending_repayment_allocations (tenant_id,
+schedule_item_id)`, `lending_loan_transactions (tenant_id, txn_type, value_date)
+INCLUDE (loan_id, amount_minor)`, `lending_members (tenant_id, created_at)`, `lending_loans
+(tenant_id, submitted_at) WHERE submitted_at IS NOT NULL` and `journal_entries (tenant_id,
+entry_date)`.
 
 ### `lending_collection_actions` (append-only except `promise_status`)
 
@@ -1080,76 +1124,115 @@ bigint`, `arrears_minor bigint`, `days_past_due integer`, `par_bucket text` [`cu
 
 ### `lending_savings_products`
 
-(std) `code varchar(20) NOT NULL` (`UNIQUE (tenant_id, code)`), `name`, `currency`,
-`interest_rate_bp integer NOT NULL DEFAULT 0` (per year), `interest_calc text NOT NULL`
-[`none`, `daily_balance`, `minimum_monthly_balance`], `interest_posting text NOT NULL`
-[`monthly`, `quarterly`, `yearly`], `min_opening_balance_minor bigint NOT NULL DEFAULT 0`,
-`min_balance_minor bigint NOT NULL DEFAULT 0`, `withdrawal_fee_minor bigint NOT NULL
-DEFAULT 0`, `dormancy_days integer`, `status text NOT NULL` [`active`, `archived`].
-Fields that affect interest cannot change once an account uses the product; a change is
-a new product.
+(std) `code varchar(20) NOT NULL` (`UNIQUE (tenant_id, code)`, upper case letters, digits and
+hyphens), `name`, `currency`, `interest_rate_bp integer NOT NULL DEFAULT 0` (per year, 0 to
+10 000), `interest_calc text NOT NULL` [`none`, `daily_balance`, `minimum_monthly_balance`],
+`interest_posting text NOT NULL` [`monthly`, `quarterly`, `yearly`],
+`min_balance_for_interest_minor bigint NOT NULL DEFAULT 0` (a day or month below it earns nothing),
+`min_opening_balance_minor bigint NOT NULL DEFAULT 0`, `min_balance_minor bigint NOT NULL DEFAULT 0`,
+`withdrawal_fee_minor bigint NOT NULL DEFAULT 0`, `max_withdrawal_minor bigint` (per withdrawal),
+`max_withdrawals_per_month integer`, `dormancy_days integer`, `status text NOT NULL` [`active`,
+`archived`], `created_by`. CHECK: the rate is 0 exactly when `interest_calc` is `none`. Fields that
+affect interest (currency, rate, calculation, posting, minimum for interest) cannot change once an
+account uses the product; a change is a new product. The trigger `lending_savings_products_guard`
+enforces it (`V30`, ADR-032).
 
 ### `lending_savings_accounts`
 
-(std) `branch_id`, `account_no varchar(20) NOT NULL` (`SV` plus 6 digits, unique per
-tenant), `member_id uuid NOT NULL`, `product_id uuid NOT NULL`, `currency`,
-`status text NOT NULL` [`active`, `dormant`, `closed`], `balance_minor bigint NOT NULL
-DEFAULT 0` (`CHECK (balance_minor >= 0)`), `hold_minor bigint NOT NULL DEFAULT 0`,
-`opened_on date NOT NULL`, `closed_on date`, `last_member_txn_on date`,
-`last_interest_posted_to date`.
+(std) `branch_id`, `account_no varchar(20) NOT NULL` (`SV` plus 6 digits from the `savings_no`
+sequence, unique per tenant), `member_id uuid NOT NULL` (a member may hold any number of
+accounts), `product_id uuid NOT NULL`, `currency`, `status text NOT NULL` [`active`, `dormant`,
+`frozen`, `closed`], `status_reason text`, `balance_minor bigint NOT NULL DEFAULT 0`
+(`CHECK (balance_minor >= 0)`), `hold_minor bigint NOT NULL DEFAULT 0`, `opened_on date NOT NULL`,
+`closed_on date` (set exactly when closed; a closed account holds 0), `last_member_txn_on date`,
+`last_interest_posted_to date`, `balances_through date` (the last day the end of day has written;
+no movement is dated on or before it), `txn_count integer NOT NULL DEFAULT 0` (the last `seq`),
+`created_by`. Every movement updates the row under its lock (FR-SAV-04).
 
 ### `lending_savings_transactions` (append-only)
 
-`id`, `tenant_id`, `created_at`, `branch_id`, `account_id uuid NOT NULL`,
+`id`, `tenant_id`, `created_at`, `branch_id`, `account_id uuid NOT NULL`, `seq integer NOT NULL`
+(`UNIQUE (tenant_id, account_id, seq)`: recording order, so the running balance is exact),
 `txn_type text NOT NULL` [`deposit`, `withdrawal`, `interest`, `fee`, `transfer_in`,
-`transfer_out`, `reversal`], `amount_minor bigint NOT NULL` (`> 0`),
-`balance_after_minor bigint NOT NULL`, `value_date date NOT NULL`, `payment_method_key
-text`, `external_reference varchar(100)`, `receipt_no varchar(30)`, `reverses_txn_id
-uuid`, `journal_entry_id uuid NOT NULL`, `approval_request_id uuid`, `idempotency_key
-varchar(100)`, `recorded_by uuid`.
+`transfer_out`, `reversal`], `amount_minor bigint NOT NULL` (`> 0`), `is_credit boolean NOT NULL`
+(money into the account; a reversal goes the other way to the row it reverses), `currency`,
+`balance_after_minor bigint NOT NULL` (`>= 0`), `value_date date NOT NULL`,
+`payment_method_key text`, `external_reference varchar(100)`, `receipt_no varchar(30)` (`RC-` for a
+deposit, `VC-` for a withdrawal, unique per tenant, from the per-branch sequences shared with loans),
+`reason text`, `related_txn_id uuid` (a fee's withdrawal), `reverses_txn_id uuid` (unique: a row
+is reversed at most once), `journal_entry_id uuid NOT NULL`, `approval_request_id uuid`,
+`idempotency_key varchar(100)`, `source text NOT NULL` [`staff`, `portal`, `gateway`, `import`,
+`system`], `recorded_by uuid`.
 
-### `lending_savings_daily_balances`
+### `lending_savings_daily_balances` (append-only)
 
-`tenant_id`, `account_id`, `business_date`, `closing_balance_minor bigint NOT NULL`.
-PK `(tenant_id, account_id, business_date)`. Written by the nightly job for interest
-calculation (FR-SAV-05).
+`tenant_id`, `account_id`, `business_date`, `closing_balance_minor bigint NOT NULL` (`>= 0`).
+PK `(tenant_id, account_id, business_date)`. Written once per account and day by the nightly end of
+day (`lending.savings-end-of-day`, 00:20) for interest calculation (FR-SAV-05); a period end's row
+includes the interest credited that day.
 
-### `lending_savings_interest_postings`
+### `lending_savings_interest_postings` (append-only)
 
 (std, no `version`) `account_id uuid NOT NULL`, `period_start date NOT NULL`,
-`period_end date NOT NULL`, `interest_minor bigint NOT NULL`, `transaction_id uuid`.
-`UNIQUE (tenant_id, account_id, period_end)` (idempotent posting).
+`period_end date NOT NULL`, `interest_minor bigint NOT NULL` (`>= 0`), `transaction_id uuid` (null
+exactly when the period earned nothing). `UNIQUE (tenant_id, account_id, period_end)` (idempotent
+posting).
 
 ### `lending_investment_products`
 
-(std) `code`, `name`, `currency`, `allowed_terms_months integer[] NOT NULL`,
-`return_rate_bp integer NOT NULL` (per year), `payout_method text NOT NULL`
-[`at_maturity`, `monthly`], `min_amount_minor bigint NOT NULL`, `max_amount_minor bigint`,
+(std) `code varchar(20)` (`UNIQUE (tenant_id, code)`), `name`, `currency`, `product_type text NOT
+NULL` [`fixed_term`, `recurring`], `allowed_terms_months integer[] NOT NULL` (1 to 24 terms of 1 to
+120 months), `return_rate_bp integer NOT NULL` (per year), `return_method text NOT NULL` [`flat`,
+`compound`], `payout_frequency text NOT NULL` [`at_maturity`, `monthly`, `quarterly`] (`compound`
+only with `at_maturity`, R-INV-3), `min_amount_minor bigint NOT NULL`, `max_amount_minor bigint`,
 `early_withdrawal_allowed boolean NOT NULL DEFAULT false`, `early_withdrawal_rule text`
-[`forfeit_return`, `reduced_rate`], `early_withdrawal_rate_bp integer`,
-`status text NOT NULL` [`active`, `archived`].
+[`forfeit_return`, `reduced_rate`], `early_withdrawal_rate_bp integer` (required for
+`reduced_rate`, at most the return rate), `early_withdrawal_penalty_bp integer NOT NULL DEFAULT 0`
+(0 to 10000), `status text NOT NULL` [`active`, `archived`], `created_by`. An edit changes only
+investments opened afterwards: each investment copies the terms. Built in `V32` (#152).
 
 ### `lending_investments`
 
-(std) `branch_id`, `account_no varchar(20) NOT NULL` (`IV` plus 6 digits), `member_id`,
-`product_id`, `currency`, `status text NOT NULL` [`pending_funding`, `active`, `matured`,
-`paid_out`, `rolled_over`, `withdrawn_early`, `cancelled`], `principal_minor bigint NOT
-NULL`, `return_rate_bp integer NOT NULL`, `term_months integer NOT NULL`,
-`payout_method text NOT NULL`, `start_date date`, `maturity_date date`,
-`agreed_return_minor bigint`, `return_due_minor bigint NOT NULL DEFAULT 0`,
-`return_paid_minor bigint NOT NULL DEFAULT 0`, `maturity_instruction text`
-[`payout`, `rollover_principal`, `rollover_all`], `rolled_over_from_id uuid`,
-`rolled_over_to_id uuid`, `channel text NOT NULL` [`staff`, `portal`], `created_by uuid`.
+(std) `branch_id` (the member's), `account_no varchar(20) NOT NULL` (`IV` plus 6 digits, unique per
+tenant), `member_id`, `product_id`, `currency`, `status text NOT NULL` [`pending_funding`, `active`,
+`matured`, `paid_out`, `rolled_over`, `withdrawn_early`, `cancelled`], `principal_minor bigint NOT
+NULL` (the amount subscribed), the terms copied from the product (`return_rate_bp`,
+`return_method`, `term_months`, `payout_frequency`, `product_type`, `early_withdrawal_allowed`,
+`early_withdrawal_rule`, `early_withdrawal_rate_bp`, `early_withdrawal_penalty_bp`), `start_date
+date` and `maturity_date date` (set at funding), `agreed_return_minor bigint`, the balances
+`principal_held_minor` (the investment's `investments_payable` subledger), `return_accrued_minor`,
+`return_due_minor` (accrued and past a payout date, R-INV-4) and `return_paid_minor` (CHECK
+`paid <= due <= accrued`; accrued less paid is the `investment_returns_payable` subledger),
+`maturity_instruction text` [`payout`, `rollover_principal`, `rollover_all`],
+`rolled_over_from_id uuid`, `rolled_over_to_id uuid`, `certificate_no varchar(30)` (`IC` plus 6
+digits, unique), `channel text NOT NULL` [`staff`, `portal`, `import`, `system`],
+`pre_maturity_reminded_on date`, `post_maturity_reminded_on date` (FR-INV-07, FR-INV-05),
+`closed_on date`, `created_by`. Built in `V32` (#152).
+
+### `lending_investment_schedule_items`
+
+(std) `investment_id uuid NOT NULL`, `period_no smallint NOT NULL` (`UNIQUE (investment_id,
+period_no)`), `period_start date`, `period_end date`, `opening_balance_minor bigint` (the balance
+the period's return is computed on), `return_minor bigint`, `is_payout boolean`, `status text NOT
+NULL` [`scheduled`, `accrued`, `cancelled`], `accrued_txn_id uuid` (the accrual transaction; null
+only for a period whose return rounds to zero). Written once at funding (FR-INV-09); the trigger
+`lending_investment_schedule_items_guard` refuses a change of the dates or amounts. Built in `V32`
+(#152).
 
 ### `lending_investment_transactions` (append-only)
 
 `id`, `tenant_id`, `created_at`, `branch_id`, `investment_id uuid NOT NULL`,
-`txn_type text NOT NULL` [`funding`, `return_due`, `return_paid`, `principal_payout`,
-`early_withdrawal`, `rollover_out`, `rollover_in`, `reversal`], `amount_minor bigint NOT
-NULL`, `value_date date NOT NULL`, `payment_method_key text`, `external_reference
-varchar(100)`, `period_no integer` (monthly returns; partial unique per investment),
-`reverses_txn_id uuid`, `journal_entry_id uuid NOT NULL`, `approval_request_id uuid`,
-`idempotency_key varchar(100)`, `recorded_by uuid`.
+`txn_type text NOT NULL` [`funding`, `return_accrual`, `return_payout`, `maturity_payout`,
+`early_withdrawal`, `rollover_out`, `rollover_in`, `reversal`], `amount_minor bigint NOT NULL`
+(`> 0`), the breakdown `principal_minor`, `return_minor` (negative on an early withdrawal that takes
+paid returns back) and `penalty_minor`, `currency`, `value_date date NOT NULL`, `period_no smallint`
+(accruals only; `UNIQUE (tenant_id, investment_id, period_no) WHERE txn_type = 'return_accrual'`,
+the job's idempotency), `payment_method_key text`, `external_reference varchar(100)`, `receipt_no
+varchar(30)` (RC for a funding, VC for a payout, gap-free per branch and shared with loans,
+FR-DOC-04), `reason text`, `reverses_txn_id uuid` (unique), `journal_entry_id uuid NOT NULL`
+(a rollover's two rows share one entry), `approval_request_id uuid`, `source text NOT NULL`
+[`staff`, `portal`, `gateway`, `import`, `system`], `recorded_by uuid`. One funding per investment.
+Built in `V32` (#152).
 
 ## 6.8 Entity relationship diagram
 
@@ -1203,6 +1286,9 @@ erDiagram
     LENDING_MEMBERS ||--o{ LENDING_INVESTMENTS : places
     LENDING_INVESTMENT_PRODUCTS ||--o{ LENDING_INVESTMENTS : governs
     LENDING_INVESTMENTS ||--o{ LENDING_INVESTMENT_TRANSACTIONS : records
+    LENDING_INVESTMENTS ||--|{ LENDING_INVESTMENT_SCHEDULE_ITEMS : schedules
+    LENDING_INVESTMENT_TRANSACTIONS |o--o| LENDING_INVESTMENT_SCHEDULE_ITEMS : accrues
+    LENDING_INVESTMENTS |o--o| LENDING_INVESTMENTS : "rolls over into"
     IMPORT_ROWS |o--o| LENDING_MEMBERS : creates
     IMPORT_ROWS |o--o| LENDING_LOANS : creates
 ```
@@ -1292,10 +1378,17 @@ account in `bms_seed_retail_chart` and for every tenant that switched retail on 
 movement kinds and the movements' `transfer_id` link (sections 6.11.1 and 6.11.2). It takes the next
 number free on `main` when it merges, so it may be renumbered then. `V23__onboarding_applications_and_outbox.sql` (#89, ADR-024) creates
 `onboarding_applications` and `notification_outbox` (section 6.4) with `onboarding_normalise_name`,
-`onboarding_email_key` and their definer functions. V24 and V25 are held by the open guided tour (#123)
-and loan servicing (#126) branches. `V26__database_optimisation.sql` (#107, ADR-028) changes indexes
-and a storage setting only (section 6.12); with `outOfOrder` off it merges after those two, or they
-take numbers above it. The next migration is V27 (`MigrationOrderIT`, chapter 15 section 15.4.3).
+`onboarding_email_key` and their definer functions. `V26__database_optimisation.sql` (#107, ADR-028) changes indexes
+and a storage setting only (section 6.12). `V28__retail_catalogue_management.sql` is the retail
+catalogue management (#146). `V29__lending_disbursement_repayments.sql` (#108, ADR-026) is lending
+increment 5: schedule items, loan transactions and repayment allocations (section 6.7).
+`V30__lending_savings.sql` (#151, ADR-032) is lending increment 9, savings.
+`V31__user_preferences.sql` (#19, ADR-025) adds `users.preferences` (section 6.5), additive with a
+default. `V32__lending_investments.sql` (#152, ADR-031) is lending increment 10: the four investment
+tables of section 6.7, the two checker permissions of chapter 8 and account 4060 of section 6.6.2,
+added to `bms_seed_lending_chart` and to every tenant that already holds the lending chart. V24,
+V25 and V27 stay unused: with `outOfOrder` off a number below an applied one can never run. The
+next migration is V33 (`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 
@@ -1604,6 +1697,200 @@ as `bms_app` under the tenant's row-level security:
 
 Primary key `(tenant_id, source_file, source_ref)`: a row already present is skipped, so a re-run
 of the same export adds nothing.
+
+### 6.11.5 Cash book (ADR-022; FR-RET-17 to FR-RET-32)
+
+**Built in migration `V34__retail_cash_book.sql` (issue #147).** Flyway runs with `outOfOrder` off, so
+the number is the next free one above every open branch (V24 to V28 were held by other open pull
+requests when it was written); the owner session renumbers it at merge time if another lands first.
+This section is its specification. Every table below is tenant-owned with forced row-level security
+(`bms_apply_tenant_rls`), a `tenant_id` first in every key, composite foreign keys on
+`(tenant_id, id)`, and the standard columns `id`, `tenant_id`, `created_at`; the lists carry `created_by` and the record tables `recorded_by`. Money is
+`bigint` minor units with a `currency`, CHECK `0 < amount_minor <= 10^13` (savings: `>= 0`).
+Business dates are `date` in the tenant's zone (`tenants.timezone`), never in the future (checked by
+the service with the kernel clock); the instant is a separate `timestamptz`. Rows are append-only
+except the void columns (changed once) and, on `retail_advances` only, `repaid_minor` (changed on every
+repayment, see its guard below), by a guard trigger on each table (the pattern of
+`retail_sales_guard_update`, and the owner's `bms.allow_mutation` switch of `reject_mutation`).
+
+**Chart additions** (seeded by `bms_seed_retail_chart`, also for tenants that switched retail on
+earlier; a code or key the tenant already has is kept). Code 5900 and key `operating_expenses` are
+the lending chart's (section 6.6.2), reused so a tenant with both verticals keeps one such account,
+the way 1190 is shared; a tenant that has it from lending gets no second account:
+
+| Code | Name | Type | `system_key` |
+|---|---|---|---|
+| 1015 | Savings reserve (restricted cash) | asset | `savings_reserve` |
+| 1250 | Advances to owner and related parties | asset | `owner_advances` |
+| 5900 | Operating expenses | expense | `operating_expenses` |
+
+#### Tables
+
+| Table | Grants (`bms_app`) | Purpose |
+|---|---|---|
+| `retail_expense_categories` | SELECT, INSERT, UPDATE | Category lists: `name varchar(100)`, `expense_account_id` (nullable, composite FK to ledger accounts; null means `operating_expenses`; a trigger checks on insert and update that the account has `account_type = 'expense'`, `is_postable` and `is_active`, so a header, asset or inactive account is refused, 422 `account_not_expense`), `active`, `sort_order`. Unique `(tenant_id, lower(name))` |
+| `retail_expense_items` | SELECT, INSERT, UPDATE | `category_id` (composite FK), `name varchar(100)`, `requires_explanation boolean` (the pilot's "others"), `active`. Unique `(tenant_id, category_id, lower(name))` |
+| `retail_cash_parties` | SELECT, INSERT, UPDATE | Beneficiaries and advance parties: `name varchar(200)`, `contact varchar(100)` kept as entered, `kind` (`owner`, `staff`, `related_entity`, `supplier`, `other`; there is deliberately no `company` kind: an advance to the tenant's own business is not a receivable, ADR-022 open question 9). The party of an advance must be `owner`, `staff` or `related_entity` (service rule), `active`. Unique `(tenant_id, kind, lower(name))` |
+| `retail_daily_savings` | SELECT, INSERT, UPDATE (void only) | One record per branch and date, below |
+| `retail_cash_bankings` | SELECT, INSERT, UPDATE (void only) | Cash banked, below |
+| `retail_cash_withdrawals` | SELECT, INSERT, UPDATE (void only) | Withdrawals from bank, below |
+| `retail_expenses` | SELECT, INSERT, UPDATE (void only) | Company expenses, below |
+| `retail_advances` | SELECT, INSERT, UPDATE (`repaid_minor`, void) | Advances to owner or company, below |
+| `retail_advance_repayments` | SELECT, INSERT, UPDATE (void only) | Repayments, below |
+
+Categories, items and parties are never deleted (`active` is cleared). No UPDATE of a name once a
+record refers to it is blocked, because records snapshot the names they were written with.
+
+#### `retail_daily_savings`
+
+| Column | Type | Notes |
+|---|---|---|
+| `branch_id`, `business_date` | uuid, date | The shop and the trading day |
+| `amount_minor`, `currency` | bigint, text | The amount set aside, `>= 0` |
+| `suggested_minor` | bigint | The server's suggestion when written (day's profit times `savings_rate_bp`, half up, zero for a loss). Readable only with `retail.profit.read` (as is `amount_minor`, a savings amount being half the profit, ADR-022 decision 13; the API omits both without it) |
+| `overwritten` | boolean | CHECK `(suggested_minor IS NULL AND NOT overwritten) OR (suggested_minor IS NOT NULL AND overwritten = (amount_minor <> suggested_minor))`: a historical row has no suggestion (the pilot never stored one) so it is never `overwritten`, and the reason rule below does not apply to it |
+| `overwrite_reason` | text | CHECK: not null and at least 5 characters when `overwritten` |
+| `total_sold_minor` | bigint | Snapshot of the day's completed sales total, shown on the screen (a read-only column in the pilot) |
+| `occurred_at`, `recorded_by` | | Kernel clock instant, user |
+| `journal_entry_id` | uuid | Null when the amount is zero or the row is historical |
+| `historical`, `voided_at`, `voided_by`, `void_reason` | | |
+
+Index `UNIQUE (tenant_id, branch_id, business_date) WHERE voided_at IS NULL` (one active record per
+shop per day). Index `(tenant_id, branch_id, business_date)` for the lists and reports.
+
+#### `retail_cash_bankings`
+
+| Column | Type | Notes |
+|---|---|---|
+| `branch_id`, `business_date` | | The trading day banked for |
+| `amount_minor`, `currency` | | The amount banked, `> 0` |
+| `expected_minor` | bigint | Snapshot of the expected amount to bank when entered (never supplied by the client). May be negative when the till paid out more than it took. Net of savings, so profit-derived: readable only with `retail.profit.read` |
+| `banked_at` | timestamptz | The pilot's datetime |
+| `reference` | varchar(100) | Optional deposit slip number |
+| `recorded_by`, `journal_entry_id`, `historical`, void columns | | |
+
+Several rows per branch and date are allowed. Index `(tenant_id, branch_id, business_date)`.
+
+#### `retail_cash_withdrawals`
+
+`branch_id`, `business_date`, `amount_minor > 0`, `currency`, `withdrawn_at`, `purpose varchar(300)`,
+`recorded_by`, `journal_entry_id`, `historical`, void columns. Index `(tenant_id, branch_id,
+business_date)`. The pilot form has no shop; `branch_id` defaults to the caller's one branch, else the head office
+branch when it is in the caller's scope, else the request must name one (422 `branch_required`);
+an imported row with no shop takes the tenant's single head office branch whatever any scope is
+(open question 7).
+
+#### `retail_expenses`
+
+| Column | Type | Notes |
+|---|---|---|
+| `branch_id`, `business_date` | | |
+| `category_id`, `item_id` | uuid | Composite FKs; the service refuses an item of another category |
+| `category_name`, `item_name` | varchar(100) | Snapshots, so a rename never changes an old record, and so an imported row whose list entry is missing keeps what was written |
+| `party_id` | uuid | Optional beneficiary |
+| `amount_minor`, `currency` | | The pilot's Total Cost, `> 0` |
+| `explanation` | varchar(500) | Required when the item `requires_explanation` (service rule, FR-RET-24) |
+| `receipt_document_id` | uuid | Optional, `core.documents` |
+| `occurred_at`, `recorded_by`, `journal_entry_id`, `historical`, void columns | | |
+
+Indexes `(tenant_id, branch_id, business_date)` and `(tenant_id, category_id, business_date)` for the
+expenses report.
+
+#### `retail_advances`, `retail_advance_repayments`
+
+An advance: `branch_id` (the source shop), `advance_no` from the tenant sequence
+`retail_advance_no` (`RA00000001`, sequential like the pilot's ids; an imported advance takes the
+next value too, in business date then source id order, and the pilot's id lives only in
+`retail_import_refs` and the note, so an imported number can never collide with a live one), `party_id` (kind `owner`, `staff` or `related_entity`),
+`taken_by_party_id` (optional, the pilot's "who took the money"), `principal_minor > 0`, `currency`,
+`purpose varchar(300)`, `business_date`, `repaid_minor` (CHECK `0 <= repaid_minor <= principal_minor`; a stored running total, **not** an independent balance: it is changed only by the repayment insert and the repayment void, in the same transaction and under the advance's row lock, like `retail_sales.paid_minor`), `note`, `journal_entry_id`,
+`historical`, void columns. The balance is `principal_minor - repaid_minor`; the pilot's "loans with
+balance above zero" is `repaid_minor < principal_minor` and not voided. Unique `(tenant_id,
+advance_no)`. A repayment: `advance_id`, `branch_id` (the branch that receives the money, within the caller's scope, defaulting to the advance's branch; the posting is made in this branch, so its `cash_on_hand`, `mobile_money` or `bank` is debited and `owner_advances` credited there), `amount_minor > 0`, `method` (`cash`, `mobile_money`,
+`bank`), `paid_on`, `recorded_by`, `journal_entry_id`, `historical`, void columns; index
+`(tenant_id, advance_id)`. An advance with a non-voided repayment cannot be voided; voiding a
+repayment lowers `repaid_minor` under the lock. **Guard on `retail_advances`:** the guard trigger
+refuses every UPDATE except the void columns (once) and `repaid_minor`, and it refuses a
+`repaid_minor` change that is not equal to the sum of the advance's non-voided repayments after
+the change (a deferred constraint trigger on `retail_advance_repayments` compares the two), so no
+session, `bms_app` included, can set an arbitrary figure; a repayment row itself is append-only
+except its void columns. A reconciliation test asserts, after concurrent repayments and voids,
+that `repaid_minor` equals the sum of non-voided repayments for every advance, and that a direct
+UPDATE of `repaid_minor` to another value is refused.
+
+#### Cash book posting rules (FR-RET-20 to FR-RET-26)
+
+Every rule posts through `post_entry` in the transaction of its event, one entry, in the record's
+`branch_id`, `source_module = 'retail'`. A zero amount posts nothing. A void posts the reversal
+(`reverses_entry_id` set) with the key `<key>:void`. Historical rows post nothing, except the importer's opening entries in the last three rows below. The opening entry is dated the day **before** the first live day (the day before the importer's first live date, default the import day), so the first live day's `opening_minor` equals the carried balance and the opening is not an `other_movements_minor` of that day.
+
+| Event | Debit | Credit | Idempotency key |
+|---|---|---|---|
+| Daily savings | `savings_reserve` | `cash_on_hand` | `retail.savings:<id>` |
+| Cash banked | `bank` | `cash_on_hand` | `retail.banking:<id>` |
+| Withdrawal from bank | `cash_on_hand` | `bank` | `retail.withdrawal:<id>` |
+| Expense | the category's expense account (`operating_expenses` when unmapped) | `cash_on_hand` | `retail.expense:<id>` |
+| Advance paid out | `owner_advances`, advance as subledger | `cash_on_hand` | `retail.advance:<id>` |
+| Repayment of an advance | `cash_on_hand`, `mobile_money` or `bank` by method | `owner_advances`, advance as subledger | `retail.advance_repayment:<id>` |
+| Opening, per branch, at import | `cash_on_hand`, `bank`, `savings_reserve` balances, and one `owner_advances` line **per outstanding advance** with that advance as subledger | `opening_balance_equity` | `retail.cash_opening:<branch>` |
+| Opening of one advance (importer: a branch with advances but no opening row, or an advance imported on a re-run) | `owner_advances`, advance as subledger | `opening_balance_equity` | `retail.advance_opening:<advance>` |
+| Imported repayment of an advance that is already opened (importer) | `opening_balance_equity` | `owner_advances`, advance as subledger | `retail.advance_repayment_opening:<repayment>` |
+
+An opening posts the principal less the repayments imported with the advance, never less live repayments, which post their own credit, so after any later live repayment the ledger balance of the advance equals the principal less every repayment. The opening entries above are the only ledger postings of imported data.
+
+#### Derived figures (read model, no table)
+
+For a branch and a business date, in the tenant's zone:
+
+- **Cash takings** = sum of `retail_sales.total_minor` where `payment_method = 'cash'` and
+  `sale_date` is the date (a sale voided later is counted here too, on its own day), plus
+  `retail_sale_payments.amount_minor` where `method = 'cash'` and `paid_on` is the date. Credit,
+  mobile money and bank sales are not cash takings (open question 2). A credit sale with payments
+  cannot be voided (`sale_has_payments`), so payments never need a void line.
+- **One void rule.** Every cash book record posts on its own `business_date` (which may be earlier
+  than `created_at` for a back-dated record) and counts there whether or not it is voided later;
+  its reversal posts on the **void date**, the business date of `voided_at` in the tenant's zone,
+  and shows as a separate voids line on that day. A void is never back-dated onto the record's day:
+  the ledger holds the record on its day and the reversal on the void day, and closing must equal
+  the ledger at the end of each day. A record voided the day it is dated nets to zero. The lines
+  are `cash_sale_voids_minor` (sum of `total_minor` of cash sales whose void falls on the date),
+  `savings_voids_minor`, `expense_voids_minor`, `advance_voids_minor`, `banking_voids_minor`,
+  `repayment_voids_minor` and `withdrawal_voids_minor` (each the sum of the amounts of records of
+  that kind voided on the date; a repayment void counts only for a cash repayment in the cash
+  movement).
+- **Cash purchases** = per branch, the amount of the entry `retail.purchase:<id>:<branch>` (the
+  branch's quantities times the line costs, rounded per branch) of each purchase whose
+  `payment_method = 'cash'` and `purchased_on` is the date; for a historical purchase the same
+  amount worked from its movements. Bank and credit purchases are not cash. Cash restocks credit
+  `cash_on_hand` (ADR-020 decision 7), so they leave the till.
+- **Cash expected** (`cash_expected_minor`, what a caller without `retail.profit.read` sees) = cash takings, less cash sale voids, less cash expenses and advances paid out, plus cash repayments received, plus `expense_voids_minor` and `advance_voids_minor`, less `repayment_voids_minor`: it **excludes cash purchases and savings**, so it carries no cost and no profit.
+- **Expected to bank** = cash takings, less cash sale voids, less cash purchases, less savings,
+  less cash expenses, less advances paid out, plus cash repayments received (each by its own
+  `business_date`, voided or not), plus `savings_voids_minor`, `expense_voids_minor` and
+  `advance_voids_minor`, less `repayment_voids_minor` (all of the void date). A banking or
+  withdrawal void moves the banked or withdrawn line, not the expected amount. It is computed from
+  the rows and the same query serves the form, the snapshot `expected_minor` and the reports.
+- **Difference** = sum of `amount_minor` banked for the date, less `banking_voids_minor` of the date, less expected, and the flag
+  from the tenant tolerance. **Running unbanked** = cumulative sum of (expected less banked) over the
+  branch's **live** days, starting at the first live day (the day after the cash opening journal)
+  with nothing carried in. Imported (historical) days are listed separately in the banking report,
+  with their own expected, banked and difference, and are excluded from `unbanked_running_minor`:
+  the pilot's expected figure was virtual and often wrong, and its drift must not follow the shop
+  forever.
+- **Daily cash summary closing** = opening plus every listed movement; it is compared with the
+  ledger's `cash_on_hand` for the branch on that date (`LedgerAccounts.balanceByBranch`), and the
+  remainder is reported as `other_movements_minor`. Imported days have no journals, so they carry
+  `ledger_basis: false` and no opening or closing.
+- **Savings suggestion** = daily profit (section 6.11.3) times `retail.cashbook.savings_rate_bp`
+  (tenant setting, default 5000), rounded half up per branch and day.
+
+Tenant settings added (chapter 6 `tenant_settings`, default if unset): `retail.cashbook.savings_rate_bp`
+(5000) and `retail.cashbook.tolerance_minor` (0).
+
+**Import references.** `retail_import_refs.source_file` gains the values `savings`, `expenses`,
+`banking`, `withdrawals`, `advances`, `advance_payments` and `cash_opening` (the CHECK is widened in
+the cash book migration); the key `(tenant_id, source_file, source_ref)` is unchanged.
+
 
 ## 6.12 Performance and indexing (issue #107, ADR-028)
 
