@@ -1,4 +1,4 @@
--- V36: retail branch roles (ADR-033, issue #191; docs/specs/trade-capabilities.md section 2).
+-- V37: retail branch roles (ADR-033, issue #191; docs/specs/trade-capabilities.md section 2).
 --
 -- Expand only, safe on a populated database: one new table, one new permission, and a backfill of
 -- role 'both' for the branches of tenants that have the retail module. Nothing is dropped,

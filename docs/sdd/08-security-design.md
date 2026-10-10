@@ -221,14 +221,6 @@ platform API and holds no tenant permissions.
 | `retail.advance.repay` | Y | | | | | | | |
 | `retail.cashbook.void` | Y | | | | | | | |
 | `retail.branch_role.manage` | Y | | | | | | | |
-| `retail.pricelist.manage` | Y | | | | | | | |
-| `retail.pricelist.use` | Y | | | | | | | |
-| `retail.price.override` | Y | | | | | | | Y |
-| `retail.credit.manage` | Y | | | | | | | |
-| `retail.sale.return` | Y | | | | | | | |
-| `retail.credit.override` | Y | | | | | | | |
-| `retail.document.issue` | Y | | | | | | | |
-| `retail.payable.manage` | Y | | | | | | | |
 
 Notes:
 
@@ -277,10 +269,12 @@ Notes:
   the suggestion (FR-RET-19, ADR-022 decision 12). Voiding needs `retail.cashbook.void`. No cash
   book approval action is registered (open question 3); if one is, its row joins section 8.4 with a
   threshold set first.
-- Trade capabilities (ADR-033, design only): the nine permissions `retail.branch_role.manage`,
-  `retail.pricelist.manage`, `retail.pricelist.use`, `retail.price.override`, `retail.credit.manage`,
+- Trade capabilities (ADR-033): `retail.branch_role.manage` is built (issue #191, migration V37, a row of the
+  matrix above, administrators only); it sets a branch's role and the role can only refuse a sale at a store.
+  The other eight permissions are design only and become rows of the matrix in the slice that seeds each
+  (`PermissionMatrixIT` compares seeded permissions with the matrix): `retail.pricelist.manage`, `retail.pricelist.use`, `retail.price.override`, `retail.credit.manage`,
   `retail.credit.override`, `retail.sale.return`, `retail.document.issue` and `retail.payable.manage`
-  are rows of the matrix above, seeded by the slice that needs each. Only `retail.price.override`,
+  are seeded by the slice that needs each. Only `retail.price.override`,
   which guards behaviour the sales role already has, is granted to every holder of
   `retail.sale.create`; all others, `retail.pricelist.use` included, are administrators only.
   `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales
