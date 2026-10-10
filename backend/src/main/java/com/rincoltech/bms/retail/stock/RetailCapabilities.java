@@ -45,7 +45,12 @@ public class RetailCapabilities {
     }
 
     /** Applies a partial change to the group; validated by the group and audited by the core. */
-    public Map<String, Object> change(Map<String, Object> proposed) {
-        return settings.change(MODULE, proposed);
+    public Map<String, Object> change(Map<String, Object> proposed, int expectedVersion) {
+        return settings.change(MODULE, proposed, expectedVersion);
+    }
+
+    /** The settings version, the ETag of the group. */
+    public int version() {
+        return settings.version();
     }
 }

@@ -14042,7 +14042,9 @@ export interface operations {
     updateRetailCapabilities: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path?: never;
             cookie?: never;
         };

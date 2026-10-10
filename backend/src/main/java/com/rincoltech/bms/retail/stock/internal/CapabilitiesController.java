@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.rincoltech.bms.kernel.RequiresPermission;
+import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -9,9 +10,11 @@ import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -59,8 +62,8 @@ class CapabilitiesController {
     @GetMapping
     @RequiresPermission("core.settings.manage")
     @Operation(summary = "The tenant's retail capabilities, absent keys off", operationId = "getRetailCapabilities")
-    CapabilitiesResponse get() {
-        return response(capabilities.group());
+    ResponseEntity<CapabilitiesResponse> get() {
+        return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(response(capabilities.group()));
     }
 
     @PutMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -68,7 +71,9 @@ class CapabilitiesController {
     @Operation(
             summary = "Switch retail capabilities or choose the shop or trade profile; audited with old and new values",
             operationId = "updateRetailCapabilities")
-    CapabilitiesResponse update(@Valid @RequestBody UpdateRequest r) {
+    ResponseEntity<CapabilitiesResponse> update(
+            @RequestHeader(name = "If-Match", required = false) String ifMatch, @Valid @RequestBody UpdateRequest r) {
+        int expected = Versions.fromIfMatch(ifMatch);
         Map<String, Object> proposed = new LinkedHashMap<>();
         put(proposed, "profile", r.profile());
         put(proposed, "branch_roles", r.branchRoles());
@@ -79,7 +84,8 @@ class CapabilitiesController {
         put(proposed, "purchasing", r.purchasing());
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
-        return response(capabilities.change(proposed));
+        CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
+        return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);
     }
 
     private static void put(Map<String, Object> m, String key, Object value) {

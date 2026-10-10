@@ -47,7 +47,9 @@ class RetailBranchRolesIT extends IntegrationTest {
     }
 
     ResponseEntity<JsonNode> putCapabilities(Map<String, Object> body, String perms) {
-        return api.call(HttpMethod.PUT, "/settings/capabilities", body, perms, "*", Map.of());
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        Map<String, String> headers = etag == null ? Map.of() : Map.of("If-Match", etag);
+        return api.call(HttpMethod.PUT, "/settings/capabilities", body, perms, "*", headers);
     }
 
     void switchOn() {
@@ -236,8 +238,11 @@ class RetailBranchRolesIT extends IntegrationTest {
     void theProfileIsAPresetOfTheFlagsAndEveryChangeIsAudited() {
         assertThat(putCapabilities(Map.of("profile", "trade"), ADMIN).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(putCapabilities(Map.of("unknown_flag", true), SETTINGS).getStatusCode())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // An unknown key never reaches the group: the request body refuses unknown properties (400).
+        // The group's own refusal of unknown keys is covered by RetailCapabilityGroupTest.
+        ResponseEntity<JsonNode> unknown = putCapabilities(Map.of("unknown_flag", true), SETTINGS);
+        assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(code(unknown)).isEqualTo("malformed_request");
         assertThat(putCapabilities(Map.of("profile", "wholesale"), SETTINGS).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
@@ -266,6 +271,53 @@ class RetailBranchRolesIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isEqualTo(3);
+    }
+
+    /** A write without the current settings version is refused like PATCH /settings. */
+    @Test
+    void theCapabilitiesWriteNeedsTheCurrentSettingsVersion() {
+        ResponseEntity<JsonNode> none =
+                api.call(HttpMethod.PUT, "/settings/capabilities", Map.of("units", true), SETTINGS, "*", Map.of());
+        assertThat(none.getStatusCode().is4xxClientError()).isTrue();
+        ResponseEntity<JsonNode> stale = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("units", true),
+                SETTINGS,
+                "*",
+                Map.of("If-Match", "999"));
+        assertThat(stale.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("units")
+                        .asBoolean())
+                .isFalse();
+    }
+
+    /** A general settings PATCH rewrites the settings row and must keep the module groups in it. */
+    @Test
+    void aGeneralSettingsPatchKeepsTheCapabilities() {
+        switchOn();
+        Api session = Api.tenant(http, t.slug());
+        String email = Api.email("patchadmin");
+        UUID admin = Api.staff(t, email, new Role("tenant_admin", null));
+        Session signedIn = session.signIn(admin, email, Api.PASSWORD, null);
+        String etag = session.get("/api/v1/settings", signedIn.accessToken())
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> patched = session.call(
+                HttpMethod.PATCH,
+                "/api/v1/settings",
+                Map.of("receipt_footer", "Test footer"),
+                signedIn.accessToken(),
+                Map.of("If-Match", etag));
+        assertThat(patched.getStatusCode()).as("%s", patched.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("branch_roles")
+                        .asBoolean())
+                .isTrue();
+        assertThat(api.get("/branch-roles", ADMIN).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     /** Spec 1.2 (issue #185): /me lists the enabled modules and, beside them, the enabled capabilities. */

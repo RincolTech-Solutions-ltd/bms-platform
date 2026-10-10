@@ -10,7 +10,7 @@ import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useSingleBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
 import type { BranchRole } from '../../../api/retail';
-import { branchesWhere, needsOf, sellingBranches } from './permissions';
+import { BRANCH_ROLES, branchesWhere, capabilityOn, needsOf, sellingBranches } from './permissions';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -230,12 +230,16 @@ export function RecordSale() {
   const roles = useBranchRoles(me);
   const { branchId, branchName } = useSingleBranch();
   const store = branchId !== null && roles !== undefined && roles.some((r) => r.branch_id === branchId && !r.can_sell);
+  // With branch roles on, the sale form waits for the roles, so it is never drawn at a store while they load.
+  const waiting = capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read') && roles === undefined;
   const [sale, setSale] = useState<Sale | null>(null);
   const [round, setRound] = useState(0);
   return (
     <Gate screen="sale" title="Record a sale">
       {branchId === null ? (
         <BranchRequired permissions={needsOf('sale')} />
+      ) : waiting ? (
+        <p role="status">Loading</p>
       ) : store && roles ? (
         <StoreBranch branchName={branchName} roles={roles} />
       ) : sale ? (

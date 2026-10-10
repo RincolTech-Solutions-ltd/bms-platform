@@ -218,9 +218,12 @@ class SettingsService implements TenantSettings, ModuleSettings {
 
     @Override
     @Transactional
-    public Map<String, Object> change(String moduleKey, Map<String, Object> proposed) {
+    public Map<String, Object> change(String moduleKey, Map<String, Object> proposed, int expectedVersion) {
         ModuleSettingsGroup group = groupOf(moduleKey);
         Stored stored = lock();
+        if (stored.version() != expectedVersion) {
+            throw Versions.conflict(stored.version());
+        }
         Map<String, Object> before = group.normalise(storedGroup(stored, moduleKey), Map.of());
         Map<String, Object> after = group.normalise(before, proposed);
         if (after.equals(before)) {
@@ -236,6 +239,12 @@ class SettingsService implements TenantSettings, ModuleSettings {
         audit.record(new AuditLog.Entry(
                 group.auditAction(), "core.tenant_settings", tenant.profile().id(), null, before, after));
         return after;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public int version() {
+        return load(false).version();
     }
 
     @Override

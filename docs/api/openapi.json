@@ -19822,6 +19822,14 @@
       },
       "put" : {
         "operationId" : "updateRetailCapabilities",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
         "requestBody" : {
           "content" : {
             "application/json" : {

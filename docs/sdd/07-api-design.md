@@ -932,7 +932,7 @@ Error codes: the cash book's codes are listed in section 7.7 (409 `cash_record_v
 ### 7.11.23 Retail trade capabilities (`/retail`, ADR-033, issue #190)
 
 Built (issue #191): `GET` and `PUT /retail/settings/capabilities` (`core.settings.manage`; the body is
-the profile and the eight flags, a change is partial, choosing a profile writes its preset first, the
+the profile and the eight flags, `PUT` needs `If-Match` with the settings version as `PATCH /settings` does (the `ETag` is returned by `GET`), a change is partial, choosing a profile writes its preset first, the
 change is audited as `retail.capabilities.changed` with old and new values; an unknown key or a
 non-boolean value is 422); `GET /retail/branch-roles` (`retail.stock.read`; the active branches in the
 caller's scope with `role` and `can_sell`) and `PUT /retail/branch-roles/{branch_id}` (body `{role}`,
