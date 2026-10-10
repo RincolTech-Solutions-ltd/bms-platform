@@ -435,7 +435,7 @@ endpoint.
 | POST | `/ledger/journal-entries/{entry_id}/reverse` | `core.journals.create` | **M A** |
 | GET | `/ledger/periods` | `core.ledger.read` | |
 | POST | `/ledger/periods/{period_id}/close` | `core.periods.close` | **A**. FR-GL-06 |
-| GET, PUT | `/ledger/payment-methods` | read / `core.payment_methods.manage` | FR-GL-08 |
+| GET, PUT | `/ledger/payment-methods` | `core.ledger.read` / `core.payment_methods.manage` | FR-GL-08. Built (#160): GET lists the mapped rows and the defaults still in use (`source` `mapped` or `default`); PUT sets one method's account for the tenant or a `branch_id` (`is_active` false switches it off). The account must be a postable, active asset account no module controls (`invalid_payment_account`); `unknown_branch`. Audited as `core.payment_method.set`. |
 | GET | `/ledger/reconciliation` | `core.ledger.read` | Latest subledger reconciliation. FR-GL-10 |
 
 ### 7.11.7 Notifications and documents

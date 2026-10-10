@@ -15,6 +15,12 @@ public interface LedgerAccounts {
     Optional<Account> bySystemKey(String systemKey);
 
     /**
+     * An account by reference: {@code gl:<account id>} names one account directly (a payment
+     * method's mapping, FR-GL-08); anything else is a {@code system_key}. Postable and active only.
+     */
+    Optional<Account> byRef(String ref);
+
+    /**
      * The balance (debits less credits, in minor units) of the account with this key per branch, over
      * entries dated on or before {@code asOf}. Branches without entries are absent.
      */

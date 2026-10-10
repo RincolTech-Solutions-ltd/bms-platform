@@ -296,6 +296,112 @@ class LoanServicingIT extends LoanFixtures {
         booksAgree();
     }
 
+    /** A postable asset account under the fixture tenant, as a payment method target would be. */
+    String assetAccount(String code, String name) {
+        UUID id = UUID.randomUUID();
+        TestDatabase.owner().sql("""
+                        INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
+                            is_postable, is_system_controlled)
+                        VALUES (?, ?, ?, ?, 'asset', 'debit', 'UGX', true, false)
+                        """).params(id, t.tenantId(), code, name).update();
+        return id.toString();
+    }
+
+    ResponseEntity<JsonNode> setMethod(String method, UUID branch, String account, Boolean active, String perms) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("method_key", method);
+        body.put("branch_id", branch);
+        body.put("gl_account_id", account);
+        body.put("is_active", active);
+        return send(HttpMethod.PUT, "/api/v1/ledger/payment-methods", as(admin, perms, "*", null), body);
+    }
+
+    /**
+     * FR-GL-08: a branch's mapping wins over the tenant's, an unmapped method keeps its seeded
+     * account, and a method switched off is refused with payment_method_unmapped.
+     */
+    @Test
+    void frGl08_paymentMethodsDecideTheAccount() {
+        String perms = permissionsOf("tenant_admin");
+        JsonNode defaults = send(HttpMethod.GET, "/api/v1/ledger/payment-methods", as(admin, perms, "*", null), null)
+                .getBody()
+                .get("items");
+        assertThat(defaults.findValuesAsString("source")).containsOnly("default");
+        assertThat(defaults.findValuesAsString("method_key"))
+                .containsExactlyInAnyOrder("airtel_money", "bank", "cash", "mtn_momo");
+
+        String tenantTill = assetAccount("1011", "Test till");
+        String headOfficeTill = assetAccount("1012", "Test head office till");
+        assertThat(setMethod("cash", null, tenantTill, null, perms).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JsonNode mapped =
+                setMethod("cash", t.headOffice(), headOfficeTill, null, perms).getBody();
+        assertThat(mapped.get("items").findValuesAsString("source")).contains("mapped", "default");
+
+        String loan = approved(exampleB("PMMAP"), 1_200_000, 3, 71);
+        disburse(loan, today);
+        JsonNode txn = get(loan, "/transactions").get("items").get(0);
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                                SELECT a.code FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id
+                                 WHERE l.entry_id = ?::uuid AND l.credit > 0
+                                """)
+                        .param(txn.get("journal_entry_id").asString())
+                        .query(String.class)
+                        .list())
+                .as("the head office mapping wins over the tenant's")
+                .containsExactly("1012");
+
+        assertThat(setMethod("cash", t.headOffice(), headOfficeTill, false, perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> off = repay(loan, 100_000, today, key());
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(off.getBody().get("code").asString()).isEqualTo("payment_method_unmapped");
+        booksAgree();
+    }
+
+    /** FR-GL-08: only a postable, active asset account that no module controls, a real branch, and the permission. */
+    @Test
+    void frGl08_aMappingIsValidated() {
+        String perms = permissionsOf("tenant_admin");
+        String liability = TestDatabase.owner()
+                .sql("SELECT id FROM gl_accounts WHERE tenant_id = ? AND system_key = 'member_savings'")
+                .param(t.tenantId())
+                .query(UUID.class)
+                .single()
+                .toString();
+        String controlled = TestDatabase.owner()
+                .sql("SELECT id FROM gl_accounts WHERE tenant_id = ? AND system_key = 'loans_receivable'")
+                .param(t.tenantId())
+                .query(UUID.class)
+                .single()
+                .toString();
+        for (String account : List.of(liability, controlled)) {
+            assertThat(setMethod("bank", null, account, null, perms)
+                            .getBody()
+                            .get("errors")
+                            .findValuesAsString("code"))
+                    .containsExactly("invalid_payment_account");
+        }
+        String till = assetAccount("1013", "Test bank two");
+        assertThat(setMethod("bank", UUID.randomUUID(), till, null, perms)
+                        .getBody()
+                        .get("errors")
+                        .findValuesAsString("code"))
+                .containsExactly("unknown_branch");
+        assertThat(setMethod("bank", null, till, null, cashierPerms).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(setMethod("bank", null, till, null, perms).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.payment_method.set'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
     /**
      * FR-APR-04 and FR-PRD-02 (upfront and added fees): below the threshold the disbursement runs at
      * once; the upfront fee posts its own entry and the added fee is spread over the schedule.

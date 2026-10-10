@@ -551,7 +551,12 @@ SELECT and INSERT only. `sha256` is of the stored bytes, after images are re-enc
 (std) `method_key text NOT NULL` [`cash`, `bank`, `mtn_momo`, `airtel_money`, `gateway`,
 `savings_transfer`], `branch_id uuid` (NULL = tenant default),
 `gl_account_id uuid NOT NULL`, `is_active boolean NOT NULL DEFAULT true`.
-Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08.
+Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08. Built in
+`V36__payment_methods.sql` (#160). A branch row wins over the tenant row; a method with no row
+posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_momo` to
+`mobile_money_mtn`, `airtel_money` to `mobile_money_airtel`, ADR-026), and a row with
+`is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
+lending's loans, savings and investments post through it.
 
 ### `payment_intents` (RLS)
 

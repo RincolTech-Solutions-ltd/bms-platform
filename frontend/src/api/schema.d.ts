@@ -380,6 +380,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ledger/payment-methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Each payment method's account: the mapped rows, then the defaults still in use */
+        get: operations["listPaymentMethods"];
+        /** Map a payment method to an asset account (FR-GL-08) */
+        put: operations["setPaymentMethod"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/collateral": {
         parameters: {
             query?: never;
@@ -5485,6 +5503,23 @@ export interface components {
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
         };
+        PaymentMethodMapping: {
+            account_code?: string;
+            /**
+             * Format: uuid
+             * @description Null for the tenant's mapping
+             */
+            branch_id?: string;
+            /** Format: uuid */
+            gl_account_id?: string;
+            is_active?: boolean;
+            method_key?: string;
+            /** @description mapped (a row) or default (the seeded account, ADR-026) */
+            source?: string;
+        };
+        PaymentMethodMappingList: {
+            items?: components["schemas"]["PaymentMethodMapping"][];
+        };
         /** @description R-PAYOFF as at value_date; rebate is interest not charged */
         PayoffQuote: {
             currency?: string;
@@ -8272,6 +8307,18 @@ export interface components {
         SetLoanGuarantorsRequest: {
             guarantors: components["schemas"]["LoanGuarantorInput"][];
         };
+        SetPaymentMethodRequest: {
+            /**
+             * Format: uuid
+             * @description Omit for the tenant's mapping
+             */
+            branch_id?: string;
+            /** Format: uuid */
+            gl_account_id: string;
+            /** @description Default true; false switches the method off for this scope */
+            is_active?: boolean;
+            method_key: string;
+        };
         SignInRequest: {
             /** @description Email, or phone for staff */
             login: string;
@@ -9117,6 +9164,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DownloadUrl"];
+                };
+            };
+        };
+    };
+    listPaymentMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+        };
+    };
+    setPaymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPaymentMethodRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
                 };
             };
         };

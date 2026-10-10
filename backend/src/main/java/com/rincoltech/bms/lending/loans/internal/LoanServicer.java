@@ -151,7 +151,7 @@ class LoanServicer implements LoanServicing {
                 date);
         repo.insertItems(loan.id(), schedule, today);
 
-        String method = books.methodAccount(paymentMethodKey);
+        String method = books.methodAccount(paymentMethodKey, loan.branchId());
         String voucher = number("VC", "voucher", loan.branchId());
         UUID txnId = UUID.randomUUID();
         PostedEntry entry = books.post(
@@ -268,7 +268,7 @@ class LoanServicer implements LoanServicing {
             UUID recordedBy,
             String source) {
         LocalDate today = today();
-        String method = books.methodAccount(paymentMethodKey);
+        String method = books.methodAccount(paymentMethodKey, loan.branchId());
         String receipt = number("RC", "receipt", loan.branchId());
         UUID txnId = UUID.randomUUID();
         boolean recovery = loan.status().equals("written_off");
@@ -431,7 +431,7 @@ class LoanServicer implements LoanServicing {
             }
             if (othersMoved) {
                 List<Leg> legs = new ArrayList<>();
-                legs.add(Leg.credit(books.methodAccount(txn.paymentMethodKey()), txn.amountMinor()));
+                legs.add(Leg.credit(books.methodAccount(txn.paymentMethodKey(), loan.branchId()), txn.amountMinor()));
                 legs.addAll(netLegs(
                         loan.id(),
                         deltas.values().stream().flatMap(List::stream).toList()));

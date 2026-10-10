@@ -170,7 +170,7 @@ class SavingsServicer implements SavingsServicing {
             String externalReference,
             UUID by,
             String source) {
-        String method = books.methodAccount(paymentMethodKey);
+        String method = books.methodAccount(paymentMethodKey, a.branchId());
         String receipt = number("RC", "receipt", a.branchId());
         UUID txnId = UUID.randomUUID();
         PostedEntry entry = books.post(
@@ -325,7 +325,7 @@ class SavingsServicer implements SavingsServicing {
             UUID approvalId,
             UUID by,
             String source) {
-        String method = books.methodAccount(paymentMethodKey);
+        String method = books.methodAccount(paymentMethodKey, a.branchId());
         String voucher = number("VC", "voucher", a.branchId());
         UUID txnId = UUID.randomUUID();
         PostedEntry entry = books.post(
