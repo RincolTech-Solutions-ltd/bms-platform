@@ -4304,6 +4304,23 @@
           "mfa_required" : {
             "type" : "boolean"
           },
+          "module_capabilities" : {
+            "additionalProperties" : {
+              "items" : {
+                "type" : "string"
+              },
+              "type" : "array"
+            },
+            "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
+            "type" : "object"
+          },
+          "modules" : {
+            "description" : "Keys of the modules the tenant has switched on, sorted (issue #185)",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "permission_scopes" : {
             "additionalProperties" : {
               "$ref" : "#/components/schemas/MePermissionScope"
@@ -5687,6 +5704,38 @@
         },
         "required" : [ "branch_id", "qty" ]
       },
+      "RetailBranchRole" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "can_sell" : {
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "RetailBranchRoleList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailBranchRole"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "RetailBusinessEvaluation" : {
         "properties" : {
           "branches" : {
@@ -5722,6 +5771,39 @@
             "$ref" : "#/components/schemas/RetailEvaluationTotal"
           }
         }
+      },
+      "RetailCapabilities" : {
+        "properties" : {
+          "branch_roles" : {
+            "type" : "boolean"
+          },
+          "customer_accounts" : {
+            "type" : "boolean"
+          },
+          "documents" : {
+            "type" : "boolean"
+          },
+          "price_lists" : {
+            "type" : "boolean"
+          },
+          "profile" : {
+            "enum" : [ "shop", "trade" ],
+            "type" : "string"
+          },
+          "purchasing" : {
+            "type" : "boolean"
+          },
+          "returns" : {
+            "type" : "boolean"
+          },
+          "transfer_receipt" : {
+            "type" : "boolean"
+          },
+          "units" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
       },
       "RetailCashCategoryPatch" : {
         "properties" : {
@@ -10521,6 +10603,17 @@
         },
         "required" : [ "guarantors" ]
       },
+      "SetRetailBranchRoleRequest" : {
+        "properties" : {
+          "role" : {
+            "enum" : [ "store", "shop", "both" ],
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "role" ],
+        "type" : "object"
+      },
       "SignInRequest" : {
         "properties" : {
           "login" : {
@@ -11042,6 +11135,39 @@
             "type" : "string"
           }
         }
+      },
+      "UpdateRetailCapabilitiesRequest" : {
+        "properties" : {
+          "branch_roles" : {
+            "type" : "boolean"
+          },
+          "customer_accounts" : {
+            "type" : "boolean"
+          },
+          "documents" : {
+            "type" : "boolean"
+          },
+          "price_lists" : {
+            "type" : "boolean"
+          },
+          "profile" : {
+            "enum" : [ "shop", "trade" ],
+            "type" : "string"
+          },
+          "purchasing" : {
+            "type" : "boolean"
+          },
+          "returns" : {
+            "type" : "boolean"
+          },
+          "transfer_receipt" : {
+            "type" : "boolean"
+          },
+          "units" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
       },
       "UpdateRetailProductRequest" : {
         "description" : "Omitted fields are unchanged; prices change only through /prices",
@@ -17435,6 +17561,63 @@
         "tags" : [ "retail-cashbook" ]
       }
     },
+    "/api/v1/retail/branch-roles" : {
+      "get" : {
+        "operationId" : "listRetailBranchRoles",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBranchRoleList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The active branches in the caller's stock scope with their roles; 404 capability_not_enabled when off",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/branch-roles/{branch_id}" : {
+      "put" : {
+        "operationId" : "setRetailBranchRole",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetRetailBranchRoleRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBranchRole"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/cash-parties" : {
       "get" : {
         "operationId" : "listRetailCashParties",
@@ -19617,6 +19800,52 @@
         },
         "summary" : "Void a savings record and free its day (FR-RET-28); M",
         "tags" : [ "retail-cashbook" ]
+      }
+    },
+    "/api/v1/retail/settings/capabilities" : {
+      "get" : {
+        "operationId" : "getRetailCapabilities",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailCapabilities"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The tenant's retail capabilities, absent keys off",
+        "tags" : [ "retail-stock" ]
+      },
+      "put" : {
+        "operationId" : "updateRetailCapabilities",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateRetailCapabilitiesRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailCapabilities"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Switch retail capabilities or choose the shop or trade profile; audited with old and new values",
+        "tags" : [ "retail-stock" ]
       }
     },
     "/api/v1/retail/stock" : {
