@@ -641,7 +641,7 @@ hiding the sales screen.
 
 Nine slices, each a GitHub task referencing #190, each independently mergeable with all
 capabilities off changing nothing. Order matters: **slice 1 alone unblocks the wholesaler flow**
-(section 9.1). The issue numbers are in the pull request description.
+(section 9.1). Slices 1 to 9 are issues #191 to #199, in order.
 
 | Slice | Delivers | Depends on |
 |---|---|---|
