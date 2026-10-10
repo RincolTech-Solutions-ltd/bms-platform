@@ -220,6 +220,13 @@ platform API and holds no tenant permissions.
 | `retail.advance.create` | Y | | | | | | | |
 | `retail.advance.repay` | Y | | | | | | | |
 | `retail.cashbook.void` | Y | | | | | | | |
+| `retail.branch_role.manage` | Y | | | | | | |  |
+| `retail.pricelist.manage` | Y | | | | | | |  |
+| `retail.pricelist.use` | Y | | | | | | | Y |
+| `retail.price.override` | Y | | | | | | | Y |
+| `retail.credit.override` | Y | | | | | | |  |
+| `retail.document.issue` | Y | | | | | | |  |
+| `retail.payable.manage` | Y | | | | | | |  |
 
 Notes:
 
@@ -268,6 +275,14 @@ Notes:
   the suggestion (FR-RET-19, ADR-022 decision 12). Voiding needs `retail.cashbook.void`. No cash
   book approval action is registered (open question 3); if one is, its row joins section 8.4 with a
   threshold set first.
+- Trade capabilities (ADR-033, design only): the seven permissions `retail.branch_role.manage`,
+  `retail.pricelist.manage`, `retail.pricelist.use`, `retail.price.override`, `retail.credit.override`,
+  `retail.document.issue` and `retail.payable.manage` are rows of the matrix above, seeded by the slice
+  that needs each. A permission guarding behaviour the sales role already has (`retail.pricelist.use`,
+  `retail.price.override`) is granted to every holder of `retail.sale.create`, so nothing changes until
+  an administrator removes it; the others are administrators only. A branch role can only refuse an
+  action, never grant a permission or widen scope; cost, margin and landed unit cost fields need
+  `retail.profit.read` in the row's branch.
 - `retail.stock.transfer` (issue #84, migration V22, FR-RET-16) moves stock from one branch to
   another. It is money-moving (it posts an inventory entry at each branch) and goes to the roles
   that restock, which in the default roles is the tenant admin only. Its branch scope is checked
