@@ -936,11 +936,11 @@ Design only. Every route below answers 404 `capability_not_enabled` unless its c
 routes are in `docs/specs/trade-capabilities.md` section 11: capability settings, branch roles,
 product units, price lists and price resolution, customer account, statement, payment on account and
 ageing, documents and quotations, purchase orders, goods receipts, supplier bills, credits and
-payments, landed cost, transfer receive and cancel, and the reports stock-by-location,
+payments, landed cost, transfer receive and cancel, sale returns, and the reports stock-by-location,
 transfers-in-flight and supplier-payables. Existing routes gain optional request fields (a sale
 line's `unit_id`, a sale's `price_list_id`) that are ignored when the capability is off. New error
 codes: 422 `branch_role_forbids_sales`, `quantity_not_representable`, `no_price_in_list`,
-`credit_limit_exceeded`, `branch_has_open_work`, `unit_in_use_by_pack`; 409 `price_item_overlap`.
+`credit_limit_exceeded`, `customer_required`, `payment_exceeds_allocatable`, `received_exceeds_dispatched`, `branch_has_open_work`, `unit_in_use_by_pack`; 409 `price_item_overlap`.
 
 ### 7.11.22 Lending: insights (`/lending/insights`, #153, ADR-030)
 

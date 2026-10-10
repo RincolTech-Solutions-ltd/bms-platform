@@ -31,7 +31,7 @@ write audited (FR-RET-14).
 
 ## 1. Capabilities and the tenant profile
 
-### 1.1 The seven capabilities
+### 1.1 The eight capabilities
 
 | Key | What it adds | Default |
 |---|---|---|
@@ -42,13 +42,27 @@ write audited (FR-RET-14).
 | `documents` | Invoice, quotation, delivery note from a sale (section 6) | off |
 | `purchasing` | Purchase order, goods received, supplier invoice, supplier credit, landed cost (section 7) | off |
 | `transfer_receipt` | A transfer is dispatched, then received, so stock can be in flight (section 9.3) | off |
+| `returns` | Customer returns and sales credit notes (section 5.3) | off |
 
 Each is a boolean in the tenant settings group `retail.capabilities` (FR-TEN-08 typed schema;
 absent keys read as off). Nothing else in the module reads a "wholesale" notion.
 
+**Where this lives (module boundaries, ADR-002).** `TenantSettings` and `/me` are core, and the
+boundary test forbids core depending on `retail.*`. So the core gains one small, vertical-neutral
+hook of the kind section 5.4.3 of the SDD already describes for registries: a *module settings
+group* contract. The core stores the group as opaque jsonb under its module key, calls the
+registered group to validate and normalise it on write, and asks it for the capability names to
+list in `/me`. The retail manifest (`retail.manifest`) supplies the group; lending supplies none.
+Inside retail, **`retail.stock` owns branch roles and the capability reads** (a public
+`RetailCapabilities` and `BranchRoles` interface), because stock is where branches and role checks
+already live. `retail.sales` and `retail.purchasing` depend only on `retail.stock` and
+`retail.catalogue` for them, never on each other's internals. The capability routes
+(`/retail/settings/capabilities`) are retail's and call the core settings write through its public
+interface. `ModularityTest` stays green; slice 1 adds the hook and its test.
+
 **Capability off means behaviour exactly as today.** Data written while a capability was on is kept
 and never deleted when it is switched off; it is simply not offered and not applied. A capability
-that changes how a sale is computed (`price_lists`, `units`, `branch_roles`, `customer_accounts`)
+that changes how a sale is computed (`price_lists`, `units`, `branch_roles`, `customer_accounts`, `returns`)
 is ignored by the sale path when off, even if rows exist. This is what makes switching off safe.
 
 ### 1.2 The tenant profile switch
@@ -61,7 +75,7 @@ is no code path "if trade".
 | Profile | Capabilities switched on by the preset |
 |---|---|
 | `shop` | none (all off) |
-| `trade` | `branch_roles`, `units`, `price_lists`, `customer_accounts`, `transfer_receipt`; `documents` and `purchasing` stay off until chosen, because the product owner's rule is that documents are never assumed |
+| `trade` | `branch_roles`, `units`, `price_lists`, `customer_accounts`, `returns`, `transfer_receipt`; `documents` and `purchasing` stay off until chosen, because the product owner's rule is that documents are never assumed |
 
 Changing the profile or a flag needs `core.settings.manage` (administrators only), is audited
 (`retail.capabilities.changed`, old and new values) and takes effect on the next request.
@@ -85,7 +99,7 @@ table is untouched, as ADR-001 asks when only one vertical needs the concept):
 | Role | Sells (sales screen, `POST /retail/sales`) | Restock (`POST /retail/purchases`, later goods received) | Transfer out | Transfer in | Usage, damage, stock-take |
 |---|---|---|---|---|---|
 | `store` | no, refused | yes | yes | yes | yes |
-| `shop` | yes | yes, if the user holds the permission (optional) | yes | yes | yes |
+| `shop` | yes | yes (by permission) | yes | yes | yes |
 | `both` | yes | yes | yes | yes | yes |
 
 `both` is today's behaviour for every branch and is the default. Payments on a credit sale, voids
@@ -98,10 +112,11 @@ Rules:
   (the sale cannot be made, so the server, not the screen, enforces it). The sales screen lists
   only `shop` and `both` branches in its branch picker, and a user whose one branch is a store
   lands on the stock screen.
-- **Restock is the action.** There is no "can receive purchases" flag. A `shop` restocks only if
-  the user holds `retail.purchase.create` at that branch, exactly as today; a tenant that does not
-  want shops to buy simply does not grant it there. Role never grants a permission, it only removes
-  the ability to do what the branch cannot do.
+- **Restock is the action, for every role.** There is no "can receive purchases" flag and the role
+  never limits restocking (the column is yes for all three roles): who may restock is
+  `retail.purchase.create` and branch scope, exactly as today. A tenant that does not want shops to
+  buy does not grant it there. Role never grants a permission, it only removes the ability to do
+  what the branch cannot do, which is selling at a store.
 - **Roles are enforced only when `branch_roles` is on.** Off, every branch behaves as `both`.
 - Changing a role needs the new permission `retail.branch_role.manage` (administrators), is audited
   (`retail.branch_role.changed`), and is refused (422 `branch_has_open_work`) while an unreceived
@@ -164,7 +179,8 @@ Rollback: switch the capability off. Rows stay, behaviour is today's.
 The server resolves each line; the client may suggest a list but never a price it cannot justify.
 
 1. **Which list.** In order: the list the sale names explicitly (`price_list_id`, needs
-   `retail.pricelist.use` for a list other than the customer's), else the customer's own list, else
+   `retail.pricelist.use`, administrators only, to pick a list other than the customer's own or the
+   customer group's; the customer's and the group's list always apply automatically to any seller), else the customer's own list, else
    the customer's group list, else none.
 2. **Which item.** Within the list, for the line's product and sale unit, among items valid on the
    sale's business date (`valid_from <= sale_date` and `valid_to` null or on or after it), the item
@@ -184,9 +200,11 @@ snapshots, never from lists (ADR-020 decision 5), so editing a list never change
 
 ### 3.3 Cost rules that stay
 
-- **Price below cost.** The existing rule holds on the **resolved** price, compared per base unit:
-  a line whose price per base unit is not above the product's cost at the time is refused unless the
-  user holds `retail.price.below_cost`. A list item below cost can be **saved** (a promotion or a
+- **Price below cost.** The existing rule holds on the **resolved** price, compared on the **line**,
+  never on a rounded per-unit figure: a line whose `line_total_minor` is not above its
+  `line_cost_minor` (base quantity times the product's cost at the time, rounded half up once) is
+  refused unless the user holds `retail.price.below_cost`. A pack of twelve costing 83 per piece
+  (996) sold for 1,000 is above cost and accepted, though 1,000 / 12 rounded is 83. A list item below cost can be **saved** (a promotion or a
   clearance), but the editor warns, and a sale at it needs the permission anyway. This keeps the
   rule in one place: the sale.
 - **Cost visibility.** Cost, margin and profit appear only with `retail.profit.read` covering the
@@ -226,6 +244,7 @@ its snapshot, so back-dating a list gains nothing).
   decimal places; otherwise 422 `quantity_not_representable`. Nothing is silently rounded in stock,
   consistent with FR-RET-03.
 - **Money rounds once per line**, half up, on the line total (R-ROUND), as every other retail line.
+  The below-cost test uses these line totals (section 3.3), not the derived per-base price.
 - A sale line stores both worlds: `qty` and `unit_price_minor` stay in **base units** (so every
   existing report, which sums `qty` and `line_total_minor`, is unchanged), and the new columns
   `sale_unit_id`, `sale_qty`, `sale_unit_price_minor` and `unit_factor` record what was entered.
@@ -276,15 +295,36 @@ This design **does not decide #96 and does not post anything for imported credit
 
 | Item | Rule |
 |---|---|
-| Credit limit | `credit_limit_minor` on the customer, null means no limit. A credit sale that would take the balance above it is refused with 422 `credit_limit_exceeded` unless the user holds `retail.credit.override`. The check uses the **tenant-wide** balance including historical rows, because it measures exposure; the response says only that the limit is exceeded and by how much, and never other branches' sales, so branch scope is not leaked |
+| Credit limit | `credit_limit_minor` on the customer, null means no limit. **Setting or changing a limit or terms needs `retail.credit.manage` (administrators only)**: the sales role already holds `retail.customer.manage` and must not be able to raise its own customers' limits, so that permission edits name and contact only. A credit sale that would take the balance above the limit is refused with 422 `credit_limit_exceeded` unless the user holds `retail.credit.override`. **Concurrency:** the sale first locks the customer row (`SELECT ... FOR UPDATE`, taken before the balance locks, in the same lock order as the other sale locks) and only then computes exposure, so two shops selling to one customer at once cannot both pass the check. **A customer record is required:** with `customer_accounts` on, a credit sale must name a `customer_id` (422 `customer_required`); a typed `buyer_name` alone is refused, otherwise it would bypass every limit (V11 allowed a buyer name with no record). The check uses the **tenant-wide** balance including historical rows, because it measures exposure; the response says only that the limit is exceeded and by how much, and never other branches' sales, so branch scope is not leaked |
 | Terms | `terms_days` on the customer, null means none. It defaults the sale's `due_date` to `sale_date + terms_days`; the date stays editable, as the proposed payment date is today |
 | Ageing | Report `GET /retail/reports/customer-ageing`: per customer, open balance in buckets by days past `due_date` (not yet due, 1 to 30, 31 to 60, 61 to 90, over 90; fixed buckets in the first version), plus a total row. No cost or profit appears. Scoped by `retail.sale.read` |
-| Statement | `GET /retail/customers/{id}/statement?from&to`: opening balance, credit sales, payments, closing balance, with the "before system start" section of 5.1. Built from `retail_sales` and `retail_sale_payments`; no new ledger event |
-| Payment on account | `POST /retail/customers/{id}/payments`: one amount, allocated to the oldest open credit sales first, creating ordinary `retail_sale_payments` rows (so every posting rule of FR-RET-05 holds unchanged). An over-payment is refused (422 `payment_exceeds_balance`), as today; an unallocated deposit is deferred |
+| Statement | `GET /retail/customers/{id}/statement?from&to`: opening balance, credit sales, returns (5.3), payments, closing balance, with the "before system start" section of 5.1. Built from `retail_sales`, `retail_sale_returns` and `retail_sale_payments`; no new ledger event. Like the existing `/customers/{id}/balance` it covers **the caller's branch scope**; its test compares the statement's closing balance with that scoped balance (and, for a caller with full scope, with the tenant-wide balance). The limit check alone is tenant-wide |
+| Payment on account | `POST /retail/customers/{id}/payments` with `branch_id` (the branch that received the money, in the caller's `retail.sale.create` scope). One amount, allocated oldest first, creating ordinary `retail_sale_payments` rows. **Allocation skips** (a) `historical` imported sales, which stay outside the ledger until issue #96 is decided, so a payment never credits trade debtors for an amount that was never debited; and (b) sales outside the caller's branch scope (they would be 404). The amount that cannot be allocated is refused (422 `payment_exceeds_allocatable`, the response says how much can be); nothing is held as a deposit (deferred). **Posting branch:** each payment entry posts in the receiving branch (debit cash, mobile money or bank of that branch; credit `trade_debtors`, the sale as subledger), not in the branch of the sale, so cash lands in the shop that holds it. Trade debtors per branch can therefore differ from that branch's open sales; the debtors reconciliation is tenant-wide, as the customer balance is. An explicit payment against one named sale (today's route) is unchanged |
 | Group and list | `customer_group_id`, `price_list_id` (section 3) |
 
 Stores never sell, so a credit sale can exist only at a shop; the customer balance still spans
 shops, which is why the limit check reads tenant-wide.
+
+### 5.3 Customer returns and credit notes (capability `returns`)
+
+A sale can be partly or fully returned after the fact. A return is its own record, never an edit
+of the sale (sales are append-only apart from the void):
+
+- `POST /retail/sales/{id}/returns` (**M**, `retail.sale.return`, scope on the sale's branch):
+  lines of product, quantity (at most sold less already returned, in the sale's unit), a reason,
+  and the **refund**: `cash`, `mobile_money`, `bank` (money out of the receiving branch) or
+  `account` (reduces what the customer owes; only for a sale with an open balance, never below
+  zero, the rest refunded in money).
+- Stock: returned goods go back into the branch as a `return` movement at the sale line's cost
+  snapshot, if resaleable; damaged goods are a usage report instead, so a return never inflates
+  stock. A voided sale cannot be returned (the void already reverses it); a historical sale can be
+  returned for stock and a money refund, but an `account` refund is refused for it until issue #96
+  is decided.
+- Posting: debit `sales_returns` (new contra income account 4110) for the returned value, credit the
+  refund account (or `trade_debtors` for `account`); debit `inventory`, credit `cost_of_goods_sold`
+  at the snapshot cost. Key `retail.sale_return:<id>`; void by reversal.
+- Reports: sales analysis and daily profit net returns by return date; the customer statement lists
+  them. The credit note document is a template of the return (section 6).
 
 ## 6. Optional documents
 
@@ -295,8 +335,8 @@ shops, which is why the limit check reads tenant-wide.
   **after-step** that reads a committed record.
 - **The till receipt stays the default** and is not a numbered document: it is the existing receipt
   view, with no series.
-- Templates, not features: an invoice, a quotation and a delivery note are three templates of one
-  `retail_documents` record.
+- Templates, not features: an invoice, a quotation, a delivery note and (with `returns`) a credit
+  note are templates of one `retail_documents` record.
 
 ### 6.2 Behaviour
 
@@ -304,6 +344,7 @@ shops, which is why the limit check reads tenant-wide.
 |---|---|---|
 | Invoice | A completed sale | Buyer name and contact, lines in the sale unit, totals, payment status, due date for a credit sale |
 | Delivery note | A completed sale | Same lines, **no prices** by default (a template option shows them); signature line |
+| Credit note | A customer return (section 5.3) | Lines returned, refund method, reference to the invoice if one was issued |
 | Quotation | Lines entered without a sale (a draft of lines, buyer, `valid_until`) | Reserves no stock and posts nothing. `convert to sale` creates a sale: lines re-priced at conversion unless the quoted price is still valid (list item still effective) and the user holds the override permission; a converted quotation records the sale id |
 
 - **Snapshot.** Issuing a document stores a JSON snapshot (tenant header, buyer, lines, totals,
@@ -345,7 +386,7 @@ valuation, stock and reports do not care which path made them.
 | Goods received note (GRN) | posted, voided | Receives into **a branch** (normally a store): `purchase` movements, cost set by the rule below, posted to **goods received not invoiced** |
 | Supplier invoice (bill) | posted, voided | Records the supplier's invoice number, date, due date and amount against one or more GRNs; clears goods received not invoiced into trade creditors; any price or quantity difference is shown, and a difference above the tenant tolerance (default zero) needs a reason |
 | Supplier credit note | posted, voided | Reduces what is owed to a supplier: goods returned (a `return_to_supplier` movement, negative, guarded like a sale so stock cannot go below zero) or a price adjustment |
-| Supplier payment | posted, voided | Cash, mobile money or bank against a supplier's open bills; the module has no supplier payment today (a credit restock only raises trade creditors), so this is new |
+| Supplier payment | posted, voided | Cash, mobile money or bank against a supplier's open **bills and open credit restocks** alike: a plain credit restock only raises trade creditors today and nothing can pay it, so the payment applies to either and works for a tenant that never uses orders. **Cash goes through the cash book (ADR-022):** a cash supplier payment is a cash-out the daily cash summary and the expected-to-bank amount include for the paying branch, so it never makes the till look short; mobile money and bank do not touch the cash book |
 
 A PO may be raised without a supplier invoice ever following, and a GRN may be received without a
 PO (a "blind receipt"), because small wholesalers do both; matching is **reported, not enforced**:
@@ -362,9 +403,13 @@ line with the remainder on the line with the largest value, so the parts add exa
 
 - The allocation raises the receipt lines' landed unit cost. The product's cost is set to the
   landed unit cost with a price history row (`source` = `receipt`), by the existing rule that the
-  latest receipt wins (ADR-020 decision 5). Weighted average cost stays pending (pending ADR-021).
+  latest receipt wins (ADR-020 decision 5), under the guard below. Weighted average cost stays pending (pending ADR-021).
 - Posting: debit inventory, credit trade creditors (the carrier or agent as supplier) for the
   allocated amount.
+- **Cost update guard.** The product's cost is changed by the allocation only when this receipt is
+  still the product's **latest cost-setting event**; if a newer receipt, restock or manual edit has
+  since set the cost, the allocation posts to inventory and records a price history row noting it
+  was not applied, and never overwrites the newer cost.
 - **Known simplification.** Stock movement snapshots are immutable (FR-RET-03), so a charge that
   arrives after some of the goods were sold or transferred is added to inventory in full, and the
   cost of those earlier sales is not restated. The difference sits in the revaluation difference
@@ -414,9 +459,22 @@ stays the default. With `transfer_receipt` on, a transfer is **dispatched** (the
 movement and entry post at once, status `in_transit`) and later **received** (the destination's in
 movement and entry), possibly with a received quantity different from dispatched, in which case the
 difference is a recorded `transfer_shortage` posted as stock shrinkage at the destination's cost.
-While in transit the stock is in neither branch's balance; the inter-branch clearing balance
-(1190) is the in-transit value, which is exactly what the "transfers in flight" report lists. A
-dispatch can be cancelled before receipt (the source gets the stock back).
+While in transit the stock is in neither branch's balance. The in-transit value is the sum of the
+open dispatches' source entries (the report is built from the transfers, not from the account):
+account 1190 is shared with the lending chart, so its balance is **never** read as the in-flight
+figure, and the reconciliation compares only the entries whose source is a retail transfer
+(`retail.transfer_out`, `retail.transfer_in`, their voids and the shortage key).
+
+**A shortage at receipt is valued at the source's cost** (the cost both sides already carry), not
+the destination's: debit `stock_shrinkage` at the destination branch and credit
+`interbranch_clearing` for the missing quantity at that cost, so the clearing legs of this transfer
+net to zero. Receiving more than dispatched is refused (422 `received_exceeds_dispatched`).
+
+**Cancel and void of a dispatched transfer.** Cancelling a transfer still `in_transit` moves each
+line back to the source with a `transfer_in` of the dispatched quantity at the original cost and
+reverses the source's out entry (the destination never booked anything); status `cancelled`. The
+existing void remains for `completed` (atomic) and `received` transfers, with its rule that the
+destination still holds what came in, applied to the received quantity.
 
 ## 10. Data model sketch
 
@@ -432,7 +490,8 @@ where noted, with the `reject_mutation` trigger. Names are provisional.
 | `retail_price_lists` | `name`, `currency`, `strict`, `active`, `version` | unique `(tenant_id, lower(name))` |
 | `retail_price_list_items` | `price_list_id`, `product_id`, `unit_id`, `min_qty`, `price_minor`, `valid_from`, `valid_to`; UPDATE limited to `valid_to` by a guard trigger | unique open row `(tenant_id, price_list_id, product_id, unit_id, min_qty) where valid_to is null`; lookup `(tenant_id, price_list_id, product_id, valid_from desc)` |
 | `retail_customer_groups` | `name`, `price_list_id` | unique `(tenant_id, lower(name))` |
-| `retail_customers` (add columns) | `credit_limit_minor`, `terms_days`, `customer_group_id`, `price_list_id`, all nullable | partial index on `price_list_id` |
+| `retail_customers` (add columns) | Slice 6: `credit_limit_minor`, `terms_days`, nullable. Slice 5 (price lists): `customer_group_id`, `price_list_id`, nullable, with a partial index on `price_list_id`. The two groups of columns arrive in the slice that needs them | as said |
+| `retail_sale_returns`, `retail_sale_return_lines` | `sale_id`, `branch_id`, `reason`, `refund_method`, `refund_minor`, `journal_entry_id`, `status`; lines with product, qty, `line_total_minor`, `line_cost_minor`; append-only apart from the void | `(tenant_id, sale_id)`; `(tenant_id, branch_id, created_at)` |
 | `retail_sale_lines` (add columns) | `sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`, `price_list_id`, `price_source`; all nullable for history | none new; the V26 covering index is kept |
 | `retail_sales` (add column) | `price_list_id` nullable | none |
 | `retail_document_series` | `type`, `prefix`, `next_no`; the row lock is the allocator | unique `(tenant_id, type)` |
@@ -443,10 +502,14 @@ where noted, with the `reject_mutation` trigger. Names are provisional.
 | `retail_supplier_bills`, `_allocations` | supplier, number, date, due date, amount, `kind` (`goods`, `landed_cost`), allocations to GRNs | unique `(tenant_id, supplier_id, number)` ; `(tenant_id, supplier_id, due_date)` for ageing |
 | `retail_supplier_credits` | supplier, kind (`goods`, `price`), lines, amount | `(tenant_id, supplier_id)` |
 | `retail_supplier_payments` | supplier, method, amount, bill allocations, journal entry | `(tenant_id, supplier_id, paid_on)` |
-| `retail_transfers` (add columns) | `status` gains `in_transit`, `received`, `cancelled`; `received_at`, `received_by`; line `received_qty` | partial `(tenant_id, status) where status = 'in_transit'` |
+| `retail_transfers` (change) | V22 is not just extended. It (a) limits `status` to `completed` or `voided`, (b) requires `out_entry_id` and `in_entry_id` to be both null or both set, and (c) has a guard trigger that lets an UPDATE change only the void columns once. The migration **replaces** all three: (a) `status` in (`completed`, `in_transit`, `received`, `cancelled`, `voided`); (b) the entry pair is both null only for a zero-cost transfer, `in_entry_id` may be null while `in_transit` or `cancelled`, and both are set for `completed` and `received` unless the cost is zero; (c) the guard allows exactly these transitions: `in_transit` to `received` (sets `in_entry_id`, `received_at`, `received_by` once), `in_transit` to `cancelled` (void-style columns once), and `completed` or `received` to `voided` as today; every other change is refused. Added columns: `received_at`, `received_by`; line `received_qty`. The check and trigger replacements are done in the expand migration with the new constraint added `NOT VALID` first; existing rows are all `completed` or `voided` and satisfy it | partial `(tenant_id, status) where status = 'in_transit'` |
 
-Stock movement kinds gain `return_to_supplier` (negative) and `transfer_shortage` is not a kind: a
-shortage is a recorded difference posted as shrinkage, with the receipt as its source. RLS tests
+Stock movement kinds gain `return_to_supplier` (negative). `retail_stock_movements` is the largest
+table and its `kind` and sign checks (V11) must be **replaced**, so the migration adds the new
+constraints `NOT VALID` (a metadata change that takes no long lock), and a separate, later
+migration runs `VALIDATE CONSTRAINT`, which scans without blocking writes; the old constraints are
+dropped only after validation. `transfer_shortage` is not a kind: a shortage is a recorded
+difference posted as shrinkage, with the receipt as its source. RLS tests
 (NFR-ISO-04) cover every table above; the isolation test enumerates tables from the catalogue, so a
 table without the policy fails CI.
 
@@ -468,9 +531,10 @@ Branch-bound routes check scope per ADR-017. Full catalogue goes in SDD 7.11.23.
 | GET, POST, PATCH | `/retail/price-lists`, `/retail/price-lists/{id}/items` | read: `retail.sale.create`; write: `retail.pricelist.manage` | `price_lists` |
 | POST | `/retail/prices/resolve` | `retail.sale.create` | `price_lists`; `{customer_id?, price_list_id?, branch_id, lines: [{product_id, unit_id?, qty}]}` returns price and source per line, never cost |
 | POST | `/retail/sales` | `retail.sale.create` | existing route; lines gain `unit_id?`, request gains `price_list_id?` |
-| GET, PUT | `/retail/customers/{id}/account` | read `retail.sale.read`; write `retail.customer.manage` | `customer_accounts` |
+| GET, PUT | `/retail/customers/{id}/account` | read `retail.sale.read`; write limit and terms `retail.credit.manage` | `customer_accounts` |
 | GET | `/retail/customers/{id}/statement` | `retail.sale.read` | `customer_accounts` |
 | POST (M) | `/retail/customers/{id}/payments` | `retail.sale.create` | `customer_accounts` |
+| POST (M), GET | `/retail/sales/{id}/returns` | `retail.sale.return` | `returns` |
 | GET | `/retail/reports/customer-ageing` | `retail.sale.read` | `customer_accounts` |
 | POST (M), GET | `/retail/sales/{id}/documents`, `/retail/documents/{id}` | `retail.document.issue` | `documents` |
 | POST, GET, PATCH | `/retail/quotations`, `/retail/quotations/{id}/convert` | `retail.document.issue`; convert needs `retail.sale.create` | `documents` |
@@ -481,10 +545,10 @@ Branch-bound routes check scope per ADR-017. Full catalogue goes in SDD 7.11.23.
 
 New permissions, each a row of the SDD 8 matrix and seeded by the slice that needs it:
 `retail.branch_role.manage`, `retail.pricelist.manage`, `retail.pricelist.use`,
-`retail.price.override`, `retail.credit.override`, `retail.document.issue`, `retail.payable.manage`.
-Seeding rule: a new permission that guards behaviour the sales role already had (`price.override`,
-`pricelist.use`) is granted to every role that holds `retail.sale.create`; one that guards new
-behaviour goes to administrators only.
+`retail.price.override`, `retail.credit.manage`, `retail.credit.override`, `retail.sale.return`,
+`retail.document.issue`, `retail.payable.manage`.
+Seeding rule: only `retail.price.override`, which guards behaviour the sales role already has (a unit price override), is granted to every role that holds `retail.sale.create`. Every other new
+permission, including `retail.pricelist.use`, goes to administrators only.
 
 ## 12. Ledger postings
 
@@ -498,6 +562,7 @@ branch, in the transaction of the event, with idempotency keys of the form `reta
 | 2110 | Goods received not invoiced | liability | `goods_received_not_invoiced` | `purchasing` |
 | 5120 | Purchase price rounding | expense | `purchase_rounding` | `units` |
 | 5130 | Purchase price variance | expense | `purchase_price_variance` | `purchasing` |
+| 4110 | Sales returns | income (contra) | `sales_returns` | `returns` |
 
 ### 12.2 Sales, units, transfers
 
@@ -505,7 +570,7 @@ A sale in a pack unit posts the same two entries as today (revenue and cost), fr
 and the base-quantity cost snapshot. A credit sale beyond a limit is refused before posting. Price
 list use changes no posting. A two-step transfer posts the existing out entry at dispatch and the
 existing in entry at receipt; a shortage at receipt debits `stock_shrinkage` and credits
-`interbranch_clearing` for the missing quantity at the source cost, so clearing returns to zero.
+`interbranch_clearing` for the missing quantity at the source cost (section 9.3), so this transfer's clearing legs return to zero. A return posts as section 5.3.
 
 ### 12.3 Purchasing
 
@@ -531,16 +596,20 @@ Follows SDD 15.4.2 and adds, per slice:
 - **Roles.** Sales refused at a store (service and API), allowed at shop and both; transfer from
   store to shop; role off means both; role change refused with an unreceived transfer; the matrix of
   section 2.2 as a table-driven test.
-- **Units.** Property tests: for random factors and quantities, `base_qty` is exact or refused,
+- **Units.** A pack sale above cost on the line total is accepted although the rounded per-base price equals the cost; property tests: for random factors and quantities, `base_qty` is exact or refused,
   stock is conserved across a pack sale and a base sale; rounding remainder equals the
   `purchase_rounding` posting; a whole month of mixed-unit sales reconciles to the ledger (the
   date-logic rule of testing a whole month).
 - **Price lists.** Resolution order; largest break not above the quantity; effective-date edges
   (valid on the first and last day); overlap refused under concurrency; below-cost refused on the
   resolved price; cost absent without profit read; editing a list leaves old sales' snapshots.
-- **Customer accounts.** Limit at the boundary (equal allowed, above refused); historical rows
-  counted in exposure and excluded from the debtors reconciliation; statement closing equals the
-  customer balance; payment on account allocates oldest first and never overpays; a tenant with
+- **Customer accounts.** Limit at the boundary (equal allowed, above refused); **two shops selling
+  to one customer concurrently cannot both pass the limit** (two connections, deterministic);
+  a credit sale with only a buyer name is 422 `customer_required`; the sales role cannot set a limit
+  (403 without `retail.credit.manage`); historical rows counted in exposure and excluded from the
+  debtors reconciliation and from automatic allocation; payment on account posts in the receiving
+  branch and skips out-of-scope sales; statement closing equals the caller's branch-scoped customer
+  balance (and the tenant-wide balance for a full-scope caller); payment on account allocates oldest first and never overpays; a tenant with
   null limits behaves as today.
 - **Documents.** Gapless numbering under concurrent issue; a failing render leaves the sale
   committed; a void sale voids its invoice and keeps the number; the capability off hides routes
@@ -549,7 +618,8 @@ Follows SDD 15.4.2 and adds, per slice:
   difference posts variance; landed cost allocation adds exactly (remainder rule); credit note
   cannot return more than on hand; every entry balances (deferred balance trigger); plain restock
   results are identical on the old and new path.
-- **Transfers.** In-transit stock is in neither balance and clearing equals the in-flight report;
+- **Returns.** A return cannot exceed sold less returned; stock and cost restore at the sale snapshot; `account` refund never takes the balance below zero; sales analysis nets returns; every entry balances.
+- **Transfers.** The replaced status check, entry-pair check and update guard allow exactly the transitions of section 10 and refuse the rest; cancel of a dispatched transfer restores the source and reverses its entry; in-transit stock is in neither balance and the in-flight report equals the open dispatches (never read from account 1190);
   shortage posts to shrinkage and clearing returns to zero; cancel restores the source.
 - **Permissions.** Every new route in the route permission test; cost fields absent without profit
   read on every new response; a branch-scoped caller cannot see another branch's balances in the
@@ -586,7 +656,7 @@ Answers written after one pass looking for what breaks.
 | Switching `price_lists` off with open quotations | A quotation keeps its stored prices; conversion re-prices at the product price when lists are off, and says so |
 | Landed cost after goods were sold | Documented simplification (7.2) reported through the revaluation difference; mitigation setting `purchasing.require_costing_before_sale` |
 | Pack cost rounding | One visible account `purchase_rounding`, bounded by half a minor unit per base unit |
-| Migrations | All expand only; none renames or drops; numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
+| Migrations | Mostly additive, but not all: slice 3 replaces the transfer status check, entry-pair check and update guard, and slice 8 replaces the stock movement kind and sign checks. Replacements add the new constraint `NOT VALID` first and `VALIDATE` in a later migration, and drop the old one last, so no long lock is taken on the largest table. Numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
 
 ### 14.3 Permissions
 
@@ -594,9 +664,11 @@ Answers written after one pass looking for what breaks.
 |---|---|
 | Role used as authorisation | It is not: it can only refuse. A user's permissions and branch scope are checked first and unchanged |
 | Cost leaks through the new surfaces | Price resolution returns price and source only; list margin and below-cost warnings, supplier bill margins, landed unit costs and the location report's value need `retail.profit.read` covering each branch; absent, never null |
+| A sales clerk raises a customer's limit | Limit and terms need `retail.credit.manage`, administrators only; `retail.customer.manage` (held by the sales role) edits name and contact only |
 | Credit exposure leaks other branches' sales | The limit check runs server side tenant-wide and returns only "exceeded by X"; the statement and ageing are filtered by the caller's scope |
 | A store clerk sells by a direct call | The service refuses on role, not the screen (422); covered by the API test |
 | Document issue exposes a sale outside scope | The document route resolves the sale under the caller's scope first (404 otherwise); the snapshot is built from the scoped view |
+| A credit sale names no customer to dodge the limit | With `customer_accounts` on a credit sale requires a customer record |
 | Quotation conversion bypasses the price floor | Conversion runs the normal sale path, including below-cost and override rules |
 | Supplier payables and bills seen by shop staff | `retail.payable.manage` is administrators only; the sales role has none |
 | Self-approval of high purchase orders | Registered as a maker-checker action (ADR-015) when a threshold is set; the database enforces checker is not maker |
@@ -605,8 +677,10 @@ Answers written after one pass looking for what breaks.
 
 ### 14.4 Findings that changed the design
 
-- Role could have been a column on `branches`; it is a retail table instead, so the core is not
-  touched for one vertical and the missing-row rule needs no data migration to be correct.
+- Role could have been a column on `branches`; it is a retail table instead, so the core `branches`
+  table is not touched for one vertical and the missing-row rule needs no data migration to be
+  correct. The core still gains one vertical-neutral hook for module settings groups (section 1.1),
+  because settings and `/me` are core.
 - The first draft stored the retail price as a default price list. It stays on the product, so
   nothing about prices changes for plain shops and no price is copied (the pilot's failure mode of
   copied prices, ADR-020 context).
@@ -631,7 +705,7 @@ Answers written after one pass looking for what breaks.
 
 Weighted average cost (pending ADR-021); tiered or mix-and-match quantity breaks across lines;
 promotions and coupons; tax and VAT handling on documents (the module has no tax model today);
-customer returns and sales credit notes; unallocated customer deposits; server-side PDFs (documents
+unallocated customer deposits; server-side PDFs (documents
 follow-up, issue #120); sending documents by message or email; serial or batch tracking and expiry;
 multi-currency lists; barcode scanning for pack units; reorder points and automatic purchase orders;
 bank reconciliation of supplier payments; role-specific mobile layouts for store clerks beyond
@@ -639,18 +713,19 @@ hiding the sales screen.
 
 ## 17. Build plan
 
-Nine slices, each a GitHub task referencing #190, each independently mergeable with all
+Ten slices, each a GitHub task referencing #190, each independently mergeable with all
 capabilities off changing nothing. Order matters: **slice 1 alone unblocks the wholesaler flow**
-(section 9.1). Slices 1 to 9 are issues #191 to #199, in order.
+(section 9.1).
 
-| Slice | Delivers | Depends on |
-|---|---|---|
-| 1 | Branch roles and the capability settings group, enforcement in sales, restock and transfer, branch picker filtering | none |
-| 2 | Tenant profile switch, `retail_capabilities` in `/me`, capability-aware menus and tours (with #185) | 1 |
-| 3 | Stock by store and shop report, combined total, and two-step transfers with the in-flight report | 1 |
-| 4 | Units of measure: packs, conversions, sale and restock in any unit, import columns | 1 |
-| 5 | Price lists, quantity breaks, effective dates, customer groups | 4 |
-| 6 | Customer accounts: limit, terms, ageing, statement, payment on account | none |
-| 7 | Optional documents: invoice, delivery note, quotation, numbered series | 5, 6 optional |
-| 8 | Optional purchasing: purchase order, goods received, supplier invoice, supplier credit, supplier payment | 1, 4 |
-| 9 | Landed cost allocation and the supplier payables report | 8 |
+| Slice | Issue | Delivers | Depends on |
+|---|---|---|---|
+| 1 | #191 | Branch roles, the capability settings group and the core module-settings hook; enforcement on sales only | none |
+| 2 | #192 | Tenant profile switch, `retail_capabilities` in `/me`, capability-aware menus and tours (with #185) | 1 |
+| 3 | #193 | Stock by store and shop report, combined total, and two-step transfers (replaced status check, entry-pair check, update guard) with the in-flight report | 1 |
+| 4 | #194 | Units of measure: packs, conversions, sale and restock in any unit, import columns | 1 |
+| 5 | #195 | Price lists, quantity breaks, effective dates, customer groups (adds the group and list columns to customers) | 4 |
+| 6 | #196 | Customer accounts: limit, terms (admin only), ageing, statement, payment on account | none |
+| 7 | #201 | Customer returns and sales credit notes (`returns`) | 6 |
+| 8 | #197 | Optional documents: invoice, delivery note, quotation, credit note, numbered series | 5, 6 and 7 optional |
+| 9 | #198 | Optional purchasing: purchase order, goods received, supplier invoice, supplier credit, supplier payment (also against credit restocks) | 1, 4 |
+| 10 | #199 | Landed cost allocation and the supplier payables report | 9 |

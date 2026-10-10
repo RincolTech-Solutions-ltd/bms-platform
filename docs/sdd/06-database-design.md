@@ -1662,11 +1662,13 @@ Optional tables and columns for the trade capabilities (FR-RET-33 to FR-RET-40):
 `retail_product_units`, `retail_price_lists`, `retail_price_list_items`, `retail_customer_groups`,
 `retail_document_series`, `retail_documents`, `retail_quotations`, `retail_purchase_orders`,
 `retail_goods_receipts`, `retail_supplier_bills`, `retail_supplier_credits`,
-`retail_supplier_payments`; nullable columns on `retail_customers`, `retail_sales`,
-`retail_sale_lines` and `retail_transfers`; the system accounts 2110, 5120 and 5130. Columns,
+`retail_supplier_payments`, `retail_sale_returns`; nullable columns on `retail_customers`, `retail_sales`,
+`retail_sale_lines` and `retail_transfers`; the system accounts 2110, 4110, 5120 and 5130. Columns,
 indexes, RLS and postings are in `docs/specs/trade-capabilities.md` sections 10 and 12 and move
-into this chapter slice by slice as each is built. Every addition is expand only and defaults to
-the behaviour of this section.
+into this chapter slice by slice as each is built. Most additions are expand only and default to
+the behaviour of this section; two replace constraints (the transfer status and entry-pair checks and
+update guard of `retail_transfers`, and the kind and sign checks of `retail_stock_movements`) and do
+it as `NOT VALID` first, `VALIDATE` in a later migration, old constraint dropped last.
 
 ### 6.11.4 The pilot import (FR-RET-12; ADR-020 decision 9; #55)
 
