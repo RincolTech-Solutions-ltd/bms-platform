@@ -939,8 +939,11 @@ pledged item secures one open loan at a time (`collateral_already_pledged`): the
 item row before it checks, and the partial unique index
 `lending_loan_collateral_one_open_pledge (tenant_id, collateral_id) WHERE released_at IS NULL`
 is the backstop. `released_at` is set when the loan becomes `cancelled`, `rejected` or `closed`;
-a `written_off` loan keeps its pledges. The collateral register asks the loans module through
-`CollateralPledges` before any release (FR-COL-04).
+a `written_off` loan keeps its pledges. A reversal that reopens a closed loan clears
+`released_at` again on that loan's own rows, after locking each item and checking it is still held
+and free; V35's guard allows that one change only on an active loan named in the
+transaction-local setting `bms.restore_pledges_loan` (#176). The collateral register asks the loans
+module through `CollateralPledges` before any release (FR-COL-04).
 
 ### `lending_loan_status_history` (append-only)
 
@@ -1389,6 +1392,8 @@ tables of section 6.7, the two checker permissions of chapter 8 and account 4060
 added to `bms_seed_lending_chart` and to every tenant that already holds the lending chart. V24,
 V25 and V27 stay unused: with `outOfOrder` off a number below an applied one can never run. The
 next migration is V33 (`MigrationOrderIT`, chapter 15 section 15.4.3).
+`V35__loan_reopen_restores_pledges.sql` (#176) replaces `lending_loan_collateral_guard` so a
+reversal that reopens a closed loan can restore that loan's own pledges (section 6.7).
 
 ## 6.10 Open items
 

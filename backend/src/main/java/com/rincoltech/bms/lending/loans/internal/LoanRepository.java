@@ -215,6 +215,36 @@ class LoanRepository {
                 .list();
     }
 
+    /** The pledges a closed loan released at closure (FR-COL-04); each item has one row per loan. */
+    List<PledgeRow> releasedPledges(UUID loanId) {
+        return jdbc.sql("""
+                        SELECT collateral_id, pledged_value_minor FROM lending_loan_collateral
+                         WHERE loan_id = ? AND released_at IS NOT NULL ORDER BY collateral_id
+                        """)
+                .param(loanId)
+                .query((rs, n) ->
+                        new PledgeRow(rs.getObject("collateral_id", UUID.class), rs.getLong("pledged_value_minor")))
+                .list();
+    }
+
+    /**
+     * #176: a reopened loan takes its released pledges back. The guard (V35) allows exactly this
+     * change, for the loan named in the transaction-local {@code bms.restore_pledges_loan}.
+     */
+    void restorePledges(UUID loanId) {
+        jdbc.sql("SELECT set_config('bms.restore_pledges_loan', ?, true)")
+                .param(loanId.toString())
+                .query(String.class)
+                .single();
+        jdbc.sql("UPDATE lending_loan_collateral SET released_at = NULL, updated_at = now(), version = version + 1"
+                        + " WHERE loan_id = ? AND released_at IS NOT NULL")
+                .param(loanId)
+                .update();
+        jdbc.sql("SELECT set_config('bms.restore_pledges_loan', '', true)")
+                .query(String.class)
+                .single();
+    }
+
     void replacePledges(UUID loanId, List<PledgeRow> rows) {
         jdbc.sql("DELETE FROM lending_loan_collateral WHERE loan_id = ?")
                 .param(loanId)

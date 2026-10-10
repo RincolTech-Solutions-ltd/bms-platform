@@ -510,7 +510,10 @@ Origination rules that follow from the table above:
   not cancelled, rejected or closed. A draft holds its pledges from the moment they are set, and a
   loan returned for correction keeps them: the officer is still assembling that application.
   Cancelling, rejecting or closing the loan releases them. A written-off loan keeps its
-  collateral, because it is being recovered.
+  collateral, because it is being recovered. A repayment reversal that reopens a closed loan
+  (FR-REP-05) takes its pledges back, provided every item is still held and secures no other
+  loan; otherwise the reversal is refused with `collateral_no_longer_held` and a manager decides
+  (#176).
 - Pledged value (FR-ORG-02). A pledge states at most the item's value (latest forced sale value,
   else the estimate), so only a valued item can be pledged (`collateral_not_valued`), on any
   product. A loan takes at most 20 guarantors and 20 pledged items.

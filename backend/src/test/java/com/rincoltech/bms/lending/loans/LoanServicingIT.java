@@ -512,6 +512,143 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     /**
+     * A secured loan (bullet, 500,000 at 20% for a month, 1x cover) approved by three users, its
+     * item pledged at 1,000,000; disbursed and paid off with 650,000, so it closes and its pledge
+     * is released. Returns {loan, item, payoff transaction}.
+     */
+    String[] securedPaidOff(String code, int memberNo) {
+        String product = product(code, false, true);
+        String member = member(
+                "Test Borrower %02d".formatted(memberNo), "07000000%02d".formatted(memberNo), t.headOffice(), true);
+        String item = collateralItem(member, "TEST-PLEDGE-%02d".formatted(memberNo));
+        String loan = apply(member, product, 500_000, null).getBody().get("id").asString();
+        assertThat(asOfficer(
+                                HttpMethod.PUT,
+                                LOANS + "/" + loan + "/collateral",
+                                "\"1\"",
+                                Map.of(
+                                        "collateral",
+                                        List.of(Map.of("collateral_id", item, "pledged_value_minor", 1_000_000))))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(asOfficer(HttpMethod.POST, LOANS + "/" + loan + "/submit", "\"2\"", null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/appraisals",
+                as(appraiser, officerPerms, "*", "\"3\""),
+                Map.of("declared_monthly_income_minor", 2_400_000));
+        assertThat(send(
+                                HttpMethod.POST,
+                                LOANS + "/" + loan + "/decision",
+                                as(manager, managerPerms, "*", "\"4\""),
+                                Map.of("decision", "approve"))
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("approved");
+        disburse(loan, today);
+        String txn = repaid(loan, 650_000, today).get("transaction").get("id").asString();
+        assertThat(loan(loan).get("status").asString()).isEqualTo("closed");
+        assertThat(openPledges(loan)).as("closing released the pledge").isZero();
+        return new String[] {loan, item, txn};
+    }
+
+    static long openPledges(String loan) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM lending_loan_collateral WHERE loan_id = ?::uuid AND released_at IS NULL")
+                .param(loan)
+                .query(Long.class)
+                .single();
+    }
+
+    static void custody(String item, String status) {
+        TestDatabase.owner()
+                .sql("UPDATE lending_collateral_items SET custody_status = ? WHERE id = ?::uuid")
+                .params(status, item)
+                .update();
+    }
+
+    /** #176: a bounced payoff reopens the loan with its collateral pledged again. */
+    @Test
+    void frRep05_aReopenedLoanTakesBackItsPledges() {
+        String[] s = securedPaidOff("REPLEDGE", 61);
+        ResponseEntity<JsonNode> d = decide(requestReversal(s[0], s[2]), manager, managerPerms);
+        assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
+
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+        assertThat(openPledges(s[0])).as("the pledge is back").isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE entity_id = ?::uuid"
+                                + " AND action = 'lending.loan.pledges_restored'")
+                        .param(s[0])
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        // The item is held by the open loan again: a release is refused.
+        ResponseEntity<JsonNode> release = send(
+                HttpMethod.POST,
+                "/api/v1/lending/collateral/" + s[1] + "/release",
+                as(officer, officerPerms, "*", "\"1\""),
+                Map.of("collected_by", "Test Borrower 61"));
+        assertThat(release.getBody().get("code").asString()).isEqualTo("collateral_secures_open_loan");
+        booksAgree();
+    }
+
+    /** #176: an item released to the member since closure refuses the reversal, at request and at execution. */
+    @Test
+    void frRep05_aReversalThatWouldReopenWithoutTheItemIsRefused() {
+        String[] s = securedPaidOff("GONE", 62);
+        // Changed after the request: the checker's approval fails and the request stays pending.
+        String approval = requestReversal(s[0], s[2]);
+        custody(s[1], "released");
+        ResponseEntity<JsonNode> failed = decide(approval, manager, managerPerms);
+        assertThat(failed.getBody().get("code").asString()).isEqualTo("approval_execution_failed");
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
+        assertThat(openPledges(s[0])).isZero();
+
+        // Changed before the request: refused straight away.
+        String[] other = securedPaidOff("GONE2", 63);
+        custody(other[1], "released");
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                LOANS + "/" + other[0] + "/transactions/" + other[2] + "/reverse",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("reason", "Test bounced"));
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("collateral_no_longer_held");
+        booksAgree();
+    }
+
+    /** #176: an item pledged to a new loan since closure refuses the reversal. */
+    @Test
+    void frRep05_aReversalThatWouldTakeAnItemFromAnotherLoanIsRefused() {
+        String[] s = securedPaidOff("TAKEN", 64);
+        String borrower = loan(s[0]).get("member_id").asString();
+        String next = apply(borrower, product("TAKEN2", false, false), 500_000, null)
+                .getBody()
+                .get("id")
+                .asString();
+        assertThat(asOfficer(
+                                HttpMethod.PUT,
+                                LOANS + "/" + next + "/collateral",
+                                "\"1\"",
+                                Map.of(
+                                        "collateral",
+                                        List.of(Map.of("collateral_id", s[1], "pledged_value_minor", 1_000_000))))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                LOANS + "/" + s[0] + "/transactions/" + s[2] + "/reverse",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("reason", "Test bounced"));
+        assertThat(r.getBody().get("code").asString()).isEqualTo("collateral_no_longer_held");
+        assertThat(openPledges(next)).isEqualTo(1);
+    }
+
+    /**
      * FR-REP-05 acceptance: reversing a repayment that is not the latest re-allocates the later one
      * in value date order and posts the net difference.
      */

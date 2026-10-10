@@ -70,3 +70,8 @@ most one open loan.**
   registering the same asset twice, which the one-open-loan rule does not cover.
 
 A two-thread test pledges one item to two drafts at once and expects one 200 and one 409.
+
+Addendum (2026-10-10, issue #176): a repayment reversal that reopens a closed loan restores that
+loan's released pledges under the same item locks, or is refused with `collateral_no_longer_held`
+when an item is no longer held or now secures another loan. The one-open-pledge index stays the
+backstop; V35 narrows the guard exception to the reopened loan alone.

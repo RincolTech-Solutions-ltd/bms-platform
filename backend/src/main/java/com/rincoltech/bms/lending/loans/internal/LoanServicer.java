@@ -7,6 +7,7 @@ import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSequences;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.lending.collateral.CollateralLookup;
 import com.rincoltech.bms.lending.loans.LoanServicing;
 import com.rincoltech.bms.lending.loans.internal.LoanBooks.Leg;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -55,6 +57,7 @@ class LoanServicer implements LoanServicing {
     private final CurrentTenant currentTenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final CollateralLookup collateral;
 
     LoanServicer(
             LoanRepository loans,
@@ -65,7 +68,8 @@ class LoanServicer implements LoanServicing {
             TenantSequences sequences,
             CurrentTenant currentTenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            CollateralLookup collateral) {
         this.loans = loans;
         this.repo = repo;
         this.products = products;
@@ -75,6 +79,7 @@ class LoanServicer implements LoanServicing {
         this.currentTenant = currentTenant;
         this.clock = clock;
         this.audit = audit;
+        this.collateral = collateral;
     }
 
     LocalDate today() {
@@ -384,7 +389,61 @@ class LoanServicer implements LoanServicing {
                     "Invalid status transition",
                     "A repayment on a " + loan.status() + " loan is not reversed.");
         }
+        if (txn.txnType().equals("repayment") && loan.status().equals("closed")) {
+            // Fail fast at request time; reopen() checks again under the items' locks.
+            requirePledgesRestorable(loan, loans.releasedPledges(loan.id()), false);
+        }
         return txn;
+    }
+
+    /**
+     * #176: the reopened loan takes back the pledges its closure released, each item locked in id
+     * order as pledging does. An item no longer held (released to the member, seized, disposed) or
+     * pledged to another open loan refuses the reversal, so a manager decides what secures the loan.
+     */
+    private void restorePledges(Loan loan, UUID by) {
+        List<LoanRepository.PledgeRow> released = loans.releasedPledges(loan.id());
+        if (released.isEmpty()) {
+            return;
+        }
+        requirePledgesRestorable(loan, released, true);
+        try {
+            loans.restorePledges(loan.id());
+        } catch (DuplicateKeyException e) {
+            // The one-open-pledge index: the backstop behind the lock and the check.
+            throw ApiException.rule(
+                    "collateral_no_longer_held", "A pledged item now secures another loan; the loan is not reopened.");
+        }
+        audit.record(AuditLog.Entry.created(
+                "lending.loan.pledges_restored",
+                SUBJECT,
+                loan.id(),
+                loan.branchId(),
+                Map.of(
+                        "collateral_ids",
+                        released.stream()
+                                .map(LoanRepository.PledgeRow::collateralId)
+                                .toList(),
+                        "restored_by",
+                        by)));
+    }
+
+    private void requirePledgesRestorable(Loan loan, List<LoanRepository.PledgeRow> released, boolean lock) {
+        List<String> gone = new ArrayList<>();
+        for (LoanRepository.PledgeRow p : released) {
+            var item = lock ? collateral.lockForPledge(p.collateralId()) : collateral.find(p.collateralId());
+            boolean held = item.map(i -> Set.of("pledged", "in_custody").contains(i.custodyStatus()))
+                    .orElse(false);
+            if (!held || loans.pledgedElsewhere(p.collateralId(), loan.id())) {
+                gone.add(p.collateralId().toString());
+            }
+        }
+        if (!gone.isEmpty()) {
+            throw ApiException.rule(
+                    "collateral_no_longer_held",
+                    "The loan would reopen without collateral it was secured by: item(s) " + String.join(", ", gone)
+                            + " are no longer held or now secure another loan.");
+        }
     }
 
     /**
@@ -495,6 +554,7 @@ class LoanServicer implements LoanServicing {
             if (loan.status().equals("closed") && !position.settled()) {
                 loans.move(loan.id(), "closed", "active", by, "repayment_reversed", Map.of());
                 repo.closedOn(loan.id(), null);
+                restorePledges(loan, by);
             } else if (loan.status().equals("active") && position.settled()) {
                 close(loan, today, by);
             }
