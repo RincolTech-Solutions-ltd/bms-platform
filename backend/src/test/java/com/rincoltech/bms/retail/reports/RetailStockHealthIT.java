@@ -193,7 +193,7 @@ class RetailStockHealthIT extends IntegrationTest {
         assertThat(AnalyticsData.hasKey(r, "cost")).isFalse();
         assertThat(AnalyticsData.hasKey(r, "profit_minor")).isFalse();
         assertThat(AnalyticsData.hasKey(r, "net")).isFalse();
-        assertThat(r.toString()).doesNotContain("1450", "27200");
+        assertThat(AnalyticsData.figures(r)).doesNotContain("1450", "27200");
         assertThat(AnalyticsData.auditRows()).isEqualTo(audit);
     }
 
@@ -201,7 +201,7 @@ class RetailStockHealthIT extends IntegrationTest {
     void permissionBranchScopeAndInputRules() {
         ResponseEntity<JsonNode> denied = api.get("/reports/stock-health", "retail.sale.read");
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(denied.getBody().toString()).doesNotContain("1450", "255.0");
+        assertThat(AnalyticsData.figures(denied.getBody())).doesNotContain("1450", "255.0");
         ResponseEntity<JsonNode> scoped = api.call(
                 HttpMethod.GET,
                 "/reports/stock-health",

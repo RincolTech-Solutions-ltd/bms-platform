@@ -78,6 +78,29 @@ final class AnalyticsData {
         sell(t.secondBranch(), "cash", p1, "1", 0);
     }
 
+    /**
+     * Every number in a response, as text (1800, 255.0). A test that a figure is absent asserts on
+     * these, never on the response text: a random id or a date can contain the same digits (#237).
+     */
+    static java.util.Set<String> figures(JsonNode node) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        collectFigures(node, out);
+        return out;
+    }
+
+    private static void collectFigures(JsonNode node, java.util.Set<String> out) {
+        if (node == null) {
+            return;
+        }
+        if (node.isNumber()) {
+            out.add(node.asString());
+        } else if (node.isObject()) {
+            node.properties().forEach(e -> collectFigures(e.getValue(), out));
+        } else if (node.isArray()) {
+            node.forEach(n -> collectFigures(n, out));
+        }
+    }
+
     static boolean hasKey(JsonNode node, String fragment) {
         if (node.isObject()) {
             for (var e : node.properties()) {

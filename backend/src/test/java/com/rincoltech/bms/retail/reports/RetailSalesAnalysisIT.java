@@ -152,7 +152,7 @@ class RetailSalesAnalysisIT extends IntegrationTest {
         for (String fragment : new String[] {"cost", "profit_minor", "margin", "gross"}) {
             assertThat(AnalyticsData.hasKey(a, fragment)).as(fragment).isFalse();
         }
-        assertThat(a.toString()).doesNotContain("3333", "1800");
+        assertThat(AnalyticsData.figures(a)).doesNotContain("3333", "1800");
         assertThat(AnalyticsData.auditRows()).isEqualTo(audit);
     }
 
@@ -185,7 +185,7 @@ class RetailSalesAnalysisIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
         long audit = AnalyticsData.auditRows();
         ResponseEntity<JsonNode> denied = api.get("/reports/sales-analysis", "retail.stock.read");
-        assertThat(denied.getBody().toString()).doesNotContain("1800", "3600", "5400");
+        assertThat(AnalyticsData.figures(denied.getBody())).doesNotContain("1800", "3600", "5400");
         assertThat(AnalyticsData.auditRows()).isEqualTo(audit);
         String today = AnalyticsData.today().toString();
         assertThat(api.get(
@@ -222,7 +222,7 @@ class RetailSalesAnalysisIT extends IntegrationTest {
             boolean headOffice = row.get("id").asString().equals(t.headOffice().toString());
             assertThat(row.has("gross_profit_minor")).as("branch row %s", row).isEqualTo(headOffice);
         }
-        assertThat(body.toString()).doesNotContain("1800");
+        assertThat(AnalyticsData.figures(body)).doesNotContain("1800");
 
         // Asking for head office alone is a report over a branch where the permission is held.
         ResponseEntity<JsonNode> one = api.call(
