@@ -220,15 +220,6 @@ platform API and holds no tenant permissions.
 | `retail.advance.create` | Y | | | | | | | |
 | `retail.advance.repay` | Y | | | | | | | |
 | `retail.cashbook.void` | Y | | | | | | | |
-| `retail.branch_role.manage` | Y | | | | | | | |
-| `retail.pricelist.manage` | Y | | | | | | | |
-| `retail.pricelist.use` | Y | | | | | | | |
-| `retail.price.override` | Y | | | | | | | Y |
-| `retail.credit.manage` | Y | | | | | | | |
-| `retail.sale.return` | Y | | | | | | | |
-| `retail.credit.override` | Y | | | | | | | |
-| `retail.document.issue` | Y | | | | | | | |
-| `retail.payable.manage` | Y | | | | | | | |
 
 Notes:
 
@@ -280,7 +271,7 @@ Notes:
 - Trade capabilities (ADR-033, design only): the nine permissions `retail.branch_role.manage`,
   `retail.pricelist.manage`, `retail.pricelist.use`, `retail.price.override`, `retail.credit.manage`,
   `retail.credit.override`, `retail.sale.return`, `retail.document.issue` and `retail.payable.manage`
-  are rows of the matrix above, seeded by the slice that needs each. Only `retail.price.override`,
+  are design only: they are not rows of the matrix above, and each is added to the matrix by the migration of the slice that needs it (design, seeded by the slice that needs each). Only `retail.price.override`,
   which guards behaviour the sales role already has, is granted to every holder of
   `retail.sale.create`; all others, `retail.pricelist.use` included, are administrators only.
   `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales
