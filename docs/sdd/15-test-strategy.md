@@ -282,6 +282,14 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
 - **Contract snapshot.** The generated OpenAPI document must equal
   `docs/api/openapi.json` (chapter 7 section 7.3).
 
+Generated documents (ADR-034, #120). `LoanServicingIT` renders the voucher, the receipt, the
+schedule and the loan statement for a fabricated loan and compares the text PDFBox extracts
+(every printed date replaced by `{DATE}`) with `src/test/resources/golden/documents/*.txt`; a
+receipt is one page, receipts and vouchers are stored once and schedules and statements never.
+`-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
+each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
+of the quality bar before a template change is merged.
+
 Updating a golden file is allowed only in a pull request that explains why the expected
 output changed.
 

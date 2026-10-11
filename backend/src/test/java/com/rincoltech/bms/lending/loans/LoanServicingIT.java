@@ -676,4 +676,244 @@ class LoanServicingIT extends LoanFixtures {
                         .get("items"))
                 .isEmpty();
     }
+
+    // ---- Documents (FR-DOC-01, ADR-034) ---------------------------------------------------
+
+    /** The fixture's staff as real users, so the signature blocks carry names. */
+    void namedStaff() {
+        String[][] staff = {
+            {cashier.toString(), "Test Cashier"}, {manager.toString(), "Test Manager"}, {admin.toString(), "Test Admin"}
+        };
+        for (String[] u : staff) {
+            TestDatabase.owner()
+                    .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                            + " VALUES (?::uuid, ?, 'staff', ?, ?, 'active') ON CONFLICT DO NOTHING")
+                    .params(u[0], t.tenantId(), u[1], u[1].toLowerCase().replace(' ', '.') + "@example.test")
+                    .update();
+        }
+        TestDatabase.owner()
+                .sql("UPDATE branches SET location = 'Plot 1, Test Road, Kampala' WHERE id = ?")
+                .param(t.headOffice())
+                .update();
+        // A fixed name, footer, brand colour and logo, so the golden text is stable and the letterhead is complete.
+        String settingsPerms = "core.settings.read,core.settings.manage";
+        int version = send(HttpMethod.GET, "/api/v1/settings", as(admin, settingsPerms, "*", null), null)
+                .getBody()
+                .get("version")
+                .asInt();
+        assertThat(send(
+                                HttpMethod.PATCH,
+                                "/api/v1/settings",
+                                as(admin, settingsPerms, "*", "\"" + version + "\""),
+                                Map.of(
+                                        "display_name", "Test Lending Ltd",
+                                        "receipt_footer",
+                                                "Test Lending Ltd, Plot 1 Test Road. Keep this document safe.",
+                                        "theme_primary", "#1E5631"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        org.springframework.util.LinkedMultiValueMap<String, Object> form =
+                new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("file", new org.springframework.core.io.ByteArrayResource(logoPng()) {
+            @Override
+            public String getFilename() {
+                return "logo.png";
+            }
+        });
+        HttpHeaders h = as(admin, settingsPerms, "*", null);
+        h.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        assertThat(http.exchange(
+                                "/api/v1/settings/logo",
+                                HttpMethod.PUT,
+                                new org.springframework.http.HttpEntity<>(form, h),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /** A fabricated logo: a green square with a white bar, 256 by 128 pixels. */
+    static byte[] logoPng() {
+        java.awt.image.BufferedImage img =
+                new java.awt.image.BufferedImage(256, 128, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setColor(new java.awt.Color(0x1E, 0x56, 0x31));
+        g.fillRect(0, 0, 256, 128);
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(32, 52, 192, 24);
+        g.dispose();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try {
+            javax.imageio.ImageIO.write(img, "png", out);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return out.toByteArray();
+    }
+
+    /** The text of a PDF with every printed date replaced, so a golden file does not move with the calendar. */
+    static String text(byte[] pdf) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            String raw = new org.apache.pdfbox.text.PDFTextStripper().getText(d);
+            return raw.replaceAll("\\b\\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4}\\b", "{DATE}")
+                    .replace("\r", "")
+                    .strip();
+        }
+    }
+
+    /**
+     * Compares with {@code golden/documents/<name>.txt}. With {@code -Dbms.golden.record=true} it
+     * writes the file instead (review it before committing). With {@code -Dbms.documents.samples}
+     * it also writes the PDF and a PNG of each page to {@code target/document-samples} for the
+     * visual check of the ADR-034 quality bar.
+     */
+    static void golden(String name, byte[] pdf) throws Exception {
+        if (System.getProperty("bms.documents.samples") != null) {
+            java.nio.file.Path dir = java.nio.file.Path.of("target/document-samples");
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Files.write(dir.resolve(name + ".pdf"), pdf);
+            try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+                org.apache.pdfbox.rendering.PDFRenderer r = new org.apache.pdfbox.rendering.PDFRenderer(d);
+                for (int i = 0; i < d.getNumberOfPages(); i++) {
+                    javax.imageio.ImageIO.write(
+                            r.renderImageWithDPI(i, 110),
+                            "png",
+                            dir.resolve(name + "-p" + (i + 1) + ".png").toFile());
+                }
+            }
+        }
+        java.nio.file.Path file = java.nio.file.Path.of("src/test/resources/golden/documents/" + name + ".txt");
+        String actual = text(pdf) + "\n";
+        if (Boolean.getBoolean("bms.golden.record")) {
+            java.nio.file.Files.createDirectories(file.getParent());
+            java.nio.file.Files.writeString(file, actual);
+            return;
+        }
+        assertThat(actual).as("golden text of %s", name).isEqualTo(java.nio.file.Files.readString(file));
+    }
+
+    ResponseEntity<JsonNode> issue(String loan, String txn) {
+        return send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/transactions/" + txn + "/document",
+                as(cashier, cashierPerms, "*", null),
+                null);
+    }
+
+    byte[] stored(String documentId) {
+        ResponseEntity<JsonNode> url = send(
+                HttpMethod.POST,
+                "/api/v1/documents/" + documentId + "/download-url",
+                as(cashier, cashierPerms, "*", null),
+                null);
+        assertThat(url.getStatusCode()).as("%s", url.getBody()).isEqualTo(HttpStatus.OK);
+        HttpHeaders h = new HttpHeaders();
+        h.add("X-Tenant", t.slug());
+        return http.exchange(
+                        java.net.URI.create(
+                                http.getRootUri() + url.getBody().get("url").asString()),
+                        HttpMethod.GET,
+                        new org.springframework.http.HttpEntity<>(h),
+                        byte[].class)
+                .getBody();
+    }
+
+    /**
+     * FR-DOC-01 and FR-DOC-02: the voucher and the receipt are rendered on first request, stored
+     * once and downloaded through a signed URL; their text matches the golden files, with names,
+     * amounts in words, the allocation and the signature blocks.
+     */
+    @Test
+    void frDoc01_theVoucherAndReceiptAreIssuedOnce() throws Exception {
+        namedStaff();
+        String product = product("DOCS", Map.of(), List.of(fee("deducted_at_disbursement", null, 200)));
+        String loan = approved(product, 1_200_000, 3, 81);
+        disburse(loan, today);
+        String receiptTxn =
+                repaid(loan, 300_000, today).get("transaction").get("id").asString();
+        String disbursement = null;
+        for (JsonNode t : get(loan, "/transactions").get("items")) {
+            if (t.get("txn_type").asString().equals("disbursement")) {
+                disbursement = t.get("id").asString();
+            }
+        }
+
+        JsonNode voucher = issue(loan, disbursement).getBody();
+        assertThat(voucher.get("doc_type").asString()).isEqualTo("voucher");
+        assertThat(voucher.get("doc_number").asString()).isEqualTo("VC-HQ-000001");
+        assertThat(voucher.get("created").asBoolean()).isTrue();
+        JsonNode again = issue(loan, disbursement).getBody();
+        assertThat(again.get("created").asBoolean()).as("stored once").isFalse();
+        assertThat(again.get("document_id").asString())
+                .isEqualTo(voucher.get("document_id").asString());
+        byte[] voucherPdf = stored(voucher.get("document_id").asString());
+        golden("voucher", voucherPdf);
+
+        JsonNode receipt = issue(loan, receiptTxn).getBody();
+        assertThat(receipt.get("doc_number").asString()).isEqualTo("RC-HQ-000001");
+        byte[] receiptPdf = stored(receipt.get("document_id").asString());
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(receiptPdf)) {
+            assertThat(d.getNumberOfPages()).as("a receipt is one page").isEqualTo(1);
+        }
+        golden("receipt", receiptPdf);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_type IN ('receipt', 'voucher')")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2);
+    }
+
+    /** FR-DOC-01: the schedule and the statement are rendered as at today, never stored. */
+    @Test
+    void frDoc01_theScheduleAndStatementAreRenderedAsAtToday() throws Exception {
+        namedStaff();
+        String loan = approved(exampleB("DOCS2"), 1_200_000, 3, 82);
+        disburse(loan, today);
+        String paid = repaid(loan, 300_000, today).get("transaction").get("id").asString();
+        ResponseEntity<byte[]> schedule = http.exchange(
+                LOANS + "/" + loan + "/documents/schedule",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(as(cashier, cashierPerms, "*", null)),
+                byte[].class);
+        assertThat(schedule.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(schedule.getHeaders().getContentType().toString()).isEqualTo("application/pdf");
+        golden("schedule", schedule.getBody());
+        byte[] statement = http.exchange(
+                        LOANS + "/" + loan + "/documents/loan_statement",
+                        HttpMethod.POST,
+                        new org.springframework.http.HttpEntity<>(as(cashier, cashierPerms, "*", null)),
+                        byte[].class)
+                .getBody();
+        golden("loan_statement", statement);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_type <> 'upload'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("schedules and statements are not stored")
+                .isZero();
+
+        // A reversal has no receipt; a loan not yet disbursed has no schedule; another branch sees nothing.
+        String approval = requestReversal(loan, paid);
+        decide(approval, manager, managerPerms);
+        String reversal =
+                get(loan, "/transactions").get("items").get(0).get("id").asString();
+        assertThat(issue(loan, reversal).getBody().get("code").asString()).isEqualTo("no_document");
+        String notYet = approved(exampleB("DOCS3"), 1_200_000, 3, 83);
+        assertThat(send(
+                                HttpMethod.POST,
+                                LOANS + "/" + notYet + "/documents/schedule",
+                                as(cashier, cashierPerms, "*", null),
+                                null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(send(
+                                HttpMethod.POST,
+                                LOANS + "/" + loan + "/transactions/" + paid + "/document",
+                                as(cashier, cashierPerms, t.secondBranch().toString(), null),
+                                null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
 }
