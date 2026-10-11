@@ -2,10 +2,11 @@
 
 ## Status
 
-Proposed (issue #120, the FR-DOC-01 follow-up that #126 deferred). Builds on ADR-004 (integer
+Accepted (2026-10-11, product owner decision on #205; issue #120, the FR-DOC-01 follow-up that
+#126 deferred). Builds on ADR-004 (integer
 money), ADR-024 (the outbox) and ADR-026 (receipt and voucher numbers, FR-DOC-04). Needs a decision
-before code: no PDF library is in the project, and chapter 5 names PDF rendering in the documents
-module without choosing how.
+before code, because no PDF library was in the project and chapter 5 named PDF rendering in the
+documents module without choosing how.
 
 ## Context
 
@@ -23,7 +24,7 @@ Four questions are open:
    (chapter 5 lists the worker as draining PDF rendering).
 4. How a golden-file test stays stable when PDF bytes carry timestamps and object ids.
 
-## Decision (proposed)
+## Decision
 
 1. **Library: OpenHTMLtoPDF** (`io.github.openhtmltopdf`, the maintained fork, on Apache PDFBox).
    It lays out XHTML and CSS, including tables, page headers and footers, page numbers and
@@ -34,7 +35,7 @@ Four questions are open:
 2. **Templates: Thymeleaf XHTML** under `resources/templates/documents/`, one per document. It
    escapes every value by default, so a member's name cannot break the markup. Money and dates
    are formatted in Java, once, by the same helpers the API uses. The tenant's logo, theme colour
-   and footer come from the branding of FR-TEN-08. One open font (Noto Sans) is embedded, so
+   and footer come from the branding of FR-TEN-08. The self-hosted Open Sans is embedded, so
    names and amounts render the same on every device.
 3. **On demand, stored once per version.**
    - **Receipt and voucher.** These are fixed once the transaction exists. The first download
@@ -69,6 +70,27 @@ Java. Receipts are stored exactly as first issued. Golden tests read as text in 
 **Worse:** one new runtime dependency family (OpenHTMLtoPDF, PDFBox, Thymeleaf) and one embedded
 font, about 6 MB in the image. The first download of a receipt costs one render inside the
 request.
+
+**Quality bar** (product owner, 2026-10-11). It applies to #120 and to every later document:
+
+1. One shared header and footer for all documents. The header has the tenant logo and business
+   details on the left, the branch address, and a right-aligned line with the document number
+   and date. Below it comes a full-width rule in the tenant brand colour, then a centred document
+   title (RECEIPT, VOUCHER, LOAN SCHEDULE, STATEMENT).
+2. The tenant brand colour is used for the rule, the table header and the title, with a pale tint
+   of it for alternate rows. Body text is dark grey. The table header is white on the brand
+   colour, contrast-checked by the existing brand contrast rule.
+3. Amounts appear in figures and in words, with the currency shown. Money is right aligned in a
+   tabular figure font, and the totals row is clearly set off.
+4. Signature blocks appear where the document type needs them (the voucher: prepared, approved,
+   received), with names and dates. A blank placeholder is never left for data the system knows.
+5. Document numbers are readable and unique per tenant and branch: a series with a prefix and
+   the branch code. The number is repeated in the footer with page x of y.
+6. Fonts are embedded (the self-hosted Open Sans) with A4 print margins and no cut-off tables.
+   Long tables repeat their header on each page, and a receipt fits on one page.
+7. Leave room in the receipt layout for an optional QR or short verification code later.
+8. Visual check: each template is rendered to PNG by a documented script (or in CI), and a sample
+   sheet is reviewed before merging. Golden text tests alone do not catch an ugly layout.
 
 **Watch for:** the logo must stay PNG, JPEG or WebP (FR-TEN-08); SVG is never passed to the
 renderer. A template change does not alter receipts already stored; that is intended, and the
