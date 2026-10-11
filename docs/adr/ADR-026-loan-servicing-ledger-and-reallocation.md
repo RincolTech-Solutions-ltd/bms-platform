@@ -110,3 +110,6 @@ Also decided here, within the rules of chapter 3:
 - When FR-GL-08's `payment_methods` arrives, the default mapping must stay as the fallback or be
   seeded as rows, so existing tenants keep posting. Done in #160 (V36): the defaults stay the
   fallback, in one place (`core.ledger`'s `PaymentMethods`), and the three lending copies are gone.
+  Retail is not covered yet: its postings and the cash book still use the seeded system keys, so
+  remapping `cash` moves lending cash out of the retail cash book (#236). A correction credits the
+  account the original entry debited, never the method's mapping at the time of the correction.

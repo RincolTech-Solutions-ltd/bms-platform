@@ -67,11 +67,6 @@ class InvestmentBooks {
         return paymentMethods.accountRef(paymentMethodKey, branchId);
     }
 
-    /** The same check without a branch: the tenant's mapping, for request validation. */
-    String methodAccount(String paymentMethodKey) {
-        return methodAccount(paymentMethodKey, null);
-    }
-
     /** Posts one balanced entry; legs of zero are left out. */
     PostedEntry post(
             UUID branchId,

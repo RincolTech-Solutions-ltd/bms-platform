@@ -226,7 +226,7 @@ class InvestmentServicer implements InvestmentServicing {
         if (valueDate.isAfter(today())) {
             throw ApiException.rule("value_date_in_future", "The value date is today or earlier.");
         }
-        books.methodAccount(paymentMethodKey);
+        books.methodAccount(paymentMethodKey, inv.branchId());
     }
 
     /**
@@ -958,9 +958,9 @@ class InvestmentServicer implements InvestmentServicing {
 
     // ---- Shared ---------------------------------------------------------------------------
 
-    /** FR-GL-08: the payment method maps to an active account. */
-    void checkMethod(String paymentMethodKey) {
-        books.methodAccount(paymentMethodKey);
+    /** FR-GL-08: the payment method maps to an active account at this branch. */
+    void checkMethod(String paymentMethodKey, UUID branchId) {
+        books.methodAccount(paymentMethodKey, branchId);
     }
 
     static InvestmentReturns.Terms terms(Inv inv, long principal) {

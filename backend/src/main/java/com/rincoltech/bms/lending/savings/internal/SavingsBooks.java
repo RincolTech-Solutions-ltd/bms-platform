@@ -56,11 +56,6 @@ class SavingsBooks {
         return paymentMethods.accountRef(paymentMethodKey, branchId);
     }
 
-    /** The same check without a branch: the tenant's mapping, for request validation. */
-    String methodAccount(String paymentMethodKey) {
-        return methodAccount(paymentMethodKey, null);
-    }
-
     /**
      * Posts one balanced two-line entry: {@code debitKey} and {@code creditKey} by system key; the
      * {@code member_savings} side carries the account as subledger.

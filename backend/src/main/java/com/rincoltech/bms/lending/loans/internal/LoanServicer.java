@@ -112,7 +112,7 @@ class LoanServicer implements LoanServicing {
         if (date.isAfter(today())) {
             throw ApiException.rule("value_date_in_future", "The disbursement date is today or earlier.");
         }
-        books.methodAccount(paymentMethodKey);
+        books.methodAccount(paymentMethodKey, loan.branchId());
     }
 
     /**
@@ -255,7 +255,7 @@ class LoanServicer implements LoanServicing {
                     "before_last_repayment",
                     "The value date is before the loan's latest repayment (" + b.lastRepaymentOn() + ").");
         }
-        books.methodAccount(paymentMethodKey);
+        books.methodAccount(paymentMethodKey, loan.branchId());
     }
 
     /** Records the repayment, or on a written-off loan the recovery; returns the transaction id. */
@@ -431,7 +431,7 @@ class LoanServicer implements LoanServicing {
             }
             if (othersMoved) {
                 List<Leg> legs = new ArrayList<>();
-                legs.add(Leg.credit(books.methodAccount(txn.paymentMethodKey(), loan.branchId()), txn.amountMinor()));
+                legs.add(Leg.credit(books.paidThrough(txn.journalEntryId()), txn.amountMinor()));
                 legs.addAll(netLegs(
                         loan.id(),
                         deltas.values().stream().flatMap(List::stream).toList()));

@@ -361,6 +361,75 @@ class LoanServicingIT extends LoanFixtures {
         booksAgree();
     }
 
+    /** The account codes on the credit side of a journal entry. */
+    static List<String> creditCodes(String entryId) {
+        return TestDatabase.owner()
+                .sql("SELECT a.code FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id"
+                        + " WHERE l.entry_id = ?::uuid AND l.credit > 0 AND a.system_key IS DISTINCT FROM 'loans_receivable'"
+                        + " AND a.system_key IS DISTINCT FROM 'loan_interest_income'")
+                .param(entryId)
+                .query(String.class)
+                .list();
+    }
+
+    /**
+     * Review of #206: cash remapped between a repayment and its reversal. The re-allocating
+     * reversal credits the till the repayment debited, not the till cash maps to now.
+     */
+    @Test
+    void frGl08_aReversalCreditsTheAccountTheRepaymentDebited() {
+        String perms = permissionsOf("tenant_admin");
+        String tillA = assetAccount("1014", "Test till A");
+        String tillB = assetAccount("1015", "Test till B");
+        setMethod("cash", null, tillA, null, perms);
+        String loan = approved(exampleB("REMAP"), 1_200_000, 3, 72);
+        LocalDate disbursed = today.minusMonths(2).minusDays(5);
+        disburse(loan, disbursed);
+        String first = repaid(loan, 300_000, disbursed.plusMonths(1))
+                .get("transaction")
+                .get("id")
+                .asString();
+        repaid(loan, 520_000, disbursed.plusMonths(2));
+        setMethod("cash", null, tillB, null, perms);
+
+        decide(requestReversal(loan, first), manager, managerPerms);
+        JsonNode reversal = get(loan, "/transactions").get("items").get(0);
+        assertThat(reversal.get("txn_type").asString()).isEqualTo("reversal");
+        assertThat(creditCodes(reversal.get("journal_entry_id").asString()))
+                .as("the money goes back out of the till it came into")
+                .containsExactly("1014");
+        booksAgree();
+    }
+
+    /**
+     * Review of #206: a method mapped only for a branch is accepted when requested at that branch,
+     * and a method switched off for that branch is refused at the request, not later at approval.
+     */
+    @Test
+    void frGl08_theBranchMappingDecidesAtRequestToo() {
+        String perms = permissionsOf("tenant_admin");
+        String headOfficeTill = assetAccount("1016", "Test head office till");
+        setMethod("mtn_momo", t.headOffice(), headOfficeTill, null, perms);
+        String loan = approved(exampleB("BRANCHMAP"), 1_200_000, 3, 73);
+        disburse(loan, today);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("amount_minor", 100_000);
+        body.put("value_date", today.toString());
+        body.put("payment_method_key", "mtn_momo");
+        ResponseEntity<JsonNode> paid = send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/repayments",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                body);
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        setMethod("cash", t.headOffice(), headOfficeTill, false, perms);
+        ResponseEntity<JsonNode> off =
+                requestDisbursement(approved(exampleB("BRANCHOFF"), 1_200_000, 3, 74), today, key());
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(off.getBody().get("code").asString()).isEqualTo("payment_method_unmapped");
+    }
+
     /** FR-GL-08: only a postable, active asset account that no module controls, a real branch, and the permission. */
     @Test
     void frGl08_aMappingIsValidated() {

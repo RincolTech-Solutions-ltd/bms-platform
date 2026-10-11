@@ -556,7 +556,9 @@ Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08. Buil
 posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_momo` to
 `mobile_money_mtn`, `airtel_money` to `mobile_money_airtel`, ADR-026), and a row with
 `is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
-lending's loans, savings and investments post through it.
+lending's loans, savings and investments post through it, at the branch of the loan, account or
+investment (request checks included). A correction credits the account its original entry debited.
+Retail postings and the cash book do not use it yet (#236).
 
 ### `payment_intents` (RLS)
 

@@ -167,12 +167,21 @@ class PaymentMethodController {
                     .single();
         } else {
             id = UUID.randomUUID();
-            jdbc.sql("""
-                            INSERT INTO payment_methods (id, tenant_id, method_key, branch_id, gl_account_id, is_active, updated_by)
-                            VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                            """)
-                    .params(id, r.methodKey(), r.branchId(), r.glAccountId(), active, user)
-                    .update();
+            try {
+                jdbc.sql("""
+                                INSERT INTO payment_methods (id, tenant_id, method_key, branch_id, gl_account_id, is_active, updated_by)
+                                VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                                """)
+                        .params(id, r.methodKey(), r.branchId(), r.glAccountId(), active, user)
+                        .update();
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                // Two first saves for the same method and scope: the unique index decides, the other is told.
+                throw new ApiException(
+                        org.springframework.http.HttpStatus.CONFLICT,
+                        "payment_method_changed",
+                        "Changed at the same time",
+                        "Another change to this payment method was saved just now; reload and try again.");
+            }
         }
         Map<String, Object> was = new LinkedHashMap<>();
         before.ifPresent(b -> {

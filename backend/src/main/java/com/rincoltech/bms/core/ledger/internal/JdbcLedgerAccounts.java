@@ -48,6 +48,16 @@ class JdbcLedgerAccounts implements LedgerAccounts {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<String> debitedAccountRef(UUID entryId) {
+        java.util.List<UUID> debited = jdbc.sql("SELECT account_id FROM journal_lines WHERE entry_id = ? AND debit > 0")
+                .param(entryId)
+                .query(UUID.class)
+                .list();
+        return debited.size() == 1 ? Optional.of(ACCOUNT_REF + debited.getFirst()) : Optional.empty();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Map<UUID, Long> balanceByBranch(String systemKey, LocalDate asOf) {
         Map<UUID, Long> balances = new LinkedHashMap<>();
         jdbc.sql("""

@@ -77,9 +77,10 @@ class LoanBooks {
         return paymentMethods.accountRef(paymentMethodKey, branchId);
     }
 
-    /** The same check without a branch: the tenant's mapping, for request validation. */
-    String methodAccount(String paymentMethodKey) {
-        return methodAccount(paymentMethodKey, null);
+    /** Where the payment of this entry went in (its one debit line), for a correction of it. */
+    String paidThrough(UUID entryId) {
+        return accounts.debitedAccountRef(entryId)
+                .orElseThrow(() -> new IllegalStateException("entry " + entryId + " has no single debit line"));
     }
 
     /** Posts one balanced entry; legs of zero are left out. */

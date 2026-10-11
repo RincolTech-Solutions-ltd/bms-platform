@@ -21,6 +21,13 @@ public interface LedgerAccounts {
     Optional<Account> byRef(String ref);
 
     /**
+     * The account of an entry's one debit line, as a {@link #byRef} reference: where a payment's
+     * money went in. A correction credits that account, not the method's mapping now, so a remap
+     * between a payment and its reversal cannot split them across two accounts.
+     */
+    Optional<String> debitedAccountRef(UUID entryId);
+
+    /**
      * The balance (debits less credits, in minor units) of the account with this key per branch, over
      * entries dated on or before {@code asOf}. Branches without entries are absent.
      */
