@@ -61,7 +61,9 @@ delivery log, modes that make a real send on staging impossible, sending windows
 endpoint with a path token, and cost recording (spec `docs/specs/client-extras.md` section 4). Still pending ADR-013:
 the USSD code model (per tenant or shared) and USSD sessions. Commercial questions (whether SMS cost is passed on)
 stay outside this repository. The flow of section 12.3.2 changes in one way: the body is rendered at send time inside
-a short tenant transaction, because tenant template overrides and the opt-out need the tenant.
+a short tenant transaction, because tenant template overrides and the opt-out need the tenant. The channel returns `Sent`,
+`Deferred(until)` or `Unknown` (a read timeout after the request was written) instead of only throwing; retries follow the outbox
+(attempts at once, after 1 and after 5 minutes) and the 30 minute step of FR-NTF-05 is dropped for SMS.
 
 ## 12.4 Payment gateway and mobile money
 
@@ -119,8 +121,8 @@ is the MVP path and works before any gateway is chosen.
 
 ### 12.4.4 What ADR-035 settles
 
-The gateway is Pesapal v3. The merchant relationship is the lender's own account (one tenant per environment while
-credentials are environment-level; per-tenant credentials in slice #233); the platform's own merchant account is used only for
+The gateway is Pesapal v3. The merchant relationship is the lender's own account (bound to the one tenant named by `BMS_PESAPAL_TENANT_ID` while
+credentials are environment-level; per-tenant credentials, each with its own IPN id and token, in slice #233); the platform's own merchant account is used only for
 subscription payments. Notifications are untrusted hints, confirmed by an authenticated status query. The public
 reference documents no signature, no settlement report endpoint and no payout endpoint, so reconciliation re-queries
 intents and uses an uploaded merchant statement for fees, and payouts are out of scope. The fee model stays a

@@ -170,12 +170,16 @@ migration) with status only, no details.
   `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR` (default 30) and
   `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR` (default 60) are the global sign-up caps.
 - Client extras (issue #210, design): Pesapal `BMS_PESAPAL_BASE_URL`, `BMS_PESAPAL_CONSUMER_KEY`,
-  `BMS_PESAPAL_CONSUMER_SECRET`, `BMS_PESAPAL_PLATFORM_CONSUMER_KEY`, `BMS_PESAPAL_PLATFORM_CONSUMER_SECRET`,
-  `BMS_PESAPAL_IPN_TOKEN`, `BMS_PESAPAL_IPN_ID`; SMS `BMS_SMS_PROVIDER`, `BMS_SMS_MODE` (`off` default, `sink` on staging),
-  `BMS_SMS_ALLOWLIST`, `BMS_SMS_AT_BASE_URL`, `BMS_SMS_AT_USERNAME`, `BMS_SMS_AT_API_KEY`, `BMS_SMS_CALLBACK_TOKEN`; AI
-  `BMS_AI_PROVIDER`, `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_PLATFORM_DAILY_TOKENS`. Each adapter is off
+  `BMS_PESAPAL_CONSUMER_SECRET`, `BMS_PESAPAL_IPN_ID`, `BMS_PESAPAL_IPN_TOKEN`, `BMS_PESAPAL_TENANT_ID` (the one tenant the
+  merchant account is bound to), `BMS_PESAPAL_PLATFORM_CONSUMER_KEY`, `BMS_PESAPAL_PLATFORM_CONSUMER_SECRET`,
+  `BMS_PESAPAL_PLATFORM_IPN_ID`, `BMS_PESAPAL_PLATFORM_IPN_TOKEN` (an IPN registration belongs to one credential pair); SMS `BMS_SMS_PROVIDER`, `BMS_SMS_MODE` (`off` default, `sink` on staging),
+  `BMS_SMS_ALLOWLIST`, `BMS_SMS_AT_BASE_URL`, `BMS_SMS_AT_USERNAME`, `BMS_SMS_AT_API_KEY`, `BMS_SMS_CALLBACK_TOKEN`, `BMS_SMS_PLATFORM_DAILY_CAP`; AI
+  `BMS_AI_PROVIDER`, `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_PLATFORM_DAILY_TOKENS`, `BMS_AI_ENABLED_TENANTS`; reports `BMS_REPORTS_MAX_CONCURRENT_RUNS`,
+  `BMS_REPORTS_PDF_ROW_CAP`, `BMS_REPORTS_XLSX_ROW_CAP` (staging 1, 500 and 20,000, because the staging API has about 224 MB of
+  heap). Each adapter is off
   when its values are unset. The API gets them and no other container does. Staging uses sandbox values only and the
-  startup guards of `docs/specs/client-extras.md` section 8 refuse a live Pesapal URL or SMS `live` mode there. The staging
+  startup guards of `docs/specs/client-extras.md` section 8 refuse a live Pesapal URL, SMS `live` mode and any non-sandbox SMS
+  provider URL or account in every SMS mode there. The staging
   tunnel must expose the callback host for provider notifications (confirmed in the spike, issue #211). Edge rules: a
   rate limit on `/api/v1/payments/callbacks/*` and `/api/v1/channels/*` on the callback host, and the provider's source
   address allow-list for SMS delivery reports where the provider publishes one; the proxy redacts the path token from its
@@ -203,7 +207,7 @@ the same image.
 
 Jobs added by the client extras design (issue #210, each with its slice): `core.payments.create-order` and
 `core.payments.poll-pending` (every 2 minutes, 48 hours per intent), `core.payments.reconcile` (nightly after the end of day),
-`core.reporting.report-runner` (every 15 seconds, one run per tenant, two per platform) and its nightly file expiry,
+`core.reporting.report-runner` (every 15 seconds, one run per tenant, one at a time on staging and two elsewhere) and its nightly file expiry,
 `lending.advisor.daily-brief` (per tenant with the assistant on, idempotent by date), and a higher batch for the SMS
 channel of the outbox sender.
 

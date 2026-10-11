@@ -446,7 +446,7 @@ endpoint.
 | PUT | `/notification-templates/{event_key}/{channel}` | `core.notification_templates.manage` | FR-NTF-03 |
 | POST | `/notification-templates/{event_key}/{channel}/preview` | `core.notification_templates.manage` | Renders with fabricated sample data |
 | GET | `/notifications` | `core.notifications.read` | Send log with status. For SMS it reads `sms_deliveries` (status, segments, recorded cost, masked recipient) (ADR-036) |
-| GET, PUT | `/settings/sms` | read / `core.settings.manage` | Sender name, window, daily cap; `sms_sender_approved` is read only here (the operator sets it) |
+| GET, PUT | `/settings/sms` | read / `core.settings.manage` | Sender name, window, `sms_include_balance`; the daily cap and `sms_sender_approved` are read only here (the operator sets them) |
 | PUT, DELETE | `/lending/members/{member_id}/sms-opt-out` | `lending.members.update` | `{scope: reminders \| all}`; audited. FR-NTF-14 |
 | GET | `/documents/{document_id}` | permission on the subject | Metadata. Declared "authenticated" (staff); the owning module's `DocumentAccess` decides, 403 `permission_denied` when it says no |
 | POST | `/documents/{document_id}/download-url` | permission on the subject | `{url, expires_at}`, 5 minutes; every issue is audited (`core.document.download_url_issued`). Member ID images (`id_front`, `id_back`) need `lending.members.verify_kyc` (chapter 8). FR-DOC-03 |
@@ -492,7 +492,7 @@ generic `POST /documents`. Built (#12): these two routes and the member document
 | GET | `/payments/intents/{intent_id}` | initiator or `core.payments.read` | Polled by the UI |
 | POST | `/payments/statements` | `core.payments.manage` | Multipart statement CSV; matches rows, posts fees once. FR-PAY-11 |
 | GET | `/payments/reconciliation` | `core.payments.read` | The latest nightly differences (ADR-035 decision 9) |
-| GET, PUT | `/payments/settings` | read / `core.settings.manage` | `collections_enabled`; 409 `merchant_in_use` when another tenant of the environment already collects |
+| GET, PUT | `/payments/settings` | read / `core.settings.manage` | `collections_enabled`; 409 `merchant_not_bound_to_tenant` for any tenant but the one named by `BMS_PESAPAL_TENANT_ID`, 409 `gateway_method_unmapped` until the `gateway` payment method is mapped (ADR-035 decision 11) |
 | GET | `/payments/unallocated` | `core.payments.read` | FR-PAY-04 |
 | POST | `/payments/unallocated/{receipt_id}/allocate` | `core.payments.allocate` | **M** |
 | POST, GET | `/payments/callbacks/{provider}/{token}` | public, path token; the body is never trusted | On the callback host. Identifies the intent, queues a status query, answers 200. FR-PAY-02, FR-PAY-08 |
@@ -968,9 +968,9 @@ and `facts` (keys with display values). Provider errors never reach the client; 
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/lending/advisor/brief` | `lending.advisor.use` | Today's brief; `source: fallback` with `reason` (`provider_down`, `cap`, `validation`, `off`) when the model was not used |
-| POST | `/lending/advisor/questions` | `lending.advisor.use` | `{question}` up to 300 characters; 422 `question_refused` with a reason class (`too_long`, `digits`, `email`, `id_pattern`, `member_name`), 429 `daily_limit`. FR-AIA-07 |
-| GET, PUT | `/lending/advisor/settings` | `lending.advisor.configure` (read), `core.settings.manage` (switch on with `acknowledged: true`) | `enabled`, `daily_token_cap`, acknowledgement record; audited |
+| GET | `/lending/advisor/brief` | `lending.advisor.use` | Today's brief; the model brief is returned only to a user whose scope covers every branch and who holds `lending.insights.all_officers`; otherwise (and when the model was not used) `source: fallback` with `reason` (`provider_down`, `cap`, `validation`, `off`, `scope`) |
+| POST | `/lending/advisor/questions` | `lending.advisor.use` | `{question}` up to 300 characters, answered from the caller's scope; 422 `question_refused` with a reason class (`too_long`, `digits`, `email`, `id_pattern`, `series_number`, `member_name`), 429 `daily_limit`. FR-AIA-07 |
+| GET, PUT | `/lending/advisor/settings` | `lending.advisor.configure` (read), `core.settings.manage` (switch on with `acknowledged: true`) | `enabled`, `daily_token_cap`, acknowledgement record; audited; 403 `advisor_not_available` when the tenant is not in `BMS_AI_ENABLED_TENANTS` |
 | GET | `/lending/advisor/calls` | `lending.advisor.configure` | The call log without personal data, 90 days |
 
 ## 7.12 Example: record a repayment

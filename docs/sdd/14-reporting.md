@@ -349,11 +349,14 @@ Design only. The seven formal reports are defined in sections 14.3, 14.4, 14.5 a
 
 Rules added by the pack:
 
-- **One query layer.** The reports and the insights page use the same queries and metric definitions (section 14.9). A
+- **One implementation per figure.** The reports reach the insights figures through the public read port `InsightsFigures`
+  of `lending.insights` (the insights queries and `Scope` stay internal to it), so the reports and the page share the metric
+  definitions of section 14.9; only the reports the page does not compute have their own queries. A
   cross check test asserts PAR30, PAR90, principal outstanding, collection rate and disbursed equal the insights values for
   the same range.
-- **One snapshot.** A run executes in a single read-only `REPEATABLE READ` transaction and records `as_of` and `snapshot_at`;
-  a pack's seven reports therefore agree with each other.
+- **One snapshot, then render.** A run queries in a single read-only `REPEATABLE READ` transaction into a disk spool and commits
+  before rendering; it records `as_of` and `snapshot_at`, and a pack's seven reports agree with each other. On staging (about
+  224 MB of heap) one run at a time, 500 PDF rows and 20,000 sheet rows, each report rendered to its own PDF and merged on disk.
 - **Outputs.** PDF through the shared document templates (landscape above seven columns, header repeated, a parameters box,
   tables over 3,000 rows cut with a pointer to the Excel file) and Excel through a streaming writer (numeric cells, real
   dates, explicit string cells for text starting with `=`, `+`, `-` or `@`, 200,000 row cap per sheet). Totals come from one

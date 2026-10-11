@@ -196,7 +196,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending.investments` | Investment products, investments, returns job, maturity, rollover, early withdrawal, maturity ladder (ADR-031) | INV; 3.25.1 R-INV | 6.7 | 7.11.16 |
 | `lending.insights` | The insights read model, snapshots, daily digest, panel registry (ADR-030) | INS | 6.7 | 7.11.22 |
 | `lending.advisor` (ADR-037, design) | The advisory AI brief and question box over insights facts; aggregates and aliases only | FR-AIA | 6.13 `ai_briefs` | 7.11.23 |
-| `lending.reports` (ADR-038, design) | The shared query layer of the seven formal reports and the monthly pack | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
+| `lending.reports` (ADR-038, design) | The definitions of the seven formal reports and the monthly pack, built on the insights figures through a public port | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
 | `lending` collections | Due lists, arrears, actions | CLN | 6.7 | 7.11.17 |
 | Member area | Member self-service | MSS; chapter 11 | none | 7.11.18 |
 | `retail.manifest` | The retail vertical's registration with the core (ADR-020) | 3.28 | 6.11.1 chart | none |

@@ -343,8 +343,9 @@ write. Keys and defaults:
 | `sms_sender_name` | string or null | null (aggregator default) | FR-NTF-02 |
 | `sms_window_start`, `sms_window_end` | `HH:MM` | `08:00`, `20:00` | FR-NTF-04 |
 | `sms_sender_approved` | boolean, set by the operator | false (shared sender) | ADR-036 |
-| `sms_daily_cap` | integer | a small default | ADR-036 |
-| `payments.collections_enabled` | boolean | false; one tenant per environment while credentials are environment-level | ADR-035 |
+| `sms_daily_cap` | integer, set by the platform operator only (read only to the tenant admin) | a small default | ADR-036 |
+| `sms_include_balance` | boolean | false | ADR-036, FR-NTF-17 |
+| `payments.collections_enabled` | boolean | false; settable only for the tenant named by `BMS_PESAPAL_TENANT_ID` while credentials are environment-level | ADR-035 |
 | `ai.enabled`, `ai.daily_token_cap`, `ai.acknowledged_by`, `ai.acknowledged_at`, `ai.acknowledged_text_version` | boolean, integer, user, time, text | false, small, null | ADR-037 |
 | `approval_thresholds_minor` | map of action type to integer | every action 0 | FR-APR-04 |
 | `approval_validity_days` | integer | 14 | FR-ORG-08 |
@@ -584,7 +585,8 @@ Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08.
 Columns added by ADR-035 (migration number taken when slice #213 merges): `merchant_reference text NOT NULL UNIQUE`
 (`BMS-<env>-<32 hex>`), `redirect_url text`, `scope text NOT NULL DEFAULT 'tenant'` [`tenant`, `platform`],
 `paid_amount_minor bigint`, `confirmation_code text`, `reported_method text`, `last_checked_at timestamptz`,
-`final_status text`. `payment_callbacks` stores identifiers only and its `outcome` also takes `unknown_reference` and
+`final_status text` [`booked`, `booked_unallocated`, `needs_attention`, `failed`, `expired`], `refusal_code text`,
+`creation_lease_until timestamptz`, `technical_failures integer`. `payment_callbacks` stores identifiers only and its `outcome` also takes `unknown_reference` and
 `throttled`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
 tenant and intent id or nothing (ADR-016).
 
@@ -1967,6 +1969,6 @@ tables with `tenant_id`, forced row-level security (`bms_apply_tenant_rls`) and 
 | `sms_opt_outs` | #218 | `member_id`, `recipient_hash`, `scope` [`reminders`, `all`], `source` [`staff`, `member`], `created_by`, `created_at`; a removal is a new row with `removed_at` |
 | `notification_templates` | #218 | Tenant overrides for `event_key` and `channel` with the text and a version (FR-NTF-03) |
 | `ai_calls` | #220 | Tenant, kind, asking user, model, request and response text (aliases and aggregates only), validation outcome, token counts, `estimated_cost_micro`, latency, status, fallback reason; 90 day retention |
-| `ai_briefs` | #226 | One stored brief per tenant and business date with its facts digest and `source` [`model`, `fallback`], unique on `(tenant_id, brief_date)` |
+| `ai_briefs` | #226 | One stored all-branches brief per tenant and business date with its facts digest and `source` [`model`, `fallback`], unique on `(tenant_id, brief_date)`; shown only to all-branch users (FR-AIA-08) |
 | `payment_statement_rows` | #224 | Uploaded merchant statement rows: confirmation code, merchant reference, gross, fee, settled, matched intent id, fee journal entry id; unique on `(tenant_id, confirmation_code)` |
 | `payment_gateway_accounts` | #233 | Per tenant merchant credentials; the secret is encrypted with the application data key and never returned |

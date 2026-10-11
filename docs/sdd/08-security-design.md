@@ -239,7 +239,9 @@ Notes:
   merchant statement and reads the reconciliation (ADR-035); switching collections on needs `core.settings.manage`. The
   AI assistant (ADR-037) needs `lending.advisor.use` to read the brief and ask, `lending.advisor.configure` to read the
   call log and set caps, and `core.settings.manage` to switch it on after the acknowledgement. SMS sender name, window and
-  daily cap need `core.settings.manage`; a member's SMS opt-out needs `lending.members.update`. Running a report run needs
+  `sms_include_balance` need `core.settings.manage`, while the daily SMS cap and the sender approval are set by the
+  platform operator only; the assistant can be switched on only for tenants in `BMS_AI_ENABLED_TENANTS`; collections can be
+  switched on only for the tenant named by `BMS_PESAPAL_TENANT_ID`; a member's SMS opt-out needs `lending.members.update`. Running a report run needs
   the report's own permission (a pack needs all seven); loan officers still see only their own loans.
 - Branch managers approve loans, but never one they submitted or appraised (FR-APR-03).
 - Member ID images (`id_front`, `id_back`) need `lending.members.verify_kyc` in the member's
@@ -568,7 +570,7 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   card data ever reaches the platform (the hosted page takes it). **SMS:** the delivery log keeps the recipient masked to
   the last four digits plus a keyed hash, never the message text; the platform outbox row keeps the full number and the
   parameters only until sent (ADR-024) and the number until the 30 day purge; an opted-out member is never texted for
-  reminders. **AI:** only aggregates and aliases leave the platform; the call log holds no personal data by construction
+  reminders. **AI:** only aggregates and aliases for branches and products leave the platform, with groups under five suppressed and no officer dimension; the call log holds no personal data by construction
   and by test; the tenant acknowledges what is sent and where (ADR-037; spec section 5.11 lists the Data Protection and
   Privacy Act considerations). **Reports:** files with member names and balances are deleted after 30 days; downloads
   are audited.
@@ -597,6 +599,7 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 | Sign-up used to learn which emails are customers | Same answer for known and unknown emails; a known email gets the link by email only |
 | A leaked activation or applicant link | Hashed at rest in its own table, single purpose, 72 hours (activation) or 7 days (applicant), in the URL fragment only; in the outbox only until sent, at most 7 days |
 | The sign-up form used to send attacker-written text (phishing relay) | The confirmation email carries only the server's reference and link; volume bounded per mailbox and globally in the database |
+| A tenant admin switches on collections or the assistant ahead of the operator | The merchant is bound to one named tenant and the assistant needs the platform allow-list (ADR-035, ADR-037) |
 | Forged or replayed Pesapal notification | The notification carries no authority: only an authenticated status query books, once per provider reference (ADR-035, spec section 3.13) |
 | Staging sends real SMS or prompts a real payer | SMS sink by default and `live` refused on staging; the Pesapal live URL refused on staging; sandbox accounts only (ADR-036, ADR-035) |
 | Personal data reaches the language model provider | Typed aggregate facts and aliases only, question scrub, leak tests, tenant acknowledgement, off by default (ADR-037, spec section 5.12) |

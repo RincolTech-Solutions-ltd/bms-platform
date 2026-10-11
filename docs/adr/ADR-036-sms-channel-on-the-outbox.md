@@ -43,20 +43,36 @@ Staging must never text a real person.
    (FR-NTF-07). Retention 13 months unless the retention decision (NFR-DP-06) says otherwise.
 4. **Modes make a real send impossible by accident.** `BMS_SMS_MODE` is `off` (default; rows stay
    `pending`), `sink` (the log row is written with status `sunk`, no network call), `allowlist` (real
-   send only to numbers in `BMS_SMS_ALLOWLIST`, the rest sunk) or `live`. The staging environment
-   refuses `live` at startup and defaults to `sink`; the production profile refuses `sink` and the
-   fake provider; the provider's own sandbox account is used wherever a network send is wanted
-   outside production. The allow-list is an environment value, never in the repository.
-5. **Sending window and deferral.** Categories `reminder` and `arrears` are sent only inside the
-   tenant's window (default 08:00 to 20:00 Africa/Kampala, FR-NTF-04); `transactional` (receipts)
-   are not held. The enqueue sets `next_attempt_at` to the next window start, and the channel checks
-   again at send time and **defers without counting an attempt** (a new `Deferred` outcome beside
-   `SendFailure`), because retries can push a send past the window.
-6. **Retries, and the case a retry would text twice.** The provider has no idempotency key, so a
-   timeout after the request was written is ambiguous. Connect failures and clean provider rejections
-   follow the outbox backoff (1 and 5 minutes, then `failed`, FR-NTF-05, with the 30 minute step
-   added for SMS). A read timeout is recorded as `unknown`, **not retried**, and listed for the
-   operator; the delivery report usually settles it.
+   send only to numbers in `BMS_SMS_ALLOWLIST`, the rest sunk) or `live`. Two rules hold in every
+   mode, because an allow-list on the live provider URL is still a real send on staging: **when
+   `BMS_ENVIRONMENT` is `staging`, startup refuses any `BMS_SMS_AT_BASE_URL` other than the provider's
+   sandbox host and any `BMS_SMS_AT_USERNAME` other than the sandbox account**, and refuses `live`;
+   `allowlist` against the live host is possible only in production, for a pilot check. The production
+   profile refuses `sink` and the fake provider. Staging defaults to `sink`. A startup test covers
+   each refusal. The allow-list is an environment value, never in the repository.
+
+5. **Sending window, priority and deferral.** Categories `reminder` and `arrears` are sent only inside
+   the tenant's window (default 08:00 to 20:00 Africa/Kampala, FR-NTF-04); `transactional` (receipts,
+   payment links) are not held. The enqueue sets `next_attempt_at` to the next window start, and the
+   channel checks again at send time and returns `Deferred(until)`. Because 08:00 would otherwise put
+   a thousand reminders ahead of a receipt, the claim function orders **transactional rows first**,
+   then by due time, and takes rows **round-robin across tenants** (rank within tenant) so one
+   tenant's reminders cannot starve another's receipts.
+
+6. **Outcomes, retries and the case a retry would text twice.** The outbox claim counts an attempt
+   before the send and leases the row for 2 minutes (`MAX_ATTEMPTS` 3, backoff 1 and 5 minutes,
+   ADR-024). SMS keeps those numbers: FR-NTF-05's third retry step of 30 minutes is dropped (the
+   requirement is amended), because a longer step needs a new attempt model that has no value for a
+   message that goes stale within the hour (decision 14). `OutboxChannel.send` returns a result
+   instead of only throwing: `Sent`, `Deferred(until)` and `Unknown`, with a thrown `SendFailure`
+   still meaning a clean failure. A new definer function `notification_outbox_record_result`
+   records them: `Deferred` gives the attempt back and sets `next_attempt_at`; `Unknown` marks the row
+   `failed` with `last_error = 'unknown_outcome'`, never retried automatically. The provider has no
+   idempotency key, so a read timeout after the request was written is ambiguous and is `Unknown`.
+   The SMS client's total time per message is capped at 15 seconds, far inside the lease (a test
+   asserts the cap is under a quarter of the lease), so a slow provider cannot hand a second sender
+   the same row.
+
 7. **Delivery reports** arrive on the callback host at
    `/api/v1/channels/sms/africastalking/delivery-reports/<token>`, with a long random token in the
    path, a proxy allow-list of the provider's published source addresses where they exist, and a
@@ -86,6 +102,22 @@ Staging must never text a real person.
     later option.
 12. **Out of scope:** one time codes (FR-NTF-02 portal codes), USSD, inbound SMS, WhatsApp.
 
+13. **Cost limits are set by the operator, not the tenant.** A platform-wide daily ceiling
+    (`BMS_SMS_PLATFORM_DAILY_CAP`) and a per tenant daily cap that only the platform operator can
+    change (a platform console setting; the tenant admin sees it read only). At 80 percent an alert is
+    raised. Over the tenant cap, `reminder` and `arrears` rows are deferred to the next day's window,
+    and `transactional` rows continue up to twice the cap; beyond that, or over the platform ceiling,
+    rows are held `pending` (deferred an hour at a time) with an operator alert until they expire.
+    Nothing over a cap is silently dropped before it expires, and nothing over a cap is sent.
+14. **Content and staleness.** A transactional SMS expires one hour after it was queued and a reminder
+    at the end of its window day (a receipt arriving the next day is worse than none). When the
+    channel moves from a non-sending mode (`off`, `sink`) to a sending one, rows queued before that
+    moment are marked `failed` with `backlog_dropped` and not sent, so switching SMS on never
+    releases up to two days of old savings receipts. Savings receipts today carry the balance; on a
+    shared phone that tells a household what a member holds, so the default savings receipt omits the
+    balance and a tenant setting `sms_include_balance` (default off, tenant admin) puts it back.
+    Reminders never carry a balance.
+
 ## Consequences
 
 **Better:**
@@ -114,4 +146,6 @@ Staging must never text a real person.
   sending); the purge job and the 7 day cap on unsent rows already bound it (ADR-024), and SMS
   parameters are cleared once sent.
 - Reminders depend on the arrears job of increment 6 (#109); the channel can ship without them.
+- The outbox claim and record functions change (priority, fairness, result types): the existing email and
+  Telegram tests must stay green, and the isolation tests cover the new column.
 - Alphanumeric sender registration time in Uganda is outside our control; do not promise a date.
