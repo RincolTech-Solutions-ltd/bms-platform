@@ -598,9 +598,7 @@ member name by any part) and returns the member's number and name, the outstandi
 the next due date. `payment_method_key` is `cash`, `bank`, `mtn_momo` or `airtel_money`. Codes (422
 unless stated): `value_date_in_future`, `before_disbursement`, `before_last_repayment`,
 `payment_method_unmapped`, `fees_exceed_principal`, `period_closed`, `not_reversible`,
-`nothing_to_write_off`, `collateral_no_longer_held` (a reversal that would reopen a closed loan
-whose pledged item has since been released, seized, disposed or pledged to another loan, #176),
-409 `already_reversed`, 409 `invalid_status_transition` (a second
+`nothing_to_write_off`, 409 `already_reversed`, 409 `invalid_status_transition` (a second
 disbursement, FR-DIS-03; a repayment on a closed loan; a quote on a loan that is not active), 409
 `approval_already_pending`, and the idempotency codes of section 7.8.
 

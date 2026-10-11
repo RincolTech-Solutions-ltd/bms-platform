@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -389,61 +388,67 @@ class LoanServicer implements LoanServicing {
                     "Invalid status transition",
                     "A repayment on a " + loan.status() + " loan is not reversed.");
         }
-        if (txn.txnType().equals("repayment") && loan.status().equals("closed")) {
-            // Fail fast at request time; reopen() checks again under the items' locks.
-            requirePledgesRestorable(loan, loans.releasedPledges(loan.id()), false);
-        }
         return txn;
     }
 
     /**
-     * #176: the reopened loan takes back the pledges its closure released, each item locked in id
-     * order as pledging does. An item no longer held (released to the member, seized, disposed) or
-     * pledged to another open loan refuses the reversal, so a manager decides what secures the loan.
+     * #176: the reopened loan takes back the pledges its closure released, when the item is still
+     * held and secures no other loan. Items are locked in the order pledging uses
+     * ({@code UUID.compareTo}), so a reversal and a pledge of the same items cannot deadlock. An item
+     * handed back or pledged elsewhere is not restored and the loan reopens without it: the checker
+     * saw that on the request ({@link #unrestorable}), and the audit row names it.
      */
     private void restorePledges(Loan loan, UUID by) {
-        List<LoanRepository.PledgeRow> released = loans.releasedPledges(loan.id());
+        List<LoanRepository.PledgeRow> released = new ArrayList<>(loans.releasedPledges(loan.id()));
         if (released.isEmpty()) {
             return;
         }
-        requirePledgesRestorable(loan, released, true);
-        try {
-            loans.restorePledges(loan.id());
-        } catch (DuplicateKeyException e) {
-            // The one-open-pledge index: the backstop behind the lock and the check.
-            throw ApiException.rule(
-                    "collateral_no_longer_held", "A pledged item now secures another loan; the loan is not reopened.");
+        released.sort(java.util.Comparator.comparing(LoanRepository.PledgeRow::collateralId));
+        List<UUID> restore = new ArrayList<>();
+        List<UUID> notRestored = new ArrayList<>();
+        for (LoanRepository.PledgeRow p : released) {
+            boolean held = collateral
+                    .lockForPledge(p.collateralId())
+                    .map(i -> Set.of("pledged", "in_custody").contains(i.custodyStatus()))
+                    .orElse(false);
+            (held && !loans.pledgedElsewhere(p.collateralId(), loan.id()) ? restore : notRestored)
+                    .add(p.collateralId());
         }
+        if (!restore.isEmpty()) {
+            loans.restorePledges(loan.id(), restore);
+        }
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("restored_collateral_ids", restore);
+        after.put("not_restored_collateral_ids", notRestored);
+        after.put("restored_by", by);
         audit.record(AuditLog.Entry.created(
-                "lending.loan.pledges_restored",
+                notRestored.isEmpty() ? "lending.loan.pledges_restored" : "lending.loan.reopened_partly_unsecured",
                 SUBJECT,
                 loan.id(),
                 loan.branchId(),
-                Map.of(
-                        "collateral_ids",
-                        released.stream()
-                                .map(LoanRepository.PledgeRow::collateralId)
-                                .toList(),
-                        "restored_by",
-                        by)));
+                after));
     }
 
-    private void requirePledgesRestorable(Loan loan, List<LoanRepository.PledgeRow> released, boolean lock) {
+    /**
+     * For the reversal request on a closed loan: the released items that could not be restored
+     * now (handed back, seized, disposed or pledged elsewhere). Shown to the checker in the request
+     * payload; a read, not a lock, because it only informs the decision.
+     */
+    List<String> unrestorable(Loan loan) {
+        if (!loan.status().equals("closed")) {
+            return List.of();
+        }
         List<String> gone = new ArrayList<>();
-        for (LoanRepository.PledgeRow p : released) {
-            var item = lock ? collateral.lockForPledge(p.collateralId()) : collateral.find(p.collateralId());
-            boolean held = item.map(i -> Set.of("pledged", "in_custody").contains(i.custodyStatus()))
+        for (LoanRepository.PledgeRow p : loans.releasedPledges(loan.id())) {
+            boolean held = collateral
+                    .find(p.collateralId())
+                    .map(i -> Set.of("pledged", "in_custody").contains(i.custodyStatus()))
                     .orElse(false);
             if (!held || loans.pledgedElsewhere(p.collateralId(), loan.id())) {
                 gone.add(p.collateralId().toString());
             }
         }
-        if (!gone.isEmpty()) {
-            throw ApiException.rule(
-                    "collateral_no_longer_held",
-                    "The loan would reopen without collateral it was secured by: item(s) " + String.join(", ", gone)
-                            + " are no longer held or now secure another loan.");
-        }
+        return gone;
     }
 
     /**

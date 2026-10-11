@@ -104,9 +104,10 @@ Also decided here, within the rules of chapter 3:
 **Watch for:**
 
 - A closed loan releases its pledges (FR-COL-04); a reversal that reopens it did not re-pledge
-  them, because pledges changed only on a draft. Done in #176 (V35): the reopened loan takes its
-  pledges back when every item is still held and free, and the reversal is refused with
-  `collateral_no_longer_held` otherwise.
+  them, because pledges changed only on a draft. Done in #176 (V35): the reopened loan takes back
+  each item still held and free; an item handed back or pledged elsewhere is not restored, the
+  reversal request shows it to the checker, and the reopen is audited as partly unsecured. A
+  reversal is never refused for collateral, because handing the item back after payoff is normal.
 - Penalty charges and waivers arrive in increment 6; the replay starts from the contracted
   schedule and must then add penalty charges and charge waivers before re-applying repayments.
 - When FR-GL-08's `payment_methods` arrives, the default mapping must stay as the fallback or be

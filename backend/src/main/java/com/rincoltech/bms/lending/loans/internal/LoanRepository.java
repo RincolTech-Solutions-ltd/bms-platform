@@ -231,14 +231,15 @@ class LoanRepository {
      * #176: a reopened loan takes its released pledges back. The guard (V35) allows exactly this
      * change, for the loan named in the transaction-local {@code bms.restore_pledges_loan}.
      */
-    void restorePledges(UUID loanId) {
+    void restorePledges(UUID loanId, List<UUID> collateralIds) {
         jdbc.sql("SELECT set_config('bms.restore_pledges_loan', ?, true)")
                 .param(loanId.toString())
                 .query(String.class)
                 .single();
         jdbc.sql("UPDATE lending_loan_collateral SET released_at = NULL, updated_at = now(), version = version + 1"
-                        + " WHERE loan_id = ? AND released_at IS NOT NULL")
-                .param(loanId)
+                        + " WHERE loan_id = :loan AND released_at IS NOT NULL AND collateral_id IN (:items)")
+                .param("loan", loanId)
+                .param("items", collateralIds)
                 .update();
         jdbc.sql("SELECT set_config('bms.restore_pledges_loan', '', true)")
                 .query(String.class)

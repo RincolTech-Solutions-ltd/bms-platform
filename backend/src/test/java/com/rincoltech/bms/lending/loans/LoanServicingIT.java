@@ -596,34 +596,44 @@ class LoanServicingIT extends LoanFixtures {
         booksAgree();
     }
 
-    /** #176: an item released to the member since closure refuses the reversal, at request and at execution. */
-    @Test
-    void frRep05_aReversalThatWouldReopenWithoutTheItemIsRefused() {
-        String[] s = securedPaidOff("GONE", 62);
-        // Changed after the request: the checker's approval fails and the request stays pending.
-        String approval = requestReversal(s[0], s[2]);
-        custody(s[1], "released");
-        ResponseEntity<JsonNode> failed = decide(approval, manager, managerPerms);
-        assertThat(failed.getBody().get("code").asString()).isEqualTo("approval_execution_failed");
-        assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
-        assertThat(openPledges(s[0])).isZero();
+    static String approvalPayload(String approvalId) {
+        return TestDatabase.owner()
+                .sql("SELECT payload::text FROM approval_requests WHERE id = ?::uuid")
+                .param(approvalId)
+                .query(String.class)
+                .single();
+    }
 
-        // Changed before the request: refused straight away.
-        String[] other = securedPaidOff("GONE2", 63);
-        custody(other[1], "released");
-        ResponseEntity<JsonNode> r = send(
-                HttpMethod.POST,
-                LOANS + "/" + other[0] + "/transactions/" + other[2] + "/reverse",
-                withKey(as(cashier, cashierPerms, "*", null), key()),
-                Map.of("reason", "Test bounced"));
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(r.getBody().get("code").asString()).isEqualTo("collateral_no_longer_held");
+    static long audits(String loan, String action) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM audit_log WHERE entity_id = ?::uuid AND action = ?")
+                .params(loan, action)
+                .query(Long.class)
+                .single();
+    }
+
+    /**
+     * #176 (review of #202): an item handed back after payoff, the normal step, never blocks the
+     * reversal of a bounced payoff. The checker sees on the request that the loan will reopen
+     * without it, and the reopen is recorded as partly unsecured.
+     */
+    @Test
+    void frRep05_aReopenWithoutTheHandedBackItemIsRecordedNotRefused() {
+        String[] s = securedPaidOff("GONE", 62);
+        custody(s[1], "released");
+        String approval = requestReversal(s[0], s[2]);
+        assertThat(approvalPayload(approval)).contains("collateral_not_restored_on_reopen", s[1]);
+        ResponseEntity<JsonNode> d = decide(approval, manager, managerPerms);
+        assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+        assertThat(openPledges(s[0])).isZero();
+        assertThat(audits(s[0], "lending.loan.reopened_partly_unsecured")).isEqualTo(1);
         booksAgree();
     }
 
-    /** #176: an item pledged to a new loan since closure refuses the reversal. */
+    /** #176: an item now securing another loan stays with that loan; the reopened loan goes without it. */
     @Test
-    void frRep05_aReversalThatWouldTakeAnItemFromAnotherLoanIsRefused() {
+    void frRep05_anItemPledgedElsewhereStaysWithTheOtherLoan() {
         String[] s = securedPaidOff("TAKEN", 64);
         String borrower = loan(s[0]).get("member_id").asString();
         String next = apply(borrower, product("TAKEN2", false, false), 500_000, null)
@@ -639,13 +649,46 @@ class LoanServicingIT extends LoanFixtures {
                                         List.of(Map.of("collateral_id", s[1], "pledged_value_minor", 1_000_000))))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        ResponseEntity<JsonNode> r = send(
-                HttpMethod.POST,
-                LOANS + "/" + s[0] + "/transactions/" + s[2] + "/reverse",
-                withKey(as(cashier, cashierPerms, "*", null), key()),
-                Map.of("reason", "Test bounced"));
-        assertThat(r.getBody().get("code").asString()).isEqualTo("collateral_no_longer_held");
+        String approval = requestReversal(s[0], s[2]);
+        assertThat(decide(approval, manager, managerPerms).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+        assertThat(openPledges(s[0])).isZero();
         assertThat(openPledges(next)).isEqualTo(1);
+    }
+
+    /** V35's guard: un-releasing a pledge needs the transaction to name that loan, and only that loan. */
+    @Test
+    void theGuardRefusesAnUnreleaseTheTransactionDidNotName() throws Exception {
+        String[] s = securedPaidOff("GUARD", 65);
+        // The loan must be active for the exception to apply at all; reopen it the way a reversal does.
+        TestDatabase.owner()
+                .sql("UPDATE lending_loans SET status = 'active' WHERE id = ?::uuid")
+                .param(s[0])
+                .update();
+        String unrelease = "UPDATE lending_loan_collateral SET released_at = NULL WHERE loan_id = ?::uuid";
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> TestDatabase.owner().sql(unrelease).param(s[0]).update())
+                .as("no setting")
+                .hasMessageContaining("only on a draft loan");
+        try (java.sql.Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement st = c.createStatement()) {
+                st.execute("SELECT set_config('bms.restore_pledges_loan', '" + UUID.randomUUID() + "', true)");
+                java.sql.PreparedStatement u = c.prepareStatement(unrelease);
+                u.setString(1, s[0]);
+                org.assertj.core.api.Assertions.assertThatThrownBy(u::executeUpdate)
+                        .as("another loan named")
+                        .hasMessageContaining("only on a draft loan");
+            }
+            c.rollback();
+            try (java.sql.Statement st = c.createStatement()) {
+                st.execute("SELECT set_config('bms.restore_pledges_loan', '" + s[0] + "', true)");
+                java.sql.PreparedStatement u = c.prepareStatement(unrelease);
+                u.setString(1, s[0]);
+                assertThat(u.executeUpdate()).as("this loan named").isEqualTo(1);
+            }
+            c.rollback();
+        }
     }
 
     /**
