@@ -139,7 +139,6 @@ platform API and holds no tenant permissions.
 | `core.payments.read` | Y | Y | | Y | Y | Y | | |
 | `core.payments.collect` | Y | Y | | Y | | | | |
 | `core.payments.allocate` | Y | | | Y | Y | | | |
-| `core.payments.manage` | Y | | | | Y | | | |
 | `core.reports.financial` | Y | Y | | | Y | Y | | |
 | `core.reports.audit` | Y | | | | | Y | | |
 | `lending.members.read` | Y | Y | Y | Y | Y | Y | | |
@@ -195,8 +194,6 @@ platform API and holds no tenant permissions.
 | `lending.insights.read` | Y | Y | Y | | Y | Y | | |
 | `lending.insights.all_officers` | Y | Y | | | Y | Y | | |
 | `lending.insights.export` | Y | Y | Y | | Y | Y | | |
-| `lending.advisor.use` | Y | Y | | | Y | Y | | |
-| `lending.advisor.configure` | Y | | | | | | | |
 | `member.self.read` | | | | | | | Y | |
 | `member.self.apply` | | | | | | | Y | |
 | `member.self.pay` | | | | | | | Y | |
@@ -235,7 +232,11 @@ Notes:
   table as CSV, audited as `lending.insights.exported`; a member name in an export is reduced to
   initials unless the user holds `lending.members.read`, and no insights table carries a phone or
   an ID number. The daily digest settings need `core.settings.manage`.
-- Client extras (issue #210). `core.payments.collect` starts a gateway collection and `core.payments.manage` uploads the
+- Client extras (issue #210), **design only: the permissions `core.payments.manage`, `lending.advisor.use` and
+  `lending.advisor.configure` are not in the matrix above yet; the migration of the slice that needs each adds its row**
+  (`core.payments.manage` with #224, the two advisor permissions with #226), with the grants stated here: `core.payments.manage`
+  to the tenant admin and accountant, `lending.advisor.use` to the tenant admin, branch manager, accountant and auditor,
+  `lending.advisor.configure` to the tenant admin. `core.payments.collect` starts a gateway collection and `core.payments.manage` uploads the
   merchant statement and reads the reconciliation (ADR-035); switching collections on needs `core.settings.manage`. The
   AI assistant (ADR-037) needs `lending.advisor.use` to read the brief and ask, `lending.advisor.configure` to read the
   call log and set caps, and `core.settings.manage` to switch it on after the acknowledgement. SMS sender name, window and
