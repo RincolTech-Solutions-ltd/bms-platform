@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.documents;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -54,6 +55,25 @@ public interface Documents {
     record Prepared(byte[] bytes, String contentType, String extension, String sha256) {}
 
     Optional<StoredDocument> find(UUID documentId);
+
+    /**
+     * ADR-034: renders {@code templates/documents/<template>.html} (Thymeleaf, XML mode, every value
+     * escaped) to an A4 PDF with the embedded Open Sans. No transaction and no storage: the caller
+     * stores it with {@link #storeGenerated} or streams it.
+     */
+    byte[] renderPdf(String template, Map<String, Object> model);
+
+    /**
+     * Stores a generated PDF and records it as {@code docType} with its {@code docNumber}, in the
+     * caller's transaction (FR-DOC-02). The caller serialises concurrent first renders of the same
+     * document (for example under its subject's row lock) and looks for it first with
+     * {@link #findGenerated}.
+     */
+    StoredDocument storeGenerated(
+            byte[] pdf, String docType, String docNumber, String subjectType, UUID subjectId, UUID branchId);
+
+    /** The generated document of this type and number for the subject, if one was stored. */
+    Optional<StoredDocument> findGenerated(String subjectType, UUID subjectId, String docType, String docNumber);
 
     /** @param subjectType the owning module's key, for example {@code lending.member} */
     record Upload(String subjectType, UUID subjectId, UUID branchId, byte[] bytes) {}

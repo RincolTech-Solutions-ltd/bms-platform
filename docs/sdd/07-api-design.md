@@ -627,7 +627,8 @@ disbursement, FR-DIS-03; a repayment on a closed loan; a quote on a loan that is
 | POST | `/lending/loans/{loan_id}/restructure` | `lending.loans.restructure_request` | **M A**. FR-LCL-04 (P2) |
 | PUT | `/lending/loans/{loan_id}/officer` | `lending.collections.assign` | FR-CLN-01 |
 | GET, POST | `/lending/loans/{loan_id}/collection-actions` | `lending.collections.read` / `lending.collections.log_action` | FR-CLN-04 |
-| POST | `/lending/loans/{loan_id}/documents/{doc_type}` | `lending.loans.read` | Generates statement, schedule, or agreement PDF |
+| POST | `/lending/loans/{loan_id}/documents/{doc_type}` | `lending.loans.read` | Generates statement, schedule, or agreement PDF. Built (#120, ADR-034): `schedule` and `loan_statement` return the PDF itself as at the business date, numbered `SCH-<branch>-<loan no>` and `ST-<branch>-<loan no>`, never stored; 409 `invalid_status_transition` before disbursement. |
+| POST | `/lending/loans/{loan_id}/transactions/{txn_id}/document` | `lending.loans.read` | Built (#120, ADR-034): the receipt (repayment, recovery, upfront fee) or voucher (disbursement), rendered on the first request and stored once (FR-DOC-02); answers `{document_id, doc_type, doc_number, created}`, then download through `POST /documents/{id}/download-url` (FR-DOC-03). 422 `no_document` for a reversal or a write-off. |
 
 ### 7.11.14 Lending: collateral (`/lending/collateral`)
 
