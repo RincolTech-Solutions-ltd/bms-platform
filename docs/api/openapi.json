@@ -4306,7 +4306,9 @@
           },
           "module_capabilities" : {
             "additionalProperties" : {
+              "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
               "items" : {
+                "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
                 "type" : "string"
               },
               "type" : "array"
@@ -4317,6 +4319,7 @@
           "modules" : {
             "description" : "Keys of the modules the tenant has switched on, sorted (issue #185)",
             "items" : {
+              "description" : "Keys of the modules the tenant has switched on, sorted (issue #185)",
               "type" : "string"
             },
             "type" : "array"
@@ -5722,8 +5725,7 @@
           "role" : {
             "type" : "string"
           }
-        },
-        "type" : "object"
+        }
       },
       "RetailBranchRoleList" : {
         "properties" : {
@@ -5733,8 +5735,7 @@
             },
             "type" : "array"
           }
-        },
-        "type" : "object"
+        }
       },
       "RetailBusinessEvaluation" : {
         "properties" : {
@@ -5802,8 +5803,7 @@
           "units" : {
             "type" : "boolean"
           }
-        },
-        "type" : "object"
+        }
       },
       "RetailCashCategoryPatch" : {
         "properties" : {
@@ -10611,8 +10611,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "role" ],
-        "type" : "object"
+        "required" : [ "role" ]
       },
       "SignInRequest" : {
         "properties" : {
@@ -11166,8 +11165,7 @@
           "units" : {
             "type" : "boolean"
           }
-        },
-        "type" : "object"
+        }
       },
       "UpdateRetailProductRequest" : {
         "description" : "Omitted fields are unchanged; prices change only through /prices",
