@@ -54,7 +54,8 @@ class LoanDocuments {
             "cash", "Cash",
             "bank", "Bank",
             "mtn_momo", "MTN Mobile Money",
-            "airtel_money", "Airtel Money");
+            "airtel_money", "Airtel Money",
+            "gateway", "Online payment (mobile money or card)");
     private static final Map<String, String> COMPONENTS = Map.of(
             "penalty", "Penalty",
             "fee", "Fees",
