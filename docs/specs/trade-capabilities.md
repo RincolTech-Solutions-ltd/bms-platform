@@ -545,7 +545,7 @@ Branch-bound routes check scope per ADR-017. Full catalogue goes in SDD 7.11.23.
 | POST (M) | `/retail/transfers/{id}/receive`, `/retail/transfers/{id}/cancel` | `retail.stock.transfer` | `transfer_receipt` |
 | GET | `/retail/reports/stock-by-location`, `/retail/reports/transfers-in-flight`, `/retail/reports/supplier-payables` | `retail.stock.read` (payables: `retail.payable.manage`) | as stated in section 8 |
 
-New permissions, each a row of the SDD 8 matrix and seeded by the slice that needs it:
+New permissions (design only; each is added to the SDD 8 matrix by the migration of the slice that needs it, so the matrix never lists a permission no migration seeds):
 `retail.branch_role.manage`, `retail.pricelist.manage`, `retail.pricelist.use`,
 `retail.price.override`, `retail.credit.manage`, `retail.credit.override`, `retail.sale.return`,
 `retail.document.issue`, `retail.payable.manage`.
