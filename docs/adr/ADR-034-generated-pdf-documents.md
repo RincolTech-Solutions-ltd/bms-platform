@@ -90,7 +90,9 @@ request.
    Long tables repeat their header on each page, and a receipt fits on one page.
 7. Leave room in the receipt layout for an optional QR or short verification code later.
 8. Visual check: each template is rendered to PNG by a documented script (or in CI), and a sample
-   sheet is reviewed before merging. Golden text tests alone do not catch an ugly layout.
+   sheet is reviewed before merging. Golden text tests alone do not catch an ugly layout. The script
+   is `make document-samples` (#120): a PDF and a PNG per page for each document, in
+   `backend/target/document-samples`.
 
 **Watch for:** the logo must stay PNG, JPEG or WebP (FR-TEN-08); SVG is never passed to the
 renderer. A template change does not alter receipts already stored; that is intended, and the
