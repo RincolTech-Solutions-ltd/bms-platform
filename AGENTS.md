@@ -57,8 +57,39 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   ADR-032) `V30`, the first-run preferences (issue #19, ADR-025) `V31`, and lending investments
   (issue #152, ADR-031) `V32`, and lending insights (issue #153, ADR-030) `V33`. Flyway runs with
   `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
-  (`V34` is the retail cash book, issue #147; `V35` next). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
+  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
   queries are in `scripts/db-bench/queries` (k01 to k15).
+- **Built (trade 1 of 10, issue #191, ADR-033):** migration `V37` (`retail_branch_roles`, the permission
+  `retail.branch_role.manage`, a backfill of role `both`); the tenant settings group `retail.capabilities`
+  (eight flags, the `shop` or `trade` profile as a preset, all off by default) through a vertical-neutral
+  core hook (`core.tenancy.ModuleSettingsGroup`, supplied by `retail.manifest`); `/me` now lists `modules`
+  and `module_capabilities`; branch roles `store`, `shop`, `both` owned by `retail.stock` (`BranchRoles`,
+  `RetailCapabilities`), enforced on sales only (422 `branch_role_forbids_sales`; restock and transfer are
+  never role limited; a missing row and capability off both read as `both`); the sales screen follows the
+  role and the menu follows the tenant's modules (issue #185). Deferred to the next slices: units, price
+  lists, customer accounts, documents, purchasing, transfer receipt, returns, and an administrator screen
+  for the flags and roles (the routes exist).
+- **Built (trade 2 of 10, issue #192, ADR-033):** PWA only, no migration: the Retail settings screen (shop or trade
+  profile, the eight feature switches, a review before saving, `If-Match` on the settings version), the branch roles
+  screen, `SCREEN_CAPABILITY` so a screen of a capability is offered only while `/me` lists it, and a tour per
+  capability that starts once when first enabled (branch roles built; the others arrive with their screens).
+- **Built (trade 3 of 10, issue #193, ADR-033):** migration `V38` (the two-step transfer: it replaces the
+  `retail_transfers` status check, entry-pair check, void-column checks and update guard, adds the receipt
+  columns and `received_qty`, all expand only); with the `transfer_receipt` capability a transfer is
+  dispatched (`in_transit`), then received (a shortage is stock shrinkage at the destination valued at the
+  source cost) or cancelled; switching the capability off is refused while one is on its way; the reports
+  `stock-by-location` (stores then shops, subtotals, stock in transit, combined total) and
+  `transfers-in-flight` (built from the open dispatches, reconciled against retail transfer entries in
+  account 1190 only, since lending shares it); the staff screens for stock by store and shop, the in-transit
+  list and dispatch and receive (`docs/specs/retail-ui-notes.md`). One-step transfers are the default and
+  unchanged. Deferred: the shortage in the daily profit report, and the rest of the ten slices.
+- **Built (trade 4 of 10, issue #194, ADR-033):** migration `V39` (units of measure): `retail_product_units` (pack sizes of a
+  product: a unit and its factor in base units), nullable unit columns on `retail_sale_lines` and `retail_purchase_lines`, the chart
+  account 5120 `purchase_rounding`; routes `/retail/products/{id}/units`; `unit_id` on a sale line and a restock line, converted to base
+  units exactly in `retail.sales` and `retail.purchasing` (`Quantities` holds the maths); stock, balances, reports and snapshots stay in base
+  units; the CSV item import reads `pack unit` and `pack factor`; the sale and restock screens offer the item's packs and the item screen
+  edits them while `module_capabilities` lists `units`. No permission added. The pack sizes capability is marked ready with its own tour
+  (`capability-units`).
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator
@@ -110,6 +141,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   digest settings, indexes); the owner's daily digest through the outbox; `seed-lending
   --insights-demo [--scale N]` for a fabricated year. Metrics dictionary:
   `docs/specs/lending-insights-metrics.md`.
+- **Client extras, design only (issue #210):** `docs/specs/client-extras.md` specifies mobile money through Pesapal
+  (ADR-035), SMS through Africa's Talking on the outbox (ADR-036), the advisory AI brief (ADR-037) and the formal
+  reports pack as PDF and Excel (ADR-038), with a note on credit bureaus. Nothing is built; the build slices are issues
+  #211 to #233 in the order of the spec's section 10. The numbers 033 and 034 belong to open pull requests.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -179,6 +214,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `core.reporting` | Report catalogue and runs | RPT; chapter 14 | 6.5 `report_runs` | 7.11.8 |
 | `core.imports` | Import batches, review queue, commit | IMP; chapter 13 | 13.4 | 7.11.9 |
 | `core.payments` | Payment intents, gateway, callbacks | PAY; chapter 12 | 6.5 | 7.11.10 |
+| `core.ai` (ADR-037, design) | The `LlmClient` port and one OpenAI-compatible adapter, token caps, call log, circuit breaker; depends on no vertical | FR-AIA | 6.13 `ai_calls` | none |
 | `core.jobs` | db-scheduler tasks, per-tenant job runner (ADR-008) | 5.4.4 | `scheduled_tasks` | none |
 | `core.operations` | `/version`, readiness, database role guard, the `Idempotency-Key` protocol | NFR-SEC-03 | none | 7.8, 7.11.1 |
 | `lending.manifest` | The vertical's registration with the core | 5.4.3 | none | none |
@@ -190,11 +226,13 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending.savings` | Savings products, accounts, movements, end of day and interest, statements, savings reports (ADR-032) | SAV | 6.7 | 7.11.15 |
 | `lending.investments` | Investment products, investments, returns job, maturity, rollover, early withdrawal, maturity ladder (ADR-031) | INV; 3.25.1 R-INV | 6.7 | 7.11.16 |
 | `lending.insights` | The insights read model, snapshots, daily digest, panel registry (ADR-030) | INS | 6.7 | 7.11.22 |
+| `lending.advisor` (ADR-037, design) | The advisory AI brief and question box over insights facts; aggregates and aliases only | FR-AIA | 6.13 `ai_briefs` | 7.11.24 |
+| `lending.reports` (ADR-038, design) | The definitions of the seven formal reports and the monthly pack, built on the insights figures through a public port | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
 | `lending` collections | Due lists, arrears, actions | CLN | 6.7 | 7.11.17 |
 | Member area | Member self-service | MSS; chapter 11 | none | 7.11.18 |
 | `retail.manifest` | The retail vertical's registration with the core (ADR-020) | 3.28 | 6.11.1 chart | none |
 | `retail.catalogue` | Categories, units, products, append-only price history | RET-01, RET-02 | 6.11 | 7.11.20 |
-| `retail.stock` | Stock movements and balances, stock-takes, usage and damage, transfers between branches, reconciliation; retail posting helpers | RET-03, RET-07, RET-08, RET-11, RET-16 | 6.11 | 7.11.20 |
+| `retail.stock` | Stock movements and balances, stock-takes, usage and damage, transfers between branches (one step, or dispatch then receive or cancel), branch roles, the stock-by-location and transfers-in-flight reports, reconciliation; retail posting helpers | RET-03, RET-07, RET-08, RET-11, RET-16 | 6.11 | 7.11.20 |
 | `retail.sales` | Sales with snapshots, voids, credit buyers, payments | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
 | `retail.purchasing` | Suppliers, restocks that set prices atomically | RET-06, RET-11 | 6.11 | 7.11.20 |
 | `retail.reports` | Valuation, revaluation difference, daily profit; the analytics reports of issue #149 (sales analysis, margins, stock health, credit control, business evaluation, owner dashboard), read only | RET-09, RET-10 | 6.11.3 | 7.11.20 |
@@ -366,12 +404,29 @@ Accepted (this list is the ADR index):
 - ADR-032 Savings: end-of-day balances with interest rounded once per posting, movements only after
   the closed day, withdrawals checked again at execution, receipts queued as SMS that expire unsent
   (proposed, #151)
+- ADR-033 Wholesale support as optional per-tenant capabilities of the retail module: branch roles,
+  units, price lists, customer accounts, documents, purchasing; no second vertical (accepted, #190;
+  amended by #193 for the two-step transfer; spec `docs/specs/trade-capabilities.md`)
+- ADR-034 Generated PDF documents: XHTML templates rendered with OpenHTMLtoPDF, on demand, stored once
+  per version (accepted, #204)
+- ADR-035 Mobile money and card collections through Pesapal v3: hosted orders, the notification as a
+  hint, the status query as the truth, idempotent booking through purpose handlers (proposed, #210;
+  settles the question that was pending ADR-011)
+- ADR-036 SMS as a channel of the notification outbox: Africa's Talking first, tenant link and delivery
+  log, modes with a sink outside production, windows and opt-out (proposed, #210; settles the SMS half
+  of pending ADR-013)
+- ADR-037 AI portfolio monitoring: advisory, aggregates and aliases only, numbers validated in code,
+  off by default (proposed, #210)
+- ADR-038 The reports pack: asynchronous runs over one snapshot, PDF through the shared templates,
+  streamed Excel (proposed, #210)
+- ADR-039 One search convention: a shared kernel matcher (folded text, AND of terms, phone digits, ranked, rank in the
+  cursor), `bms_fold` and `bms_digits` in V40 and no search index (none is usable under row-level security), one
+  live search hook in the PWA (proposed, #241; spec `docs/specs/search.md`)
 
 Pending (cite only as "pending ADR-NNN"):
 
-- ADR-011 Payment gateway (Pesapal or Interswitch)
 - ADR-012 Credit scoring model beyond the rules-based default
-- ADR-013 SMS and USSD aggregator
+- ADR-013 USSD aggregator (the SMS half is settled by ADR-036)
 - ADR-021 Weighted average cost for retail, per tenant (ADR-020 decision 6)
 - ADR-022 The cash book: expenses, banking and advances, likely partly core (ADR-020)
 

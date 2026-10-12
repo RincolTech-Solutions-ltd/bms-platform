@@ -1,10 +1,15 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { RETAIL_CURRENCY, RETAIL_ZONE, retail, type PriceChange, type Product } from '../../../api/retail';
 import { formatMinor, parseMinor } from '../../../components/money';
+import { useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { BackToCatalogue } from './catalogue';
+import { PackEditor } from './catalogue-packs';
+import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
 
 // Items (#146): list with search, category and active filters; add and edit an item's code,
@@ -128,6 +133,7 @@ export function ProductForm({ product, onSaved, onCancel }: { product?: Product;
             <input id="item-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> On sale (clear this to switch the item off)
           </label>
           <p className="hint">To change the price, use Change price on the list.</p>
+          <PackEditor product={product} />
         </>
       ) : (
         <>
@@ -216,6 +222,7 @@ type View = { mode: 'list' } | { mode: 'new' } | { mode: 'edit' | 'price'; id: s
 
 function Editing({ id, mode, onSaved, onCancel }: { id: string; mode: 'edit' | 'price'; onSaved: (text: string) => void; onCancel: () => void }) {
   const product = useQuery({ queryKey: ['retail', 'product', id], queryFn: () => retail.getProduct(id), gcTime: 0 });
+  useCrumbTail(product.data?.description, onCancel);
   if (product.isPending) return <p className="loading">Loading</p>;
   if (!product.data) return <Problem error={product.error} />;
   return mode === 'edit' ? <ProductForm product={product.data} onSaved={onSaved} onCancel={onCancel} /> : <PriceForm product={product.data} onSaved={onSaved} onCancel={onCancel} />;
@@ -224,25 +231,29 @@ function Editing({ id, mode, onSaved, onCancel }: { id: string; mode: 'edit' | '
 export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) => void; onPrice: (id: string) => void; onAdd: () => void }) {
   const { me } = useStaff();
   const profit = useProfitAccess();
-  const [query, setQuery] = useState('');
+  const search = useLiveSearch();
+  const query = search.term;
   const [categoryId, setCategoryId] = useState('');
   const [activeFilter, setActiveFilter] = useState<'active' | 'off' | 'all'>('active');
   const categories = useQuery({ queryKey: ['retail', 'catalogue', 'categories'], queryFn: () => retail.listCategories() });
   const active = activeFilter === 'all' ? undefined : activeFilter === 'active';
   const page = useInfiniteQuery({
     queryKey: ['retail', 'catalogue', 'products', query, categoryId, activeFilter],
-    queryFn: ({ pageParam }) => retail.listCatalogue({ query, categoryId, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}) }),
+    queryFn: ({ pageParam, signal }) => retail.listCatalogue({ query, categoryId, ...(active === undefined ? {} : { active }), ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
+    placeholderData: keepPreviousData,
   });
+  const finding = page.isPlaceholderData || (page.isFetching && !page.isFetchingNextPage);
   const items = (page.data?.pages ?? []).flatMap((p) => p.items ?? []);
   const canPrice = (me.permissions ?? []).includes(PRICE);
+  const g = useCategoryGroups({ screen: 'items', items, categoryOf: (p) => p.category, resetKey: [query, categoryId, activeFilter].join('|'), searching: query !== '', pending: page.isPlaceholderData });
+  const card = (p: Product) => <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} />;
   return (
     <>
       <BackToCatalogue />
       <p><button type="button" onClick={onAdd}>Add an item</button></p>
-      <label htmlFor="items-search">Search by name, code or category</label>
-      <input id="items-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
+      <SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} />
       <div className="rt-row">
         <div>
           <label htmlFor="items-category">Category</label>
@@ -262,13 +273,12 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
       </div>
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
-      {page.data && items.length === 0 && <p className="empty-state">No items found.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {items.map((p) => (
-          <ProductCard key={p.id} product={p} showCost={profit} canPrice={canPrice} onEdit={() => onEdit(p.id ?? '')} onPrice={() => onPrice(p.id ?? '')} />
-        ))}
-      </ul>
-      {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show more items'}</button>}
+      {page.data && items.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="items" /> : <p className="empty-state">No items found.</p>)}
+      <SearchResults fetching={finding}>
+        {items.length > 0 && <GroupControls state={g} paged={page.hasNextPage} />}
+        {g.active ? <GroupedCards state={g} renderItem={card} /> : <ul style={{ listStyle: 'none', padding: 0 }}>{items.map(card)}</ul>}
+      </SearchResults>
+      {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage || page.isPlaceholderData}>{page.isFetchingNextPage ? 'Loading' : 'Show more items'}</button>}
     </>
   );
 }

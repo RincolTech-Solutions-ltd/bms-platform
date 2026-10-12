@@ -1,12 +1,16 @@
-import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { RETAIL_CURRENCY, RetailError, retail, type Product } from '../../../api/retail';
+import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { useLiveSearch } from '../../../app/ui/useLiveSearch';
+import type { Me } from '../../../api/client';
+import { RETAIL_CURRENCY, RetailError, retail, type BranchRole, type Product } from '../../../api/retail';
 import { ALL_BRANCHES, branchLabel } from '../../../auth/branch';
 import { formatMinor } from '../../../components/money';
 import { useStockedBranches } from '../branch-picker';
 import { useStaff } from '../context';
+import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { showQty } from './maths';
-import { branchesWhere, canSeeProfit, canUse, type RetailScreen } from './permissions';
+import { BRANCH_ROLES, branchesWhere, canSeeProfit, canUse, capabilityOn, sellingBranches, type RetailScreen } from './permissions';
 
 // Shared pieces of the retail screens. Phone first: one column, 44px tap targets, labels on every
 // input, a visible focus ring, and state shown in words as well as colour.
@@ -50,30 +54,8 @@ export function useToast(): { show: (message: string) => void; toast: ReactNode 
   return { show, toast: text ? <p className="toast" aria-hidden="true">{text}</p> : null };
 }
 
-/** Passes the latest pushed value on once no newer one has arrived for `ms`. */
-export function createDebouncer<T>(ms: number, onValue: (value: T) => void) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return {
-    push(value: T) {
-      clearTimeout(timer);
-      timer = setTimeout(() => onValue(value), ms);
-    },
-    cancel() {
-      clearTimeout(timer);
-    },
-  };
-}
-
-/** The value after it has stopped changing for `ms`; the input that feeds it stays responsive. */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const debouncer = createDebouncer(ms, setSettled);
-    debouncer.push(value);
-    return debouncer.cancel;
-  }, [value, ms]);
-  return settled;
-}
+/** The debounce of the shared search hook (#241), kept here for the screens that import it from this file. */
+export { createDebouncer } from '../../../app/ui/useLiveSearch';
 
 export const STALE_TEXT = 'This was changed by someone else. The list has been reloaded; please try again.';
 
@@ -116,6 +98,22 @@ export function Gate({ screen, title, children, wide }: { screen: RetailScreen; 
       {children}
     </main>
   );
+}
+
+/**
+ * The roles of the branches (ADR-033): undefined while the capability is off, the session cannot read
+ * stock, or the read is on its way, and then every branch behaves as before roles existed.
+ */
+export function useBranchRoles(me: Pick<Me, 'permissions' | 'module_capabilities'>): BranchRole[] | undefined {
+  const enabled = capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read');
+  const roles = useQuery({ queryKey: ['retail', 'branch-roles'], queryFn: () => retail.branchRoles(), enabled, staleTime: 60_000, retry: 1 });
+  return enabled ? roles.data : undefined;
+}
+
+/** True unless branch roles are on and every branch the session can sell at is a store. */
+export function useCanSellAnywhere(me: Me): boolean {
+  const roles = useBranchRoles(me);
+  return sellingBranches(branchesWhere(me, 'retail.sale.create'), roles).length > 0;
 }
 
 /** The active branch as one concrete branch, or a prompt to choose one. */
@@ -237,36 +235,43 @@ export function ProductPicker({ id, branchId, onAdd, showPrice = false }: {
   onAdd: (p: Product) => void;
   showPrice?: boolean;
 }) {
-  const [search, setSearch] = useState('');
+  const search = useLiveSearch();
   const products = useQuery({
-    queryKey: ['retail', 'products', branchId, search],
-    queryFn: () => retail.listProducts({ query: search, branchId }),
+    queryKey: ['retail', 'products', branchId, search.term],
+    queryFn: ({ signal }) => retail.listProducts({ query: search.term, branchId, signal }),
+    placeholderData: keepPreviousData,
   });
+  const finding = products.isPlaceholderData || products.isFetching;
+  // The first 20 matches, in category groups when there is more than one category (category-groups.tsx).
+  const shown = (products.data ?? []).slice(0, 20);
+  const g = useCategoryGroups({ screen: 'picker', items: shown, categoryOf: (p) => p.category, resetKey: `${branchId}|${search.term}`, searching: search.term !== '', pending: products.isPlaceholderData, minGroups: 2 });
+  const card = (p: Product) => (
+    <li key={p.id} className="rt-card">
+      <div className="rt-row">
+        <span>
+          <strong>{p.description}</strong> ({p.code})
+          <br />
+          {!g.active && <CategoryLabel category={p.category} />}
+          {!g.active && p.category && <br />}
+          {showPrice && `${money(p.sell_minor ?? 0)} each, `}in stock here:{' '}
+          {p.qty !== undefined && p.qty.startsWith('-') ? <span className="rt-flag">{showQty(p.qty)} (negative)</span> : showQty(p.qty ?? '0')}{' '}
+          {p.unit}
+        </span>
+        <button type="button" onClick={() => onAdd(p)} aria-label={`Add ${p.description}`}>
+          Add
+        </button>
+      </div>
+    </li>
+  );
   return (
     <>
-      <label htmlFor={id}>Find an item by name, code or category</label>
-      <input id={id} type="search" value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
+      <SearchBox id={id} label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
       {products.isError && <Problem error={products.error} />}
-      <ul style={{ listStyle: 'none', padding: 0, maxHeight: 220, overflowY: 'auto' }}>
-        {(products.data ?? []).slice(0, 20).map((p) => (
-          <li key={p.id} className="rt-card">
-            <div className="rt-row">
-              <span>
-                <strong>{p.description}</strong> ({p.code})
-                <br />
-                <CategoryLabel category={p.category} />
-                {p.category && <br />}
-                {showPrice && `${money(p.sell_minor ?? 0)} each, `}in stock here:{' '}
-                {p.qty !== undefined && p.qty.startsWith('-') ? <span className="rt-flag">{showQty(p.qty)} (negative)</span> : showQty(p.qty ?? '0')}{' '}
-                {p.unit}
-              </span>
-              <button type="button" onClick={() => onAdd(p)} aria-label={`Add ${p.description}`}>
-                Add
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
+      <SearchResults fetching={finding}>
+      {shown.length > 0 && <GroupControls state={g} />}
+      {g.active ? <GroupedCards state={g} renderItem={card} scroll /> : <ul style={{ listStyle: 'none', padding: 0, maxHeight: 220, overflowY: 'auto' }}>{shown.map(card)}</ul>}
+      </SearchResults>
     </>
   );
 }

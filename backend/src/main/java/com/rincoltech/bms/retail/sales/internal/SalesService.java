@@ -12,8 +12,10 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue.PackUnit;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Customer;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.CustomerBalance;
@@ -33,14 +35,17 @@ import com.rincoltech.bms.retail.sales.internal.SalesApi.UpdateCustomerRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.VoidRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.NewLine;
+import com.rincoltech.bms.retail.stock.BranchRoles;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
 import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import com.rincoltech.bms.retail.stock.StockLedger.Movement;
 import com.rincoltech.bms.retail.stock.StockLedger.Recorded;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -76,6 +81,8 @@ class SalesService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final BranchRoles roles;
+    private final RetailCapabilities capabilities;
 
     SalesService(
             SalesRepository repo,
@@ -87,7 +94,9 @@ class SalesService {
             TenantSequences sequences,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            BranchRoles roles,
+            RetailCapabilities capabilities) {
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -98,6 +107,8 @@ class SalesService {
         this.tenant = tenant;
         this.clock = clock;
         this.audit = audit;
+        this.roles = roles;
+        this.capabilities = capabilities;
     }
 
     /** The general ledger account a payment method lands in (chapter 6 section 6.11.1). */
@@ -120,6 +131,8 @@ class SalesService {
     /** FR-RET-04, FR-RET-05, FR-RET-11. */
     private Sale record(SaleRequest r) {
         UUID branch = branches.resolve("retail.sale.create", r.branchId());
+        // ADR-033: a store never sells; with branch_roles off every branch acts as both.
+        roles.requireMaySell(branch);
         LocalDate today = clock.today(tenant.profile().timezone());
         LocalDate saleDate = r.saleDate() == null ? today : r.saleDate();
         List<FieldProblem> problems = new ArrayList<>();
@@ -162,6 +175,53 @@ class SalesService {
                 problems.add(new FieldProblem(field + ".qty", "invalid", "At most three decimal places."));
                 continue;
             }
+            if (l.unitId() != null && !l.unitId().equals(p.unitId())) {
+                // ADR-033: a pack. Stock moves in base units; the entered unit, quantity and price are kept on the
+                // line.
+                if (!capabilities.enabled(RetailCapabilities.UNITS)) {
+                    problems.add(new FieldProblem(
+                            field + ".unit_id",
+                            "capability_not_enabled",
+                            "Pack sizes are not enabled for this business."));
+                    continue;
+                }
+                PackUnit pack = catalogue.packUnit(p.id(), l.unitId()).orElse(null);
+                if (pack == null || !pack.active()) {
+                    problems.add(new FieldProblem(
+                            field + ".unit_id", "unknown_pack_unit", "This item is not sold in that unit."));
+                    continue;
+                }
+                BigDecimal baseQty = Quantities.toBase(l.qty(), pack.factor())
+                        .orElseThrow(() -> ApiException.rule(
+                                "quantity_not_representable",
+                                l.qty() + " " + pack.unit() + " does not convert exactly to thousandths of " + p.unit()
+                                        + ". Change the quantity."));
+                long packPrice = l.unitPriceMinor() == null
+                        ? Quantities.packPrice(p.sellMinor(), pack.factor())
+                        : l.unitPriceMinor();
+                long total = Quantities.value(l.qty(), packPrice);
+                long perBase = Quantities.perBase(total, baseQty);
+                // The column CHECKs bound a price at 10^13 (review F7); a defaulted pack price or the derived price per
+                // base unit can exceed it.
+                if (packPrice > RetailCatalogue.MAX_AMOUNT_MINOR || perBase > RetailCatalogue.MAX_AMOUNT_MINOR) {
+                    throw ApiException.rule(
+                            "amount_out_of_range", "The price on " + field + " is too large to compute.");
+                }
+                lines.add(new NewLine(
+                        UUID.randomUUID(),
+                        i + 1,
+                        p.id(),
+                        baseQty,
+                        perBase,
+                        p.costMinor(),
+                        total,
+                        Quantities.value(baseQty, p.costMinor()),
+                        pack.unitId(),
+                        l.qty(),
+                        packPrice,
+                        pack.factor()));
+                continue;
+            }
             long price = l.unitPriceMinor() == null ? p.sellMinor() : l.unitPriceMinor();
             lines.add(new NewLine(
                     UUID.randomUUID(),
@@ -171,7 +231,11 @@ class SalesService {
                     price,
                     p.costMinor(),
                     Quantities.value(l.qty(), price),
-                    Quantities.value(l.qty(), p.costMinor())));
+                    Quantities.value(l.qty(), p.costMinor()),
+                    null,
+                    null,
+                    null,
+                    null));
         }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
@@ -179,7 +243,11 @@ class SalesService {
         // ADR-020 decision 5: the message never carries the cost, which a sales caller cannot read.
         if (!CurrentPrincipal.require().may("retail.price.below_cost", branch)) {
             for (NewLine l : lines) {
-                if (l.unitPriceMinor() <= l.unitCostMinor()) {
+                // A pack line is judged on its line total, never on the rounded price per base unit (spec 3.3).
+                boolean below = l.saleUnitId() == null
+                        ? l.unitPriceMinor() <= l.unitCostMinor()
+                        : l.lineTotalMinor() <= l.lineCostMinor();
+                if (below) {
                     throw ApiException.rule(
                             "price_below_cost",
                             "The price on line " + l.lineNo() + " is too low: it must be above the product's cost.");
@@ -305,7 +373,10 @@ class SalesService {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Instant afterCreated = null;
         UUID afterId = null;
-        Cursor.Key after = Cursor.decodeKey(cursor).orElse(null);
+        // The list keeps its time order, so no rank travels, but the cursor still belongs to its search text.
+        Search.Query search = Search.parse(buyer);
+        Cursor.Key after =
+                Cursor.decodeKey(Search.unwrap(search, cursor).cursor()).orElse(null);
         if (after != null) {
             String direction = newestFirst ? "desc:" : "asc:";
             if (!after.sortKey().startsWith("desc:") && !after.sortKey().startsWith("asc:")) {
@@ -327,7 +398,7 @@ class SalesService {
                 customerId,
                 paymentMethod,
                 productId,
-                buyer == null || buyer.isBlank() ? null : buyer.trim(),
+                search,
                 status,
                 owing,
                 today,
@@ -338,8 +409,12 @@ class SalesService {
         boolean more = rows.size() > size;
         List<Sale> items = more ? rows.subList(0, size) : rows;
         String next = more
-                ? Cursor.encode((newestFirst ? "desc:" : "asc:")
-                        + items.getLast().createdAt() + "|" + items.getLast().id())
+                ? Search.wrap(
+                        search,
+                        0,
+                        Cursor.encode((newestFirst ? "desc:" : "asc:")
+                                + items.getLast().createdAt() + "|"
+                                + items.getLast().id()))
                 : null;
         return new SalePage(items.stream().map(SalesService::visible).toList(), next);
     }
@@ -539,16 +614,25 @@ class SalesService {
     @Transactional(readOnly = true)
     CustomerList customers(String query, Integer limit, String cursor) {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
+        Search.Query search = Search.parse(query);
+        Search.After position = Search.unwrap(search, cursor);
         com.rincoltech.bms.kernel.Cursor.Key after =
-                com.rincoltech.bms.kernel.Cursor.decodeKey(cursor).orElse(null);
+                com.rincoltech.bms.kernel.Cursor.decodeKey(position.cursor()).orElse(null);
         List<SalesRepository.CustomerRow> rows = repo.customers(
-                blankToNull(query), size + 1, CurrentPrincipal.require().branchFilter("retail.sale.read", null), after);
+                search,
+                size + 1,
+                CurrentPrincipal.require().branchFilter("retail.sale.read", null),
+                position.rank(),
+                after);
         boolean more = rows.size() > size;
         List<SalesRepository.CustomerRow> page = more ? rows.subList(0, size) : rows;
         // The key is the database's own lower(name), so the cursor agrees with the ORDER BY.
         String next = more
-                ? com.rincoltech.bms.kernel.Cursor.encode(page.getLast().sortKey() + "|"
-                        + page.getLast().customer().id())
+                ? Search.wrap(
+                        search,
+                        page.getLast().rank(),
+                        com.rincoltech.bms.kernel.Cursor.encode(page.getLast().sortKey() + "|"
+                                + page.getLast().customer().id()))
                 : null;
         return new CustomerList(
                 page.stream().map(SalesRepository.CustomerRow::customer).toList(), next);
@@ -597,7 +681,12 @@ class SalesService {
                                 l.unitPriceMinor(),
                                 l.lineTotalMinor(),
                                 null,
-                                null))
+                                null,
+                                l.saleUnitId(),
+                                l.saleUnit(),
+                                l.saleQty(),
+                                l.saleUnitPriceMinor(),
+                                l.unitFactor()))
                         .toList(),
                 s.historical(),
                 s.createdAt(),

@@ -380,24 +380,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ledger/payment-methods": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Each payment method's account: the mapped rows, then the defaults still in use */
-        get: operations["listPaymentMethods"];
-        /** Map a payment method to an asset account (FR-GL-08) */
-        put: operations["setPaymentMethod"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/lending/collateral": {
         parameters: {
             query?: never;
@@ -2443,6 +2425,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/branch-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active branches in the caller's stock scope with their roles; 404 capability_not_enabled when off */
+        get: operations["listRetailBranchRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/branch-roles/{branch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived */
+        put: operations["setRetailBranchRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/cash-parties": {
         parameters: {
             query?: never;
@@ -2739,6 +2755,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/products/{product_id}/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The pack sizes of a product; the units capability (issue #194) */
+        get: operations["listRetailProductUnits"];
+        put?: never;
+        /** Add a pack size to a product: a unit and the base units in one pack (issue #194) */
+        post: operations["createRetailProductUnit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/units/{unit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change a pack's factor or switch it off under If-Match; never deleted (issue #194) */
+        patch: operations["updateRetailProductUnit"];
+        trace?: never;
+    };
     "/api/v1/retail/purchases": {
         parameters: {
             query?: never;
@@ -2944,6 +2995,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/stock-by-location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every product's balance in each store and shop the caller may read, subtotals by role, stock in transit and the combined total (ADR-033) */
+        get: operations["getRetailStockByLocation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/stock-health": {
         parameters: {
             query?: never;
@@ -2953,6 +3021,23 @@ export interface paths {
         };
         /** Days of cover, reorder suggestions, dead stock and shrinkage by branch (issue #149) */
         get: operations["getRetailStockHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/reports/transfers-in-flight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Transfers dispatched and not yet received, with age and value; needs the transfer_receipt capability (ADR-033) */
+        get: operations["getRetailTransfersInFlight"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3094,6 +3179,24 @@ export interface paths {
         put?: never;
         /** Void a savings record and free its day (FR-RET-28); M */
         post: operations["voidRetailSavings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/settings/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tenant's retail capabilities, absent keys off */
+        get: operations["getRetailCapabilities"];
+        /** Switch retail capabilities or choose the shop or trade profile; audited with old and new values */
+        put: operations["updateRetailCapabilities"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3247,7 +3350,7 @@ export interface paths {
         /** Transfers from or to a branch in the caller's scope, newest first */
         get: operations["listRetailTransfers"];
         put?: never;
-        /** Move stock from one branch to another at cost, in one transaction (FR-RET-16); M */
+        /** Move stock from one branch to another at cost, in one transaction; with the transfer_receipt capability on, dispatch it instead and leave it in transit until received (FR-RET-16); M */
         post: operations["createRetailTransfer"];
         delete?: never;
         options?: never;
@@ -3266,6 +3369,40 @@ export interface paths {
         get: operations["getRetailTransfer"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/transfers/{transfer_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The source takes a dispatched transfer back before it is received (capability transfer_receipt, FR-RET-16); M */
+        post: operations["cancelRetailTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/transfers/{transfer_id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The destination receives a dispatched transfer, all of it or less; the shortage is posted as stock shrinkage at the source cost (capability transfer_receipt, FR-RET-16); M */
+        post: operations["receiveRetailTransfer"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5294,6 +5431,12 @@ export interface components {
             kind?: string;
             mfa_enabled?: boolean;
             mfa_required?: boolean;
+            /** @description Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed */
+            module_capabilities?: {
+                [key: string]: string[];
+            };
+            /** @description Keys of the modules the tenant has switched on, sorted (issue #185) */
+            modules?: string[];
             /** @description Per permission key, the branches it applies in */
             permission_scopes?: {
                 [key: string]: components["schemas"]["MePermissionScope"];
@@ -5502,23 +5645,6 @@ export interface components {
             /** @description Channels whose sender is configured; rows of the others stay pending */
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
-        };
-        PaymentMethodMapping: {
-            account_code?: string;
-            /**
-             * Format: uuid
-             * @description Null for the tenant's mapping
-             */
-            branch_id?: string;
-            /** Format: uuid */
-            gl_account_id?: string;
-            is_active?: boolean;
-            method_key?: string;
-            /** @description mapped (a row) or default (the seeded account, ADR-026) */
-            source?: string;
-        };
-        PaymentMethodMappingList: {
-            items?: components["schemas"]["PaymentMethodMapping"][];
         };
         /** @description R-PAYOFF as at value_date; rebate is interest not charged */
         PayoffQuote: {
@@ -5918,6 +6044,17 @@ export interface components {
             /** @example 10 */
             qty: string;
         };
+        RetailBranchRole: {
+            /** Format: uuid */
+            branch_id?: string;
+            can_sell?: boolean;
+            code?: string;
+            name?: string;
+            role?: string;
+        };
+        RetailBranchRoleList: {
+            items?: components["schemas"]["RetailBranchRole"][];
+        };
         RetailBusinessEvaluation: {
             branches?: components["schemas"]["RetailEvaluationBranch"][];
             currency?: string;
@@ -5932,6 +6069,18 @@ export interface components {
             /** Format: int32 */
             top?: number;
             total?: components["schemas"]["RetailEvaluationTotal"];
+        };
+        RetailCapabilities: {
+            branch_roles?: boolean;
+            customer_accounts?: boolean;
+            documents?: boolean;
+            price_lists?: boolean;
+            /** @enum {string} */
+            profile?: "shop" | "trade";
+            purchasing?: boolean;
+            returns?: boolean;
+            transfer_receipt?: boolean;
+            units?: boolean;
         };
         RetailCashCategoryPatch: {
             active?: boolean;
@@ -6610,6 +6759,145 @@ export interface components {
             /** Format: uuid */
             receipt_document_id?: string;
         };
+        /** @description Dispatched and not received or cancelled, the longest wait first */
+        RetailInFlightTransfer: {
+            /**
+             * Format: int32
+             * @description Days from the transfer date to today
+             */
+            age_days?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in either branch
+             */
+            cost_total_minor?: number;
+            /** Format: date-time */
+            dispatched_at?: string;
+            /** Format: uuid */
+            from_branch_id?: string;
+            /** Format: uuid */
+            id?: string;
+            lines?: components["schemas"]["RetailTransferLine"][];
+            note?: string;
+            /** Format: uuid */
+            to_branch_id?: string;
+            /** Format: date */
+            transfer_date?: string;
+        };
+        /** @description One entry per branch of the report, in its order */
+        RetailLocationBalance: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description Below zero in this branch */
+            negative?: boolean;
+            qty?: string;
+            /**
+             * Format: int64
+             * @description Quantity at the current cost; present only with retail.profit.read in this branch
+             */
+            value_minor?: number;
+        };
+        /** @description A column of the report; ordered stores, shops, then both */
+        RetailLocationBranch: {
+            code?: string;
+            head_office?: boolean;
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /**
+             * @description both for every branch while the branch_roles capability is off
+             * @enum {string}
+             */
+            role?: "store" | "shop" | "both";
+        };
+        /** @description Only the branches where the caller holds retail.profit.read */
+        RetailLocationBranchValue: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: int64 */
+            value_minor?: number;
+        };
+        /** @description Only the roles whose branches in the report all show cost */
+        RetailLocationRoleValue: {
+            role?: string;
+            /** Format: int64 */
+            value_minor?: number;
+        };
+        /** @description One product: its balance in every branch, by role, and in transit */
+        RetailLocationRow: {
+            /** @description One entry per branch of the report, in its order */
+            balances?: components["schemas"]["RetailLocationBalance"][];
+            category?: string;
+            /** Format: uuid */
+            category_id?: string;
+            code?: string;
+            /** @description All the branches' balances plus the quantity in transit */
+            combined_qty?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report
+             */
+            combined_value_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report
+             */
+            cost_minor?: number;
+            description?: string;
+            /** @description Dispatched and not yet received, from or to a branch of the report; in neither balance */
+            in_transit_qty?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report; the quantity in transit at the cost it was dispatched at
+             */
+            in_transit_value_minor?: number;
+            /** @description True when any branch's balance is below zero */
+            negative?: boolean;
+            /** Format: uuid */
+            product_id?: string;
+            /** Format: int64 */
+            sell_minor?: number;
+            /** @description The sum of the balances of each role present in the report */
+            subtotals?: components["schemas"]["RetailRoleQuantity"][];
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report; the balances at the current cost
+             */
+            value_minor?: number;
+        };
+        /** @description Over every product in the caller's branches, not only the page; cost fields as the rows */
+        RetailLocationTotals: {
+            /** @description Only the branches where the caller holds retail.profit.read */
+            by_branch?: components["schemas"]["RetailLocationBranchValue"][];
+            /** @description Only the roles whose branches in the report all show cost */
+            by_role?: components["schemas"]["RetailLocationRoleValue"][];
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report
+             */
+            combined_value_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report; the value of the dispatches still on their way
+             */
+            in_transit_value_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report; the inventory account of those branches
+             */
+            inventory_ledger_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report; value at cost less the inventory account, as in the valuation
+             */
+            revaluation_difference_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch of the report
+             */
+            value_minor?: number;
+        };
         RetailMarginBelowTarget: {
             items?: components["schemas"]["RetailMarginRow"][];
             /**
@@ -6707,6 +6995,40 @@ export interface components {
             sale_no?: string;
             /** Format: int64 */
             total_minor?: number;
+        };
+        /** @description The pack sizes of the product; present only while the units capability is on */
+        RetailPack: {
+            active?: boolean;
+            /** @description Base units in one pack, three places, for example 12.000 */
+            factor?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            product_id?: string;
+            unit?: string;
+            /** Format: uuid */
+            unit_id?: string;
+            /**
+             * Format: int32
+             * @description Send as If-Match when updating
+             */
+            version?: number;
+        };
+        RetailPackList: {
+            items?: components["schemas"]["RetailPack"][];
+        };
+        /** @description A pack size: factor base units in one pack of the unit */
+        RetailPackRequest: {
+            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
+            factor: string;
+            /** Format: uuid */
+            unit_id: string;
+        };
+        /** @description Omitted fields are unchanged; a pack is never deleted, only switched off */
+        RetailPackUpdate: {
+            active?: boolean;
+            /** @description Base units in one pack, at least 1; required to switch a pack on again */
+            factor?: string;
         };
         RetailPayment: {
             /** Format: int64 */
@@ -6866,6 +7188,8 @@ export interface components {
             id?: string;
             /** @description True when the branch balance is below zero */
             negative?: boolean;
+            /** @description The pack sizes of the product; present only while the units capability is on */
+            packs?: components["schemas"]["RetailPack"][];
             /** @description The branch balance, when branch_id was given */
             qty?: string;
             /** Format: int64 */
@@ -6931,31 +7255,56 @@ export interface components {
         };
         RetailPurchaseLine: {
             code?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Per base unit: the movement snapshot and the product's cost
+             */
             cost_minor?: number;
             description?: string;
             /** Format: uuid */
             id?: string;
             /** Format: int32 */
             line_no?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The amount paid or owed for the line, as entered
+             */
             line_total_minor?: number;
             /** Format: uuid */
             product_id?: string;
             qty_by_branch?: components["schemas"]["RetailPurchaseLineBranch"][];
+            /** @description In base units */
             qty_total?: string;
             /** Format: int64 */
             sell_minor?: number;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Cost per unit as entered
+             */
+            unit_cost_minor?: number;
+            /** @description Base units in one unit when the line was made */
+            unit_factor?: string;
+            /**
+             * Format: uuid
+             * @description The unit the line was entered in; absent means the base unit
+             */
+            unit_id?: string;
+            /** @description Quantity in the unit */
+            unit_qty_total?: string;
         };
         RetailPurchaseLineBranch: {
             /** Format: uuid */
             branch_id?: string;
+            /** @description In base units, always */
             qty?: string;
+            /** @description The quantity in the unit the line was entered in; absent for a base unit line */
+            unit_qty?: string;
         };
         RetailPurchaseLineRequest: {
             /**
              * Format: int64
-             * @description Unit cost; becomes the product's cost
+             * @description Cost per unit_id when one is given, otherwise per base unit; becomes the product's cost per base unit (a pack cost divided by the factor, rounded half up)
              */
             cost_minor: number;
             /** Format: uuid */
@@ -6966,6 +7315,11 @@ export interface components {
              * @description When given, becomes the product's sell price
              */
             sell_minor?: number;
+            /**
+             * Format: uuid
+             * @description A pack unit of the product (units capability): the quantities and cost_minor are then in that unit and stock moves in base units. Absent or the base unit: as before
+             */
+            unit_id?: string;
         };
         RetailPurchasePage: {
             items?: components["schemas"]["RetailPurchase"][];
@@ -7027,6 +7381,12 @@ export interface components {
             method: "cash" | "mobile_money" | "bank";
             /** Format: date */
             paid_on?: string;
+        };
+        /** @description The sum of the balances of each role present in the report */
+        RetailRoleQuantity: {
+            qty?: string;
+            /** @enum {string} */
+            role?: "store" | "shop" | "both";
         };
         RetailSale: {
             /** Format: int64 */
@@ -7091,13 +7451,32 @@ export interface components {
             line_total_minor?: number;
             /** Format: uuid */
             product_id?: string;
+            /** @description In base units, always */
             qty?: string;
+            /** @description Quantity in sale_unit */
+            sale_qty?: string;
+            sale_unit?: string;
+            /**
+             * Format: uuid
+             * @description The unit the line was entered in; absent means the base unit
+             */
+            sale_unit_id?: string;
+            /**
+             * Format: int64
+             * @description Price per sale_unit; line_total_minor = sale_qty x this, rounded half up once
+             */
+            sale_unit_price_minor?: number;
             /**
              * Format: int64
              * @description Present only with retail.profit.read
              */
             unit_cost_minor?: number;
-            /** Format: int64 */
+            /** @description Base units in one sale_unit when the line was made */
+            unit_factor?: string;
+            /**
+             * Format: int64
+             * @description Per base unit; for a pack line the derived, rounded display value
+             */
             unit_price_minor?: number;
         };
         RetailSaleLineRequest: {
@@ -7106,8 +7485,13 @@ export interface components {
             /** @example 2.5 */
             qty: string;
             /**
+             * Format: uuid
+             * @description A pack unit of the product (units capability): qty and unit_price_minor are then in that unit and stock moves in base units. Absent or the base unit: as before
+             */
+            unit_id?: string;
+            /**
              * Format: int64
-             * @description Defaults to the product's sell price
+             * @description Per unit_id when one is given, otherwise per base unit. Defaults to the product's sell price (times the pack factor, rounded half up once, for a pack)
              */
             unit_price_minor?: number;
         };
@@ -7393,6 +7777,13 @@ export interface components {
             id?: string;
             name?: string;
         };
+        RetailStockByLocation: {
+            branches?: components["schemas"]["RetailLocationBranch"][];
+            currency?: string;
+            items?: components["schemas"]["RetailLocationRow"][];
+            next_cursor?: string;
+            totals?: components["schemas"]["RetailLocationTotals"];
+        };
         RetailStockHealth: {
             cover?: components["schemas"]["RetailCoverList"];
             /** Format: int32 */
@@ -7584,17 +7975,35 @@ export interface components {
             id?: string;
             lines?: components["schemas"]["RetailTransferLine"][];
             note?: string;
-            /** @enum {string} */
-            status?: "completed" | "voided";
+            /** Format: date-time */
+            received_at?: string;
+            /** Format: uuid */
+            received_by?: string;
+            /**
+             * Format: int64
+             * @description The source cost of what did not arrive; Present only with retail.profit.read in either branch
+             */
+            shortage_cost_minor?: number;
+            /**
+             * @description completed: a one-step transfer. in_transit, received, cancelled: the two-step transfer of the transfer_receipt capability. voided: undone after completion or receipt
+             * @enum {string}
+             */
+            status?: "completed" | "in_transit" | "received" | "cancelled" | "voided";
             /** Format: uuid */
             to_branch_id?: string;
             /** Format: date */
             transfer_date?: string;
             void_reason?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the transfer was voided or cancelled
+             */
             voided_at?: string;
             /** Format: uuid */
             voided_by?: string;
+        };
+        RetailTransferCancelRequest: {
+            reason: string;
         };
         RetailTransferLine: {
             code?: string;
@@ -7609,6 +8018,8 @@ export interface components {
             /** Format: uuid */
             product_id?: string;
             qty?: string;
+            /** @description What arrived, once the transfer was received (two-step transfers only) */
+            received_qty?: string;
             /**
              * Format: int64
              * @description Present only with retail.profit.read in either branch
@@ -7624,6 +8035,21 @@ export interface components {
         RetailTransferPage: {
             items?: components["schemas"]["RetailTransfer"][];
             next_cursor?: string;
+        };
+        /** @description What arrived, one entry per line of the transfer; omit to receive everything as dispatched */
+        RetailTransferReceiveLine: {
+            /** Format: uuid */
+            product_id: string;
+            /**
+             * @description What arrived; not more than was dispatched
+             * @example 2.5
+             */
+            qty: string;
+        };
+        RetailTransferReceiveRequest: {
+            /** @description What arrived, one entry per line of the transfer; omit to receive everything as dispatched */
+            lines?: components["schemas"]["RetailTransferReceiveLine"][];
+            note?: string;
         };
         RetailTransferRequest: {
             /**
@@ -7646,6 +8072,23 @@ export interface components {
         };
         RetailTransferVoidRequest: {
             reason: string;
+        };
+        RetailTransfersInFlight: {
+            /**
+             * Format: int64
+             * @description Tenant-wide net of inter-branch clearing over retail transfer entries only (account 1190 is shared with lending); present for a caller who reads every branch with cost
+             */
+            clearing_minor?: number;
+            currency?: string;
+            /**
+             * Format: int64
+             * @description The sum of the open dispatches, built from the transfers (never read from the ledger)
+             */
+            in_transit_value_minor?: number;
+            /** @description Dispatched and not received or cancelled, the longest wait first */
+            items?: components["schemas"]["RetailInFlightTransfer"][];
+            /** @description True when clearing_minor equals the value of every open dispatch */
+            reconciled?: boolean;
         };
         RetailUnit: {
             active?: boolean;
@@ -8307,17 +8750,9 @@ export interface components {
         SetLoanGuarantorsRequest: {
             guarantors: components["schemas"]["LoanGuarantorInput"][];
         };
-        SetPaymentMethodRequest: {
-            /**
-             * Format: uuid
-             * @description Omit for the tenant's mapping
-             */
-            branch_id?: string;
-            /** Format: uuid */
-            gl_account_id: string;
-            /** @description Default true; false switches the method off for this scope */
-            is_active?: boolean;
-            method_key: string;
+        SetRetailBranchRoleRequest: {
+            /** @enum {string} */
+            role: "store" | "shop" | "both";
         };
         SignInRequest: {
             /** @description Email, or phone for staff */
@@ -8509,6 +8944,18 @@ export interface components {
             phone?: string;
             relationship?: string;
             relationship_text?: string;
+        };
+        UpdateRetailCapabilitiesRequest: {
+            branch_roles?: boolean;
+            customer_accounts?: boolean;
+            documents?: boolean;
+            price_lists?: boolean;
+            /** @enum {string} */
+            profile?: "shop" | "trade";
+            purchasing?: boolean;
+            returns?: boolean;
+            transfer_receipt?: boolean;
+            units?: boolean;
         };
         /** @description Omitted fields are unchanged; prices change only through /prices */
         UpdateRetailProductRequest: {
@@ -9164,50 +9611,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DownloadUrl"];
-                };
-            };
-        };
-    };
-    listPaymentMethods: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentMethodMappingList"];
-                };
-            };
-        };
-    };
-    setPaymentMethod: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetPaymentMethodRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentMethodMappingList"];
                 };
             };
         };
@@ -12725,6 +13128,52 @@ export interface operations {
             };
         };
     };
+    listRetailBranchRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBranchRoleList"];
+                };
+            };
+        };
+    };
+    setRetailBranchRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRetailBranchRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailBranchRole"];
+                };
+            };
+        };
+    };
     listRetailCashParties: {
         parameters: {
             query?: {
@@ -13333,6 +13782,83 @@ export interface operations {
             };
         };
     };
+    listRetailProductUnits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPackList"];
+                };
+            };
+        };
+    };
+    createRetailProductUnit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailPackRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPack"];
+                };
+            };
+        };
+    };
+    updateRetailProductUnit: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                product_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailPackUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPack"];
+                };
+            };
+        };
+    };
     listRetailPurchases: {
         parameters: {
             query?: {
@@ -13656,6 +14182,32 @@ export interface operations {
             };
         };
     };
+    getRetailStockByLocation: {
+        parameters: {
+            query?: {
+                query?: string;
+                category_id?: string;
+                negative_only?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockByLocation"];
+                };
+            };
+        };
+    };
     getRetailStockHealth: {
         parameters: {
             query?: {
@@ -13679,6 +14231,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailStockHealth"];
+                };
+            };
+        };
+    };
+    getRetailTransfersInFlight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailTransfersInFlight"];
                 };
             };
         };
@@ -13967,6 +14539,52 @@ export interface operations {
             };
         };
     };
+    getRetailCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCapabilities"];
+                };
+            };
+        };
+    };
+    updateRetailCapabilities: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRetailCapabilitiesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailCapabilities"];
+                };
+            };
+        };
+    };
     listRetailStock: {
         parameters: {
             query?: {
@@ -14194,6 +14812,7 @@ export interface operations {
             query?: {
                 branch_id?: string[];
                 product_id?: string;
+                status?: string;
                 from?: string;
                 to?: string;
                 limit?: number;
@@ -14252,6 +14871,62 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailTransfer"];
+                };
+            };
+        };
+    };
+    cancelRetailTransfer: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                transfer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailTransferCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailTransfer"];
+                };
+            };
+        };
+    };
+    receiveRetailTransfer: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                transfer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetailTransferReceiveRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

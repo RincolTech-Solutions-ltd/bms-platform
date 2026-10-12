@@ -1,5 +1,5 @@
--- V36: payment methods mapped to ledger accounts (FR-GL-08, issue #160). V36 is claimed for
--- lending on issue #50 and merges after V35 (#176).
+-- V43: payment methods mapped to ledger accounts (FR-GL-08, issue #160). V43 follows V42
+-- (#176, the loan pledge guard), which merges first; outOfOrder is off.
 --
 -- Chapter 6 table payment_methods: a tenant maps each payment method to a postable asset
 -- account, for the whole tenant (branch_id NULL) or for one branch. A branch row wins over the
