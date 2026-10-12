@@ -1,5 +1,6 @@
 package com.rincoltech.bms.lending.loans.internal;
 
+import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
 import com.rincoltech.bms.core.tenancy.Branches;
@@ -422,12 +423,17 @@ class LoanServicer implements LoanServicing {
         if (!unlisted.isEmpty()) {
             // Handing an item back does not change the loan, so the checker may have approved on older
             // facts: nothing is written, the maker asks again and the checker sees the current list.
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
+            // The request ends as stale (the maker may ask again at once) and the error carries every
+            // item that cannot come back now, not only the unlisted ones.
+            throw new RequestSupersededException(
                     "collateral_facts_changed",
                     "Collateral changed since the request",
                     "The reopened loan would also go without " + unlisted
-                            + ", which the request did not list. Request the reversal again.");
+                            + ", which the request did not list. This request is closed; request the reversal"
+                            + " again to approve the current list.",
+                    Map.of(
+                            "collateral_not_restored_on_reopen",
+                            notRestored.stream().map(UUID::toString).toList()));
         }
         if (!restore.isEmpty()) {
             loans.restorePledges(loan.id(), restore);

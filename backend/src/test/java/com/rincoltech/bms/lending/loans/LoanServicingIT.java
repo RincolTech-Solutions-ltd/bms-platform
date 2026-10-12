@@ -666,33 +666,36 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     /**
-     * #176 (second review of #202): handing an item back after the request does not change the loan,
-     * so the request is not stale. The run still refuses when the reopen would leave out an item the
-     * request did not list: nothing is written, the request stays pending, and a new request lists it.
+     * #176 (third review of #202): handing an item back after the request does not change the loan,
+     * so the request is not stale by version. The run still refuses when the reopen would leave out
+     * an item the request did not list: 409 with the full current list, nothing written, and the
+     * request ends as stale (audited, with the reason) so the maker can ask again at once.
      */
     @Test
-    void frRep05_anItemHandedBackAfterTheRequestIsRefusedAtRunTimeUntilItIsRequestedAgain() {
+    void frRep05_anItemHandedBackAfterTheRequestEndsTheRequestAndAllowsANewOne() {
         String[] s = securedPaidOff("STALE", 67);
         String approval = requestReversal(s[0], s[2]);
         assertThat(approvalPayload(approval)).doesNotContain("collateral_not_restored_on_reopen");
         custody(s[1], "released");
 
         ResponseEntity<JsonNode> d = decide(approval, manager, managerPerms);
-        assertThat(d.getStatusCode().is2xxSuccessful()).as("%s", d.getBody()).isFalse();
-        assertThat(d.getBody().toString()).contains("collateral_facts_changed", s[1]);
+        assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(d.getBody().get("code").asString()).isEqualTo("collateral_facts_changed");
+        assertThat(d.getBody().get("collateral_not_restored_on_reopen").toString())
+                .contains(s[1]);
         assertThat(loan(s[0]).get("status").asString())
                 .as("nothing was written")
                 .isEqualTo("closed");
         assertThat(reversalsOf(s[0])).isZero();
-        assertThat(approvalStatus(approval)).isEqualTo("pending");
+        assertThat(approvalStatus(approval)).isEqualTo("stale");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE entity_id = ?::uuid AND action = 'core.approval.stale'")
+                        .param(approval)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
 
-        assertThat(send(
-                                HttpMethod.POST,
-                                "/api/v1/approvals/" + approval + "/reject",
-                                as(manager, managerPerms, "*", null),
-                                Map.of("note", "Item handed back, request again"))
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.OK);
         String again = requestReversal(s[0], s[2]);
         assertThat(approvalPayload(again)).contains("collateral_not_restored_on_reopen", s[1]);
         assertThat(decide(again, manager, managerPerms).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -715,11 +718,27 @@ class LoanServicingIT extends LoanFixtures {
 
         ResponseEntity<JsonNode> officerTry = decide(approval, UUID.randomUUID(), officerPerms);
         assertThat(officerTry.getStatusCode().value()).isIn(403, 404);
-        ResponseEntity<JsonNode> accountantTry = decide(approval, UUID.randomUUID(), permissionsOf("accountant"));
-        assertThat(accountantTry.getStatusCode().is2xxSuccessful())
-                .as("%s", accountantTry.getBody())
+        String accountantPerms = permissionsOf("accountant");
+        UUID accountant = UUID.randomUUID();
+        assertThat(send(
+                                HttpMethod.GET,
+                                "/api/v1/approvals/" + approval,
+                                as(accountant, accountantPerms, "*", null),
+                                null)
+                        .getBody()
+                        .get("can_decide")
+                        .asBoolean())
+                .as("the accountant is not offered the decision")
                 .isFalse();
-        assertThat(accountantTry.getBody().toString()).contains("unsecured_reopen_needs_manager");
+        assertThat(send(HttpMethod.GET, "/api/v1/approvals/" + approval, as(manager, managerPerms, "*", null), null)
+                        .getBody()
+                        .get("can_decide")
+                        .asBoolean())
+                .isTrue();
+        ResponseEntity<JsonNode> accountantTry = decide(approval, accountant, accountantPerms);
+        assertThat(accountantTry.getStatusCode())
+                .as("%s", accountantTry.getBody())
+                .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
         assertThat(approvalStatus(approval)).isEqualTo("pending");
 
@@ -806,7 +825,7 @@ class LoanServicingIT extends LoanFixtures {
             assertThat(p.getStatusCode().value()).as("%s", p.getBody()).isIn(200, 409);
             if (p.getStatusCode().value() == 200) {
                 // The draft got the items first: the run refuses to reopen without items the request did not list.
-                assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
+                assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(409);
                 assertThat(r.getBody().toString()).contains("collateral_facts_changed");
                 assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
             } else {
