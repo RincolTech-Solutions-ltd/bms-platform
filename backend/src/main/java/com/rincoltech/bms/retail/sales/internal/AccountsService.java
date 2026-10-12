@@ -610,6 +610,18 @@ class AccountsService {
                     "This payment has been reversed already.");
         }
         List<AllocationRow> parts = repo.allAllocations(receiptId);
+        // The reversal gives paid amounts back to the sales it paid, wherever they are: it needs the void permission in
+        // each
+        // of those branches as well as in the receiving one, as voiding the sale itself would.
+        for (AllocationRow a : parts) {
+            if (!principal.may("retail.sale.void", a.branchId())) {
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "permission_denied",
+                        "Permission denied",
+                        "This payment paid sales in a branch outside your scope, so you cannot reverse it.");
+            }
+        }
         Map<UUID, OpenSale> locked =
                 repo
                         .lockSales(
@@ -629,9 +641,6 @@ class AccountsService {
         LocalDate today = clock.today(tenant.profile().timezone());
         PostedEntry reversal =
                 books.reverse(receipt.journalEntryId(), today, receipt.receiptNo(), RECEIPT + "_void:" + receiptId);
-        for (AllocationRow a : parts) {
-            sales.addPaid(a.saleId(), -a.amountMinor());
-        }
         Instant now = clock.now();
         if (repo.markReversed(receiptId, principal.userId(), today, now, reason, reversal.entryId()) == 0) {
             throw new ApiException(
@@ -639,6 +648,11 @@ class AccountsService {
                     "receipt_reversed",
                     "Receipt reversed",
                     "This payment has been reversed already.");
+        }
+        // After the receipt reads reversed: the sales guard lets paid_minor fall only to what the payments that were
+        // not reversed add up to.
+        for (AllocationRow a : parts) {
+            sales.addPaid(a.saleId(), -a.amountMinor());
         }
         audit.record(new AuditLog.Entry(
                 "retail.customer.account_payment_reversed",

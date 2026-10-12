@@ -222,6 +222,18 @@ final class SalesApi {
             @Schema(description = "The customer's own price list; present only while the price_lists capability is on")
             UUID priceListId,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The credit limit, when the buyer has one; present only while the customer_accounts capability is on")
+            Long creditLimitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The payment terms in days, when the buyer has them; present only while the customer_accounts capability is on")
+            Integer termsDays,
+
             @Schema(description = "Send as If-Match when updating")
             int version) {}
 
@@ -237,7 +249,14 @@ final class SalesApi {
             LocalDate dueDate,
             long totalMinor,
             long paidMinor,
-            long balanceMinor) {}
+            long balanceMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "True for an imported credit sale (never posted to the ledger, skipped by payment on account);"
+                                    + " present only while the customer_accounts capability is on, and only when true")
+            Boolean historical) {}
 
     @Schema(name = "RetailCustomerBalance", description = "Credit sales in the caller's branch scope")
     record CustomerBalance(UUID customerId, String currency, long balanceMinor, List<OpenSale> openSales) {}

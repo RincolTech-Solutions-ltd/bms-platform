@@ -514,6 +514,27 @@ for the resolution and is refused for a line a strict list has no price for. The
 reason (`units-state.ts` and `price-state.ts` hold the pure rules). With the feature off none of this is drawn and the form is exactly what it was. `price_lists` is marked
 ready in `capabilities-state.ts` with its tour (`capability-price-lists`: an introduction, the Price lists tile, the lists) and a Help page tour (`page-price-lists`).
 
+## Customer accounts (#196, ADR-033)
+
+Three places show it while `/me` lists `customer_accounts` (`SCREEN_CAPABILITY`, so none of them is drawn while it is off). **Customer accounts**
+(`/staff/retail/accounts`, crumb "Customer accounts", tile `retail-customerAccounts`) is the administrator's page (it needs `retail.credit.manage`,
+which the sales role lacks, so a seller sees the same tiles with the feature on and off): the credit buyers with the shared live search, each with what
+they owe, the limit and the terms, and Open account. A seller reaches the same account from **Credit buyers** (each buyer shows the limit and terms and an
+Open account link) and from **Credit control** (the buyer's name links to the account, a Limit column appears, and a buyer owing more than the limit is
+marked). **The account** (`/staff/retail/accounts/$customerId`, crumb "Account", named after the buyer) is open to whoever reads sales: the summary (what
+is owed over the branches the caller may read, the limit with what is left when the caller sees every branch, the terms, and for `retail.credit.manage` a
+form to change the limit and terms under `If-Match`), **Take a payment** (branch that received the money, amount, method, date; the oldest sales are paid
+first and the form lists where the money would go before anything is saved; "Choose which sales it pays" lists the sales with an amount box each; imported
+sales are never offered), **Payments taken** (each receipt with its allocations; Reverse, with a reason of at least five characters, for
+`retail.sale.void`; to allocate differently, reverse and take it again) and the **Statement** (From and To, 90 days by default ending today in the business
+time zone; opening balance, each line with its running balance, closing balance, and imported sales apart under "Before system start").
+
+On the sale screen with the feature on, a credit sale needs a buyer from the list ("Add this buyer" creates one first); the buyer's limit and terms show under the
+choice; the date is optional when the buyer has terms (the server dates the sale); a sale refused for the limit says by how much, and a user holding
+`retail.credit.override` at the branch gets a reason box and saves again to sell above the limit. `customer_accounts` is marked ready in
+`capabilities-state.ts` with its tour (`capability-customer-accounts`: an introduction, the tile, the list) and a Help page tour (`page-accounts`). The
+pure rules (the preview of an allocation, the checks of a payment and of a limit, the words of a statement) are in `account-state.ts`.
+
 ## Left to do
 
 - Void a sale and pay a credit sale screens; see `docs/specs/retail-ui-parity.md`.

@@ -144,6 +144,49 @@ SELECT bms_grant_app('retail_account_payment_allocations', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_account_payment_allocations');
 
 -- ---------------------------------------------------------------------------------------------
+-- retail_sales guard (V14): paid_minor could only go up. Reversing a payment on account has to give the paid
+-- amount back, so the guard now lets it go down, but never below what the sale's payments that were not
+-- reversed add up to. Everything else the guard refuses stays refused. Replacing the function body takes no
+-- lock on retail_sales (the trigger stays as it is); the new rule reads the two tables created above, and
+-- only when paid_minor goes down, which no other code path does.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION retail_sales_guard_update() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on' THEN
+        RETURN NEW;
+    END IF;
+    IF (NEW.id, NEW.tenant_id, NEW.created_at, NEW.branch_id, NEW.sale_no, NEW.sale_date, NEW.payment_method,
+        NEW.customer_id, NEW.buyer_name, NEW.buyer_contact, NEW.due_date, NEW.currency, NEW.total_minor,
+        NEW.cost_total_minor, NEW.historical, NEW.created_by)
+       IS DISTINCT FROM
+       (OLD.id, OLD.tenant_id, OLD.created_at, OLD.branch_id, OLD.sale_no, OLD.sale_date, OLD.payment_method,
+        OLD.customer_id, OLD.buyer_name, OLD.buyer_contact, OLD.due_date, OLD.currency, OLD.total_minor,
+        OLD.cost_total_minor, OLD.historical, OLD.created_by)
+       OR (NEW.paid_minor < OLD.paid_minor
+           AND NEW.paid_minor < (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p
+                                  WHERE p.tenant_id = NEW.tenant_id AND p.sale_id = NEW.id
+                                    AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
+                                                      JOIN retail_account_payments r
+                                                        ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id
+                                                     WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id
+                                                       AND r.status = 'reversed')))
+       OR (OLD.sale_entry_id IS NOT NULL AND NEW.sale_entry_id IS DISTINCT FROM OLD.sale_entry_id)
+       OR (OLD.cost_entry_id IS NOT NULL AND NEW.cost_entry_id IS DISTINCT FROM OLD.cost_entry_id)
+       OR (OLD.status = 'voided' AND (NEW.status, NEW.voided_at, NEW.voided_by, NEW.void_reason)
+                                     IS DISTINCT FROM (OLD.status, OLD.voided_at, OLD.voided_by, OLD.void_reason))
+       OR (OLD.status = 'completed' AND NEW.status = 'completed'
+           AND (NEW.voided_at, NEW.voided_by, NEW.void_reason) IS DISTINCT FROM (OLD.voided_at, OLD.voided_by, OLD.void_reason))
+    THEN
+        RAISE EXCEPTION 'retail_sales: only the paid amount, the void, the entry ids (once) and the version may change'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
 -- Permissions (chapter 8 section 8.3.2; PermissionMatrixIT compares these rows with the matrix). Both go
 -- to administrators only. retail.customer.manage, which the sales role holds, edits a buyer's name and
 -- contact and nothing else: the sales role must not be able to raise its own customers' limits. Payment on

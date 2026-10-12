@@ -566,13 +566,13 @@ class SalesService {
             now.put("price_list_id", r.priceListId());
         }
         if (now.isEmpty()) {
-            return before;
+            return forCaller(before);
         }
         if (repo.updateCustomerPricing(id, r.customerGroupId(), r.priceListId(), expected) == 0) {
             throw repo.customer(id).map(c -> Versions.conflict(c.version())).orElseGet(ApiException::notFound);
         }
         audit.record(new AuditLog.Entry("retail.customer.pricing_changed", "retail.customer", id, null, was, now));
-        return repo.customer(id).orElseThrow();
+        return forCaller(repo.customer(id).orElseThrow());
     }
 
     private static final java.util.Set<String> OWING_FILTERS = java.util.Set.of("owing", "overdue", "paid");
@@ -809,8 +809,8 @@ class SalesService {
 
     @Transactional
     Customer createCustomer(CustomerRequest r) {
-        Customer c =
-                new Customer(UUID.randomUUID(), r.name().trim(), blankToNull(r.contact()), null, null, null, null, 1);
+        Customer c = new Customer(
+                UUID.randomUUID(), r.name().trim(), blankToNull(r.contact()), null, null, null, null, null, null, 1);
         repo.insertCustomer(c, CurrentPrincipal.require().userId());
         audit.record(AuditLog.Entry.created(
                 "retail.customer.created", "retail.customer", c.id(), null, Map.of("name", c.name())));
@@ -822,11 +822,26 @@ class SalesService {
      * say what the buyer pays); otherwise the buyer reads as before price lists.
      */
     private Customer forCaller(Customer c) {
-        if (c.customerGroupId() == null && c.priceListId() == null
-                || pricing.on() && CurrentPrincipal.require().hasPermission("retail.pricelist.manage")) {
+        // The credit limit and the terms travel only while customer accounts are on (issue #196); off, the buyer reads
+        // exactly as it did before them.
+        boolean accountsOn = accounts.on();
+        boolean showPricing = c.customerGroupId() == null && c.priceListId() == null
+                || pricing.on() && CurrentPrincipal.require().hasPermission("retail.pricelist.manage");
+        boolean showAccount = accountsOn || c.creditLimitMinor() == null && c.termsDays() == null;
+        if (showPricing && showAccount) {
             return c;
         }
-        return new Customer(c.id(), c.name(), c.contact(), c.createdAt(), c.balanceMinor(), null, null, c.version());
+        return new Customer(
+                c.id(),
+                c.name(),
+                c.contact(),
+                c.createdAt(),
+                c.balanceMinor(),
+                showPricing ? c.customerGroupId() : null,
+                showPricing ? c.priceListId() : null,
+                accountsOn ? c.creditLimitMinor() : null,
+                accountsOn ? c.termsDays() : null,
+                c.version());
     }
 
     /** #146: edit a credit buyer's name or contact. Nothing else about a buyer changes, and none is deleted. */
@@ -900,6 +915,22 @@ class SalesService {
         List<UUID> filter = CurrentPrincipal.require().branchFilter("retail.sale.read", null);
         List<OpenSale> open = repo.openSales(customerId, filter);
         long owed = open.stream().mapToLong(OpenSale::balanceMinor).reduce(0, Math::addExact);
+        // Which sales are imported is said only while customer accounts are on (issue #196); off, the answer is as
+        // before.
+        if (!accounts.on()) {
+            open = open.stream()
+                    .map(s -> new OpenSale(
+                            s.saleId(),
+                            s.saleNo(),
+                            s.branchId(),
+                            s.saleDate(),
+                            s.dueDate(),
+                            s.totalMinor(),
+                            s.paidMinor(),
+                            s.balanceMinor(),
+                            null))
+                    .toList();
+        }
         return new CustomerBalance(customerId, tenant.profile().currency(), owed, open);
     }
 
