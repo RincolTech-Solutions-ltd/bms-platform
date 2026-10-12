@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.catalogue;
 
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,6 +19,13 @@ public interface RetailCatalogue {
     long MAX_AMOUNT_MINOR = 10_000_000_000_000L;
 
     Optional<ProductSnapshot> find(UUID productId);
+
+    /**
+     * ADR-033, issue #194: the pack of a product in the given unit (a carton of twelve pieces), read
+     * in the caller's transaction. Empty when the product has no pack of that unit. Whether packs
+     * may be used at all is the {@code units} capability, which the caller checks.
+     */
+    Optional<PackUnit> packUnit(UUID productId, UUID unitId);
 
     /**
      * Takes the product's row lock for the rest of the caller's transaction. A caller that changes
@@ -78,10 +86,14 @@ public interface RetailCatalogue {
                                         || Character.isWhitespace(c)));
     }
 
+    /** A pack size: {@code factor} base units in one pack of {@code unit}. */
+    record PackUnit(UUID unitId, String unit, BigDecimal factor, boolean active) {}
+
     record ProductSnapshot(
             UUID id,
             String code,
             String description,
+            UUID unitId,
             String unit,
             long costMinor,
             long sellMinor,
