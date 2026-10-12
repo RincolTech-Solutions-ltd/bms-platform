@@ -73,6 +73,8 @@ const retailUnitsRoute = retailScreen('/catalogue/units').lazy(() => import('../
 const retailSuppliersRoute = retailScreen('/catalogue/suppliers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.SuppliersRoute));
 const retailImportRoute = retailScreen('/catalogue/import').lazy(() => import('../areas/staff/retail/catalogue-import').then((m) => m.ImportRoute));
 const retailBuyersRoute = retailScreen('/catalogue/buyers').lazy(() => import('../areas/staff/retail/catalogue-people').then((m) => m.BuyersRoute));
+const retailSettingsRoute = retailScreen('/settings').lazy(() => import('../areas/staff/retail/settings').then((m) => m.Route));
+const retailBranchRolesRoute = retailScreen('/branch-roles').lazy(() => import('../areas/staff/retail/branch-roles').then((m) => m.Route));
 const retailBankingRoute = retailScreen('/banking').lazy(() => import('../areas/staff/retail/banking').then((m) => m.Route));
 const retailBankingReportRoute = retailScreen('/banking-report').lazy(() => import('../areas/staff/retail/banking').then((m) => m.ReportRoute));
 const retailExpensesRoute = retailScreen('/expenses').lazy(() => import('../areas/staff/retail/expenses').then((m) => m.Route));
@@ -189,6 +191,8 @@ export const router = createRouter({
         retailExpensesRoute,
         retailExpensesReportRoute,
         retailExpenseListsRoute,
+        retailSettingsRoute,
+        retailBranchRolesRoute,
         retailBankingRoute,
         retailBankingReportRoute,
       ]), staffLendingRoute.addChildren([
