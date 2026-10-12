@@ -1,5 +1,5 @@
 -- V42: a reversal that reopens a closed loan restores that loan's own pledges (issue #176).
--- V41 is held by the retail price lists (PR #247): that one must merge before this one (outOfOrder is off).
+-- V41 (the retail price lists, #247) is on main; this follows it (outOfOrder is off).
 --
 -- Closing a loan releases its pledges (FR-COL-04, the #45 rule). A repayment reversal that
 -- reopens it (FR-REP-05, for example a bounced payoff) left it active with no collateral,
