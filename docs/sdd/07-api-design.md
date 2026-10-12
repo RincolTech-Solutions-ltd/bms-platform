@@ -936,6 +936,30 @@ Error codes: the cash book's codes are listed in section 7.7 (409 `cash_record_v
 `repayment_exceeds_balance`, `advance_settled`, `branch_required`; the field code `future_date`). The cash book has no import endpoint; its history comes through the
 `import-retail` command (chapter 13 section 13.13).
 
+### 7.11.23 Retail trade capabilities (`/retail`, ADR-033, issue #190)
+
+Built (issue #191): `GET` and `PUT /retail/settings/capabilities` (`core.settings.manage`; the body is
+the profile and the eight flags, `PUT` needs `If-Match` with the settings version as `PATCH /settings`
+does (the `ETag` is returned by `GET`), a change is partial, choosing a profile writes its preset
+first, the change is audited as `retail.capabilities.changed` with old and new values; an unknown key
+is 400 and a wrong value 422); `GET /retail/branch-roles` (`retail.stock.read`; the active branches in
+the caller's scope with `role` and `can_sell`) and `PUT /retail/branch-roles/{branch_id}` (body
+`{role}`, `retail.branch_role.manage`, audited as `retail.branch_role.changed`, 404 outside the
+caller's scope, 422 `branch_has_open_work` while a dispatched transfer is unreceived), both 404
+`capability_not_enabled` until `branch_roles` is on. `POST /retail/sales` answers 422
+`branch_role_forbids_sales` for a store. Design only, not built: the rest of this section.
+
+Every route below answers 404 `capability_not_enabled` unless its capability is on
+(after 404 `module_not_enabled`); the full route table, permissions and the money-moving (`M`)
+routes are in `docs/specs/trade-capabilities.md` section 11: capability settings, branch roles,
+product units, price lists and price resolution, customer account, statement, payment on account and
+ageing, documents and quotations, purchase orders, goods receipts, supplier bills, credits and
+payments, landed cost, transfer receive and cancel, sale returns, and the reports stock-by-location,
+transfers-in-flight and supplier-payables. Existing routes gain optional request fields (a sale
+line's `unit_id`, a sale's `price_list_id`) that are ignored when the capability is off. New error
+codes: 422 `branch_role_forbids_sales`, `quantity_not_representable`, `no_price_in_list`,
+`credit_limit_exceeded`, `customer_required`, `payment_exceeds_allocatable`, `received_exceeds_dispatched`, `branch_has_open_work`, `unit_in_use_by_pack`; 409 `price_item_overlap`.
+
 ### 7.11.22 Lending: insights (`/lending/insights`, #153, ADR-030)
 
 Read-only. Every route takes the page filter: `from` and `to` (inclusive dates, default the first
@@ -960,7 +984,7 @@ in `docs/specs/lending-insights-metrics.md`.
 | PUT | `/lending/insights/digest` | `core.settings.manage` | `{enabled, email_recipients (max 5), telegram_chat_id, send_hour}` with `If-Match`; 422 `digest_needs_recipient` when on with no recipient; 412 `version_mismatch`; audited (FR-INS-08) |
 | GET | `/lending/insights/digest/preview` | `core.settings.manage` | `{as_of, subject, text}`: the text the digest would send now |
 
-### 7.11.23 Lending: AI assistant (`/lending/advisor`, ADR-037, off by default)
+### 7.11.24 Lending: AI assistant (`/lending/advisor`, ADR-037, off by default)
 
 Refused with 404 `advisor_disabled` unless the tenant has switched the assistant on. Responses carry
 `Cache-Control: no-store`. Every answer body has `advisory: true`, `as_of`, `source` (`model` or `fallback`), the text,

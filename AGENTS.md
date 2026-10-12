@@ -57,8 +57,18 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   ADR-032) `V30`, the first-run preferences (issue #19, ADR-025) `V31`, and lending investments
   (issue #152, ADR-031) `V32`, and lending insights (issue #153, ADR-030) `V33`. Flyway runs with
   `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
-  (`V34` is the retail cash book, issue #147; `V35` next). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
+  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` next). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
   queries are in `scripts/db-bench/queries` (k01 to k15).
+- **Built (trade 1 of 10, issue #191, ADR-033):** migration `V37` (`retail_branch_roles`, the permission
+  `retail.branch_role.manage`, a backfill of role `both`); the tenant settings group `retail.capabilities`
+  (eight flags, the `shop` or `trade` profile as a preset, all off by default) through a vertical-neutral
+  core hook (`core.tenancy.ModuleSettingsGroup`, supplied by `retail.manifest`); `/me` now lists `modules`
+  and `module_capabilities`; branch roles `store`, `shop`, `both` owned by `retail.stock` (`BranchRoles`,
+  `RetailCapabilities`), enforced on sales only (422 `branch_role_forbids_sales`; restock and transfer are
+  never role limited; a missing row and capability off both read as `both`); the sales screen follows the
+  role and the menu follows the tenant's modules (issue #185). Deferred to the next slices: units, price
+  lists, customer accounts, documents, purchasing, transfer receipt, returns, and an administrator screen
+  for the flags and roles (the routes exist).
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator
@@ -195,7 +205,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending.savings` | Savings products, accounts, movements, end of day and interest, statements, savings reports (ADR-032) | SAV | 6.7 | 7.11.15 |
 | `lending.investments` | Investment products, investments, returns job, maturity, rollover, early withdrawal, maturity ladder (ADR-031) | INV; 3.25.1 R-INV | 6.7 | 7.11.16 |
 | `lending.insights` | The insights read model, snapshots, daily digest, panel registry (ADR-030) | INS | 6.7 | 7.11.22 |
-| `lending.advisor` (ADR-037, design) | The advisory AI brief and question box over insights facts; aggregates and aliases only | FR-AIA | 6.13 `ai_briefs` | 7.11.23 |
+| `lending.advisor` (ADR-037, design) | The advisory AI brief and question box over insights facts; aggregates and aliases only | FR-AIA | 6.13 `ai_briefs` | 7.11.24 |
 | `lending.reports` (ADR-038, design) | The definitions of the seven formal reports and the monthly pack, built on the insights figures through a public port | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
 | `lending` collections | Due lists, arrears, actions | CLN | 6.7 | 7.11.17 |
 | Member area | Member self-service | MSS; chapter 11 | none | 7.11.18 |
@@ -373,6 +383,11 @@ Accepted (this list is the ADR index):
 - ADR-032 Savings: end-of-day balances with interest rounded once per posting, movements only after
   the closed day, withdrawals checked again at execution, receipts queued as SMS that expire unsent
   (proposed, #151)
+- ADR-033 Wholesale support as optional per-tenant capabilities of the retail module: branch roles,
+  units, price lists, customer accounts, documents, purchasing; no second vertical (proposed, #190;
+  spec `docs/specs/trade-capabilities.md`)
+- ADR-034 Generated PDF documents: XHTML templates rendered with OpenHTMLtoPDF, on demand, stored once
+  per version (accepted, #204)
 - ADR-035 Mobile money and card collections through Pesapal v3: hosted orders, the notification as a
   hint, the status query as the truth, idempotent booking through purpose handlers (proposed, #210;
   settles the question that was pending ADR-011)
