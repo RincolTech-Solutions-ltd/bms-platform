@@ -92,7 +92,12 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
     }
 
     ResponseEntity<JsonNode> receive(UUID id, Object body, String perms, String branches) {
-        return api.postKeyed("/transfers/" + id + "/receive", body, perms, branches, UUID.randomUUID().toString());
+        return api.postKeyed(
+                "/transfers/" + id + "/receive",
+                body,
+                perms,
+                branches,
+                UUID.randomUUID().toString());
     }
 
     ResponseEntity<JsonNode> receiveAll(UUID id) {
@@ -139,7 +144,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
 
     long entryCount(UUID transfer) {
         return TestDatabase.owner()
-                .sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_type = 'retail.transfer' AND source_id = ?")
+                .sql(
+                        "SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_type = 'retail.transfer' AND source_id = ?")
                 .params(t.tenantId(), transfer)
                 .query(Long.class)
                 .single();
@@ -238,13 +244,19 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(valuation.get("value_at_cost_minor").asLong())
                 .as("the held stock only: 6 at head office")
                 .isEqualTo(6_000);
-        assertThat(valuation.get("branches").get(0).get("revaluation_difference_minor").asLong())
+        assertThat(valuation
+                        .get("branches")
+                        .get(0)
+                        .get("revaluation_difference_minor")
+                        .asLong())
                 .isZero();
 
         JsonNode location = byLocation(ADMIN);
         JsonNode r = row(location, product);
         assertThat(r.get("in_transit_qty").asString()).isEqualTo("4.000");
-        assertThat(r.get("combined_qty").asString()).as("held 6 plus 4 on the way").isEqualTo("10.000");
+        assertThat(r.get("combined_qty").asString())
+                .as("held 6 plus 4 on the way")
+                .isEqualTo("10.000");
         assertThat(r.get("in_transit_value_minor").asLong()).isEqualTo(4_000);
         assertThat(r.get("combined_value_minor").asLong()).isEqualTo(10_000);
         assertThat(location.get("totals").get("combined_value_minor").asLong()).isEqualTo(10_000);
@@ -290,7 +302,9 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         JsonNode flight = inFlight(ADMIN);
 
         assertThat(flight.get("in_transit_value_minor").asLong()).isEqualTo(4_000);
-        assertThat(flight.get("clearing_minor").asLong()).as("the 777 is not a retail transfer entry").isEqualTo(4_000);
+        assertThat(flight.get("clearing_minor").asLong())
+                .as("the 777 is not a retail transfer entry")
+                .isEqualTo(4_000);
         assertThat(flight.get("reconciled").asBoolean()).isTrue();
     }
 
@@ -362,13 +376,15 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(flight.get("clearing_minor").asLong()).isZero();
         assertThat(flight.get("reconciled").asBoolean()).isTrue();
         assertThat(TestDatabase.owner()
-                        .sql("SELECT received_qty::text FROM retail_transfer_lines WHERE tenant_id = ? AND transfer_id = ?")
+                        .sql(
+                                "SELECT received_qty::text FROM retail_transfer_lines WHERE tenant_id = ? AND transfer_id = ?")
                         .params(t.tenantId(), id)
                         .query(String.class)
                         .single())
                 .isEqualTo("3.000");
         assertThat(TestDatabase.owner()
-                        .sql("SELECT data::text FROM audit_log WHERE entity_id = ? AND action = 'retail.transfer.received'")
+                        .sql(
+                                "SELECT data::text FROM audit_log WHERE entity_id = ? AND action = 'retail.transfer.received'")
                         .param(id)
                         .query(String.class)
                         .single())
@@ -392,7 +408,9 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> done = receive(
                 id,
-                Map.of("lines", List.of(Map.of("product_id", product, "qty", "4"), Map.of("product_id", other, "qty", "0"))),
+                Map.of(
+                        "lines",
+                        List.of(Map.of("product_id", product, "qty", "4"), Map.of("product_id", other, "qty", "0"))),
                 ADMIN,
                 "*");
 
@@ -418,7 +436,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(code(over)).isEqualTo("received_exceeds_dispatched");
         ResponseEntity<JsonNode> unknown = receive(id, received(other, "1"), ADMIN, "*");
         assertThat(unknown.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(unknown.getBody().get("errors").get(0).get("code").asString()).isEqualTo("unknown_product");
+        assertThat(unknown.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("unknown_product");
         ResponseEntity<JsonNode> fraction = receive(id, received(product, "1.0001"), ADMIN, "*");
         assertThat(fraction.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(qty(t.secondBranch(), product)).isEqualTo("0.000");
@@ -442,7 +461,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         ResponseEntity<JsonNode> partial = receive(id, received(product, "4"), ADMIN, "*");
 
         assertThat(partial.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(partial.getBody().get("errors").get(0).get("code").asString()).isEqualTo("incomplete");
+        assertThat(partial.getBody().get("errors").get(0).get("code").asString())
+                .isEqualTo("incomplete");
         assertThat(qty(t.secondBranch(), product)).isEqualTo("0.000");
     }
 
@@ -505,7 +525,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(code(voided)).isEqualTo("transfer_cancelled");
         assertThat(TestDatabase.owner()
-                        .sql("SELECT data::text FROM audit_log WHERE entity_id = ? AND action = 'retail.transfer.cancelled'")
+                        .sql(
+                                "SELECT data::text FROM audit_log WHERE entity_id = ? AND action = 'retail.transfer.cancelled'")
                         .param(id)
                         .query(String.class)
                         .single())
@@ -534,9 +555,11 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         switchOn();
         api.stockUp(t.headOffice(), product, "10");
         UUID id = dispatched("4");
-        assertThat(receive(id, received(product, "3"), ADMIN, "*").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(receive(id, received(product, "3"), ADMIN, "*").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
 
-        ResponseEntity<JsonNode> voided = api.post("/transfers/" + id + "/void", Map.of("reason", "Test miscount"), ADMIN);
+        ResponseEntity<JsonNode> voided =
+                api.post("/transfers/" + id + "/void", Map.of("reason", "Test miscount"), ADMIN);
 
         assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(voided.getBody().get("status").asString()).isEqualTo("voided");
@@ -557,7 +580,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         switchOn();
         api.stockUp(t.headOffice(), product, "10");
         UUID id = dispatched("4");
-        assertThat(receive(id, received(product, "3"), ADMIN, "*").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(receive(id, received(product, "3"), ADMIN, "*").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         assertThat(api.sell(t.secondBranch(), "cash", product, "2").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
 
@@ -584,7 +608,10 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(code(flag)).isEqualTo("transfers_in_transit");
         assertThat(profile.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(profile)).isEqualTo("transfers_in_transit");
-        assertThat(api.get("/settings/capabilities", SETTINGS).getBody().get("transfer_receipt").asBoolean())
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("transfer_receipt")
+                        .asBoolean())
                 .isTrue();
         // Other flags are untouched by the guard.
         assertThat(putCapabilities(Map.of("documents", true)).getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -601,17 +628,29 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
     @Test
     void aBranchRoleCannotChangeWhileATransferIsOnItsWay() {
         switchOn();
-        assertThat(putCapabilities(Map.of("branch_roles", true)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(putCapabilities(Map.of("branch_roles", true)).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         api.stockUp(t.headOffice(), product, "10");
         UUID id = dispatched("4");
 
-        ResponseEntity<JsonNode> refused =
-                api.call(HttpMethod.PUT, "/branch-roles/" + t.secondBranch(), Map.of("role", "store"), ROLE_MANAGE, "*", Map.of());
+        ResponseEntity<JsonNode> refused = api.call(
+                HttpMethod.PUT,
+                "/branch-roles/" + t.secondBranch(),
+                Map.of("role", "store"),
+                ROLE_MANAGE,
+                "*",
+                Map.of());
 
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("branch_has_open_work");
         assertThat(receiveAll(id).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(api.call(HttpMethod.PUT, "/branch-roles/" + t.secondBranch(), Map.of("role", "store"), ROLE_MANAGE, "*", Map.of())
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/branch-roles/" + t.secondBranch(),
+                                Map.of("role", "store"),
+                                ROLE_MANAGE,
+                                "*",
+                                Map.of())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
     }
@@ -673,7 +712,9 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
         JsonNode item = row(r.getBody(), product);
-        assertThat(item.has("value_minor")).as("not everywhere, so no row total").isFalse();
+        assertThat(item.has("value_minor"))
+                .as("not everywhere, so no row total")
+                .isFalse();
         assertThat(item.has("combined_value_minor")).isFalse();
         for (JsonNode b : item.get("balances")) {
             boolean hq = b.get("branch_id").asString().equals(t.headOffice().toString());
@@ -691,11 +732,24 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
     /** Stores first, then shops; a subtotal per role and a combined total; a scoped caller sees its own columns. */
     @Test
     void stockByLocationGroupsByRoleWithSubtotalsAndACombinedTotal() {
-        assertThat(putCapabilities(Map.of("branch_roles", true)).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(api.call(HttpMethod.PUT, "/branch-roles/" + t.headOffice(), Map.of("role", "store"), ROLE_MANAGE, "*", Map.of())
+        assertThat(putCapabilities(Map.of("branch_roles", true)).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/branch-roles/" + t.headOffice(),
+                                Map.of("role", "store"),
+                                ROLE_MANAGE,
+                                "*",
+                                Map.of())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        assertThat(api.call(HttpMethod.PUT, "/branch-roles/" + t.secondBranch(), Map.of("role", "shop"), ROLE_MANAGE, "*", Map.of())
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/branch-roles/" + t.secondBranch(),
+                                Map.of("role", "shop"),
+                                ROLE_MANAGE,
+                                "*",
+                                Map.of())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         api.stockUp(t.headOffice(), product, "10");
@@ -706,7 +760,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
 
         assertThat(report.get("branches")).hasSize(2);
         assertThat(report.get("branches").get(0).get("role").asString()).isEqualTo("store");
-        assertThat(report.get("branches").get(0).get("id").asString()).isEqualTo(t.headOffice().toString());
+        assertThat(report.get("branches").get(0).get("id").asString())
+                .isEqualTo(t.headOffice().toString());
         assertThat(report.get("branches").get(1).get("role").asString()).isEqualTo("shop");
         JsonNode r = row(report, product);
         assertThat(r.get("balances").get(0).get("qty").asString()).isEqualTo("10.000");
@@ -737,7 +792,9 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(shopOnly.get("branches")).hasSize(1);
         JsonNode mine = row(shopOnly, product);
         assertThat(mine.get("balances")).hasSize(1);
-        assertThat(mine.get("combined_qty").asString()).as("another branch's balance is not leaked").isEqualTo("3.000");
+        assertThat(mine.get("combined_qty").asString())
+                .as("another branch's balance is not leaked")
+                .isEqualTo("3.000");
     }
 
     /** With branch_roles off every branch is both, one group, and the report is the all-branches view plus transit. */
@@ -755,7 +812,8 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(r.get("subtotals").get(0).get("role").asString()).isEqualTo("both");
         assertThat(r.get("combined_qty").asString()).isEqualTo("10.000");
         JsonNode all = api.get("/stock/all-branches", ADMIN).getBody();
-        assertThat(all.get("items").get(0).get("total_qty").asString()).isEqualTo(r.get("combined_qty").asString());
+        assertThat(all.get("items").get(0).get("total_qty").asString())
+                .isEqualTo(r.get("combined_qty").asString());
     }
 
     /** The routes need retail.stock.read. */

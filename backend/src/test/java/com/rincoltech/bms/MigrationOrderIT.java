@@ -402,15 +402,7 @@ class MigrationOrderIT {
                                     CASE WHEN ? THEN now() END, CASE WHEN ? THEN gen_random_uuid() END,
                                     CASE WHEN ? THEN 'Test reason' END)
                                 """)
-                        .params(
-                                id,
-                                tenant,
-                                hq,
-                                two,
-                                isVoided ? "voided" : "completed",
-                                isVoided,
-                                isVoided,
-                                isVoided)
+                        .params(id, tenant, hq, two, isVoided ? "voided" : "completed", isVoided, isVoided, isVoided)
                         .update();
                 owner.sql("""
                                 INSERT INTO retail_transfer_lines (id, tenant_id, transfer_id, line_no, product_id, qty,
@@ -430,7 +422,8 @@ class MigrationOrderIT {
                             .query(String.class)
                             .list())
                     .containsExactly("completed", "voided");
-            assertThat(owner.sql("SELECT count(*) FROM retail_transfer_lines WHERE tenant_id = ? AND received_qty IS NULL")
+            assertThat(owner.sql(
+                                    "SELECT count(*) FROM retail_transfer_lines WHERE tenant_id = ? AND received_qty IS NULL")
                             .param(tenant)
                             .query(Long.class)
                             .single())
@@ -453,10 +446,8 @@ class MigrationOrderIT {
             assertThat(owner.sql("""
                                     UPDATE retail_transfers SET status = 'voided', voided_at = now(), voided_by = gen_random_uuid(),
                                         void_reason = 'Test reason' WHERE id = ?
-                                    """).param(completed).update())
-                    .isEqualTo(1);
-            assertThatThrownBy(() -> owner.sql(
-                                    "UPDATE retail_transfers SET void_reason = 'Other' WHERE id = ?")
+                                    """).param(completed).update()).isEqualTo(1);
+            assertThatThrownBy(() -> owner.sql("UPDATE retail_transfers SET void_reason = 'Other' WHERE id = ?")
                             .param(completed)
                             .update())
                     .rootCause()

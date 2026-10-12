@@ -112,15 +112,17 @@ class RetailTransferGuardIT extends IntegrationTest {
     /** The UPDATE that moves a transfer to a status, setting the columns that status needs. */
     String moveTo(UUID id, String target) {
         return switch (target) {
-            case "received" -> asApp(
-                    "UPDATE retail_transfers SET status = 'received', received_at = now(), received_by = ? WHERE id = ?",
-                    UUID.randomUUID(),
-                    id);
-            case "cancelled", "voided" -> asApp(
-                    "UPDATE retail_transfers SET status = '" + target
-                            + "', voided_at = now(), voided_by = ?, void_reason = 'Test reason' WHERE id = ?",
-                    UUID.randomUUID(),
-                    id);
+            case "received" ->
+                asApp(
+                        "UPDATE retail_transfers SET status = 'received', received_at = now(), received_by = ? WHERE id = ?",
+                        UUID.randomUUID(),
+                        id);
+            case "cancelled", "voided" ->
+                asApp(
+                        "UPDATE retail_transfers SET status = '" + target
+                                + "', voided_at = now(), voided_by = ?, void_reason = 'Test reason' WHERE id = ?",
+                        UUID.randomUUID(),
+                        id);
             default -> asApp("UPDATE retail_transfers SET status = '" + target + "' WHERE id = ?", id);
         };
     }
@@ -139,7 +141,9 @@ class RetailTransferGuardIT extends IntegrationTest {
                     assertThat(refused).as("%s to %s is allowed", from, to).isNull();
                     assertThat(status(id)).isEqualTo(to);
                 } else {
-                    assertThat(refused).as("%s to %s is refused by the guard", from, to).isEqualTo(GUARD);
+                    assertThat(refused)
+                            .as("%s to %s is refused by the guard", from, to)
+                            .isEqualTo(GUARD);
                     assertThat(status(id)).isEqualTo(from);
                 }
             }
@@ -219,10 +223,20 @@ class RetailTransferGuardIT extends IntegrationTest {
                         "voided",
                         ", now(), gen_random_uuid(), ' '"),
                 new Case("received without a receipt time", "", 0, "received", ""),
-                new Case("completed with a receipt time", ", received_at, received_by", 0, "completed", ", now(), gen_random_uuid()"),
+                new Case(
+                        "completed with a receipt time",
+                        ", received_at, received_by",
+                        0,
+                        "completed",
+                        ", now(), gen_random_uuid()"),
                 new Case("a receipt time without a receiver", ", received_at", 0, "received", ", now()"),
                 new Case("in transit with a cost and no source entry", "", 100, "in_transit", ""),
-                new Case("received with a cost and no source entry", ", received_at, received_by", 100, "received", ", now(), gen_random_uuid()"));
+                new Case(
+                        "received with a cost and no source entry",
+                        ", received_at, received_by",
+                        100,
+                        "received",
+                        ", now(), gen_random_uuid()"));
         for (Case c : cases) {
             String sql = insert.formatted(c.columns(), c.cost(), c.status(), c.values());
             String state = null;
@@ -254,7 +268,8 @@ class RetailTransferGuardIT extends IntegrationTest {
     @Test
     void aLineRecordsWhatArrivedOnceAndOnlyWhileInTransit() {
         UUID open = transfer("in_transit");
-        assertThat(asApp("UPDATE retail_transfer_lines SET received_qty = 3 WHERE transfer_id = ?", open)).isNull();
+        assertThat(asApp("UPDATE retail_transfer_lines SET received_qty = 3 WHERE transfer_id = ?", open))
+                .isNull();
         assertThat(asApp("UPDATE retail_transfer_lines SET received_qty = 4 WHERE transfer_id = ?", open))
                 .as("once")
                 .isEqualTo(GUARD);
