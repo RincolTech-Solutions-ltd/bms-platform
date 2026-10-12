@@ -156,9 +156,37 @@ for real; the stub is for curl and tests.
   and are refused with 400 `malformed_request`, so a client part-way through a sales list must restart the list.
 - Filters are query parameters named after fields: `status=active&status=closed`
   (repeatable means OR), ranges as `<field>_from` and `<field>_to` (inclusive), free
-  search as `q`.
+  search as `q` (the retail lists keep their `query`, and the sales list its `buyer`; section 7.6.1).
 - `branch_id` (repeatable) filters branch-owned lists. When omitted the list covers every
   branch in the principal's scope; the UI sends the active branch (FR-BR-03, FR-BR-04).
+
+### 7.6.1 Search text (ADR-039, `docs/specs/search.md`)
+
+Every list that takes a search text (`q` on `/lending/members`, `/lending/loans`, `/lending/savings-accounts`,
+`/lending/investments`; `query` on `/retail/products`, `/retail/stock`, `/retail/stock/all-branches`,
+`/retail/customers`, `/retail/cash-parties`; `buyer` on `/retail/sales`) matches it the same way, through the
+kernel's one matcher:
+
+- **Case and accent insensitive.** "jose" finds a name written with an accent on the e.
+- **Several words are an AND.** The text is split on white space (at most 6 words, at most 100 characters; the rest
+  is ignored) and a row must match every word somewhere in its name, number, code or reference columns, in any order.
+- **Phone numbers match in any written form.** A word of four or more typed digits, and a whole text that looks like a
+  phone number, also match the digits of a phone column: the typed digits anywhere in the number and, when the text starts with 256
+  or 0, the rest at the start of the number written with 256, with 0 or with neither. "0700 000 111", "+256 700 000 111",
+  "256700000111" and "700000111" are one number, and "0772" or "+2567" is already a search; a contact kept as free text
+  ("0772123456") is found as well as a stored +256 number. Fewer than four typed digits is not a phone, and the rest is
+  never matched in the middle of a number.
+- **`%`, `_` and `\` are ordinary characters.**
+- **Ranked.** A name or code that starts with the whole text comes first ("buyer b"), then one where the whole text starts
+  a word, then one where every word starts a word, then any other match; inside a rank the list's usual order holds.
+  The sales history is the exception and keeps its time order.
+- **Same scope, same permissions.** The match narrows the list the caller could already read; it adds no row. The
+  columns a list does not show are matched only for a caller who may read them (a member's phone and national id on a
+  loan, savings or investment list need `lending.members.read` at the member's branch).
+- **Cursor.** With a search text the cursor carries the rank of the last row and a fingerprint of the text; it is valid
+  only with the same text. A cursor from another text, from a list without a search text, or the reverse, is 400
+  `malformed_request` ("restart the list"). Change the text, restart the list.
+- A blank text is no search. Matching and paging never change the response shape.
 
 ## 7.7 Errors
 
@@ -445,7 +473,9 @@ endpoint.
 | GET | `/notification-templates` | `core.notifications.read` | |
 | PUT | `/notification-templates/{event_key}/{channel}` | `core.notification_templates.manage` | FR-NTF-03 |
 | POST | `/notification-templates/{event_key}/{channel}/preview` | `core.notification_templates.manage` | Renders with fabricated sample data |
-| GET | `/notifications` | `core.notifications.read` | Send log with status |
+| GET | `/notifications` | `core.notifications.read` | Send log with status. For SMS it reads `sms_deliveries` (status, segments, recorded cost, masked recipient) (ADR-036) |
+| GET, PUT | `/settings/sms` | read / `core.settings.manage` | Sender name, window, `sms_include_balance`; the daily cap and `sms_sender_approved` are read only here (the operator sets them) |
+| PUT, DELETE | `/lending/members/{member_id}/sms-opt-out` | `lending.members.update` | `{scope: reminders \| all}`; audited. FR-NTF-14 |
 | GET | `/documents/{document_id}` | permission on the subject | Metadata. Declared "authenticated" (staff); the owning module's `DocumentAccess` decides, 403 `permission_denied` when it says no |
 | POST | `/documents/{document_id}/download-url` | permission on the subject | `{url, expires_at}`, 5 minutes; every issue is audited (`core.document.download_url_issued`). Member ID images (`id_front`, `id_back`) need `lending.members.verify_kyc` (chapter 8). FR-DOC-03 |
 
@@ -459,8 +489,9 @@ generic `POST /documents`. Built (#12): these two routes and the member document
 |---|---|---|---|
 | GET | `/reports` | authenticated staff | Catalogue filtered by permission. FR-RPT-01 |
 | GET | `/reports/{report_key}` | report's permission | Synchronous JSON for small reports; params as query |
-| POST | `/report-runs` | report's permission | `{report_key, params, format}`; async. FR-RPT-04 |
-| GET | `/report-runs/{run_id}` | requester or `core.audit.read` | Status and document id |
+| POST | `/report-runs` | report's permission (a pack needs all seven) | `{report_key \| pack, params, format}`; async, returns the run (an identical queued or running request returns the same run). FR-RPT-04, FR-RPT-06, ADR-038 |
+| GET | `/report-runs` | requester | Own runs with status, as-of date, expiry |
+| GET | `/report-runs/{run_id}` | requester or `core.audit.read` | Status and document ids; 422 codes `report_too_large`, `snapshot_unavailable`, `timeout` on `failed` runs. Download goes through `POST /documents/{id}/download-url`, 410 `report_expired` after 30 days |
 
 ### 7.11.9 Imports (`/imports`)
 
@@ -484,11 +515,15 @@ generic `POST /documents`. Built (#12): these two routes and the member document
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/payments/intents` | `core.payments.collect` or `member.self.pay` | **M**. FR-PAY-01 |
+| POST | `/payments/intents` | `core.payments.collect` or `member.self.pay` | **M**. FR-PAY-01. `{purpose, subject_id, amount_minor, payer_phone}`; returns the intent with `redirect_url` once the order exists. 422 `collections_disabled`, `exceeds_payoff`, `subject_not_payable` (ADR-035) |
+| GET | `/payments/intents` | `core.payments.read` | List with status and flags (`paid_less`, `paid_more`, `late`, `reversed_pending_review`) |
 | GET | `/payments/intents/{intent_id}` | initiator or `core.payments.read` | Polled by the UI |
+| POST | `/payments/statements` | `core.payments.manage` | Multipart statement CSV; matches rows, posts fees once. FR-PAY-11 |
+| GET | `/payments/reconciliation` | `core.payments.read` | The latest nightly differences (ADR-035 decision 9) |
+| GET, PUT | `/payments/settings` | read / `core.settings.manage` | `collections_enabled`; 409 `merchant_not_bound_to_tenant` for any tenant but the one named by `BMS_PESAPAL_TENANT_ID`, 409 `gateway_method_unmapped` until the `gateway` payment method is mapped (ADR-035 decision 11) |
 | GET | `/payments/unallocated` | `core.payments.read` | FR-PAY-04 |
 | POST | `/payments/unallocated/{receipt_id}/allocate` | `core.payments.allocate` | **M** |
-| POST | `/payments/callbacks/{provider}` | public, signature verified | On the callback host. FR-PAY-02 |
+| POST, GET | `/payments/callbacks/{provider}/{token}` | public, path token; the body is never trusted | On the callback host. Identifies the intent, queues a status query, answers 200. FR-PAY-02, FR-PAY-08 |
 
 ### 7.11.11 Lending: members (`/lending/members`)
 
@@ -741,8 +776,8 @@ Codes (422 unless stated): `term_not_offered`, `amount_out_of_range`, `product_a
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/payments/callbacks/{provider}` | 7.11.10 |
-| POST | `/channels/sms/{provider}/delivery-reports` | FR-NTF-05 |
+| POST, GET | `/payments/callbacks/{provider}/{token}` | 7.11.10 |
+| POST | `/channels/sms/{provider}/delivery-reports/{token}` | FR-NTF-05; forward-only status; unknown ids ignored (ADR-036) |
 | POST | `/channels/ussd/{provider}` | Session callback. FR-MSS-07 (Later) |
 
 ### 7.11.20 Retail (`/retail`, ADR-020)
@@ -764,12 +799,15 @@ Built (#51, catalogue):
 |---|---|---|---|
 | GET | `/retail/categories`, `/retail/units` | `retail.stock.read` | `{items: [{id, name, active, product_count}]}`; `product_count` is the products, active or not, that use the row (#146) |
 | POST | `/retail/categories`, `/retail/units` | `retail.catalogue.manage` | `{name}`; 409 `duplicate_category`, `duplicate_unit` (names ignore case). FR-RET-01 |
-| POST | `/retail/products/import` | `retail.catalogue.manage` and, checked in the service, `core.settings.manage` (administrators only; 403 `permission_denied` otherwise) | `dry_run` (default `true`), body `{csv}`: a header row then one item per row, columns `code`, `description`, `category`, `unit`, `sell price` and optionally `cost price` (comma, semicolon or tab separated, quotes allowed, at most 2,000 rows and 1,000,000 characters). Codes are normalised by `RetailCatalogue.normaliseCode`; categories and units are created on demand by name ignoring case and surrounding spaces, so `Drinks` and `drinks` in one file are one new row, and a switched-off category or unit is an error row naming the line; amounts are in major units read with the tenant currency's exponent (whole numbers for UGX, up to two decimals for a two-decimal currency), as integer minor units with no floating point. An apply that meets a clash raised by a concurrent change returns 409 `import_conflict` and adds nothing. Returns `{dry_run, rows_read, added, skipped, errors, categories_created, units_created, rows: [{line, code, description, outcome, message}]}` where `outcome` is `added`, `skipped` (the code exists, or repeats in the file) or `error`. A dry run changes nothing. An apply with any error row adds nothing (422 `import_has_errors`); applying again skips every row already added, so it is idempotent on the code. A `cost price` column needs `retail.profit.read` (422 `cost_not_allowed` otherwise) and a cost at or above the sell price is an error row. Each item is audited as `retail.product.created` without cost, plus one `retail.product.imported` summary (#146) |
+| POST | `/retail/products/import` | `retail.catalogue.manage` and, checked in the service, `core.settings.manage` (administrators only; 403 `permission_denied` otherwise) | `dry_run` (default `true`), body `{csv}`: a header row then one item per row, columns `code`, `description`, `category`, `unit`, `sell price` and optionally `cost price`, `pack unit` and `pack factor` (issue #194: one pack per row, both or neither; an error row while the `units` capability is off, when the pack unit equals the unit or is switched off, or the factor is not at least 1 with at most three places (a comma is refused, "12,5" is an error, never 125; a dry run row names the factor it read); a pack unit is created on demand like a unit; a file without these columns is read as before) (comma, semicolon or tab separated, quotes allowed, at most 2,000 rows and 1,000,000 characters). Codes are normalised by `RetailCatalogue.normaliseCode`; categories and units are created on demand by name ignoring case and surrounding spaces, so `Drinks` and `drinks` in one file are one new row, and a switched-off category or unit is an error row naming the line; amounts are in major units read with the tenant currency's exponent (whole numbers for UGX, up to two decimals for a two-decimal currency), as integer minor units with no floating point. An apply that meets a clash raised by a concurrent change returns 409 `import_conflict` and adds nothing. Returns `{dry_run, rows_read, added, skipped, errors, categories_created, units_created, rows: [{line, code, description, outcome, message}]}` where `outcome` is `added`, `skipped` (the code exists, or repeats in the file) or `error`. A dry run changes nothing. An apply with any error row adds nothing (422 `import_has_errors`); applying again skips every row already added, so it is idempotent on the code. A `cost price` column needs `retail.profit.read` (422 `cost_not_allowed` otherwise) and a cost at or above the sell price is an error row. Each item is audited as `retail.product.created` without cost, plus one `retail.product.imported` summary (#146) |
 | PATCH | `/retail/categories/{category_id}`, `/retail/units/{unit_id}` | `retail.catalogue.manage` | `{name?, active?}` under `If-Match` with the `version` last read (428 `precondition_required` without it, 409 `version_conflict` when stale; the response carries the new `ETag`); rename or switch off, never deleted; 409 `duplicate_category`, `duplicate_unit`; 404 for another tenant's id. A switched-off row stays on its products but cannot be chosen for a new product or a product's change (422 `inactive_category`, `inactive_unit`). Audited as `retail.category.updated`, `retail.unit.updated` (#146) |
 | GET | `/retail/products` | `retail.stock.read` | Filters `query` (code, description or category name), `category_id`, `active`; `limit`, `cursor`, ordered by code. Row: `{id, code, description, category_id, category, unit_id, unit, sell_minor, cost_minor*, currency, active, version}` |
 | POST | `/retail/products` | `retail.catalogue.manage` | `{code, description, category_id, unit_id, cost_minor, sell_minor}`; writes the `initial` history row; 409 `duplicate_product_code`. FR-RET-01 |
 | GET, PATCH | `/retail/products/{product_id}` | read / `retail.catalogue.manage` | PATCH needs `If-Match` and edits `code`, `description`, `category_id`, `unit_id`, `active` only; a price in the body is 400 |
 | POST | `/retail/products/{product_id}/prices` | `retail.price.edit` | `{cost_minor?, sell_minor?, reason}` with `If-Match` (428 without it, 409 `version_conflict` on a stale version, #77); at least one price; 422 `price_unchanged`, which never depends on a cost the caller may not read: without `retail.profit.read` a body naming `cost_minor` always goes ahead, so resending the current cost writes a history and audit row that change nothing, by design (#77); writes a `manual` history row and audit. FR-RET-02 |
+| GET | `/retail/products/{product_id}/units` | `retail.stock.read` | Issue #194, the `units` capability (404 `capability_not_enabled` while off): `{items: [{id, product_id, unit_id, unit, factor, active, version}]}`, `factor` a three-place string. The product responses carry the same list as `packs` while the capability is on (absent while off). Reading needs only `retail.stock.read` because the sale and restock forms offer the packs; the spec's table lists `retail.catalogue.manage` for all three |
+| POST | `/retail/products/{product_id}/units` | `retail.catalogue.manage` | `{unit_id, factor}`, factor at least 1 with at most three places (a pack holds at least one base unit); 201 with the pack and its `ETag`; 409 `duplicate_pack`; 422 `pack_unit_is_base_unit`, 422 `inactive_unit`. Audited as `retail.product_unit.created` |
+| PATCH | `/retail/products/{product_id}/units/{unit_id}` | `retail.catalogue.manage` | `{factor?, active?}` under `If-Match` (428, 409 `version_conflict`); switching a pack on again needs `factor` (422 `factor_required`) and an active unit that is not the item's own; a new factor applies to later lines only, a pack switched off is not offered, never deleted. Audited as `retail.product_unit.updated`. A product's `unit_id` cannot change while it has an active pack, and a unit used by an active pack cannot be switched off: 422 `unit_in_use_by_pack` |
 | GET | `/retail/products/{product_id}/price-history` | `retail.stock.read` | `{items: [{id, at, by, source, source_id, old_cost_minor*, new_cost_minor*, old_sell_minor, new_sell_minor, currency, reason}]}` |
 
 Built (#52, stock and sales). `M` marks a money-moving route that requires `Idempotency-Key`
@@ -785,7 +823,7 @@ branch when the permission's scope has exactly one; otherwise 422 `branch_requir
 | POST | `/retail/stocktakes` | `retail.stocktake.commit` | `{branch_id?, lines: [{product_id, counted_qty}], note?}`; returns each line's `expected_qty` and `variance_qty`. FR-RET-08 |
 | GET | `/retail/stocktakes/{stocktake_id}` | `retail.stock.read` | Draft or committed |
 | POST | `/retail/stocktakes/{stocktake_id}/commit` | `retail.stocktake.commit` | Adjustment movements of counted less `expected_qty` (the variance when counted, so later movements stay in the balance), posted at cost; 409 `stocktake_committed`; 409 `stock_moved_since_count` when later movements would make an adjusted balance negative (recount those lines) |
-| POST | `/retail/sales` | `retail.sale.create` | **M**. `{branch_id?, sale_date?, payment_method, customer_id?, buyer_name?, buyer_contact?, due_date?, lines: [{product_id, qty, unit_price_minor?}]}`; 422 `insufficient_stock` when a line exceeds the branch's stock (always; ADR-020 decision 4); 422 `price_below_cost` when a line's unit price is not above the product's cost and the caller lacks `retail.price.below_cost` (the message never carries the cost; ADR-020 decision 5). Response: the sale with `lines`, `total_minor`, `paid_minor`, `balance_minor`, `cost_total_minor*`, `profit_minor*`, and per line `unit_cost_minor*`, `line_cost_minor*`. FR-RET-04 |
+| POST | `/retail/sales` | `retail.sale.create` | **M**. `{branch_id?, sale_date?, payment_method, customer_id?, buyer_name?, buyer_contact?, due_date?, lines: [{product_id, qty, unit_price_minor?, unit_id?}]}`; `unit_id` (issue #194, the `units` capability) names a pack of the product: `qty` and `unit_price_minor` are then in that unit, the price defaults to the sell price times the factor rounded half up, the stock moves in base units (422 `quantity_not_representable` when the base quantity is not exact to three places or does not fit, 422 `unknown_pack_unit` or `capability_not_enabled` as a field problem on the line), and the price floor is judged on the line total against the line cost; 422 `insufficient_stock` when a line exceeds the branch's stock (always; ADR-020 decision 4); 422 `price_below_cost` when a line's unit price is not above the product's cost and the caller lacks `retail.price.below_cost` (the message never carries the cost; ADR-020 decision 5). Response: the sale with `lines`, `total_minor`, `paid_minor`, `balance_minor`, `cost_total_minor*`, `profit_minor*`, and per line `unit_cost_minor*`, `line_cost_minor*`, and for a pack line `sale_unit_id`, `sale_unit`, `sale_qty`, `sale_unit_price_minor`, `unit_factor` (absent means entered in the base unit; `qty` and `unit_price_minor` are always per base unit). FR-RET-04 |
 | GET | `/retail/sales` | `retail.sale.read` | `branch_id` (repeatable, scoped), `from`, `to` (by sale date), `customer_id`, `buyer` (part of the buyer's name or of the linked credit buyer's name; `%` and `_` are literal), `payment_method` (`cash`, `mobile_money`, `bank` or `credit`; else 422), `product_id` (a sale with a line of that product), `status` (`completed` or `voided`; else 422), `owing` (`owing`: a completed credit sale with a balance above zero; `overdue`: owing and `due_date` before the tenant's business date; `paid`: a completed credit sale with no balance; anything else 422; applied in SQL before paging, so it holds across every page), `newest_first` (default false: oldest first), `limit`, `cursor` (the cursor records the `newest_first` direction it was issued for; one sent with the other direction is 422 on `cursor`) (#145) |
 | GET | `/retail/sales/{sale_id}` | `retail.sale.read` | 404 outside scope |
 | POST | `/retail/sales/{sale_id}/void` | `retail.sale.void` | `{reason}`; 409 `sale_voided`; 422 `sale_has_payments` for a credit sale with payments |
@@ -800,7 +838,7 @@ Built (#53, purchasing, usage and payments):
 |---|---|---|---|
 | GET, POST | `/retail/suppliers` | `retail.purchase.create` | `{name, contact?}`; 409 `duplicate_supplier` |
 | PATCH | `/retail/suppliers/{supplier_id}` | `retail.catalogue.manage` | `{name?, contact?, active?}` under `If-Match` (428 without it, 409 `version_conflict` when stale); an empty contact clears it, a switched-off supplier is refused on a new restock (422 `inactive_supplier`), never deleted; audited as `retail.supplier.updated` without the contact (#146) |
-| POST | `/retail/purchases` | `retail.purchase.create` | **M**. `{supplier_id?, purchased_on, payment_method: cash, bank or credit, note?, lines: [{product_id, cost_minor, sell_minor?, qty_by_branch: [{branch_id, qty}]}]}`; every branch must be in the caller's scope; sets the product prices and history atomically, latest line wins. FR-RET-06 |
+| POST | `/retail/purchases` | `retail.purchase.create` | **M**. `{supplier_id?, purchased_on, payment_method: cash, bank or credit, note?, lines: [{product_id, cost_minor, sell_minor?, qty_by_branch: [{branch_id, qty}], unit_id?}]}`; every branch must be in the caller's scope; sets the product prices and history atomically, latest line wins. `unit_id` (issue #194) names a pack: the quantities and `cost_minor` are then in that unit (`sell_minor` stays per base unit), the product's cost and the movements take the pack cost divided by the factor rounded half up, `line_total_minor` stays the amount paid or owed as entered, and the difference per branch posts to `purchase_rounding`; the response line adds `unit_id`, `unit`, `unit_factor`, `unit_qty_total`, `unit_cost_minor` and each branch's `unit_qty`. FR-RET-06 |
 | GET | `/retail/purchases` | `retail.purchase.create` | `from`, `to`, `supplier_id`, `limit`, `cursor`; purchases that moved stock into the caller's branches. A branch-scoped caller sees only their branches' `qty_by_branch`, with `qty_total`, `line_total_minor` and `total_minor` recomputed from them (lines with nothing in scope left out); an all-branch caller sees the whole document (review F11) |
 | POST | `/retail/usage` | `retail.usage.report` | **M**. `{branch_id?, kind: used or damaged, reason, occurred_on?, lines: [{product_id, qty}]}`; response `cost_total_minor*`, per line `unit_cost_minor*`, `line_cost_minor*`; 422 `insufficient_stock` past the branch's stock (ADR-020 decision 4). FR-RET-07 |
 | POST | `/retail/sales/{sale_id}/payments` | `retail.sale.create` | **M**. `{amount_minor, method: cash, mobile_money or bank, paid_on?}`; `{payment, sale_paid_minor, sale_balance_minor}`; 422 `payment_exceeds_balance`, `sale_not_payable`. FR-RET-05 |
@@ -837,10 +875,14 @@ Built (#84, stock transfers between branches; FR-RET-16):
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/retail/transfers` | `retail.stock.transfer` | **M**. `{from_branch_id?, to_branch_id, transfer_date?, note?, lines: [{product_id, qty}]}`. The source is `from_branch_id`, or the caller's one branch, and must be in the permission's scope (422 `unknown_branch` or `branch_required` on `from_branch_id`); the destination is any active branch of the tenant other than the source (422 `same_branch` or `unknown_branch` on `to_branch_id`). `transfer_date` defaults to today in the tenant's zone and may not be in the future; one line per product (422 `duplicate`); quantities positive with at most three places. 422 `insufficient_stock` when a line exceeds the source's balance (always; ADR-020 decision 4); nothing is written. 201 with `Location`: `{id, from_branch_id, to_branch_id, transfer_date, note, status, currency, cost_total_minor*, lines: [{line_no, product_id, code, description, qty, unit_cost_minor*, line_cost_minor*}], created_at, created_by, voided_at, voided_by, void_reason}` |
-| GET | `/retail/transfers` | `retail.stock.read` | `branch_id` (repeatable, scoped; a transfer is listed when its source or its destination is one of them), `product_id`, `from`, `to` (on `transfer_date`), `limit`, `cursor`; newest first |
+| POST | `/retail/transfers` | `retail.stock.transfer` | **M**. `{from_branch_id?, to_branch_id, transfer_date?, note?, lines: [{product_id, qty}]}`. The source is `from_branch_id`, or the caller's one branch, and must be in the permission's scope (422 `unknown_branch` or `branch_required` on `from_branch_id`); the destination is any active branch of the tenant other than the source (422 `same_branch` or `unknown_branch` on `to_branch_id`). `transfer_date` defaults to today in the tenant's zone and may not be in the future; one line per product (422 `duplicate`); quantities positive with at most three places. 422 `insufficient_stock` when a line exceeds the source's balance (always; ADR-020 decision 4); nothing is written. 201 with `Location`: `{id, from_branch_id, to_branch_id, transfer_date, note, status, currency, cost_total_minor*, lines: [{line_no, product_id, code, description, qty, unit_cost_minor*, line_cost_minor*}], created_at, created_by, voided_at, voided_by, void_reason, received_at, received_by, shortage_cost_minor*}`; a line also carries `received_qty` once received. With the `transfer_receipt` capability on, the same call is a dispatch: `status` is `in_transit`, only the source's movement and entry are written, and the destination's follow at the receipt (FR-RET-40, issue #193) |
+| GET | `/retail/transfers` | `retail.stock.read` | `branch_id` (repeatable, scoped; a transfer is listed when its source or its destination is one of them), `product_id`, `status` (`completed`, `in_transit`, `received`, `cancelled`, `voided`; 422 otherwise), `from`, `to` (on `transfer_date`), `limit`, `cursor`; newest first |
 | GET | `/retail/transfers/{transfer_id}` | `retail.stock.read` | 404 unless the caller may read the source or the destination branch |
-| POST | `/retail/transfers/{transfer_id}/void` | `retail.stock.transfer` | `{reason}`; scope checked on the source branch (404 otherwise). Moves every line back at the transfer's cost and reverses both entries, dated today. 409 `transfer_voided`; 422 `transfer_stock_moved` when the destination no longer holds a line's quantity (sold, used or moved on since), naming the destination and the product codes; nothing is written |
+| POST | `/retail/transfers/{transfer_id}/void` | `retail.stock.transfer` | `{reason}`; scope checked on the source branch (404 otherwise). Moves every line back at the transfer's cost and reverses both entries, dated today. 409 `transfer_voided`; 422 `transfer_stock_moved` when the destination no longer holds a line's quantity (sold, used or moved on since), naming the destination and the product codes; nothing is written. For a received transfer the rule applies to what was received, the dispatched quantity returns to the source and the shortage entry is reversed with the others. A transfer still on its way is 409 `transfer_in_transit` (cancel it instead) and a cancelled one 409 `transfer_cancelled` |
+| POST | `/retail/transfers/{transfer_id}/receive` | `retail.stock.transfer` | **M**. Capability `transfer_receipt` (404 `capability_not_enabled` otherwise). `{lines?: [{product_id, qty}], note?}`; omit `lines` to receive everything as dispatched, otherwise name every line of the transfer once (422 `incomplete`, `unknown_product`, `duplicate`), `qty` from 0 to the dispatched quantity (422 `received_exceeds_dispatched` above it). Scope is checked on the **destination** branch (404 otherwise). Writes a `transfer_in` movement for what arrived, one entry at the destination (debit inventory, credit clearing) and, for a shortage, one shrinkage entry at the destination valued at the source cost. 200 with the transfer (`status` `received`); 409 `transfer_not_in_transit` when it is not on its way |
+| POST | `/retail/transfers/{transfer_id}/cancel` | `retail.stock.transfer` | **M**. Capability `transfer_receipt`. `{reason}`; scope on the **source** branch (404 otherwise). Returns every line to the source at the original cost (a `transfer_in` that reverses the dispatch movement, `source_type` `retail.transfer_cancel`) and reverses the source entry. 200 with the transfer (`status` `cancelled`); 409 `transfer_not_in_transit` |
+| GET | `/retail/reports/stock-by-location` | `retail.stock.read` | `query`, `category_id`, `negative_only`, `limit`, `cursor` (by product code). `{currency, branches: [{id, code, name, head_office, role}] (stores, then shops, then both; every branch is `both` while `branch_roles` is off), items: [{product_id, code, description, category, unit, balances: [{branch_id, qty, negative, value_minor*}] (in the order of `branches`), subtotals: [{role, qty}], in_transit_qty, combined_qty, negative, sell_minor, cost_minor*, value_minor*, in_transit_value_minor*, combined_value_minor*}], totals: {by_branch: [{branch_id, value_minor}], by_role: [{role, value_minor}], value_minor*, in_transit_value_minor*, combined_value_minor*, inventory_ledger_minor*, revaluation_difference_minor*}, next_cursor}`. Quantities in transit are in neither branch's balance, so `combined_qty` is the balances plus `in_transit_qty` and counts nothing twice. `*` shows only with `retail.profit.read` in every branch of the report; a per-branch value shows where that permission covers the branch, and `totals` cover every product, not the page. Always available; the role grouping and the transit column are trivial while their capabilities are off |
+| GET | `/retail/reports/transfers-in-flight` | `retail.stock.read` | Capability `transfer_receipt`. `{currency, items: [{id, from_branch_id, to_branch_id, transfer_date, dispatched_at, age_days, note, lines, cost_total_minor*}] (open dispatches from or to a branch in scope, the longest wait first), in_transit_value_minor*, clearing_minor*, reconciled*}`. The value is the sum of the open dispatches, built from the transfers and never read from account 1190 (shared with lending). For a caller who reads every branch with cost, `clearing_minor` is the net of inter-branch clearing over the retail transfer entries only and `reconciled` says it equals the value of every open dispatch |
 
 For transfers, the `*` fields show when the caller holds `retail.profit.read` in the source or the
 destination branch: the same cost is posted to both branches' inventory accounts. Both branches'
@@ -930,6 +972,35 @@ Error codes: the cash book's codes are listed in section 7.7 (409 `cash_record_v
 `repayment_exceeds_balance`, `advance_settled`, `branch_required`; the field code `future_date`). The cash book has no import endpoint; its history comes through the
 `import-retail` command (chapter 13 section 13.13).
 
+### 7.11.23 Retail trade capabilities (`/retail`, ADR-033, issue #190)
+
+Built (issue #191): `GET` and `PUT /retail/settings/capabilities` (`core.settings.manage`; the body is
+the profile and the eight flags, `PUT` needs `If-Match` with the settings version as `PATCH /settings`
+does (the `ETag` is returned by `GET`), a change is partial, choosing a profile writes its preset
+first, the change is audited as `retail.capabilities.changed` with old and new values; an unknown key
+is 400 and a wrong value 422); `GET /retail/branch-roles` (`retail.stock.read`; the active branches in
+the caller's scope with `role` and `can_sell`) and `PUT /retail/branch-roles/{branch_id}` (body
+`{role}`, `retail.branch_role.manage`, audited as `retail.branch_role.changed`, 404 outside the
+caller's scope, 422 `branch_has_open_work` while a dispatched transfer is unreceived), both 404
+`capability_not_enabled` until `branch_roles` is on. `POST /retail/sales` answers 422
+`branch_role_forbids_sales` for a store. Built (issue #193): the two-step transfer, whose routes
+(`/receive`, `/cancel`, the `status` filter) and the reports `stock-by-location` and
+`transfers-in-flight` are in section 7.11.20 above; a capability change that switches
+`transfer_receipt` off while a transfer is on its way is 422 `transfers_in_transit`.
+
+Built (issue #194, units of measure): the three pack routes above, the optional `unit_id` on a sale line and a restock line, the pack fields on their responses, and the `pack unit` and `pack factor` import columns. New error codes: 422 `quantity_not_representable`, `unknown_pack_unit` (a field problem), `pack_unit_is_base_unit`, `unit_in_use_by_pack`; 409 `duplicate_pack`. Design only, not built: the rest of this section.
+
+Every route below answers 404 `capability_not_enabled` unless its capability is on
+(after 404 `module_not_enabled`); the full route table, permissions and the money-moving (`M`)
+routes are in `docs/specs/trade-capabilities.md` section 11: capability settings, branch roles,
+product units, price lists and price resolution, customer account, statement, payment on account and
+ageing, documents and quotations, purchase orders, goods receipts, supplier bills, credits and
+payments, landed cost, transfer receive and cancel, sale returns, and the reports stock-by-location,
+transfers-in-flight and supplier-payables. Existing routes gain optional request fields (a sale
+line's `unit_id`, a sale's `price_list_id`) that are ignored when the capability is off. New error
+codes: 422 `branch_role_forbids_sales`, `quantity_not_representable`, `no_price_in_list`,
+`credit_limit_exceeded`, `customer_required`, `payment_exceeds_allocatable`, `received_exceeds_dispatched`, `branch_has_open_work`, `unit_in_use_by_pack`, `transfers_in_transit`; 409 `price_item_overlap`, `transfer_not_in_transit`, `transfer_in_transit`, `transfer_cancelled`.
+
 ### 7.11.22 Lending: insights (`/lending/insights`, #153, ADR-030)
 
 Read-only. Every route takes the page filter: `from` and `to` (inclusive dates, default the first
@@ -953,6 +1024,19 @@ in `docs/specs/lending-insights-metrics.md`.
 | GET | `/lending/insights/digest` | `core.settings.manage` | The digest settings with an `ETag` |
 | PUT | `/lending/insights/digest` | `core.settings.manage` | `{enabled, email_recipients (max 5), telegram_chat_id, send_hour}` with `If-Match`; 422 `digest_needs_recipient` when on with no recipient; 412 `version_mismatch`; audited (FR-INS-08) |
 | GET | `/lending/insights/digest/preview` | `core.settings.manage` | `{as_of, subject, text}`: the text the digest would send now |
+
+### 7.11.24 Lending: AI assistant (`/lending/advisor`, ADR-037, off by default)
+
+Refused with 404 `advisor_disabled` unless the tenant has switched the assistant on. Responses carry
+`Cache-Control: no-store`. Every answer body has `advisory: true`, `as_of`, `source` (`model` or `fallback`), the text,
+and `facts` (keys with display values). Provider errors never reach the client; the fallback is returned instead.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/lending/advisor/brief` | `lending.advisor.use` | Today's brief; the model brief is returned only to a user whose scope covers every branch and who holds `lending.insights.all_officers`; otherwise (and when the model was not used) `source: fallback` with `reason` (`provider_down`, `cap`, `validation`, `off`, `scope`) |
+| POST | `/lending/advisor/questions` | `lending.advisor.use` | `{question}` up to 300 characters, answered from the caller's scope; 422 `question_refused` with a reason class (`too_long`, `digits`, `email`, `id_pattern`, `series_number`, `member_name`), 429 `daily_limit`. FR-AIA-07 |
+| GET, PUT | `/lending/advisor/settings` | `lending.advisor.configure` (read), `core.settings.manage` (switch on with `acknowledged: true`) | `enabled`, `daily_token_cap`, acknowledgement record; audited; 403 `advisor_not_available` when the tenant is not in `BMS_AI_ENABLED_TENANTS` |
+| GET | `/lending/advisor/calls` | `lending.advisor.configure` | The call log without personal data, 90 days |
 
 ## 7.12 Example: record a repayment
 

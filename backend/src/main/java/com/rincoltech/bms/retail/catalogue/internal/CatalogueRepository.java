@@ -1,6 +1,8 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
+import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Pack;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Unit;
@@ -191,24 +193,41 @@ class CatalogueRepository {
         return jdbc.sql(LOCK).param(id).query(CatalogueRepository::product).optional();
     }
 
-    /** One page ordered by code; {@code query} matches the code, the description or the category name. */
-    List<Product> page(
-            String query, UUID categoryId, Boolean active, UUID branchId, String afterCode, UUID afterId, int limit) {
+    /** What a product search matches (ADR-039): the code, the description and the category name. */
+    static final Search.Fields SEARCH =
+            Search.Fields.of().names("p.description", "c.name").codes("p.code");
+
+    /**
+     * One page ordered by code, or by match rank and then code when {@code query} is given; the query
+     * matches the code, the description or the category name.
+     */
+    List<Search.Ranked<Product>> page(
+            Search.Query query,
+            UUID categoryId,
+            Boolean active,
+            UUID branchId,
+            int afterRank,
+            String afterCode,
+            UUID afterId,
+            int limit) {
+        Search.Match match = query == null ? null : query.match(SEARCH);
+        String select = match == null
+                ? SELECT_PRODUCT
+                : SELECT_PRODUCT.replace("SELECT p.id,", "SELECT " + match.rank() + " AS search_rank, p.id,");
         Map<String, Object> params = new LinkedHashMap<>();
         StringBuilder sql;
         if (branchId == null) {
-            sql = new StringBuilder(SELECT_PRODUCT + " WHERE true");
+            sql = new StringBuilder(select + " WHERE true");
         } else {
             // The balance of retail_stock_balances (the stock module's table), read for the search row.
             sql = new StringBuilder(
-                    SELECT_PRODUCT.replace(" FROM retail_products p", ", b.qty FROM retail_products p")
+                    select.replace(" FROM retail_products p", ", b.qty FROM retail_products p")
                             + " LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :branchId WHERE true");
             params.put("branchId", branchId);
         }
-        if (query != null) {
-            sql.append(" AND (p.code ILIKE :q OR p.description ILIKE :q OR c.name ILIKE :q)");
-            params.put(
-                    "q", "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%");
+        if (match != null) {
+            sql.append(" AND ").append(match.where());
+            params.putAll(match.params());
         }
         if (categoryId != null) {
             sql.append(" AND p.category_id = :categoryId");
@@ -218,16 +237,30 @@ class CatalogueRepository {
             sql.append(" AND p.active = :active");
             params.put("active", active);
         }
-        if (afterCode != null) {
-            sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
-            params.put("afterCode", afterCode);
-            params.put("afterId", afterId);
+        String statement;
+        if (match == null) {
+            if (afterCode != null) {
+                sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = sql + " ORDER BY p.code, p.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCode != null) {
+                keyset = "(search_rank, code, id) > (:afterRank, :afterCode, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, code, id");
         }
-        sql.append(" ORDER BY p.code, p.id LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
-                .query(branchId == null ? CatalogueRepository::product : CatalogueRepository::productWithQty)
+                .query(Search.ranked(
+                        branchId == null ? CatalogueRepository::product : CatalogueRepository::productWithQty,
+                        match != null))
                 .list();
     }
 
@@ -321,6 +354,84 @@ class CatalogueRepository {
                 .list();
     }
 
+    // ---- Pack sizes (ADR-033, issue #194) ------------------------------------------------------
+
+    private static final String SELECT_PACK = """
+            SELECT k.id, k.product_id, k.unit_id, u.name AS unit, k.factor, k.active, k.version
+              FROM retail_product_units k JOIN retail_units u ON u.id = k.unit_id
+            """;
+
+    private static Pack pack(ResultSet rs, int n) throws SQLException {
+        return new Pack(
+                rs.getObject("id", UUID.class),
+                rs.getObject("product_id", UUID.class),
+                rs.getObject("unit_id", UUID.class),
+                rs.getString("unit"),
+                rs.getBigDecimal("factor").setScale(3).toPlainString(),
+                rs.getBoolean("active"),
+                rs.getInt("version"));
+    }
+
+    List<Pack> packs(UUID productId) {
+        return jdbc.sql(SELECT_PACK + " WHERE k.product_id = ? ORDER BY lower(u.name), k.id")
+                .param(productId)
+                .query(CatalogueRepository::pack)
+                .list();
+    }
+
+    /** The packs of many products in one statement, grouped by product; the key is absent for a product with none. */
+    Map<UUID, List<Pack>> packsOf(java.util.Collection<UUID> productIds) {
+        Map<UUID, List<Pack>> byProduct = new java.util.HashMap<>();
+        if (productIds.isEmpty()) {
+            return byProduct;
+        }
+        jdbc.sql(SELECT_PACK + " WHERE k.product_id IN (:ids) ORDER BY k.product_id, lower(u.name), k.id")
+                .param("ids", productIds)
+                .query(CatalogueRepository::pack)
+                .list()
+                .forEach(k -> byProduct
+                        .computeIfAbsent(k.productId(), x -> new java.util.ArrayList<>())
+                        .add(k));
+        return byProduct;
+    }
+
+    Optional<Pack> pack(UUID productId, UUID unitId) {
+        return jdbc.sql(SELECT_PACK + " WHERE k.product_id = ? AND k.unit_id = ?")
+                .params(productId, unitId)
+                .query(CatalogueRepository::pack)
+                .optional();
+    }
+
+    void insertPack(UUID id, UUID productId, UUID unitId, java.math.BigDecimal factor, UUID by) {
+        jdbc.sql("""
+                        INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor, created_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
+                        """).params(id, productId, unitId, factor, by).update();
+    }
+
+    /** Rows changed: 0 when the version moved since it was read. */
+    int updatePack(UUID id, java.math.BigDecimal factor, boolean active, int expectedVersion) {
+        return jdbc.sql(
+                        "UPDATE retail_product_units SET factor = ?, active = ?, updated_at = now(), version = version + 1 WHERE id = ? AND version = ?")
+                .params(factor, active, id, expectedVersion)
+                .update();
+    }
+
+    /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */
+    boolean productHasPacks(UUID productId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE product_id = ? AND active)")
+                .param(productId)
+                .query(Boolean.class)
+                .single();
+    }
+
+    boolean unitHasPacks(UUID unitId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE unit_id = ? AND active)")
+                .param(unitId)
+                .query(Boolean.class)
+                .single();
+    }
+
     static Product product(ResultSet rs, int n) throws SQLException {
         return new Product(
                 rs.getObject("id", UUID.class),
@@ -361,7 +472,8 @@ class CatalogueRepository {
                 p.updatedAt(),
                 p.version(),
                 q.toPlainString(),
-                q.signum() < 0);
+                q.signum() < 0,
+                null);
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {
