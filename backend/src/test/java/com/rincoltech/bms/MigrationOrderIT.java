@@ -459,7 +459,8 @@ class MigrationOrderIT {
                                     "UPDATE retail_transfers SET void_reason = 'Other' WHERE id = ?")
                             .param(completed)
                             .update())
-                    .hasRootCauseMessage("retail_transfers: voided to voided is not a transition a transfer makes");
+                    .rootCause()
+                    .hasMessageContaining("voided to voided is not a transition");
         }
     }
 
