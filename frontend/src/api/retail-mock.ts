@@ -1,6 +1,6 @@
 import type {
-  AllBranchesRow, Category, Customer, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, Stocktake, StockRow, Supplier, Transfer, Unit, Usage, Valuation,
-  ValuationRow,
+  AllBranchesRow, Category, CapabilitiesRead, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, Stocktake, StockByLocation, StockRow,
+  Supplier, Transfer, Unit, Usage, Valuation, ValuationRow,
 } from './retail';
 import { RetailError, businessToday, daysBefore } from './retail';
 import { retailMessage } from './retail-errors';
@@ -31,7 +31,7 @@ const SALES_PERMISSIONS = [
 const CASHIER_PERMISSIONS = SALES_PERMISSIONS;
 const ADMIN_PERMISSIONS = [
   ...SALES_PERMISSIONS, 'retail.catalogue.manage', 'retail.price.edit', 'retail.sale.void',
-  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage',
+  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage',
   'retail.savings.record', 'retail.savings.overwrite', 'retail.banking.record', 'retail.expense.record', 'retail.expense.manage',
   'retail.withdrawal.record', 'retail.advance.create', 'retail.advance.repay', 'retail.cashbook.read', 'retail.cashbook.void',
 ];
@@ -56,6 +56,13 @@ export function mockMe(role: string | undefined): Me & { modules: string[] } {
 }
 
 let profitAccess = true;
+let transferReceipt = false;
+
+/** Forces the two-step transfer on for every mock instance, besides the capability a mock instance's settings switch (ADR-033). */
+export function setMockTransferReceipt(on: boolean): void {
+  transferReceipt = on;
+}
+
 /** The staff layout tells the mock what the session may see; the real API decides by itself. */
 export function setMockProfitAccess(allowed: boolean): void {
   profitAccess = allowed;
@@ -112,7 +119,16 @@ const refuse = (status: number, code: string, detail: string): never => {
   throw new RetailError(retailMessage({ code, detail }, status), status, code);
 };
 
+const MOCK_FLAGS = ['branch_roles', 'units', 'price_lists', 'customer_accounts', 'documents', 'purchasing', 'transfer_receipt', 'returns'] as const;
+const MOCK_TRADE_PRESET: readonly string[] = ['branch_roles', 'units', 'price_lists', 'customer_accounts', 'returns', 'transfer_receipt'];
+
 export function createMockRetail(): RetailApi {
+  // Branch roles and capabilities of this mock instance (ADR-033): every branch both, every capability off.
+  const roles = new Map<string, 'store' | 'shop' | 'both'>();
+  const roleOf = (branch: string): 'store' | 'shop' | 'both' => roles.get(branch) ?? 'both';
+  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shop' }, version: 1 };
+  const twoStep = () => transferReceipt || caps.value['transfer_receipt'] === true;
+  const read = (): CapabilitiesRead => ({ capabilities: { ...caps.value, ...Object.fromEntries(MOCK_FLAGS.map((k) => [k, caps.value[k] === true])) }, version: caps.version });
   const balances = new Map<string, number>();
   PRODUCTS.forEach((p, i) => {
     balances.set(`${BRANCH_A}|${p.id}`, (i % 5 === 3 ? -2 : 4 + i * 3) * 1000);
@@ -125,6 +141,7 @@ export function createMockRetail(): RetailApi {
   const unitRows: { id: string; name: string; active: boolean; version: number }[] = unitNames.map((name, i) => ({ id: `00000000-0000-4000-8000-0000000d${String(i + 1).padStart(4, '0')}`, name, active: true, version: 1 }));
   const categoryId = (name: string): string => cats.find((c) => c.name === name)?.id ?? '';
   const history = new Map<string, PriceChange[]>();
+  const packs = new Map<string, Pack[]>();
   const used = <K extends 'category' | 'unit'>(key: K, name: string) => [...products.values()].filter((p) => p[key] === name).length;
   const refreshed = <T extends { name?: string }>(row: T, key: 'category' | 'unit') => ({ ...row, product_count: used(key, row.name ?? '') });
   const asProduct = (p: MockProduct): Product =>
@@ -261,6 +278,34 @@ export function createMockRetail(): RetailApi {
       }),
 
     priceHistory: (id) => run(() => ((find(id) && history.get(id)) || undefined)?.map((h) => (profitAccess ? h : { ...h, old_cost_minor: undefined, new_cost_minor: undefined })) || [{ id: nextId('h'), at: '2026-09-01T08:00:00Z', source: 'initial', new_sell_minor: find(id).sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: find(id).costMinor } : {}) }]),
+
+    // Pack sizes (ADR-033): kept per item in memory; the mock tenant has the units capability off, so products carry none.
+    // JUSTIFICATION-A3: RetailApi gained three methods; the mock must implement them, and nothing existing carries packs.
+    listPacks: (productId) => run(() => packs.get(find(productId).id) ?? []),
+
+    addPack: (productId, body) =>
+      run(() => {
+        const p = find(productId);
+        const unit = unitRows.find((u) => u.id === body.unit_id);
+        if (!unit) refuse(422, 'validation_failed', 'No such unit.');
+        if (unit?.name === p.unit) refuse(422, 'pack_unit_is_base_unit', 'A pack must be a different unit from the one the item is counted in.');
+        const rows = packs.get(p.id) ?? [];
+        if (rows.some((k) => k.unit_id === body.unit_id)) refuse(409, 'duplicate_pack', 'The item has a pack of this unit already.');
+        const pack: Pack = { id: nextId('k'), product_id: p.id, unit_id: body.unit_id, unit: unit?.name ?? '', factor: body.factor, active: true, version: 1 };
+        packs.set(p.id, [...rows, pack]);
+        return pack;
+      }),
+
+    updatePack: (productId, unitId, version, body) =>
+      run(() => {
+        const rows = packs.get(find(productId).id) ?? [];
+        const pack = rows.find((k) => k.unit_id === unitId);
+        if (!pack) refuse(404, 'not_found', 'No such pack.');
+        if (pack && pack.version !== version) refuse(409, 'version_conflict', 'The pack changed since it was read.');
+        const next: Pack = { ...(pack as Pack), ...(body.factor === undefined ? {} : { factor: body.factor }), ...(body.active === undefined ? {} : { active: body.active }), version: (pack?.version ?? 0) + 1 };
+        packs.set(productId, rows.map((k) => (k.unit_id === unitId ? next : k)));
+        return next;
+      }),
 
     importProducts: (csv, dryRun) =>
       run(() => {
@@ -544,6 +589,29 @@ export function createMockRetail(): RetailApi {
 
     stockedBranches: () => delay([BRANCH_A, BRANCH_B].filter((b) => [...products.values()].some((p) => bal(b, p.id) > 0))),
 
+    branchRoles: () => delay(MOCK_BRANCHES.map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: roles.get(b.id) ?? 'both', can_sell: (roles.get(b.id) ?? 'both') !== 'store' }))),
+
+    setBranchRole: (branchId, role) => {
+      const b = MOCK_BRANCHES.find((x) => x.id === branchId);
+      roles.set(branchId, role);
+      return delay({ branch_id: branchId, code: b?.code, name: b?.name, role, can_sell: role !== 'store' });
+    },
+
+    capabilities: () => delay(read()),
+
+    // The server's rule (RetailCapabilityGroup): a profile writes its preset first, then the flags sent win.
+    changeCapabilities: (body, version) => {
+      if (version !== caps.version) return Promise.reject(new RetailError(retailMessage({ code: 'version_conflict' }, 409), 409, 'version_conflict'));
+      const next: Record<string, unknown> = { ...caps.value };
+      if (body.profile) {
+        next.profile = body.profile;
+        for (const key of MOCK_FLAGS) next[key] = body.profile === 'shop' ? false : MOCK_TRADE_PRESET.includes(key) ? true : next[key];
+      }
+      for (const key of MOCK_FLAGS) if (typeof body[key] === 'boolean') next[key] = body[key];
+      caps = { value: next, version: caps.version + 1 };
+      return delay(read());
+    },
+
     dailyProfit: ({ branchId, from, to }) => {
       if (!profitAccess) return Promise.reject(new RetailError(retailMessage({ code: 'permission_denied' }, 403), 403, 'permission_denied'));
       const ids = branchId ? [branchId] : MOCK_BRANCHES.map((b) => b.id);
@@ -577,20 +645,20 @@ export function createMockRetail(): RetailApi {
         const lines = body.lines.map((l, n) => {
           const p = find(l.product_id);
           move(from, p.id, -toMilli(l.qty));
-          move(body.to_branch_id, p.id, toMilli(l.qty));
+          if (!twoStep()) move(body.to_branch_id, p.id, toMilli(l.qty));
           return { line_no: n + 1, product_id: p.id, code: p.code, description: p.description, qty: fromMilli(toMilli(l.qty)), unit_cost_minor: p.costMinor, line_cost_minor: lineTotal(p.costMinor, toMilli(l.qty)) };
         });
         const t: Transfer = {
           id: nextId('9'), from_branch_id: from, to_branch_id: body.to_branch_id, transfer_date: body.transfer_date ?? today(),
-          status: 'completed', currency: 'UGX', lines, cost_total_minor: lines.reduce((sum, l) => sum + l.line_cost_minor, 0),
+          status: twoStep() ? 'in_transit' : 'completed', currency: 'UGX', lines, cost_total_minor: lines.reduce((sum, l) => sum + l.line_cost_minor, 0),
           created_at: new Date().toISOString(), ...(body.note ? { note: body.note } : {}),
         };
         transfers.unshift(t);
         return visibleTransfer(t);
       })),
 
-    listTransfers: ({ branchId }) =>
-      delay({ items: transfers.filter((t) => !branchId || t.from_branch_id === branchId || t.to_branch_id === branchId).map(visibleTransfer) }),
+    listTransfers: ({ branchId, status }) =>
+      delay({ items: transfers.filter((t) => (!branchId || t.from_branch_id === branchId || t.to_branch_id === branchId) && (!status || t.status === status)).map(visibleTransfer) }),
 
     getTransfer: (id) => {
       const t = transfers.find((x) => x.id === id);
@@ -602,17 +670,104 @@ export function createMockRetail(): RetailApi {
         const t = transfers.find((x) => x.id === id);
         if (!t) return refuse(404, 'not_found', 'That could not be found.');
         if (t.status === 'voided') refuse(409, 'transfer_voided', 'This transfer has been voided already.');
-        const gone = (t.lines ?? []).filter((l) => bal(t.to_branch_id ?? '', l.product_id ?? '') < toMilli(l.qty ?? '0'));
+        if (t.status === 'cancelled') refuse(409, 'transfer_cancelled', 'This transfer was cancelled while it was on its way, so there is nothing to void.');
+        if (t.status === 'in_transit') refuse(409, 'transfer_in_transit', 'This transfer is still on its way. Cancel it, or wait for it to be received.');
+        const arrived = (l: { qty?: string; received_qty?: string }) => toMilli(l.received_qty ?? l.qty ?? '0');
+        const gone = (t.lines ?? []).filter((l) => bal(t.to_branch_id ?? '', l.product_id ?? '') < arrived(l));
         if (gone.length > 0) {
           refuse(422, 'transfer_stock_moved', `The destination branch no longer holds all of ${gone.map((l) => l.code).join(', ')} that this transfer brought, so it cannot be voided. Move the stock back with a new transfer instead.`);
         }
         (t.lines ?? []).forEach((l) => {
-          move(t.to_branch_id ?? '', l.product_id ?? '', -toMilli(l.qty ?? '0'));
+          move(t.to_branch_id ?? '', l.product_id ?? '', -arrived(l));
           move(t.from_branch_id ?? '', l.product_id ?? '', toMilli(l.qty ?? '0'));
         });
         Object.assign(t, { status: 'voided', voided_at: new Date().toISOString(), void_reason: reason });
         return visibleTransfer(t);
       }),
+
+    // The two-step transfer: the destination receives what arrived (less is a shortage, valued at the
+    // source cost), or the source takes it back; each is refused unless the transfer is on its way.
+    receiveTransfer: (id, lines, key) =>
+      run(() => once(`receive|${key}`, { id, lines }, (): Transfer => {
+        const t = onItsWay(transfers, id);
+        const got = new Map((lines ?? []).map((l) => [l.product_id, toMilli(l.qty)]));
+        if (lines && (t.lines ?? []).some((l) => !got.has(l.product_id ?? ''))) refuse(422, 'validation_failed', 'Say how much of every item arrived, even if it is none.');
+        let shortage = 0;
+        t.lines = (t.lines ?? []).map((l) => {
+          const sent = toMilli(l.qty ?? '0');
+          const arrived = lines ? (got.get(l.product_id ?? '') ?? 0) : sent;
+          if (arrived > sent) refuse(422, 'received_exceeds_dispatched', 'More arrived than was dispatched for one or more items. Record only what was sent.');
+          move(t.to_branch_id ?? '', l.product_id ?? '', arrived);
+          shortage += lineTotal(l.unit_cost_minor ?? 0, sent - arrived);
+          return { ...l, received_qty: fromMilli(arrived) };
+        });
+        Object.assign(t, { status: 'received', received_at: new Date().toISOString(), shortage_cost_minor: shortage });
+        return visibleTransfer(t);
+      })),
+
+    cancelTransfer: (id, reason, key) =>
+      run(() => once(`cancel|${key}`, { id, reason }, (): Transfer => {
+        const t = onItsWay(transfers, id);
+        (t.lines ?? []).forEach((l) => move(t.from_branch_id ?? '', l.product_id ?? '', toMilli(l.qty ?? '0')));
+        Object.assign(t, { status: 'cancelled', voided_at: new Date().toISOString(), void_reason: reason });
+        return visibleTransfer(t);
+      })),
+
+    stockByLocation: ({ query, categoryId: category, negativeOnly }) => {
+      const order = { store: 0, shop: 1, both: 2 } as const;
+      const columns = [...MOCK_BRANCHES].sort((a, b) => order[roleOf(a.id)] - order[roleOf(b.id)]);
+      const groups = [...new Set(columns.map((b) => roleOf(b.id)))];
+      const open = transfers.filter((t) => t.status === 'in_transit');
+      const items = [...products.values()].filter((p) => matches(p, query) && (!category || categoryId(p.category) === category)).map((p): LocationRow => {
+        const held = columns.map((b) => bal(b.id, p.id));
+        const way = open.flatMap((t) => (t.lines ?? []).filter((l) => l.product_id === p.id));
+        const wayMilli = way.reduce((x, l) => x + toMilli(l.qty ?? '0'), 0);
+        const total = held.reduce((x, y) => x + y, 0);
+        const row: LocationRow = {
+          product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit,
+          balances: columns.map((b, i) => ({ branch_id: b.id, qty: fromMilli(held[i] ?? 0), negative: (held[i] ?? 0) < 0, ...(profitAccess ? { value_minor: lineTotal(p.costMinor, held[i] ?? 0) } : {}) })),
+          subtotals: groups.map((r) => ({ role: r, qty: fromMilli(columns.reduce((x, b, i) => x + (roleOf(b.id) === r ? (held[i] ?? 0) : 0), 0)) })),
+          in_transit_qty: fromMilli(wayMilli), combined_qty: fromMilli(total + wayMilli), negative: held.some((m) => m < 0), sell_minor: p.sellMinor,
+        };
+        if (!profitAccess) return row;
+        const value = held.reduce((x, m) => x + lineTotal(p.costMinor, m), 0);
+        const transit = way.reduce((x, l) => x + (l.line_cost_minor ?? 0), 0);
+        return { ...row, cost_minor: p.costMinor, value_minor: value, in_transit_value_minor: transit, combined_value_minor: value + transit };
+      }).filter((r) => !negativeOnly || r.negative);
+      const everyone = [...products.values()];
+      const worth = (branch: string) => everyone.reduce((y, p) => y + lineTotal(p.costMinor, bal(branch, p.id)), 0);
+      const value = columns.reduce((x, b) => x + worth(b.id), 0);
+      const transit = open.reduce((x, t) => x + (t.cost_total_minor ?? 0), 0);
+      const report: StockByLocation = {
+        currency: 'UGX',
+        branches: columns.map((b) => ({ id: b.id, code: b.code, name: b.name, head_office: b.is_head_office, role: roleOf(b.id) })),
+        items,
+        totals: profitAccess
+          ? {
+              by_branch: columns.map((b) => ({ branch_id: b.id, value_minor: worth(b.id) })),
+              by_role: groups.map((r) => ({ role: r, value_minor: columns.filter((b) => roleOf(b.id) === r).reduce((x, b) => x + worth(b.id), 0) })),
+              value_minor: value, in_transit_value_minor: transit, combined_value_minor: value + transit,
+            }
+          : { by_branch: [], by_role: [] },
+      };
+      return delay(report);
+    },
+
+    transfersInFlight: () => {
+      const open = transfers.filter((t) => t.status === 'in_transit').reverse();
+      const day = 86_400_000;
+      const worth = open.reduce((x, t) => x + (t.cost_total_minor ?? 0), 0);
+      const report: InFlightReport = {
+        currency: 'UGX',
+        items: open.map((t) => ({
+          id: t.id, from_branch_id: t.from_branch_id, to_branch_id: t.to_branch_id, transfer_date: t.transfer_date, dispatched_at: t.created_at,
+          age_days: Math.max(0, Math.floor((Date.parse(today()) - Date.parse(t.transfer_date ?? today())) / day)), note: t.note, lines: visibleTransfer(t).lines,
+          ...(profitAccess ? { cost_total_minor: t.cost_total_minor } : {}),
+        })),
+        ...(profitAccess ? { in_transit_value_minor: worth, clearing_minor: worth, reconciled: true } : {}),
+      };
+      return delay(report);
+    },
   };
 }
 
@@ -650,9 +805,17 @@ function seedSales(into: (Sale & { costTotal: number })[]): void {
   );
 }
 
+/** The transfer, which must be on its way: a receipt or a cancel of any other is the server's 409. */
+function onItsWay(transfers: Transfer[], id: string): Transfer {
+  const t = transfers.find((x) => x.id === id);
+  if (!t) return refuse(404, 'not_found', 'That could not be found.');
+  if (t.status !== 'in_transit') refuse(409, 'transfer_not_in_transit', `Only a transfer that is on its way can be received or cancelled; this one is ${t.status}.`);
+  return t;
+}
+
 /** A transfer as the session may see it: cost fields only with retail.profit.read. */
 function visibleTransfer(t: Transfer): Transfer {
   if (profitAccess) return { ...t };
-  const { cost_total_minor: _total, lines, ...rest } = t;
+  const { cost_total_minor: _total, shortage_cost_minor: _short, lines, ...rest } = t;
   return { ...rest, lines: (lines ?? []).map(({ unit_cost_minor: _unit, line_cost_minor: _line, ...l }) => l) };
 }

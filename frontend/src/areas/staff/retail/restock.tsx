@@ -1,13 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { RETAIL_CURRENCY, businessToday, retail, type Product, type Supplier, type Purchase, type PurchasePayment, type PurchaseRequest } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { lineTotalMinor, parseQty, qtyString } from './maths';
+import { lineTotalMinor, parseQty, qtyString, showQty } from './maths';
 import { CategoryLabel, Gate, Note, Problem, money, useProfitAccess } from './ui';
+import { UNITS, capabilityOn } from './permissions';
+import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, packPriceMinor } from './units-state';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
 // the product's cost and sell price in the same transaction and leaves a price history row.
@@ -17,6 +21,15 @@ export interface RestockLine {
   cost: string;
   sell: string;
   qtyByBranch: Record<string, string>;
+  /** A pack unit of the product (ADR-033, units capability): cost and quantities are then in that unit. Absent means the base unit. */
+  unitId?: string;
+}
+
+/** The line in another unit: the cost goes to that unit's equivalent of the current cost (a pack costs factor times a piece). */
+export function withUnit(line: RestockLine, unitId: string): RestockLine {
+  const pack = chosenPack(line.product, unitId || undefined);
+  const base = line.product.cost_minor;
+  return { ...line, unitId: pack ? unitId : undefined, cost: base === undefined ? '' : String(pack ? packPriceMinor(base, pack.factor) : base) };
 }
 
 /** The quantity entered for a branch, as thousandths; blank or zero counts as none, bad text as null. */
@@ -31,6 +44,10 @@ export function restockLineProblem(l: RestockLine): string | null {
   const qtys = Object.values(l.qtyByBranch).map(branchQty);
   if (qtys.some((q) => q === null)) return 'Check the quantities.';
   if (!qtys.some((q) => q !== null && q > 0)) return 'Enter a quantity for at least one branch.';
+  const pack = chosenPack(l.product, l.unitId);
+  if (pack && qtys.some((q) => q !== null && baseQtyMilli(q, pack.factor) === null)) {
+    return `A quantity does not convert exactly to ${l.product.unit ?? 'items'}. Change it.`;
+  }
   return null;
 }
 
@@ -48,6 +65,7 @@ export function buildPurchase(input: { supplierId: string; purchasedOn: string; 
     payment_method: input.method,
     lines: input.lines.map((l) => ({
       product_id: l.product.id ?? '',
+      ...(chosenPack(l.product, l.unitId) ? { unit_id: l.unitId } : {}),
       cost_minor: parseMinor(l.cost, RETAIL_CURRENCY) ?? 0,
       sell_minor: parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0,
       qty_by_branch: Object.entries(l.qtyByBranch)
@@ -99,9 +117,14 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
   const setPurchasedOn = field('purchasedOn');
   const setMethod = field('method');
   const setLines = (f: (ls: RestockLine[]) => RestockLine[]) => setDraft((d) => ({ ...d, lines: f(d.lines) }));
-  const [search, setSearch] = useState('');
+  const search = useLiveSearch();
 
-  const products = useQuery({ queryKey: ['retail', 'products', 'all', search], queryFn: () => retail.listProducts({ query: search }) });
+  const products = useQuery({
+    queryKey: ['retail', 'products', 'all', search.term],
+    queryFn: ({ signal }) => retail.listProducts({ query: search.term, signal }),
+    placeholderData: keepPreviousData,
+  });
+  const finding = products.isPlaceholderData || products.isFetching;
   const suppliers = useQuery({ queryKey: ['retail', 'suppliers'], queryFn: () => retail.listSuppliers() });
 
   const save = useMutation({
@@ -126,13 +149,15 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
     },
   });
 
+  const unitsOn = capabilityOn(me, 'retail', UNITS);
   const add = (p: Product) =>
     setLines((ls) =>
-      ls.some((l) => l.product.id === p.id)
+      ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)
         ? ls
         : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: String(p.sell_minor ?? 0), qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
     );
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
+  const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));
 
   const problems = lines.map(restockLineProblem);
   const blocked = lines.length === 0 || problems.some((p) => p !== null);
@@ -157,8 +182,9 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
       <label htmlFor="bought-on">Bought on</label>
       <input id="bought-on" type="date" value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
 
-      <label htmlFor="restock-search">Find an item by name, code or category</label>
-      <input id="restock-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
+      <SearchBox id="restock-search" label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
+      {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
+      <SearchResults fetching={finding}>
       <ul style={{ listStyle: 'none', padding: 0, maxHeight: 180, overflowY: 'auto' }}>
         {(products.data ?? []).slice(0, 20).map((p) => (
           <li key={p.id} className="rt-card rt-row">
@@ -167,27 +193,41 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
           </li>
         ))}
       </ul>
+      </SearchResults>
 
       <h2>Items</h2>
       {lines.length === 0 && <p className="empty-state">No items yet.</p>}
       {lines.map((l, i) => {
         const newSell = parseMinor(l.sell, RETAIL_CURRENCY);
-        const newCost = parseMinor(l.cost, RETAIL_CURRENCY);
+        const enteredCost = parseMinor(l.cost, RETAIL_CURRENCY);
+        const packs = unitsOn ? activePacks(l.product) : [];
+        const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
+        // The product's cost is per base unit: a pack cost is divided by the factor, rounded half up, as the server does.
+        const newCost = enteredCost !== null && pack ? baseCostMinor(enteredCost, pack.factor) : enteredCost;
         return (
-          <div key={l.product.id} className="rt-card">
+          <div key={`${l.product.id}-${i}`} className="rt-card">
             <strong>{l.product.description}</strong>
+            {packs.length > 0 && (
+              <div>
+                <label htmlFor={`unit-${i}`}>Bought by</label>
+                <select id={`unit-${i}`} value={pack?.unit_id ?? ''} onChange={(e) => patchWhole(i, withUnit(l, e.target.value))}>
+                  <option value="">{l.product.unit}</option>
+                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {l.product.unit})</option>)}
+                </select>
+              </div>
+            )}
             <div className="rt-row">
               <div>
-                <label htmlFor={`cost-${i}`}>Cost each</label>
+                <label htmlFor={`cost-${i}`}>Cost each{pack ? ` (per ${pack.unit})` : ''}</label>
                 <input id={`cost-${i}`} inputMode="numeric" value={l.cost} onChange={(e) => patch(i, { cost: e.target.value })} />
               </div>
               <div>
-                <label htmlFor={`sell-${i}`}>Sell price each</label>
+                <label htmlFor={`sell-${i}`}>Sell price each{pack ? ` (per ${l.product.unit})` : ''}</label>
                 <input id={`sell-${i}`} inputMode="numeric" value={l.sell} onChange={(e) => patch(i, { sell: e.target.value })} />
               </div>
             </div>
             <fieldset>
-              <legend>Quantity bought per branch ({l.product.unit})</legend>
+              <legend>Quantity bought per branch ({pack?.unit ?? l.product.unit})</legend>
               {branches.map((b) => (
                 <div key={b.id}>
                   <label htmlFor={`q-${i}-${b.id}`}>{branchLabel(b)}</label>
@@ -251,6 +291,13 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
         From {context.supplierName || 'no supplier'}, bought on {purchase.purchased_on}: {count} {count === 1 ? 'item' : 'items'}, total cost{' '}
         {money(purchase.total_minor ?? 0)}.
       </p>
+      {(purchase.lines ?? []).some((l) => l.unit) && (
+        <ul>
+          {(purchase.lines ?? []).filter((l) => l.unit).map((l) => (
+            <li key={l.id}>{l.description}: {showQty(l.unit_qty_total ?? '0')} {l.unit} at {money(l.unit_cost_minor ?? 0)} each</li>
+          ))}
+        </ul>
+      )}
       {changes.length > 0 ? (
         <ul>{changes.map((c) => <li key={c}>{c}</li>)}</ul>
       ) : (

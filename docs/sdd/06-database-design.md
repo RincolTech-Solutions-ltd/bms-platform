@@ -342,6 +342,11 @@ write. Keys and defaults:
 | `receipt_footer` | string | empty | FR-DOC-01 |
 | `sms_sender_name` | string or null | null (aggregator default) | FR-NTF-02 |
 | `sms_window_start`, `sms_window_end` | `HH:MM` | `08:00`, `20:00` | FR-NTF-04 |
+| `sms_sender_approved` | boolean, set by the operator | false (shared sender) | ADR-036 |
+| `sms_daily_cap` | integer, set by the platform operator only (read only to the tenant admin) | a small default | ADR-036 |
+| `sms_include_balance` | boolean | false | ADR-036, FR-NTF-17 |
+| `payments.collections_enabled` | boolean | false; settable only for the tenant named by `BMS_PESAPAL_TENANT_ID` while credentials are environment-level | ADR-035 |
+| `ai.enabled`, `ai.daily_token_cap`, `ai.acknowledged_by`, `ai.acknowledged_at`, `ai.acknowledged_text_version` | boolean, integer, user, time, text | false, small, null | ADR-037 |
 | `approval_thresholds_minor` | map of action type to integer | every action 0 | FR-APR-04 |
 | `approval_validity_days` | integer | 14 | FR-ORG-08 |
 | `allow_loans_before_kyc_verified` | boolean | false | FR-MEM-05 |
@@ -542,9 +547,12 @@ SELECT and INSERT only. `sha256` is of the stored bytes, after images are re-enc
 ### `report_runs` (RLS)
 
 (std, no `version`) `report_key text NOT NULL`, `params jsonb NOT NULL`,
-`format text NOT NULL` [`json`, `csv`, `pdf`, `xlsx`], `status text NOT NULL` [`queued`,
+`format text NOT NULL` [`json`, `csv`, `pdf`, `xlsx`, `pack`], `status text NOT NULL` [`queued`,
 `running`, `ready`, `failed`], `requested_by uuid NOT NULL`, `started_at timestamptz`,
-`finished_at timestamptz`, `document_id uuid`, `row_count integer`, `error text`.
+`finished_at timestamptz`, `document_id uuid`, `row_count integer`, `error text`. Added by ADR-038: `as_of date`,
+`snapshot_at timestamptz`, `params_hash text` (dedupe of identical queued or running runs), `pdf_document_id uuid`,
+`xlsx_document_id uuid` (a pack has both), `expires_at timestamptz` (30 days after ready; the file object is deleted
+then and the `documents` row stays).
 
 ### `payment_methods` (RLS)
 
@@ -563,7 +571,7 @@ Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08.
 | `subject_type`, `subject_id` | `text`, `uuid NOT NULL` | The account being paid. |
 | `payer_phone_e164` | `varchar(16) NOT NULL` | |
 | `amount_minor`, `currency` | | `CHECK (amount_minor > 0)` |
-| `provider` | `text NOT NULL` | Adapter key (pending ADR-011). |
+| `provider` | `text NOT NULL` | Adapter key (`pesapal`, ADR-035). |
 | `provider_reference` | `text` | Unique per provider once known. |
 | `status` | `text NOT NULL` | [`created`, `pending`, `succeeded`, `failed`, `expired`] |
 | `failure_reason` | `text` | |
@@ -573,6 +581,14 @@ Unique `(tenant_id, method_key, coalesce(branch_id, zero uuid))`. FR-GL-08.
 | `booked_subject_txn_id` | `uuid` | The repayment or deposit created (FR-PAY-03). |
 
 `UNIQUE (provider, provider_reference)`.
+
+Columns added by ADR-035 (migration number taken when slice #213 merges): `merchant_reference text NOT NULL UNIQUE`
+(`BMS-<env>-<32 hex>`), `redirect_url text`, `scope text NOT NULL DEFAULT 'tenant'` [`tenant`, `platform`],
+`paid_amount_minor bigint`, `confirmation_code text`, `reported_method text`, `last_checked_at timestamptz`,
+`final_status text` [`booked`, `booked_unallocated`, `needs_attention`, `failed`, `expired`], `refusal_code text`,
+`creation_lease_until timestamptz`, `technical_failures integer`. `payment_callbacks` stores identifiers only and its `outcome` also takes `unknown_reference` and
+`throttled`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
+tenant and intent id or nothing (ADR-016).
 
 ### `payment_callbacks` (RLS, append-only)
 
@@ -1387,8 +1403,16 @@ increment 5: schedule items, loan transactions and repayment allocations (sectio
 default. `V32__lending_investments.sql` (#152, ADR-031) is lending increment 10: the four investment
 tables of section 6.7, the two checker permissions of chapter 8 and account 4060 of section 6.6.2,
 added to `bms_seed_lending_chart` and to every tenant that already holds the lending chart. V24,
-V25 and V27 stay unused: with `outOfOrder` off a number below an applied one can never run. The
-next migration is V33 (`MigrationOrderIT`, chapter 15 section 15.4.3).
+V25 and V27 stay unused: with `outOfOrder` off a number below an applied one can never run.
+`V37__retail_branch_roles.sql` (#191, ADR-033) adds `retail_branch_roles`, the backfill of role
+`both` and `retail.branch_role.manage`. `V38__retail_two_step_transfers.sql` (#193, ADR-033) is the
+two-step transfer: three nullable columns on `retail_transfers`, `received_qty` on its lines, the
+replaced status check, entry-pair check, void-column checks and update guard (each new check added
+`NOT VALID`, validated, the old one dropped last, on a table of a few rows a day), a guard that
+lets one line column be set once, and a partial index on the transfers in transit. It changes no
+existing row and no existing behaviour; the flow is behind the `transfer_receipt` capability. The
+next migration takes the number above the highest on `main` (`MigrationOrderIT`, chapter 15
+section 15.4.3).
 
 ## 6.10 Open items
 
@@ -1430,6 +1454,7 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 | 5000 | Expenses | expense (header) | | |
 | 5100 | Cost of goods sold | expense | `cost_of_goods_sold` | |
 | 5110 | Stock shrinkage | expense | `stock_shrinkage` | |
+| 5120 | Purchase price rounding | expense | `purchase_rounding` | |
 
 ### `retail_categories`, `retail_units` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1487,13 +1512,26 @@ are all zero is not posted.
 | Stock-take gain | `inventory`, value of the surplus at cost | `stock_shrinkage` | (same entry as the loss) |
 | Transfer, at the source branch | `interbranch_clearing`, the lines at the source's cost | `inventory` | `retail.transfer_out:<id>` |
 | Transfer, at the destination branch | `inventory`, the same amount | `interbranch_clearing` | `retail.transfer_in:<id>` |
-| Transfer void | The reversal of each of the two entries, each in its own branch | | `retail.transfer_out_void:<id>`, `retail.transfer_in_void:<id>` |
+| Transfer void | The reversal of each of the entries of the transfer, each in its own branch | | `retail.transfer_out_void:<id>`, `retail.transfer_in_void:<id>`, `retail.transfer_shortage_void:<id>` |
+| Transfer dispatch (`transfer_receipt`), at the source branch | As the source entry above, posted alone; status `in_transit` | | `retail.transfer_out:<id>` |
+| Transfer receipt, at the destination branch | `inventory`, what arrived at the source's cost | `interbranch_clearing`, the same | `retail.transfer_in:<id>` |
+| Transfer shortage on receipt, at the destination branch | `stock_shrinkage`, what did not arrive at the SOURCE cost | `interbranch_clearing`, the same | `retail.transfer_shortage:<id>` |
+| Transfer cancel (`transfer_receipt`) | The reversal of the source entry | | `retail.transfer_out_cancel:<id>` |
 | Opening stock from the import, per branch | `inventory`, the branch's positive source balances at the product's current cost | `opening_balance_equity` | `retail.import_opening:<branch>` |
 
 A transfer moves stock at the source's current cost, the same amount on both sides, so it gains or
 loses nothing: the tenant's inventory and valuation at cost are unchanged, and in a consolidation the
 clearing account nets to zero (ADR-004). The retail chart has the clearing account since V22
 (code 1190, the lending chart's code and key, so a tenant with both verticals keeps one).
+
+With the two-step transfer the value in flight is the clearing balance of the dispatched, not yet
+received transfers: the source has credited inventory and debited clearing and the destination has
+not posted. Account 1190 is shared with lending, so its balance is never read as the in-flight
+figure. The in-flight report is the sum of the open dispatches' `cost_total_minor`, and the
+reconciliation compares it with the net of `interbranch_clearing` over the entries whose
+`source_module` is `retail` and `source_type` is `retail.transfer` (the dispatch, receipt, shortage,
+cancel and void entries and their reversals all carry that source), which equals it exactly: receipt
+plus shortage clear what the dispatch debited, and a reversal restores what it reversed.
 
 Imported history (sales, purchases, adjustments, returns, usage, legacy balances) posts nothing
 (ADR-020 decision 9); see section 6.11.4.
@@ -1533,11 +1571,14 @@ row here, so the table keeps free space on each page (`fillfactor = 80`) and has
 (V26 dropped the partial `qty < 0` index, which no query used and which made every update non-HOT):
 balance updates are HOT and do not grow the indexes (section 6.12).
 
-### `retail_transfers` (RLS; `bms_app` SELECT, INSERT, UPDATE of the void only)
+### `retail_transfers` (RLS; `bms_app` SELECT, INSERT, UPDATE of the transitions only)
 
-A stock transfer between branches (FR-RET-16, V22). The trigger `retail_transfers_guard_update` lets
-an UPDATE change only the status and the void columns, once, from `completed` to `voided`; DELETE is
-rejected for every role (`reject_mutation`).
+A stock transfer between branches (FR-RET-16, V22; the two-step transfer, FR-RET-40, V38). The
+trigger `retail_transfers_guard_update` lets an UPDATE make exactly four transitions, each once:
+`in_transit` to `received` (sets `in_entry_id`, `shortage_entry_id`, `received_at`, `received_by`),
+`in_transit` to `cancelled` and `completed` or `received` to `voided` (both set the void columns).
+Every other change, including any change to the transfer itself, is refused; DELETE is rejected for
+every role (`reject_mutation`). V22 allowed the void only; V38 replaced the trigger function.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1546,16 +1587,22 @@ rejected for every role (`reject_mutation`).
 | `transfer_date` | date | The business date both entries and all four kinds of movement carry |
 | `note` | varchar(300) | Optional |
 | `currency`, `cost_total_minor` | | The lines at the source's cost (present in responses only with `retail.profit.read`) |
-| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries; both null when the cost is zero |
-| `status` | text | `completed` or `voided` |
-| `created_by`, `voided_at`, `voided_by`, `void_reason` | | CHECK a void has a time, a user and a reason |
+| `out_entry_id`, `in_entry_id` | uuid | The source's and the destination's journal entries. `completed`: both or neither (neither only at zero cost). `in_transit`: the source's only (none at zero cost). `cancelled`: the source's only, now reversed. `received`: the source's, unless zero cost; the destination's is null only when nothing of value arrived. CHECK `retail_transfers_entries_chk` (V38) |
+| `shortage_entry_id` | uuid | V38. The destination's shrinkage entry for what did not arrive, valued at the source cost; null when everything arrived. Composite FK to `journal_entries` |
+| `status` | text | `completed` (one step), `in_transit`, `received`, `cancelled`, `voided`. CHECK `retail_transfers_status_chk` (V38, replaces the V22 check) |
+| `received_at`, `received_by` | | V38. Set together, once, by the receipt (CHECK `retail_transfers_received_chk`); kept when a received transfer is later voided |
+| `created_by`, `voided_at`, `voided_by`, `void_reason` | | CHECK a void or a cancel has a time, a user and a reason (`retail_transfers_void_at_chk`, `retail_transfers_void_by_chk`, V38; V22's two checks tied them to `voided` alone) |
 
-### `retail_transfer_lines` (RLS; append-only, `bms_app` SELECT, INSERT)
+### `retail_transfer_lines` (RLS; append-only except one column, `bms_app` SELECT, INSERT, UPDATE of `received_qty`)
 
 `transfer_id`, `line_no`, `product_id`, `qty numeric(14,3)` (positive), `unit_cost_minor` (the
 source's cost when moved, at most 10^13) and `line_cost_minor`. One line per product per transfer
 (`UNIQUE (transfer_id, product_id)`). The quantities that moved are the movements themselves
-(`source_line_id` the line).
+(`source_line_id` the line). `received_qty numeric(14,3)` (V38, null until a receipt, then at least
+zero and at most `qty`, CHECK `retail_transfer_lines_received_qty_chk`) is set once, by the receipt,
+while the transfer is in transit (trigger `retail_transfer_lines_guard_update`); null on a one-step
+transfer means all of it arrived with the transfer. Updates of any other column and every delete
+are refused.
 
 ### `retail_stocktakes`, `retail_stocktake_lines` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1655,6 +1702,35 @@ error. Daily profit per branch and day is the sum of `retail_sale_lines.line_tot
 `line_cost_minor` over the lines of completed (not voided) sales by `sale_date` (the append-only
 lines, never the sale header, review F10), less `retail_usage_reports.cost_total_minor` by
 `occurred_on`; snapshots only, never current prices.
+
+### 6.11.3a Trade capabilities (ADR-033)
+
+Built: `retail_branch_roles` (issue #191, migration V37). One row per branch at most:
+`tenant_id`, `branch_id` (composite foreign key to `branches`), `role` in (`store`, `shop`, `both`),
+`changed_by`, `changed_at`; primary key `(tenant_id, branch_id)`; forced RLS; the application role may
+SELECT, INSERT and UPDATE. A missing row means `both`. The migration backfills `both` for the branches
+of tenants that have the retail module, so a populated database changes in no way; correctness never
+depends on the backfill. The capability flags are not a table: they live in `tenant_settings.settings`
+under `module_groups.retail` (opaque to the core, validated by `retail.manifest`). Design only, no
+migration yet: everything else below, except the two-step transfer (issue #193, migration V38:
+`received_at`, `received_by` and `shortage_entry_id` on `retail_transfers`, `received_qty` on
+`retail_transfer_lines`, below).
+
+Built: units of measure (issue #194, migration V39). `retail_product_units` (`id`, `tenant_id`, `product_id`, `unit_id`, `factor numeric(14,3) >= 1`, `active`, `version`, audit columns; composite foreign keys to `retail_products` and `retail_units`; unique `(tenant_id, product_id, unit_id)`; forced RLS; the application role may SELECT, INSERT and UPDATE, never DELETE). The pack's unit differing from the product's base unit, and a base unit that cannot change while an active pack exists, are rules of the catalogue service because they span two tables. Four nullable columns on `retail_sale_lines` (`sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`) and four on `retail_purchase_lines` (`unit_id`, `unit_qty_total`, `unit_cost_minor`, `unit_factor`) record what was entered; all four of a group are null (entered in the base unit, every row that existed before) or all four are set (check `retail_sale_lines_unit_chk`, `retail_purchase_lines_unit_chk`; foreign keys to `retail_units`), each added `NOT VALID` and validated in the same migration (Flyway runs the file in one transaction, so the lock is held through the validation scan; the new columns are null on every existing row, so validation cannot fail), and also tie `qty` to `sale_qty x unit_factor` and `qty_total` to `unit_qty_total x unit_factor`. `qty`, `unit_price_minor`, `cost_minor` and `qty_total` keep their meaning (base units, per base unit), so every report is unchanged; `line_total_minor` is `sale_qty x sale_unit_price_minor` rounded half up once, and on a purchase line the amount paid or owed as entered. The chart gains account 5120 `purchase_rounding` (section 6.11.1), added to existing retail tenants by the migration. The covering index of V26 is untouched.
+
+Optional tables and columns for the trade capabilities (FR-RET-33 to FR-RET-40): `retail_branch_roles`,
+`retail_product_units`, `retail_price_lists`, `retail_price_list_items`, `retail_customer_groups`,
+`retail_document_series`, `retail_documents`, `retail_quotations`, `retail_purchase_orders`,
+`retail_goods_receipts`, `retail_supplier_bills`, `retail_supplier_credits`,
+`retail_supplier_payments`, `retail_sale_returns`; nullable columns on `retail_customers`, `retail_sales`,
+`retail_sale_lines` and `retail_transfers`; the system accounts 2110, 4110, 5120 and 5130. Columns,
+indexes, RLS and postings are in `docs/specs/trade-capabilities.md` sections 10 and 12 and move
+into this chapter slice by slice as each is built. Most additions are expand only and default to
+the behaviour of this section; two replace constraints (the transfer status, entry-pair and void-column
+checks and update guard of `retail_transfers`, built in V38, and the kind and sign checks of
+`retail_stock_movements`, not yet built) and do it as `NOT VALID` first, `VALIDATE`, old constraint
+dropped last; V38 validates in the same migration because `retail_transfers` gains a few rows a day,
+and the stock movement checks, on the largest table, validate in a later migration.
 
 ### 6.11.4 The pilot import (FR-RET-12; ADR-020 decision 9; #55)
 
@@ -1909,7 +1985,9 @@ table.
   keyset list, so a page reads its rows and stops (`(tenant_id, created_at, id)` for the sales and
   loans lists).
 - Only leakproof predicates become index conditions under the policy (section 6.3.2). A search by
-  `ILIKE` or trigram similarity runs as a filter over the tenant's rows; that is fine at the sizes
+  `ILIKE` or trigram similarity runs as a filter over the tenant's rows (no text operator is leakproof, so
+  a trigram index is never used by `bms_app`; the shared search of ADR-039 and migration V40 is built on that
+  fact and adds the functions `bms_fold` and `bms_digits`, not an index); that is fine at the sizes
   measured (product search 4 to 6 ms, member search 19 ms, duplicate check 121 ms on the staging
   settings at 25 times the data) and is the first thing to revisit if a tenant grows far beyond.
 - Reports that aggregate many rows read a covering index (`INCLUDE`) instead of the heap: stock
@@ -1940,3 +2018,19 @@ they arrive.
 `idle_in_transaction_session_timeout` of 60 s (`BMS_DB_STATEMENT_TIMEOUT`,
 `BMS_DB_IDLE_IN_TRANSACTION_TIMEOUT`). Pool sizes and server settings: chapter 9 and
 `docs/runbooks/database-tuning.md`; health checks: `docs/runbooks/database-health-check.md`.
+
+## 6.13 Client extras: tables added by the design of issue #210
+
+Design only; each table is created by the slice named, with the migration number taken at merge time. All are tenant
+tables with `tenant_id`, forced row-level security (`bms_apply_tenant_rls`) and composite foreign keys, unless stated.
+
+| Table | Slice | Purpose |
+|---|---|---|
+| `notification_outbox.tenant_id`, `.category` (columns, platform table, additive) | #212 | The tenant that caused an SMS row and its category (ADR-036). The enqueue takes the tenant from the bound transaction; platform rows keep null |
+| `sms_deliveries` | #212 | One row per SMS attempt outcome: outbox id, template key, category, subject type and id, recipient masked, `recipient_hash`, provider, `provider_message_id`, `segments`, `provider_segments`, `cost_minor`, `currency`, `cost_raw`, `status`, `failure_reason`, timestamps. Index on `(tenant_id, provider_message_id)` and `(tenant_id, created_at)`. Retention 13 months |
+| `sms_opt_outs` | #218 | `member_id`, `recipient_hash`, `scope` [`reminders`, `all`], `source` [`staff`, `member`], `created_by`, `created_at`; a removal is a new row with `removed_at` |
+| `notification_templates` | #218 | Tenant overrides for `event_key` and `channel` with the text and a version (FR-NTF-03) |
+| `ai_calls` | #220 | Tenant, kind, asking user, model, request and response text (aliases and aggregates only), validation outcome, token counts, `estimated_cost_micro`, latency, status, fallback reason; 90 day retention |
+| `ai_briefs` | #226 | One stored all-branches brief per tenant and business date with its facts digest and `source` [`model`, `fallback`], unique on `(tenant_id, brief_date)`; shown only to all-branch users (FR-AIA-08) |
+| `payment_statement_rows` | #224 | Uploaded merchant statement rows: confirmation code, merchant reference, gross, fee, settled, matched intent id, fee journal entry id; unique on `(tenant_id, confirmation_code)` |
+| `payment_gateway_accounts` | #233 | Per tenant merchant credentials; the secret is encrypted with the application data key and never returned |
