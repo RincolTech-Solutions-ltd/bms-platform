@@ -640,13 +640,103 @@ class LoanServicingIT extends LoanFixtures {
         custody(s[1], "released");
         String approval = requestReversal(s[0], s[2]);
         assertThat(approvalPayload(approval))
-                .contains("collateral_not_restored_on_reopen", "unsecured_reopen_if_reopened", s[1]);
+                .contains("collateral_not_restored_on_reopen", "reopen_would_be_unsecured", s[1]);
         ResponseEntity<JsonNode> d = decide(approval, manager, managerPerms);
         assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
         assertThat(openPledges(s[0])).isZero();
         assertThat(audits(s[0], "lending.loan.reopened_partly_unsecured")).isEqualTo(1);
         booksAgree();
+    }
+
+    static long reversalsOf(String loan) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM lending_loan_transactions WHERE loan_id = ?::uuid AND txn_type = 'reversal'")
+                .param(loan)
+                .query(Long.class)
+                .single();
+    }
+
+    static String approvalStatus(String approvalId) {
+        return TestDatabase.owner()
+                .sql("SELECT status FROM approval_requests WHERE id = ?::uuid")
+                .param(approvalId)
+                .query(String.class)
+                .single();
+    }
+
+    /**
+     * #176 (second review of #202): handing an item back after the request does not change the loan,
+     * so the request is not stale. The run still refuses when the reopen would leave out an item the
+     * request did not list: nothing is written, the request stays pending, and a new request lists it.
+     */
+    @Test
+    void frRep05_anItemHandedBackAfterTheRequestIsRefusedAtRunTimeUntilItIsRequestedAgain() {
+        String[] s = securedPaidOff("STALE", 67);
+        String approval = requestReversal(s[0], s[2]);
+        assertThat(approvalPayload(approval)).doesNotContain("collateral_not_restored_on_reopen");
+        custody(s[1], "released");
+
+        ResponseEntity<JsonNode> d = decide(approval, manager, managerPerms);
+        assertThat(d.getStatusCode().is2xxSuccessful()).as("%s", d.getBody()).isFalse();
+        assertThat(d.getBody().toString()).contains("collateral_facts_changed", s[1]);
+        assertThat(loan(s[0]).get("status").asString())
+                .as("nothing was written")
+                .isEqualTo("closed");
+        assertThat(reversalsOf(s[0])).isZero();
+        assertThat(approvalStatus(approval)).isEqualTo("pending");
+
+        assertThat(send(
+                                HttpMethod.POST,
+                                "/api/v1/approvals/" + approval + "/reject",
+                                as(manager, managerPerms, "*", null),
+                                Map.of("note", "Item handed back, request again"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        String again = requestReversal(s[0], s[2]);
+        assertThat(approvalPayload(again)).contains("collateral_not_restored_on_reopen", s[1]);
+        assertThat(decide(again, manager, managerPerms).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+        assertThat(audits(s[0], "lending.loan.reopened_partly_unsecured")).isEqualTo(1);
+    }
+
+    /**
+     * #176 (second review of #202): a request that reopens a loan without its collateral is approved
+     * only by someone who may release collateral (lending.collateral.release_approve, seeded for the
+     * tenant administrator and the branch manager). The accountant may approve any other reversal
+     * but not this one; a loan officer may approve no reversal at all.
+     */
+    @Test
+    void frRep05_anUnsecuredReopenNeedsAnApproverWhoMayReleaseCollateral() {
+        String[] s = securedPaidOff("UNSEC", 68);
+        custody(s[1], "released");
+        String approval = requestReversal(s[0], s[2]);
+        assertThat(approvalPayload(approval)).contains("reopen_would_be_unsecured");
+
+        ResponseEntity<JsonNode> officerTry = decide(approval, UUID.randomUUID(), officerPerms);
+        assertThat(officerTry.getStatusCode().value()).isIn(403, 404);
+        ResponseEntity<JsonNode> accountantTry = decide(approval, UUID.randomUUID(), permissionsOf("accountant"));
+        assertThat(accountantTry.getStatusCode().is2xxSuccessful())
+                .as("%s", accountantTry.getBody())
+                .isFalse();
+        assertThat(accountantTry.getBody().toString()).contains("unsecured_reopen_needs_manager");
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
+        assertThat(approvalStatus(approval)).isEqualTo("pending");
+
+        assertThat(decide(approval, manager, managerPerms).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+    }
+
+    /** A reopen that restores every item needs no more than the usual reversal approver. */
+    @Test
+    void frRep05_aFullyRestoredReopenNeedsOnlyTheUsualApprover() {
+        String[] s = securedPaidOff("SECURE", 69);
+        String approval = requestReversal(s[0], s[2]);
+        assertThat(approvalPayload(approval)).doesNotContain("reopen_would_be_unsecured");
+        assertThat(decide(approval, UUID.randomUUID(), permissionsOf("accountant"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(openPledges(s[0])).isEqualTo(1);
     }
 
     /** #176: an item now securing another loan stays with that loan; the reopened loan goes without it. */
@@ -677,8 +767,8 @@ class LoanServicingIT extends LoanFixtures {
     /**
      * #176 (review of #202): a reversal that restores three pledges and a draft that pledges the same
      * three items at the same moment (in the opposite order) take the item locks in one order, so
-     * neither is a deadlock (40P01, a 500). Whoever gets the items first keeps them: the other either
-     * reopens without them or sees collateral_already_pledged, and no item is open on two loans.
+     * neither is a deadlock (40P01, a 500). Whoever gets the items first keeps them: the other is refused
+     * (collateral_already_pledged, or collateral_facts_changed for the reversal), and no item is open on two loans.
      */
     @Test
     void frRep05_aReopeningReversalAndAPledgeOfTheSameItemsNeverDeadlock() throws Exception {
@@ -713,10 +803,17 @@ class LoanServicingIT extends LoanFixtures {
             start.countDown();
             ResponseEntity<JsonNode> r = reversal.get(30, TimeUnit.SECONDS);
             ResponseEntity<JsonNode> p = pledge.get(30, TimeUnit.SECONDS);
-            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
             assertThat(p.getStatusCode().value()).as("%s", p.getBody()).isIn(200, 409);
+            if (p.getStatusCode().value() == 200) {
+                // The draft got the items first: the run refuses to reopen without items the request did not list.
+                assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
+                assertThat(r.getBody().toString()).contains("collateral_facts_changed");
+                assertThat(loan(s[0]).get("status").asString()).isEqualTo("closed");
+            } else {
+                assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+                assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+            }
         }
-        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
         for (String item : items) {
             assertThat(TestDatabase.owner()
                             .sql("SELECT count(*) FROM lending_loan_collateral WHERE collateral_id = ?::uuid"
