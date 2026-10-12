@@ -89,11 +89,11 @@ One hook and one box, in `frontend/src/app/ui/` (`useLiveSearch.ts`, `SearchBox.
 | Searching | While the debounce runs or an answer is due the status line reads "Searching" (a small spinner, still under `prefers-reduced-motion`). |
 | Announcements | The status line is `role="status"` `aria-live="polite"`: "12 results", "1 result", "25 results so far, more below", `No results for "x"`. |
 | Clear | A Clear button when there is text; Escape does the same, both at once (text and term). |
-| URL | `urlParam: 'q'` mirrors the term in the address bar (`replaceState`, other parameters kept) and reads it on load. On the three lending registers. |
+| URL | The option `urlParam` mirrors the term in the address bar (`replaceState`, other parameters kept) and reads it on load. No screen uses it: a name, a phone or a national id would reach the browser history, shared links and the Referer header, so it is for a screen that searches things, never people. |
 | Empty answer | `NoResults`: `No loans for "x".` and a Clear search button. |
 | Highlight | `Highlight` marks the matched words (case and accent blind) in the names and numbers of the loan, savings, investment, sale and member picker rows. |
 
-Screens converted: loans, savings accounts, investments, the investment member picker, credit sales,
+Screens converted: the members list on the staff home, loans, savings accounts, investments, the investment member picker, credit sales,
 all sales (buyer and item), credit buyers, the item pickers (sale and transfer through `ProductPicker`),
 usage, restock, and the stock-take sheet. Not converted, and why: `retail/stock.tsx` (and the stock by
 location view of #193) and `retail/catalogue-products.tsx` are being restructured into category groups on
@@ -110,13 +110,13 @@ sign-up form have no search box.
 |---|---|
 | Fold | `bms_fold(column) LIKE bms_fold(pattern)`: lower case, Latin accents removed (V40). |
 | Terms | Split on white space, at most 6, text at most 100 characters; every term must match in some name or code column (AND). |
-| Phone | A term of four or more digits (digits, spaces, `+`, `-`, brackets only), and a whole text that looks like a phone number, match `bms_digits(phone)` after removing a leading `256` or `0`. |
+| Phone | A term of four or more typed digits (digits, spaces, `+`, `-`, brackets only), and a whole text that looks like a phone number, match `bms_digits(phone)` as typed and, when three or more digits remain, without a leading `256` or `0`. The length is checked before anything is removed, so `0772`, `0700` and `+2567` are searches. |
 | Literals | `%`, `_` and the backslash are escaped. |
-| Rank | 0: a name or code starts with the first term, or a phone starts with its digits. 1: a word in it starts with the term. 2: any substring. |
+| Rank | 0: a name or code starts with the whole text ("buyer b"), or a phone starts with its digits. 1: the whole text starts a word in it. 2: every term starts a word in it (several terms only). 3: any other match. |
 | Order | rank, then the list's usual key: member number, product code, credit buyer name, creation time, account number (investments: newest first). The sales history keeps its time order and takes the condition only. |
-| Cursor | `Search.wrap` puts the rank in front of the usual cursor; a cursor of the other kind is 400 `malformed_request`. |
+| Cursor | `Search.wrap` puts the rank and a fingerprint of the normalised text in front of the usual cursor. A cursor of the other kind, or one issued for another text, is 400 `malformed_request` ("restart the list"). The PWA cannot send one: the term is in the query key and Load more is disabled while the list shown is the previous answer. |
 | Scope | The condition is ANDed with the branch predicate and the other filters; RLS is untouched. |
-| Guarded columns | A member's phone and national id are matched on the loan, savings and investment lists only where the caller holds `lending.members.read` at the member's branch. |
+| Guarded columns | A member's phone and national id are matched on the loan, savings and investment lists only where the caller holds `lending.members.read` at the member's branch. The members list itself shows both masked, yet it matches them whole or in part for a caller who may read members: that is the same permission that opens the member, so a partial national id or phone is a way to find a member, not a way past a permission. It is noted here because a masked column that can be searched is still disclosure by search for anyone who lacks that permission, and there the search does not match it. |
 
 What each endpoint matches:
 
@@ -133,15 +133,20 @@ What each endpoint matches:
 
 Indexes: none. V40 (expand only) adds the two functions `bms_fold` and `bms_digits`. A trigram index was
 measured out: the application reads as `bms_app` under row-level security and no text operator is leakproof, so
-the planner never uses such an index for it (ADR-039 decision 7). The search is a filter over the tenant's rows:
-3 ms for 6,000 products, about 25 ms for the same rows when a phone's digits are compared.
+the planner never uses such an index for it (ADR-039 decision 7). The search is a filter over the tenant's rows.
+Measured through the API on a laptop (`SearchScaleIT`, 25,000 sales, 12,000 members, 6,000 products, 800 credit
+buyers, medians of five calls): a search that matches nothing and so reads every row takes 11 to 20 ms; a phone
+search 25 to 60 ms; every other search 3 to 22 ms. The credit buyer behind a sale is reached through a subquery
+that runs once per statement (the plan shows one execution of the subplan for 25,000 sales), and the rank is
+worked out once per row, not again in the paging condition. The CI bound is 400 ms, to catch a query that reads
+rows more than once per row.
 
 ## 4. Decisions, tests and what is left
 
 ADR-039 records the decisions. Tests: `SearchTest` (parsing, escaping, phone digits, cursor rules),
 `SearchLendingIT` and `SearchRetailIT` (phone formats, several terms, accents, literals, ranking and paging, scope,
-guarded columns, a 6000 row product table for speed), `useLiveSearch.test.tsx` (debounce, restart, trim,
-minimum length, paging reset, flush, clear, URL, status words, highlight, markup).
+guarded columns, cursors tied to their text, the size of a busy tenant in `SearchScaleIT`), `useLiveSearch.test.tsx` (debounce, restart, trim,
+minimum length, paging reset, flush, clear, URL, status words, highlight, markup), `useLiveSearch.dom.test.tsx` (the hook in React: Escape, Enter, unmount clean-up, the URL mirror, a request that has moved on is aborted and its late answer never shown, the previous list stays) and `fold.test.ts` (the browser's folding table equals the one in V40).
 
 Left for follow-ups: `stock.tsx`, the stock by location screen and `catalogue-products.tsx` (hook);
 `LocationRepository` of #193 (the matcher); a data-volume pass over the loan, savings and investment

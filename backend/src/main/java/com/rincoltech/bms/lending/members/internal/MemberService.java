@@ -141,14 +141,14 @@ class MemberService implements MemberLookup {
         // Branch scope is authorisation (ADR-003), applied per permission (chapter 8 section 8.3.1).
         List<UUID> branchFilter = principal.branchFilter("lending.members.read", requestedBranches);
         Search.Query search = Search.parse(q);
-        Search.After after = Search.unwrap(search != null, cursor);
+        Search.After after = Search.unwrap(search, cursor);
         after = new Search.After(after.rank(), Cursor.decode(after.cursor()).orElse(null));
         List<Search.Ranked<MemberListItem>> rows = members.page(branchFilter, statuses, search, after, size + 1);
         boolean more = rows.size() > size;
         List<Search.Ranked<MemberListItem>> items = more ? rows.subList(0, size) : rows;
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         items.getLast().rank(),
                         Cursor.encode(items.getLast().row().memberNo()))
                 : null;

@@ -197,22 +197,26 @@ class CashbookRepository {
             sql.append(" AND kind = :kind");
             params.put("kind", kind);
         }
-        if (afterCreated != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (afterCreated != null) {
                 sql.append(" AND (created_at, id) > (:afterCreated, :afterId)");
-            } else {
-                sql.append(" AND (")
-                        .append(match.rank())
-                        .append(", created_at, id) > (:afterRank, :afterCreated, :afterId)");
-                params.put("afterRank", afterRank);
+                params.put("afterCreated", Timestamp.from(afterCreated));
+                params.put("afterId", afterId);
             }
-            params.put("afterCreated", Timestamp.from(afterCreated));
-            params.put("afterId", afterId);
+            statement = sql + " ORDER BY created_at, id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCreated != null) {
+                keyset = "(search_rank, created_at, id) > (:afterRank, :afterCreated, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterCreated", Timestamp.from(afterCreated));
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, created_at, id");
         }
-        sql.append(match == null ? " ORDER BY created_at, id" : " ORDER BY search_rank, created_at, id")
-                .append(" LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked((rs, n) -> party(rs), match != null))
                 .list();

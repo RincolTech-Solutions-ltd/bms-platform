@@ -384,13 +384,16 @@ class SalesRepository {
      * the condition is used, not the rank.
      */
     static final Search.Fields BUYER_SEARCH = Search.Fields.of()
-            .names(
-                    "retail_sales.buyer_name",
-                    "(SELECT c.name FROM retail_customers c WHERE c.id = retail_sales.customer_id)")
+            .names("retail_sales.buyer_name")
             .codes("retail_sales.sale_no")
-            .phones(
-                    "retail_sales.buyer_contact",
-                    "(SELECT c.contact FROM retail_customers c WHERE c.id = retail_sales.customer_id)");
+            .phones("retail_sales.buyer_contact")
+            // The linked credit buyer is reached through an uncorrelated subquery, so it runs once per
+            // statement and not once per sale.
+            .related(
+                    "retail_sales.customer_id",
+                    "retail_customers c",
+                    "c.id",
+                    Search.Fields.of().names("c.name").phones("c.contact"));
 
     /**
      * The list, each buyer with what they owe on credit sales in the given branches (null: every
@@ -425,22 +428,26 @@ class SalesRepository {
             sql.append(" AND ").append(match.where());
             params.putAll(match.params());
         }
-        if (after != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (after != null) {
                 sql.append(" AND (lower(c.name), c.id) > (:afterName, :afterId)");
-            } else {
-                sql.append(" AND (")
-                        .append(match.rank())
-                        .append(", lower(c.name), c.id) > (:afterRank, :afterName, :afterId)");
-                params.put("afterRank", afterRank);
+                params.put("afterName", after.sortKey());
+                params.put("afterId", after.id());
             }
-            params.put("afterName", after.sortKey());
-            params.put("afterId", after.id());
+            statement = sql + " ORDER BY lower(c.name), c.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (after != null) {
+                keyset = "(search_rank, sort_key, id) > (:afterRank, :afterName, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterName", after.sortKey());
+                params.put("afterId", after.id());
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, sort_key, id");
         }
-        sql.append(match == null ? " ORDER BY lower(c.name), c.id" : " ORDER BY search_rank, lower(c.name), c.id")
-                .append(" LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query((rs, n) -> new CustomerRow(
                         new Customer(

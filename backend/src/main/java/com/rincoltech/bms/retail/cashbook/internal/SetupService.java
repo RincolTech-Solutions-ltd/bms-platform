@@ -190,7 +190,7 @@ class SetupService {
     PartyPage parties(String query, String kind, Integer limit, String cursor) {
         int size = support.limit(limit);
         Search.Query search = Search.parse(query);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
         List<Search.Ranked<PartyRow>> rows = repo.parties(
                 search,
@@ -203,7 +203,7 @@ class SetupService {
         List<Search.Ranked<PartyRow>> items = more ? rows.subList(0, size) : rows;
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         items.getLast().rank(),
                         Cursor.encode(items.getLast().row().createdAt() + "|"
                                 + items.getLast().row().id()))

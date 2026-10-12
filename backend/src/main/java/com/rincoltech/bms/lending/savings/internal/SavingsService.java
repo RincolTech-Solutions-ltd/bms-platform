@@ -199,7 +199,7 @@ class SavingsService {
         Principal principal = CurrentPrincipal.require();
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(q);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         String after = Cursor.decode(position.cursor()).orElse(null);
         List<Search.Ranked<AccountRow>> rows = repo.page(
                 principal.branchFilter("lending.savings.read", branchIds),
@@ -218,7 +218,7 @@ class SavingsService {
                 items,
                 more
                         ? Search.wrap(
-                                search != null,
+                                search,
                                 page.getLast().rank(),
                                 Cursor.encode(page.getLast().row().accountNo()))
                         : null);

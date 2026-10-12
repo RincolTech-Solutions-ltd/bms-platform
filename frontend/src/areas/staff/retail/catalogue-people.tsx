@@ -168,7 +168,7 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
         ))}
       </ul>
       </SearchResults>
-      {rows.hasNextPage && <button type="button" onClick={() => void rows.fetchNextPage()} disabled={rows.isFetchingNextPage}>{rows.isFetchingNextPage ? 'Loading' : `Show more ${plural}`}</button>}
+      {rows.hasNextPage && <button type="button" onClick={() => void rows.fetchNextPage()} disabled={rows.isFetchingNextPage || rows.isPlaceholderData}>{rows.isFetchingNextPage ? 'Loading' : `Show more ${plural}`}</button>}
       {toast}
     </>
   );

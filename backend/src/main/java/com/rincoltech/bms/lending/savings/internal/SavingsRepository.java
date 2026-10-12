@@ -270,19 +270,24 @@ class SavingsRepository {
         if (match != null) {
             sql.append(" AND ").append(match.where());
         }
-        if (afterNo != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (afterNo != null) {
                 sql.append(" AND a.account_no > :afterNo");
-            } else {
-                sql.append(" AND (").append(match.rank()).append(", a.account_no) > (:afterRank, :afterNo)");
-                p.put("afterRank", afterRank);
+                p.put("afterNo", afterNo);
             }
-            p.put("afterNo", afterNo);
+            statement = sql + " ORDER BY a.account_no LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterNo != null) {
+                keyset = "(search_rank, account_no) > (:afterRank, :afterNo)";
+                p.put("afterRank", afterRank);
+                p.put("afterNo", afterNo);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, account_no");
         }
-        sql.append(match == null ? " ORDER BY a.account_no" : " ORDER BY search_rank, a.account_no")
-                .append(" LIMIT :limit");
         p.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(p)
                 .query(Search.ranked(SavingsRepository::account, match != null))
                 .list();

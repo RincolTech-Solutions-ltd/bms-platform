@@ -117,7 +117,7 @@ class StockService {
         }
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(query);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
         List<Search.Ranked<ProductTotal>> rows = repo.allBranches(
                 ids,
@@ -157,7 +157,7 @@ class StockService {
                 .toList();
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         ranked.getLast().rank(),
                         Cursor.encode(
                                 page.getLast().code() + "|" + page.getLast().id()))
@@ -179,7 +179,7 @@ class StockService {
         UUID branch = branches.resolve("retail.stock.read", branchId);
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(query);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
         List<Search.Ranked<StockRow>> rows = repo.stock(
                 branch,
@@ -196,7 +196,7 @@ class StockService {
         List<StockRow> items = ranked.stream().map(Search.Ranked::row).toList();
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         ranked.getLast().rank(),
                         Cursor.encode(
                                 items.getLast().code() + "|" + items.getLast().productId()))

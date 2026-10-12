@@ -227,7 +227,7 @@ class CatalogueService {
         }
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(query);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         String afterCode = null;
         UUID afterId = null;
         Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
@@ -241,7 +241,7 @@ class CatalogueService {
         List<Search.Ranked<Product>> items = more ? rows.subList(0, size) : rows;
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         items.getLast().rank(),
                         Cursor.encode(items.getLast().row().code() + "|"
                                 + items.getLast().row().id()))

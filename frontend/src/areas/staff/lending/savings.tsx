@@ -78,7 +78,7 @@ export function AccountRows({ items, term = '' }: { items: SavingsAccount[]; ter
 
 function Accounts() {
   const { branch } = useStaff();
-  const search = useLiveSearch({ urlParam: 'q' });
+  const search = useLiveSearch();
   const [status, setStatus] = useState('');
   const pages = useInfiniteQuery({
     queryKey: ['savings', 'accounts', branch, search.term, status],
@@ -111,7 +111,7 @@ function Accounts() {
         </SearchResults>
       )}
       {pages.hasNextPage && (
-        <button type="button" className="btn-block" disabled={pages.isFetchingNextPage} onClick={() => void pages.fetchNextPage()}>
+        <button type="button" className="btn-block" disabled={pages.isFetchingNextPage || pages.isPlaceholderData} onClick={() => void pages.fetchNextPage()}>
           {pages.isFetchingNextPage ? 'Loading' : 'Load more'}
         </button>
       )}

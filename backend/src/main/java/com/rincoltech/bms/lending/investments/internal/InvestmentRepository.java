@@ -297,23 +297,24 @@ class InvestmentRepository {
         if (match != null) {
             sql.append(" AND ").append(match.where());
         }
-        if (after != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (after != null) {
                 sql.append(" AND i.account_no < :after");
-            } else {
-                sql.append(" AND (")
-                        .append(match.rank())
-                        .append(" > :afterRank OR (")
-                        .append(match.rank())
-                        .append(" = :afterRank AND i.account_no < :after))");
-                params.put("afterRank", afterRank);
+                params.put("after", after);
             }
-            params.put("after", after);
+            statement = sql + " ORDER BY i.account_no DESC LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (after != null) {
+                keyset = "(search_rank > :afterRank OR (search_rank = :afterRank AND account_no < :after))";
+                params.put("afterRank", afterRank);
+                params.put("after", after);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, account_no DESC");
         }
-        sql.append(match == null ? " ORDER BY i.account_no DESC" : " ORDER BY search_rank, i.account_no DESC")
-                .append(" LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked(InvestmentRepository::inv, match != null))
                 .list();

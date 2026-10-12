@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { foldText } from './fold';
 
 // Realtime search for every screen (#241, ADR-039, docs/specs/search.md). One hook owns the text a
 // person types, the term the screen queries with, and the rules between them:
@@ -19,9 +20,9 @@ export const SEARCH_DELAY_MS = 250;
 /** The most characters the box takes; the server ignores more (Search.MAX_LENGTH). */
 export const SEARCH_MAX_LENGTH = 100;
 
-/** Trimmed, with each run of white space made one space. */
+/** Trimmed, with each run of white space made one space, and accents written as one letter (NFC). */
 export function normaliseSearch(text: string): string {
-  return text.trim().replace(/\s+/g, ' ');
+  return text.normalize('NFC').trim().replace(/\s+/g, ' ');
 }
 
 /** The term to query with: the normalised text, or '' while it is shorter than `minLength`. */
@@ -49,7 +50,11 @@ export interface LiveSearchOptions {
   delayMs?: number;
   /** The fewest characters that make a term; shorter text queries nothing (an unfiltered list). */
   minLength?: number;
-  /** A URL query parameter that mirrors the term, so a search can be reloaded and shared. */
+  /**
+   * A URL query parameter that mirrors the term, so a search can be reloaded and shared. Never on a screen
+   * that searches people (a name, a phone or a national id would reach the history, shared links and the
+   * Referer header); none of the lending screens sets it.
+   */
   urlParam?: string;
 }
 
@@ -142,6 +147,21 @@ export function urlWithTerm(href: string, param: string, term: string): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+/** The parts of `window` the URL mirror touches, so it can be tested without a browser. */
+export interface UrlTarget {
+  location: { pathname: string; search: string; hash: string };
+  history: { state: unknown; replaceState: (state: unknown, title: string, url: string) => void };
+}
+
+/** Writes `term` into `param` of the address (replacing the history entry, not adding one). Returns whether it wrote. */
+export function syncUrl(target: UrlTarget, param: string, term: string): boolean {
+  const href = `${target.location.pathname}${target.location.search}${target.location.hash}`;
+  const next = urlWithTerm(href, param, term);
+  if (next === href) return false;
+  target.history.replaceState(target.history.state, '', next);
+  return true;
+}
+
 export interface LiveSearch extends LiveSearchState {
   setText: (text: string) => void;
   clear: () => void;
@@ -173,10 +193,7 @@ export function useLiveSearch(options: LiveSearchOptions = {}): LiveSearch {
   useEffect(() => () => live.dispose(), [live]);
 
   useEffect(() => {
-    if (!urlParam || typeof window === 'undefined') return;
-    const href = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    const next = urlWithTerm(href, urlParam, state.term);
-    if (next !== href) window.history.replaceState(window.history.state, '', next);
+    if (urlParam && typeof window !== 'undefined') syncUrl(window, urlParam, state.term);
   }, [urlParam, state.term]);
 
   return {
@@ -222,26 +239,21 @@ export function searchStatus(s: {
   return s.more ? `${n} so far, more below` : n;
 }
 
-/** One letter, lower case and without accents (a letter that folds to several keeps them all). */
-function foldChar(c: string): string {
-  return c.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
-}
-
 /**
  * The parts of `text` split at the places any word of `term` matches, ignoring case and accents:
  * `[{ text: 'Amina ', hit: false }, { text: 'Kato', hit: true }]`. No term gives the whole text unmarked.
  */
 export function highlightParts(text: string, term: string): { text: string; hit: boolean }[] {
-  const words = normaliseSearch(foldTerm(term)).split(' ').filter(Boolean);
+  const words = foldText(normaliseSearch(term)).split(' ').filter(Boolean);
   if (words.length === 0 || text === '') return [{ text, hit: false }];
   let folded = '';
   const origin: number[] = [];
-  Array.from(text).forEach((c, i) => {
-    const f = foldChar(c);
+  Array.from(text.normalize('NFC')).forEach((c, i) => {
+    const f = foldText(c);
     for (let k = 0; k < f.length; k++) origin.push(i);
     folded += f;
   });
-  const chars = Array.from(text);
+  const chars = Array.from(text.normalize('NFC'));
   const marked = new Array<boolean>(chars.length).fill(false);
   for (const word of words) {
     for (let at = folded.indexOf(word); at !== -1; at = folded.indexOf(word, at + 1)) {
@@ -258,17 +270,13 @@ export function highlightParts(text: string, term: string): { text: string; hit:
   return parts;
 }
 
-function foldTerm(term: string): string {
-  return Array.from(term).map(foldChar).join('');
-}
-
 /**
  * True when every word of `term` appears in `text`, ignoring case and accents: the in-browser form of
  * the server's matching, for a list that is already loaded (a stock-take sheet). Empty term: true.
  */
 export function matchesSearch(text: string, term: string): boolean {
-  const words = normaliseSearch(foldTerm(term)).split(' ').filter(Boolean);
+  const words = foldText(normaliseSearch(term)).split(' ').filter(Boolean);
   if (words.length === 0) return true;
-  const folded = foldTerm(text);
+  const folded = foldText(text);
   return words.every((word) => folded.includes(word));
 }

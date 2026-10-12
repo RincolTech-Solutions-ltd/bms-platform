@@ -187,7 +187,7 @@ class LoanService {
         Principal principal = CurrentPrincipal.require();
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(q);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         Instant afterCreated = null;
         UUID afterId = null;
         Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
@@ -211,7 +211,7 @@ class LoanService {
         List<Search.Ranked<LoanListItem>> items = more ? rows.subList(0, size) : rows;
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         items.getLast().rank(),
                         Cursor.encode(items.getLast().row().createdAt() + "|"
                                 + items.getLast().row().id()))

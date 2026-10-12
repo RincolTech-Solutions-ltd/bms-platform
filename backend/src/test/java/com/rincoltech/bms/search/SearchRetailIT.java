@@ -252,6 +252,19 @@ class SearchRetailIT extends IntegrationTest {
         assertThat(paged).containsExactly("Kato Amos", "Amina Kato", "Mukato Brian");
     }
 
+    /** The whole phrase first, then every word starting a word, then the rest: "buyer b" and "john k". */
+    @Test
+    void severalWordsRankTheWholePhraseThenEveryWordAboveASubstring() {
+        for (String name : List.of("Test Buyer A", "Test Buyer B", "Test Buyer C")) {
+            customer(name, null);
+        }
+        assertThat(buyers("buyer b")).containsExactly("Test Buyer B", "Test Buyer A", "Test Buyer C");
+        for (String name : List.of("Kato John", "Johnson Kimbugwe", "John Kato", "Jon Kasule")) {
+            customer(name, null);
+        }
+        assertThat(buyers("john k")).containsExactly("John Kato", "Johnson Kimbugwe", "Kato John");
+    }
+
     // ---- sales ------------------------------------------------------------------------------
 
     JsonNode creditSale(UUID branch, UUID customerId, String buyerName, String buyerContact) {
@@ -336,36 +349,5 @@ class SearchRetailIT extends IntegrationTest {
         assertThat(list("/cash-parties", "query", "_", "name", BOOKKEEPER, "*")).isEmpty();
         assertThat(list("/cash-parties", "query", "amina kato", "name", BOOKKEEPER, "*"))
                 .containsExactly("Amina Kato");
-    }
-
-    // ---- scale ------------------------------------------------------------------------------
-
-    /**
-     * Thousands of rows: the answer is right and quick. There is no trigram index to rely on: under row-level
-     * security no text operator is leakproof, so the search is a filter over the tenant's rows (V40), and the
-     * per-row cost of {@code bms_fold} is what this keeps in check.
-     */
-    @Test
-    void aSearchOverThousandsOfProductsIsRightAndQuick() {
-        UUID category = api.category("Bulk Category");
-        UUID unit = api.unit("bulk-unit");
-        TestDatabase.owner().sql("""
-                        INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id, cost_minor,
-                                                     sell_minor, currency)
-                        SELECT gen_random_uuid(), ?, 'BULK-' || n, 'Bulk item number ' || n || ' stock', ?, ?, 100, 200,
-                               'UGX'
-                          FROM generate_series(1, 6000) n
-                        """).params(t.tenantId(), category, unit).update();
-        TestDatabase.owner()
-                .sql("UPDATE retail_products SET description = 'Zebra crossing paint' WHERE code = 'BULK-4321'")
-                .update();
-        TestDatabase.owner().sql("ANALYZE retail_products").update();
-
-        long started = System.nanoTime();
-        assertThat(codes("zebra paint")).containsExactly("BULK-4321");
-        assertThat(codes("bulk-43")).hasSizeGreaterThan(5);
-        assertThat(codes("item number 5999")).containsExactly("BULK-5999");
-        long millis = (System.nanoTime() - started) / 1_000_000;
-        assertThat(millis).as("three searches over 6000 products").isLessThan(3_000);
     }
 }

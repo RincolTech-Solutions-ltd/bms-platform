@@ -170,18 +170,20 @@ kernel's one matcher:
 - **Case and accent insensitive.** "jose" finds a name written with an accent on the e.
 - **Several words are an AND.** The text is split on white space (at most 6 words, at most 100 characters; the rest
   is ignored) and a row must match every word somewhere in its name, number, code or reference columns, in any order.
-- **Phone numbers match in any written form.** A word of four or more digits, and a whole text that looks like a phone
-  number, also match the digits of a phone column: "0700 000 111", "+256 700 000 111", "256700000111" and "700000111"
-  are one number. Fewer than four digits is not a phone.
+- **Phone numbers match in any written form.** A word of four or more typed digits, and a whole text that looks like a
+  phone number, also match the digits of a phone column, as typed and without a leading 256 or 0: "0700 000 111",
+  "+256 700 000 111", "256700000111" and "700000111" are one number, and "0772" or "+2567" is already a search. Fewer
+  than four typed digits is not a phone.
 - **`%`, `_` and `\` are ordinary characters.**
-- **Ranked.** A name or code that starts with the first word comes first, then one with a word that starts with it,
-  then any other match; inside a rank the list's usual order holds. The sales history is the exception and keeps its
-  time order.
+- **Ranked.** A name or code that starts with the whole text comes first ("buyer b"), then one where the whole text starts
+  a word, then one where every word starts a word, then any other match; inside a rank the list's usual order holds.
+  The sales history is the exception and keeps its time order.
 - **Same scope, same permissions.** The match narrows the list the caller could already read; it adds no row. The
   columns a list does not show are matched only for a caller who may read them (a member's phone and national id on a
   loan, savings or investment list need `lending.members.read` at the member's branch).
-- **Cursor.** With a search text the cursor carries the rank of the last row; it is valid only with the same text. A
-  cursor from a list without a search text, or the reverse, is 400 `malformed_request`. Change the text, restart the list.
+- **Cursor.** With a search text the cursor carries the rank of the last row and a fingerprint of the text; it is valid
+  only with the same text. A cursor from another text, from a list without a search text, or the reverse, is 400
+  `malformed_request` ("restart the list"). Change the text, restart the list.
 - A blank text is no search. Matching and paging never change the response shape.
 
 ## 7.7 Errors

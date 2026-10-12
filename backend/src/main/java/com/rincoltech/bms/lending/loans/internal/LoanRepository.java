@@ -463,21 +463,26 @@ class LoanRepository {
         if (match != null) {
             sql.append(" AND ").append(match.where());
         }
-        if (afterCreated != null) {
-            String key = match == null
-                    ? "(l.created_at, l.id) > (:afterCreated, :afterId)"
-                    : "(" + match.rank() + ", l.created_at, l.id) > (:afterRank, :afterCreated, :afterId)";
-            sql.append(" AND ").append(key);
-            if (match != null) {
-                p.put("afterRank", afterRank);
+        String statement;
+        if (match == null) {
+            if (afterCreated != null) {
+                sql.append(" AND (l.created_at, l.id) > (:afterCreated, :afterId)");
+                p.put("afterCreated", Timestamp.from(afterCreated));
+                p.put("afterId", afterId);
             }
-            p.put("afterCreated", Timestamp.from(afterCreated));
-            p.put("afterId", afterId);
+            statement = sql + " ORDER BY l.created_at, l.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCreated != null) {
+                keyset = "(search_rank, created_at, id) > (:afterRank, :afterCreated, :afterId)";
+                p.put("afterRank", afterRank);
+                p.put("afterCreated", Timestamp.from(afterCreated));
+                p.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, created_at, id");
         }
-        sql.append(match == null ? " ORDER BY l.created_at, l.id" : " ORDER BY search_rank, l.created_at, l.id")
-                .append(" LIMIT :limit");
         p.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(p)
                 .query(Search.ranked(
                         (rs, n) -> new LoanListItem(

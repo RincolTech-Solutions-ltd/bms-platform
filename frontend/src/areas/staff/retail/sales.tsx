@@ -161,7 +161,7 @@ function useSales(filter: Omit<SalesQuery, 'cursor' | 'signal'>, enabled: boolea
 function More({ query }: { query: ReturnType<typeof useSales>['query'] }) {
   if (!query.hasNextPage) return null;
   return (
-    <button type="button" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
+    <button type="button" disabled={query.isFetchingNextPage || query.isPlaceholderData} onClick={() => void query.fetchNextPage()}>
       {query.isFetchingNextPage ? 'Loading' : 'Show more'}
     </button>
   );

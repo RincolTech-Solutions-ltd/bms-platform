@@ -55,7 +55,7 @@ export function LoanRows({ items, term = '' }: { items: LoanListItem[]; term?: s
 
 export function Loans() {
   const { branch } = useStaff();
-  const search = useLiveSearch({ urlParam: 'q' });
+  const search = useLiveSearch();
   const [status, setStatus] = useState('');
   const pages = useInfiniteQuery({
     queryKey: ['lending', 'loans', branch, search.term, status],
@@ -89,7 +89,7 @@ export function Loans() {
         </SearchResults>
       )}
       {pages.hasNextPage && (
-        <button type="button" className="btn-block" disabled={pages.isFetchingNextPage} onClick={() => void pages.fetchNextPage()}>
+        <button type="button" className="btn-block" disabled={pages.isFetchingNextPage || pages.isPlaceholderData} onClick={() => void pages.fetchNextPage()}>
           {pages.isFetchingNextPage ? 'Loading' : 'Load more'}
         </button>
       )}

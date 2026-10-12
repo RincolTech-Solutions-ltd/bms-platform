@@ -117,7 +117,7 @@ class InvestmentService {
         Principal principal = CurrentPrincipal.require();
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(q);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         String after = Cursor.decode(position.cursor()).orElse(null);
         LocalDate maturingBy =
                 maturingWithinDays == null ? null : servicer.today().plusDays(maturingWithinDays);
@@ -138,7 +138,7 @@ class InvestmentService {
                 page.stream().map(r -> view(r.row())).toList(),
                 more
                         ? Search.wrap(
-                                search != null,
+                                search,
                                 page.getLast().rank(),
                                 Cursor.encode(page.getLast().row().accountNo()))
                         : null);

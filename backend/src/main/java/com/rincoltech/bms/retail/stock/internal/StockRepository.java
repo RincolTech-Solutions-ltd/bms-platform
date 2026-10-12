@@ -79,11 +79,26 @@ class StockRepository {
             sql.append(" AND coalesce(b.qty, 0) <= :atMost");
             params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
         }
-        keyset(sql, params, match, afterRank, afterCode, afterId);
-        sql.append(match == null ? " ORDER BY p.code, p.id" : " ORDER BY search_rank, p.code, p.id")
-                .append(" LIMIT :limit");
+        String statement;
+        if (match == null) {
+            if (afterCode != null) {
+                sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = sql + " ORDER BY p.code, p.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCode != null) {
+                keyset = "(search_rank, code, id) > (:afterRank, :afterCode, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, code, id");
+        }
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked(
                         (rs, n) -> {
@@ -102,27 +117,6 @@ class StockRepository {
                         },
                         match != null))
                 .list();
-    }
-
-    /** The keyset condition after (rank, code, id); without a search it is the plain (code, id). */
-    private static void keyset(
-            StringBuilder sql,
-            Map<String, Object> params,
-            Search.Match match,
-            int afterRank,
-            String afterCode,
-            UUID afterId) {
-        if (afterCode == null) {
-            return;
-        }
-        if (match == null) {
-            sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
-        } else {
-            sql.append(" AND (").append(match.rank()).append(", p.code, p.id) > (:afterRank, :afterCode, :afterId)");
-            params.put("afterRank", afterRank);
-        }
-        params.put("afterCode", afterCode);
-        params.put("afterId", afterId);
     }
 
     record ProductTotal(
@@ -182,11 +176,26 @@ class StockRepository {
             sql.append(" AND coalesce(t.total, 0) <= :atMost");
             params.put("atMost", java.math.BigDecimal.valueOf(atMostMilli, 3));
         }
-        keyset(sql, params, match, afterRank, afterCode, afterId);
-        sql.append(match == null ? " ORDER BY p.code, p.id" : " ORDER BY search_rank, p.code, p.id")
-                .append(" LIMIT :limit");
+        String statement;
+        if (match == null) {
+            if (afterCode != null) {
+                sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = sql + " ORDER BY p.code, p.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCode != null) {
+                keyset = "(search_rank, code, id) > (:afterRank, :afterCode, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, code, id");
+        }
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked(
                         (rs, n) -> new ProductTotal(

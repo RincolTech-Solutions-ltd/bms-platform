@@ -245,19 +245,24 @@ class MemberRepository {
         if (match != null) {
             sql.append(" AND ").append(match.where());
         }
-        if (after.cursor() != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (after.cursor() != null) {
                 sql.append(" AND member_no > :after");
-            } else {
-                sql.append(" AND (").append(match.rank()).append(", member_no) > (:afterRank, :after)");
-                params.put("afterRank", after.rank());
+                params.put("after", after.cursor());
             }
-            params.put("after", after.cursor());
+            statement = sql + " ORDER BY member_no LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (after.cursor() != null) {
+                keyset = "(search_rank, member_no) > (:afterRank, :after)";
+                params.put("afterRank", after.rank());
+                params.put("after", after.cursor());
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, member_no");
         }
-        sql.append(match == null ? " ORDER BY member_no" : " ORDER BY search_rank, member_no")
-                .append(" LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked(MemberRepository::mapListItem, match != null))
                 .list();

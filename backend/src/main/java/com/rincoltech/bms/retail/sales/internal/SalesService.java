@@ -547,7 +547,7 @@ class SalesService {
     CustomerList customers(String query, Integer limit, String cursor) {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Search.Query search = Search.parse(query);
-        Search.After position = Search.unwrap(search != null, cursor);
+        Search.After position = Search.unwrap(search, cursor);
         com.rincoltech.bms.kernel.Cursor.Key after =
                 com.rincoltech.bms.kernel.Cursor.decodeKey(position.cursor()).orElse(null);
         List<SalesRepository.CustomerRow> rows = repo.customers(
@@ -561,7 +561,7 @@ class SalesService {
         // The key is the database's own lower(name), so the cursor agrees with the ORDER BY.
         String next = more
                 ? Search.wrap(
-                        search != null,
+                        search,
                         page.getLast().rank(),
                         com.rincoltech.bms.kernel.Cursor.encode(page.getLast().sortKey() + "|"
                                 + page.getLast().customer().id()))

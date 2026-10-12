@@ -122,6 +122,79 @@ class SearchLendingIT extends LoanFixtures {
         assertThat(names("700")).isEmpty();
     }
 
+    /** Typing a number is a search from the fourth digit on: 0700, 0772, +2567 and every longer prefix. */
+    @Test
+    void everyPrefixOfAPhoneNumberFindsIt() {
+        seedMembers();
+        String number = "0700000111";
+        for (int length = 4; length <= number.length(); length++) {
+            String typed = number.substring(0, length);
+            assertThat(names(typed)).as("typed %s", typed).contains("Amina Kato");
+            assertThat(names("+256" + number.substring(1, length)))
+                    .as("typed +256%s", number.substring(1, length))
+                    .contains("Amina Kato");
+        }
+        assertThat(names("0700")).hasSize(9);
+        assertThat(names("+2567")).hasSize(9);
+        assertThat(names("2567")).hasSize(9);
+        assertThat(names("0772")).isEmpty();
+        assertThat(names("+256 77")).isEmpty();
+        assertThat(names("077")).isEmpty();
+    }
+
+    @Test
+    void aCursorIsTiedToTheSearchTextItWasIssuedFor() {
+        seedMembers();
+        String cursor = page(MEMBERS, "kato", 1, null, officerHeaders())
+                .getBody()
+                .get("next_cursor")
+                .asString();
+        ResponseEntity<JsonNode> other = page(MEMBERS, "mukato", 1, cursor, officerHeaders());
+        assertThat(other.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(other.getBody().get("detail").asString()).contains("different search text");
+        // the same words in another case are the same search
+        assertThat(page(MEMBERS, "  KATO ", 1, cursor, officerHeaders()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // and a searched cursor does not page a list without a search
+        assertThat(page(MEMBERS, null, 1, cursor, officerHeaders()).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    /** The same cases are folded in the browser (frontend fold.test.ts); both sides must give these answers. */
+    @Test
+    void theDatabaseFoldsAsTheBrowserDoes() {
+        String[][] cases = {
+            {"Jos\u00e9", "jose"},
+            {"\u00c0\u00d8\u00d1", "aon"},
+            {"Stra\u00dfe", "strasse"},
+            {"\u00c6sop", "aesop"},
+            {"C\u0153ur", "coeur"},
+            {"\u0141\u00f3d\u017a", "lodz"},
+            {"\u0110or\u0111e", "dorde"},
+            {"Ni\u00f1o", "nino"},
+            {"Plain Name 07", "plain name 07"},
+        };
+        for (String[] c : cases) {
+            String folded = TestDatabase.owner()
+                    .sql("SELECT bms_fold(?)")
+                    .param(c[0])
+                    .query(String.class)
+                    .single();
+            assertThat(folded).as(c[0]).isEqualTo(c[1]);
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT bms_digits(?)")
+                        .param("+256 (700)-000 011 ext 5")
+                        .query(String.class)
+                        .single())
+                .isEqualTo("2567000000115");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT bms_fold(NULL::text) IS NULL")
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+    }
+
     @Test
     void severalTermsAreAnAndAcrossNameAndCode() {
         seedMembers();

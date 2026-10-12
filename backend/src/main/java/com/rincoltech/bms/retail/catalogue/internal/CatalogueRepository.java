@@ -236,22 +236,26 @@ class CatalogueRepository {
             sql.append(" AND p.active = :active");
             params.put("active", active);
         }
-        if (afterCode != null) {
-            if (match == null) {
+        String statement;
+        if (match == null) {
+            if (afterCode != null) {
                 sql.append(" AND (p.code, p.id) > (:afterCode, :afterId)");
-            } else {
-                sql.append(" AND (")
-                        .append(match.rank())
-                        .append(", p.code, p.id) > (:afterRank, :afterCode, :afterId)");
-                params.put("afterRank", afterRank);
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
             }
-            params.put("afterCode", afterCode);
-            params.put("afterId", afterId);
+            statement = sql + " ORDER BY p.code, p.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterCode != null) {
+                keyset = "(search_rank, code, id) > (:afterRank, :afterCode, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterCode", afterCode);
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, code, id");
         }
-        sql.append(match == null ? " ORDER BY p.code, p.id" : " ORDER BY search_rank, p.code, p.id")
-                .append(" LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
                 .query(Search.ranked(
                         branchId == null ? CatalogueRepository::product : CatalogueRepository::productWithQty,

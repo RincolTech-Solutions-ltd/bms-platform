@@ -89,14 +89,14 @@ function useInvestmentPages(q: string, status: string, memberId?: string) {
 function MoreButton({ pages }: { pages: ReturnType<typeof useInvestmentPages>['pages'] }) {
   if (!pages.hasNextPage) return null;
   return (
-    <button type="button" className="btn-block" disabled={pages.isFetchingNextPage} onClick={() => void pages.fetchNextPage()}>
+    <button type="button" className="btn-block" disabled={pages.isFetchingNextPage || pages.isPlaceholderData} onClick={() => void pages.fetchNextPage()}>
       {pages.isFetchingNextPage ? 'Loading' : 'Load more'}
     </button>
   );
 }
 
 function Investments() {
-  const search = useLiveSearch({ urlParam: 'q' });
+  const search = useLiveSearch();
   const [status, setStatus] = useState('');
   const { pages, items, waiting, fetching } = useInvestmentPages(search.term, status);
   return (
