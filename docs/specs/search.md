@@ -49,7 +49,7 @@ Every list is keyset paged on a cursor (`sortKey|id`, base64url). Branch scope i
 | `GET /retail/stock` (`query`) | `StockRepository.page` | as products | as products | `code, id` |
 | `GET /retail/stock/all-branches` (`query`) | `StockRepository.allBranches` | as products | as products | `code, id` |
 | `GET /retail/customers` (`query`) | `SalesRepository.customers` | `name` substring | `ILIKE`; escape of `\ % _` | `lower(name), id` |
-| `GET /retail/sales` (`buyer`) | `SalesRepository.page` | `buyer_name` and the customer's `name`, substring | `ILIKE`; escape of `\ % _` | sale date, id |
+| `GET /retail/sales` (`buyer`) | `SalesRepository.page` | `buyer_name` and the customer's `name`, substring | `ILIKE`; escape of `\ % _` | `created_at, id` (newest or oldest first) |
 | `GET /retail/cash-parties` (`query`) | `CashbookRepository.parties` | `name` substring | `lower(name) LIKE`; **strips** `%` and `_` instead of escaping them, so "a_b" finds "ab" | `created_at, id` |
 | `GET /core/users` (cursor on `lower(full_name)`) | `UserService` | no search parameter | n/a | `lower(full_name)` |
 
