@@ -267,6 +267,10 @@ class PurchasingService {
             PurchaseLineRequest l = r.lines().get(i);
             PackUnit pack = packs.get(i);
             long costBase = pack == null ? l.costMinor() : Quantities.baseCost(l.costMinor(), pack.factor());
+            if (costBase > RetailCatalogue.MAX_AMOUNT_MINOR) {
+                throw ApiException.rule(
+                        "amount_out_of_range", "The cost on line " + (i + 1) + " is too large to compute.");
+            }
             long lineTotal = 0;
             BigDecimal qtyTotal = BigDecimal.ZERO;
             BigDecimal unitQtyTotal = BigDecimal.ZERO;

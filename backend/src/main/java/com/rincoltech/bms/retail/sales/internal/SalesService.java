@@ -199,12 +199,19 @@ class SalesService {
                         ? Quantities.packPrice(p.sellMinor(), pack.factor())
                         : l.unitPriceMinor();
                 long total = Quantities.value(l.qty(), packPrice);
+                long perBase = Quantities.perBase(total, baseQty);
+                // The column CHECKs bound a price at 10^13 (review F7); a defaulted pack price or the derived price per
+                // base unit can exceed it.
+                if (packPrice > RetailCatalogue.MAX_AMOUNT_MINOR || perBase > RetailCatalogue.MAX_AMOUNT_MINOR) {
+                    throw ApiException.rule(
+                            "amount_out_of_range", "The price on " + field + " is too large to compute.");
+                }
                 lines.add(new NewLine(
                         UUID.randomUUID(),
                         i + 1,
                         p.id(),
                         baseQty,
-                        Quantities.perBase(total, baseQty),
+                        perBase,
                         p.costMinor(),
                         total,
                         Quantities.value(baseQty, p.costMinor()),

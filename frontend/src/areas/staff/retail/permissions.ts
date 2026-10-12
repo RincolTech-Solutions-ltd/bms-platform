@@ -139,6 +139,7 @@ export function showRetail(me: Pick<Me, 'permissions'> & { modules?: string[] })
 
 /** The retail capabilities of ADR-033; a screen of a capability is offered only while /me lists it. */
 export const BRANCH_ROLES = 'branch_roles';
+export const UNITS = 'units';
 export const BRANCH_ROLE_MANAGE = 'retail.branch_role.manage';
 
 /** True when /me lists `capability` among the enabled capabilities of `module` (absent means off). */

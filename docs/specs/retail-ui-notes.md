@@ -389,6 +389,16 @@ widths: see its README), and the script is not committed. Notes:
 - The savings report endpoint (`GET /retail/reports/cash/savings`) is built but has no screen; the savings
   records list covers it. CSV export of the reports waits for the report runs.
 
+## Units of measure (#194, ADR-033)
+
+While `/me` lists the `units` capability for retail, an item that has pack sizes shows a "Sell by" choice on the sale screen and "Bought by" on the
+restock screen (an item without packs, and every screen while the capability is off, is exactly as before). Choosing a pack changes the labels to the
+pack's unit, sets the price or cost to the pack equivalent (`sell x factor`, rounded half up), and checks the stock and the price floor in base units, as
+the server does (`units-state.ts`). The receipt and All sales show a pack line as "2 carton" at the pack price; an older line shows as it always did. The
+item screen (Edit) has a Pack sizes group for a user who may manage the catalogue: add a pack (a unit other than the item's own and a number of items in
+one pack), change the number, switch a pack off. The unit choice on the sale screen carries `data-tour="sale-unit"`; a tour step for it waits for the
+capability-aware tours of issue #192, because the tour test requires every anchor to exist on an empty sale.
+
 ## Left to do
 
 - Void a sale and pay a credit sale screens; see `docs/specs/retail-ui-parity.md`.

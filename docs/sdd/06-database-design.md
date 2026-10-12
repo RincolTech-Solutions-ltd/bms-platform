@@ -1446,6 +1446,7 @@ module on again adds nothing. `S` marks `is_system_controlled`.
 | 5000 | Expenses | expense (header) | | |
 | 5100 | Cost of goods sold | expense | `cost_of_goods_sold` | |
 | 5110 | Stock shrinkage | expense | `stock_shrinkage` | |
+| 5120 | Purchase price rounding | expense | `purchase_rounding` | |
 
 ### `retail_categories`, `retail_units` (RLS; `bms_app` SELECT, INSERT, UPDATE)
 
@@ -1681,7 +1682,9 @@ SELECT, INSERT and UPDATE. A missing row means `both`. The migration backfills `
 of tenants that have the retail module, so a populated database changes in no way; correctness never
 depends on the backfill. The capability flags are not a table: they live in `tenant_settings.settings`
 under `module_groups.retail` (opaque to the core, validated by `retail.manifest`). Design only, no
-migration yet: everything else below.
+migration yet: everything else below, except what the next paragraph lists as built.
+
+Built: units of measure (issue #194, migration V39). `retail_product_units` (`id`, `tenant_id`, `product_id`, `unit_id`, `factor numeric(14,3) > 0`, `active`, `version`, audit columns; composite foreign keys to `retail_products` and `retail_units`; unique `(tenant_id, product_id, unit_id)`; forced RLS; the application role may SELECT, INSERT and UPDATE, never DELETE). The pack's unit differing from the product's base unit, and a base unit that cannot change while a pack exists, are rules of the catalogue service because they span two tables. Four nullable columns on `retail_sale_lines` (`sale_unit_id`, `sale_qty`, `sale_unit_price_minor`, `unit_factor`) and four on `retail_purchase_lines` (`unit_id`, `unit_qty_total`, `unit_cost_minor`, `unit_factor`) record what was entered; all four of a group are null (entered in the base unit, every row that existed before) or all four are set (check `retail_sale_lines_unit_chk`, `retail_purchase_lines_unit_chk`; foreign keys to `retail_units`), each added `NOT VALID` and validated in the same migration, as V38 does. `qty`, `unit_price_minor`, `cost_minor` and `qty_total` keep their meaning (base units, per base unit), so every report is unchanged; `line_total_minor` is `sale_qty x sale_unit_price_minor` rounded half up once, and on a purchase line the amount paid or owed as entered. The chart gains account 5120 `purchase_rounding` (section 6.11.1), added to existing retail tenants by the migration. The covering index of V26 is untouched.
 
 Optional tables and columns for the trade capabilities (FR-RET-33 to FR-RET-40): `retail_branch_roles`,
 `retail_product_units`, `retail_price_lists`, `retail_price_list_items`, `retail_customer_groups`,

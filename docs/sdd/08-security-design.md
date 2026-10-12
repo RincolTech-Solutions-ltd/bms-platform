@@ -301,6 +301,10 @@ Notes:
   branch of the tenant. Listing and reading transfers needs `retail.stock.read` in the source or
   the destination branch, and the cost fields need `retail.profit.read` in either of them, because
   the same cost is posted to both branches' inventory accounts.
+- Units of measure (issue #194, FR-RET-35) add no permission, so the matrix is unchanged: the pack routes use `retail.stock.read` (list) and
+  `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
+  branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
+  purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
 - `retail.price.below_cost` (issue #64, ADR-020 decision 5) lets a sale line be priced at or below
   the product's cost. It is in the catalogue (migration V13) but no default role holds it, not even
   the tenant admin: it is meant for a custom role, and roles are not yet tenant-editable, so today

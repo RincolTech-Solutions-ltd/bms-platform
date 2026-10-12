@@ -81,3 +81,39 @@ capabilities inside retail.
 - Imported credit sales: do not post them from this work; wait for issue #96.
 - Migration numbers: assigned at merge time, above the highest on any open branch; each slice updates
   the migration order test (issue #172).
+
+## Amendment of 2026-10-12 (issue #194): units of measure, as built
+
+Decision 5 is built in slice 4 (migration V39; `docs/specs/trade-capabilities.md` section 4). The choices it
+left open:
+
+1. **The edge is the line.** A sale line or a restock line names a pack `unit_id` and enters the quantity and
+   the price or cost in that unit. The server converts once: the stock movement, the balance, the cost
+   snapshot and every existing report stay in base units. The line keeps the unit, the quantity, the price and
+   the factor in force, in four nullable columns; null means "entered in the base unit", which is every row
+   that existed and every line of a tenant with the capability off. Naming the base unit is the base unit.
+2. **Quantities refuse, money rounds.** `qty x factor` must be exact to three places and fit the column, or
+   the line is refused (422 `quantity_not_representable`); a pack price is `sell x factor` and a pack cost
+   per base unit is `pack cost / factor`, both rounded half up once; all of it is `BigDecimal` and `long`.
+3. **The price floor is judged on the line.** A pack line is below cost when its line total is not above its
+   line cost; the rounded price per base unit is never compared, so a carton of twelve costing 83 a piece is
+   accepted at 997 although 997 / 12 rounds to the cost.
+4. **The remainder has one home.** A restock priced per pack posts the amount as entered (cash, bank or the
+   supplier) and the movements at the rounded cost per base unit; the difference per branch posts to the new
+   system account `purchase_rounding` (5120) in the branch's own entry, a debit or a credit, nothing when the
+   cost divides exactly. The account is added to the retail chart for existing retail tenants by the
+   migration, and stays at zero until a restock names a pack.
+5. **Packs belong to the catalogue.** `retail_product_units` is catalogue data (a unit and a factor per
+   product, one per unit, switched off rather than deleted); the base unit of a product cannot change and a
+   unit cannot be switched off while a pack uses it (422 `unit_in_use_by_pack`), because factors are
+   relative to the base unit. No permission is added.
+6. **Expand only.** One table with forced RLS, eight nullable columns, and checks and foreign keys added
+   `NOT VALID` then validated in the same migration; the covering index of V26 is untouched. A database at
+   V37 holding sale and purchase lines is a migration test.
+
+**Better:** a wholesaler can buy by the carton and sell by the carton or the piece against one stock figure,
+and nothing a plain shop reads has changed meaning. **Worse:** a pack cost that does not divide shows as a
+small expense or income in `purchase_rounding`, and a factor with decimals makes the pack price a rounded
+figure. **Watch for:** price lists (slice 5) key items by unit and must resolve a pack price before the
+default `sell x factor`; the product CSV import skips an existing code, so packs cannot be added to existing
+items by import, only by the pack routes.

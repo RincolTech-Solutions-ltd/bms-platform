@@ -5,6 +5,7 @@ import { RETAIL_CURRENCY, RETAIL_ZONE, retail, type PriceChange, type Product } 
 import { formatMinor, parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { BackToCatalogue } from './catalogue';
+import { PackEditor } from './catalogue-packs';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
 
 // Items (#146): list with search, category and active filters; add and edit an item's code,
@@ -128,6 +129,7 @@ export function ProductForm({ product, onSaved, onCancel }: { product?: Product;
             <input id="item-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> On sale (clear this to switch the item off)
           </label>
           <p className="hint">To change the price, use Change price on the list.</p>
+          <PackEditor product={product} />
         </>
       ) : (
         <>

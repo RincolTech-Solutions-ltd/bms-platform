@@ -5,7 +5,8 @@ import { retail, type Product, type Sale, type SalePayment } from '../../../api/
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { showQty } from './maths';
-import { buildSaleRequest, draftProblem, draftTotal, lineFigures, lineHint, newLine, type Draft } from './sale-state';
+import { buildSaleRequest, draftProblem, draftTotal, lineFigures, lineHint, newLine, withUnit, type Draft } from './sale-state';
+import { activePacks, chosenPack, enteredPriceMinor, enteredQty } from './units-state';
 import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useSingleBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
@@ -45,8 +46,8 @@ export function Receipt({ sale, onNew }: { sale: Sale; onNew?: () => void }) {
           {(sale.lines ?? []).map((l) => (
             <tr key={l.product_id}>
               <td>{l.description}</td>
-              <td className="num">{showQty(l.qty ?? '0')}</td>
-              <td className="num">{money(l.unit_price_minor ?? 0)}</td>
+              <td className="num">{enteredQty(l)}</td>
+              <td className="num">{money(enteredPriceMinor(l))}</td>
               <td className="num">{money(l.line_total_minor ?? 0)}</td>
             </tr>
           ))}
@@ -92,6 +93,8 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
   const setLine = (i: number, patch: { qty?: string; price?: string }) =>
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));
+  const setUnit = (i: number, unitId: string) =>
+    setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? withUnit(l, unitId) : l)) }));
   const add = (p: Product) =>
     setDraft((d) => (d.lines.some((l) => l.product.id === p.id) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
 
@@ -114,16 +117,27 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
       {draft.lines.map((l, i) => {
         const f = lineFigures(l);
         const hint = lineHint(l);
+        const packs = activePacks(l.product);
+        const pack = chosenPack(l.product, l.unitId);
         return (
           <div key={l.product.id} className="rt-card">
             <strong>{l.product.description}</strong>
+            {packs.length > 0 && (
+              <div>
+                <label htmlFor={`unit-${i}`}>Sell by</label>
+                <select id={`unit-${i}`} data-tour="sale-unit" value={pack?.unit_id ?? ''} onChange={(e) => setUnit(i, e.target.value)}>
+                  <option value="">{l.product.unit}</option>
+                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {l.product.unit})</option>)}
+                </select>
+              </div>
+            )}
             <div className="rt-row">
               <div>
-                <label htmlFor={`qty-${i}`}>Quantity ({l.product.unit})</label>
+                <label htmlFor={`qty-${i}`}>Quantity ({pack?.unit ?? l.product.unit})</label>
                 <input id={`qty-${i}`} inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} aria-invalid={f === null || hint !== null} />
               </div>
               <div>
-                <label htmlFor={`price-${i}`}>Unit price</label>
+                <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
                 <input id={`price-${i}`} inputMode="numeric" value={l.price} onChange={(e) => setLine(i, { price: e.target.value })} aria-invalid={f === null} />
               </div>
             </div>
