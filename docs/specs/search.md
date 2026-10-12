@@ -67,19 +67,82 @@ Gaps the audit found:
   query deletes the metacharacters.
 * **Ranking:** none. Order is by number or date, so an exact code can sit below fifty substring hits.
 * **Indexes:** a trigram index exists on `lending_members.full_name` (V1) and on
-  `retail_products.description` (V10); they serve a bare `ILIKE` on the raw column, which stops being the
-  query once folding is added. Nothing indexes loan numbers, product codes, credit buyer names or phones.
+  `retail_products.description` (V10). Measured as `bms_app` with row-level security on, the planner does
+  not use them: no text operator (`textlike`, `texticlike`, `lower`, `translate`, trigram similarity) is
+  leakproof, so a search is a filter over the tenant's rows (ADR-028 found the same). More indexes would not
+  help the application role; the cost to watch is the cost per row.
 * **Cancellation:** none of the API functions pass an `AbortSignal`; a slow, old answer can only be ignored
   because its query key differs.
 
 ## 2. Frontend convention
 
-(Completed with the build; see section 4.)
+One hook and one box, in `frontend/src/app/ui/` (`useLiveSearch.ts`, `SearchBox.tsx`, `search.css`).
+
+| Rule | How |
+|---|---|
+| Realtime | The text is live; the **term** the screen queries with follows 250 ms after the last key. Enter settles at once. A screen with a list already in the browser (stock-take) filters on the live text. |
+| Trim | The term is trimmed with each run of white space made one space; trailing space is not a new search and keeps the page. |
+| Minimum length | `minLength` per screen (default 1; the member picker, which lists nothing without a search, uses 2). Shorter text queries nothing and the box says "Type at least N characters to search." |
+| Paging | A changed term is a new query key, so cursor lists start at page 1; `page` and `setPage` serve an offset list and reset to 1 when the term changes. |
+| Stale answers | The term is in the query key and the query function passes React Query's `signal` to the request, so a request whose key lost its observer is aborted, and an old answer never replaces a newer one. |
+| No flicker | `placeholderData: keepPreviousData`: the list stays, dimmed and `aria-busy`, until the new answer arrives. |
+| Searching | While the debounce runs or an answer is due the status line reads "Searching" (a small spinner, still under `prefers-reduced-motion`). |
+| Announcements | The status line is `role="status"` `aria-live="polite"`: "12 results", "1 result", "25 results so far, more below", `No results for "x"`. |
+| Clear | A Clear button when there is text; Escape does the same, both at once (text and term). |
+| URL | `urlParam: 'q'` mirrors the term in the address bar (`replaceState`, other parameters kept) and reads it on load. On the three lending registers. |
+| Empty answer | `NoResults`: `No loans for "x".` and a Clear search button. |
+| Highlight | `Highlight` marks the matched words (case and accent blind) in the names and numbers of the loan, savings, investment, sale and member picker rows. |
+
+Screens converted: loans, savings accounts, investments, the investment member picker, credit sales,
+all sales (buyer and item), credit buyers, the item pickers (sale and transfer through `ProductPicker`),
+usage, restock, and the stock-take sheet. Not converted, and why: `retail/stock.tsx` (and the stock by
+location view of #193) and `retail/catalogue-products.tsx` are being restructured into category groups on
+`feat/ui-breadcrumbs-categories`; they adopt the hook in a follow-up. The insights page and the platform
+sign-up form have no search box.
 
 ## 3. Backend convention
 
-(Completed with the build; see section 4.)
+`kernel.Search` (ADR-039), used by every repository below. A repository calls `Search.parse(text)`, builds its
+`Search.Fields`, appends `match.where()` with `AND`, and (for a ranked list) selects `match.rank()` as
+`search_rank`, orders by it first and carries it in the cursor.
 
-## 4. Decisions
+| Rule | Detail |
+|---|---|
+| Fold | `bms_fold(column) LIKE bms_fold(pattern)`: lower case, Latin accents removed (V40). |
+| Terms | Split on white space, at most 6, text at most 100 characters; every term must match in some name or code column (AND). |
+| Phone | A term of four or more digits (digits, spaces, `+`, `-`, brackets only), and a whole text that looks like a phone number, match `bms_digits(phone)` after removing a leading `256` or `0`. |
+| Literals | `%`, `_` and the backslash are escaped. |
+| Rank | 0: a name or code starts with the first term, or a phone starts with its digits. 1: a word in it starts with the term. 2: any substring. |
+| Order | rank, then the list's usual key: member number, product code, credit buyer name, creation time, account number (investments: newest first). The sales history keeps its time order and takes the condition only. |
+| Cursor | `Search.wrap` puts the rank in front of the usual cursor; a cursor of the other kind is 400 `malformed_request`. |
+| Scope | The condition is ANDed with the branch predicate and the other filters; RLS is untouched. |
+| Guarded columns | A member's phone and national id are matched on the loan, savings and investment lists only where the caller holds `lending.members.read` at the member's branch. |
 
-(Completed with the build; ADR-039.)
+What each endpoint matches:
+
+| Endpoint (param) | Name | Code, number, reference | Phone |
+|---|---|---|---|
+| `GET /lending/members` (`q`) | full name | member number, national id | phone, second phone |
+| `GET /lending/loans` (`q`) | member name | loan number, member number; guarded: national id | guarded: member phone, second phone |
+| `GET /lending/savings-accounts` (`q`) | member name | account number, member number; guarded: national id | guarded: member phone, second phone |
+| `GET /lending/investments` (`q`) | member name | account number, member number; guarded: national id | guarded: member phone, second phone |
+| `GET /retail/products`, `/stock`, `/stock/all-branches` (`query`) | description, category name | code | none |
+| `GET /retail/customers` (`query`) | name | none | contact |
+| `GET /retail/sales` (`buyer`) | buyer name, linked credit buyer name | sale number | buyer contact, linked credit buyer contact |
+| `GET /retail/cash-parties` (`query`) | name | none | contact |
+
+Indexes: none. V40 (expand only) adds the two functions `bms_fold` and `bms_digits`. A trigram index was
+measured out: the application reads as `bms_app` under row-level security and no text operator is leakproof, so
+the planner never uses such an index for it (ADR-039 decision 7). The search is a filter over the tenant's rows:
+3 ms for 6,000 products, about 25 ms for the same rows when a phone's digits are compared.
+
+## 4. Decisions, tests and what is left
+
+ADR-039 records the decisions. Tests: `SearchTest` (parsing, escaping, phone digits, cursor rules),
+`SearchLendingIT` and `SearchRetailIT` (phone formats, several terms, accents, literals, ranking and paging, scope,
+guarded columns, a 6000 row product table for speed), `useLiveSearch.test.tsx` (debounce, restart, trim,
+minimum length, paging reset, flush, clear, URL, status words, highlight, markup).
+
+Left for follow-ups: `stock.tsx`, the stock by location screen and `catalogue-products.tsx` (hook);
+`LocationRepository` of #193 (the matcher); a data-volume pass over the loan, savings and investment
+registers (ADR-028) to decide whether they need an index; the cash party screens have no search box.

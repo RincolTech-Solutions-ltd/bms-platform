@@ -104,10 +104,16 @@ class SearchTest {
     }
 
     @Test
-    void aCursorWithoutARankIsRefusedForASearchedList() {
-        assertThatThrownBy(() -> Search.unwrap(true, Cursor.encode("M000007"))).isInstanceOf(ApiException.class);
+    void aCursorOfTheOtherKindIsRefused() {
+        String plain = Cursor.encode("M000007");
+        assertThatThrownBy(() -> Search.unwrap(true, plain)).isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> Search.unwrap(true, Cursor.encode("x~M000007")))
                 .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> Search.unwrap(true, Cursor.encode("\u0001x~M000007")))
+                .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> Search.unwrap(true, "!!not base64!!")).isInstanceOf(ApiException.class);
+        // and a ranked cursor is not a plain one, so it can never page an unsearched list by accident
+        assertThatThrownBy(() -> Search.unwrap(false, Search.wrap(true, 1, plain)))
+                .isInstanceOf(ApiException.class);
     }
 }

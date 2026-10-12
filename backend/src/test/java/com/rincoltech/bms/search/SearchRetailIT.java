@@ -6,9 +6,6 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import java.net.URI;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -343,9 +340,13 @@ class SearchRetailIT extends IntegrationTest {
 
     // ---- scale ------------------------------------------------------------------------------
 
-    /** Thousands of rows: the answer is right, quick, and the trigram indexes match the queries' expressions. */
+    /**
+     * Thousands of rows: the answer is right and quick. There is no trigram index to rely on: under row-level
+     * security no text operator is leakproof, so the search is a filter over the tenant's rows (V40), and the
+     * per-row cost of {@code bms_fold} is what this keeps in check.
+     */
     @Test
-    void aSearchOverThousandsOfProductsIsQuickAndUsesTheTrigramIndex() throws Exception {
+    void aSearchOverThousandsOfProductsIsRightAndQuick() {
         UUID category = api.category("Bulk Category");
         UUID unit = api.unit("bulk-unit");
         TestDatabase.owner().sql("""
@@ -366,22 +367,5 @@ class SearchRetailIT extends IntegrationTest {
         assertThat(codes("item number 5999")).containsExactly("BULK-5999");
         long millis = (System.nanoTime() - started) / 1_000_000;
         assertThat(millis).as("three searches over 6000 products").isLessThan(3_000);
-
-        try (Connection c = TestDatabase.ownerDataSource().getConnection();
-                Statement s = c.createStatement()) {
-            s.execute("SET enable_seqscan = off");
-            StringBuilder plan = new StringBuilder();
-            try (ResultSet rs = s.executeQuery("""
-                    EXPLAIN SELECT id FROM retail_products p
-                     WHERE bms_fold(p.description) LIKE bms_fold('%zebra%') OR bms_fold(p.code) LIKE bms_fold('%zebra%')
-                    """)) {
-                while (rs.next()) {
-                    plan.append(rs.getString(1)).append('\n');
-                }
-            }
-            assertThat(plan.toString())
-                    .contains("retail_products_fold_description")
-                    .contains("retail_products_fold_code");
-        }
     }
 }

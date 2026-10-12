@@ -251,31 +251,39 @@ public final class Search {
     /** The position after which the next page starts: the rank of the last row and the entity's own cursor. */
     public record After(int rank, String cursor) {}
 
+    /** Marks a searched list's cursor; no sort key, number or code contains it. */
+    private static final char RANKED = '\u0001';
+
     /**
      * Splits a cursor of a searched list into its rank and the entity's own cursor. A searched list
-     * always carries a rank, so a cursor without one (from a list that was not searched) is 400.
+     * always carries a rank, and an unsearched list never does, so a cursor of the other kind is 400.
      */
     public static After unwrap(boolean searching, String cursor) {
         if (cursor == null || cursor.isBlank()) {
             return new After(0, null);
         }
+        String raw = Cursor.decode(cursor).orElse("");
+        boolean ranked = !raw.isEmpty() && raw.charAt(0) == RANKED;
+        if (ranked != searching) {
+            throw malformed();
+        }
         if (!searching) {
             return new After(0, cursor);
         }
-        String raw = Cursor.decode(cursor).orElse("");
         int tilde = raw.indexOf('~');
-        if (tilde < 1) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "malformed_request", "Malformed request", "Invalid cursor.");
-        }
         try {
-            return new After(Integer.parseInt(raw.substring(0, tilde)), raw.substring(tilde + 1));
-        } catch (NumberFormatException e) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "malformed_request", "Malformed request", "Invalid cursor.");
+            return new After(Integer.parseInt(raw.substring(1, tilde)), raw.substring(tilde + 1));
+        } catch (NumberFormatException | StringIndexOutOfBoundsException e) {
+            throw malformed();
         }
     }
 
     /** The cursor to hand out: the entity's own cursor, with the last row's rank in front when searching. */
     public static String wrap(boolean searching, int rank, String cursor) {
-        return searching ? Cursor.encode(rank + "~" + cursor) : cursor;
+        return searching ? Cursor.encode(RANKED + Integer.toString(rank) + "~" + cursor) : cursor;
+    }
+
+    private static ApiException malformed() {
+        return new ApiException(HttpStatus.BAD_REQUEST, "malformed_request", "Malformed request", "Invalid cursor.");
     }
 }

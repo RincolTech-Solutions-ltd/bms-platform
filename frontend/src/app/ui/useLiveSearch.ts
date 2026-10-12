@@ -245,18 +245,30 @@ export function highlightParts(text: string, term: string): { text: string; hit:
   const marked = new Array<boolean>(chars.length).fill(false);
   for (const word of words) {
     for (let at = folded.indexOf(word); at !== -1; at = folded.indexOf(word, at + 1)) {
-      for (let k = at; k < at + word.length; k++) marked[origin[k]] = true;
+      for (let k = at; k < at + word.length; k++) marked[origin[k] ?? 0] = true;
     }
   }
   const parts: { text: string; hit: boolean }[] = [];
   chars.forEach((c, i) => {
+    const hit = marked[i] === true;
     const last = parts[parts.length - 1];
-    if (last && last.hit === marked[i]) last.text += c;
-    else parts.push({ text: c, hit: marked[i] });
+    if (last && last.hit === hit) last.text += c;
+    else parts.push({ text: c, hit });
   });
   return parts;
 }
 
 function foldTerm(term: string): string {
   return Array.from(term).map(foldChar).join('');
+}
+
+/**
+ * True when every word of `term` appears in `text`, ignoring case and accents: the in-browser form of
+ * the server's matching, for a list that is already loaded (a stock-take sheet). Empty term: true.
+ */
+export function matchesSearch(text: string, term: string): boolean {
+  const words = normaliseSearch(foldTerm(term)).split(' ').filter(Boolean);
+  if (words.length === 0) return true;
+  const folded = foldTerm(text);
+  return words.every((word) => folded.includes(word));
 }

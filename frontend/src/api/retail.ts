@@ -102,6 +102,8 @@ export function daysBefore(date: string, days: number): string {
 export type StockLevel = 'out' | 'low';
 
 export interface SalesQuery {
+  /** Aborts the request when the search that asked for it has moved on. */
+  signal?: AbortSignal;
   /** One branch; absent means every branch the caller may read. */
   branchId?: string;
   from?: string;
@@ -140,7 +142,7 @@ export type SalePayment = 'cash' | 'mobile_money' | 'bank' | 'credit';
 export type PurchasePayment = 'cash' | 'bank' | 'credit';
 
 export interface RetailApi {
-  listProducts(q: { query?: string; branchId?: string }): Promise<Product[]>;
+  listProducts(q: { query?: string; branchId?: string; signal?: AbortSignal }): Promise<Product[]>;
   listCategories(): Promise<Category[]>;
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
   listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string }): Promise<ProductPage>;
@@ -164,7 +166,7 @@ export interface RetailApi {
   getSale(id: string): Promise<Sale>;
   listCustomers(): Promise<Customer[]>;
   /** The credit buyers screen: server-side search and cursor paging. */
-  listCustomerPage(q: { query?: string; cursor?: string }): Promise<CustomerPage>;
+  listCustomerPage(q: { query?: string; cursor?: string; signal?: AbortSignal }): Promise<CustomerPage>;
   listSuppliers(): Promise<Supplier[]>;
   createSupplier(body: { name: string; contact?: string }): Promise<Supplier>;
   updateSupplier(id: string, version: number, body: { name?: string; contact?: string; active?: boolean }): Promise<Supplier>;
@@ -266,10 +268,11 @@ async function allPages<T>(
 }
 
 const realRetail: RetailApi = {
-  async listProducts({ query, branchId }) {
+  async listProducts({ query, branchId, signal }) {
     const page = unwrap(
       await api.GET('/api/v1/retail/products', {
         params: { query: { query: query || undefined, branch_id: branchId, active: true, limit: 50 } },
+        signal,
       }),
     );
     return page.items ?? [];
@@ -368,7 +371,7 @@ const realRetail: RetailApi = {
   },
 
   async listSales(q) {
-    return unwrap(await api.GET('/api/v1/retail/sales', { params: { query: salesParams(q) } }));
+    return unwrap(await api.GET('/api/v1/retail/sales', { params: { query: salesParams(q) }, signal: q.signal }));
   },
 
   async getSale(id) {
@@ -379,8 +382,8 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: {} } })).items ?? [];
   },
 
-  async listCustomerPage({ query, cursor }) {
-    return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: { query: query || undefined, limit: 50, cursor } } }));
+  async listCustomerPage({ query, cursor, signal }) {
+    return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: { query: query || undefined, limit: 50, cursor } }, signal }));
   },
 
   async listSuppliers() {
