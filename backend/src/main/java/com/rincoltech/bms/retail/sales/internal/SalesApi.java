@@ -270,7 +270,7 @@ final class SalesApi {
                     "Replaces the customer's group and own price list; an absent field clears it (price_lists capability)")
     record CustomerPricingRequest(UUID customerGroupId, UUID priceListId) {}
 
-    @Schema(name = "RetailPriceResolveLine")
+    @Schema(name = "RetailPriceResolveLineRequest")
     record ResolveLineRequest(
             @NotNull UUID productId,
 

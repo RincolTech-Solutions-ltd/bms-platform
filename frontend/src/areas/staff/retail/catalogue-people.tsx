@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { retail, type Customer, type Supplier } from '../../../api/retail';
 import { useStaff } from '../context';
+import { BuyerPricing } from './buyer-pricing';
 import { AddPanel, BackToCatalogue } from './catalogue';
 import { canUse } from './permissions';
 import { Gate, Problem, Success, changeFailureText, money, requireVersion, useDebounced, useToast } from './ui';
@@ -15,9 +16,11 @@ type Person = Supplier | Customer;
 
 export interface PersonEdit { name?: string; contact?: string }
 
-export function PersonRow({ row, busy, onSave, onToggle }: {
+export function PersonRow({ row, busy, extra, onSave, onToggle }: {
   row: Person;
   busy?: boolean;
+  /** More about the person, between the balance and the buttons (a buyer's price list). */
+  extra?: ReactNode;
   onSave: (edit: PersonEdit) => void;
   onToggle?: () => void;
 }) {
@@ -35,6 +38,7 @@ export function PersonRow({ row, busy, onSave, onToggle }: {
       {owed !== undefined && (
         <p>{owed > 0 ? <>Owes <strong>{money(owed)}</strong> on credit sales, all your branches.</> : 'Owes nothing, all your branches.'}</p>
       )}
+      {extra}
       {editing ? (
         <div className="stack">
           <label htmlFor={`name-${row.id}`}>Name</label>
@@ -148,6 +152,7 @@ function PeopleList({ noun, plural, queryKey, list, create, update, canAdd, canS
             key={r.id}
             row={r}
             busy={change.isPending}
+            extra={'balance_minor' in r ? <BuyerPricing row={r} /> : undefined}
             onSave={(edit) => change.mutate({ id: r.id ?? '', version: r.version, body: edit, text: (x) => `Saved the changes to "${x.name}".` })}
             {...(canSwitch
               ? {
