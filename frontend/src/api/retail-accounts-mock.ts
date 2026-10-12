@@ -119,6 +119,11 @@ export function createAccountsMock(env: AccountsEnv): AccountsMock {
       gate(() => {
         const c = customer(id);
         if ((c.version ?? 1) !== version) env.refuse(409, 'version_conflict', 'This was changed by someone else. Reload and try again.');
+        // As the server: each field is a value or an explicit clear, never left out, never both.
+        const decided = (value: number | undefined, clear: boolean | undefined) => (value !== undefined) !== (clear === true);
+        if (!decided(body.credit_limit_minor, body.clear_credit_limit) || !decided(body.terms_days, body.clear_terms_days)) {
+          env.refuse(422, 'validation_failed', 'Give the limit and the terms, or clear them on purpose.');
+        }
         terms.set(id, { limit: body.credit_limit_minor, terms: body.terms_days });
         c.version = (c.version ?? 1) + 1;
         return account(id);

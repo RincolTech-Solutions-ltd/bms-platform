@@ -767,6 +767,17 @@ class MigrationOrderIT {
                         .param(customer)
                         .update())
                 .hasMessageContaining("retail_customers_terms_chk");
+        // The sales guard still refuses to lower a paid amount outside the reversal of a payment on account, even when
+        // no
+        // payment row backs it (this sale was written with 100 paid and none): V44 does not weaken it.
+        assertThatThrownBy(() -> owner.sql("UPDATE retail_sales SET paid_minor = 40 WHERE id = ?")
+                        .param(sale)
+                        .update())
+                .hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> owner.sql("UPDATE retail_sales SET paid_minor = 0 WHERE id = ?")
+                        .param(sale)
+                        .update())
+                .hasStackTraceContaining("only the paid amount");
         // A receipt of a payment on account is reached only through the application.
         assertThat(owner.sql("SELECT count(*) FROM retail_account_payments")
                         .query(Long.class)

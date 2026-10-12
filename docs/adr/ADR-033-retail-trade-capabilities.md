@@ -244,8 +244,11 @@ Decision 6 is built in slice 6 (migration V44; `docs/specs/trade-capabilities.md
    One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held.
 4. **Reversible as a whole.** `POST .../payments/{id}/reverse` (`retail.sale.void`, a reason) reverses the entry on the business
    day and gives each sale its paid amount back; there is no partial reversal. The V14 guard on `retail_sales` allowed
-   `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall to no less than the sale's
-   unreversed payments. The receipt is changed once, `posted` to `reversed`, by a guard trigger.
+   `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall only inside the reversal and
+   only to exactly the sale's unreversed payments: the reversal raises a transaction-local setting
+   (`bms.reverse_account_payment`, `set_config(..., true)`) for the one statement that gives the amount back, and the guard
+   refuses any lowering without it, so a plain UPDATE is refused as it was before V44. The receipt is changed once, `posted` to
+   `reversed`, by a guard trigger. The reason is at least five characters once trimmed, on the screen and on the server alike.
 5. **The cash book follows the receiving branch.** A cash payment on account is takings of the branch that received it, on the day
    it was received; a reversal is taken back on the day of the reversal, as a voided cash sale is.
 6. **The statement does not claim a ledger figure it cannot support.** It is built from sales, sale payments and receipts in the
@@ -262,7 +265,7 @@ Decision 6 is built in slice 6 (migration V44; `docs/specs/trade-capabilities.md
 
 **Better:** a wholesaler can sell on credit within a limit it controls, take money that is not tied to one sale, undo a mistake,
 and read a statement that agrees with the books. **Worse:** a change of allocation is a reversal and a new payment, not an edit; the
-paid amount of a sale can now fall, under a database rule that ties it to the unreversed payments. **Watch for:** any new reader
+paid amount of a sale can now fall, under a database rule that ties it to the reversal path and to the unreversed payments. **Watch for:** any new reader
 of `retail_sale_payments` must leave out the payments of a reversed receipt (join the allocations and the receipt status), and
 take cash by the receiving branch of an account payment; a later returns slice that refunds against the balance must go through the
 same statement lines.

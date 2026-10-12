@@ -123,11 +123,16 @@ class RetailCustomerAccountsIT extends IntegrationTest {
 
     ResponseEntity<JsonNode> setAccount(UUID customer, Long limit, Integer terms, String perms) {
         Map<String, Object> body = new LinkedHashMap<>();
+        // Each field is a value or an explicit clear: a body that leaves one out is refused.
         if (limit != null) {
             body.put("credit_limit_minor", limit);
+        } else {
+            body.put("clear_credit_limit", true);
         }
         if (terms != null) {
             body.put("terms_days", terms);
+        } else {
+            body.put("clear_terms_days", true);
         }
         return api.call(
                 HttpMethod.PUT,
@@ -446,7 +451,12 @@ class RetailCustomerAccountsIT extends IntegrationTest {
 
         // The manager sets both; If-Match is required and a stale version is a conflict.
         ResponseEntity<JsonNode> missing = api.call(
-                HttpMethod.PUT, "/customers/" + c + "/account", Map.of("terms_days", 30), MANAGER, "*", Map.of());
+                HttpMethod.PUT,
+                "/customers/" + c + "/account",
+                Map.of("terms_days", 30, "clear_credit_limit", true),
+                MANAGER,
+                "*",
+                Map.of());
         assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.PRECONDITION_REQUIRED);
         ResponseEntity<JsonNode> ok = setAccount(c, 50_000L, 30, MANAGER);
         assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -455,7 +465,7 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         ResponseEntity<JsonNode> stale = api.call(
                 HttpMethod.PUT,
                 "/customers/" + c + "/account",
-                Map.of("credit_limit_minor", 60_000),
+                Map.of("credit_limit_minor", 60_000, "clear_terms_days", true),
                 MANAGER,
                 "*",
                 Map.of("If-Match", String.valueOf(v)));
@@ -464,7 +474,7 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(api.call(
                                 HttpMethod.PUT,
                                 "/customers/" + c + "/account",
-                                Map.of("credit_limit_minor", -1),
+                                Map.of("credit_limit_minor", -1, "clear_terms_days", true),
                                 MANAGER,
                                 "*",
                                 Map.of("If-Match", String.valueOf(version(c))))
@@ -473,7 +483,7 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(api.call(
                                 HttpMethod.PUT,
                                 "/customers/" + c + "/account",
-                                Map.of("terms_days", 366),
+                                Map.of("terms_days", 366, "clear_credit_limit", true),
                                 MANAGER,
                                 "*",
                                 Map.of("If-Match", String.valueOf(version(c))))
@@ -993,6 +1003,12 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(blank.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // One rule on both sides: a reason is at least five characters once trimmed, as the screen asks.
+        ResponseEntity<JsonNode> shortReason = reverse(c, id, "  oops ", MANAGER);
+        assertThat(shortReason.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(shortReason.getBody().get("errors").get(0).get("field").asString())
+                .isEqualTo("reason");
+        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
         ResponseEntity<JsonNode> done = reverse(c, id, "Wrong buyer", MANAGER);
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(done.getBody().get("status").asString()).isEqualTo("reversed");
@@ -1121,6 +1137,79 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                         .param(s1)
                         .update())
                 .hasStackTraceContaining("only the paid amount");
+    }
+
+    /**
+     * V44 lets a sale's paid amount fall only inside the reversal of a payment on account: a plain UPDATE that lowers it is
+     * refused (as it was before V44) whatever the value, and inside the reversal the new value must equal exactly what the
+     * sale's payments that were not reversed add up to.
+     */
+    @Test
+    void aPaidAmountFallsOnlyInsideTheReversalAndOnlyToTheUnreversedPayments() throws Exception {
+        UUID c = buyer("Test Buyer 29", null, null);
+        UUID s1 = sold(hq, c, "10", "2026-01-05");
+        UUID s2 = sold(hq, c, "10", "2026-02-05");
+        // 400 on the first sale from a direct payment, and 700 on account that pays 600 of it and 100 of the second.
+        assertThat(api.postKeyed(
+                                "/sales/" + s1 + "/payments",
+                                Map.of("amount_minor", 400, "method", "cash", "paid_on", "2026-01-10"),
+                                MANAGER,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        JsonNode receipt = pay(c, hq, 700).getBody();
+        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
+        assertThat(sale(s2).get("paid_minor").asLong()).isEqualTo(100);
+        // A plain UPDATE from the application role is refused: to any lower value, the right one included.
+        for (long lower : new long[] {0, 400, 999}) {
+            assertThatThrownBy(() -> updatePaid(s1, lower, false)).hasStackTraceContaining("only the paid amount");
+        }
+        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
+        // The owner role is held to it too (bms.allow_mutation is the only way round, for restores).
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE retail_sales SET paid_minor = 400 WHERE id = ?")
+                        .param(s1)
+                        .update())
+                .hasStackTraceContaining("only the paid amount");
+        // Even with the setting on, the receipt must read reversed first: the unreversed payments still add up to
+        // 1,000.
+        assertThatThrownBy(() -> updatePaid(s1, 400, true)).hasStackTraceContaining("only the paid amount");
+        // The reversal itself succeeds and leaves each sale at its unreversed payments.
+        UUID id = UUID.fromString(receipt.get("id").asString());
+        assertThat(reverse(c, id, "Wrong buyer", MANAGER).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(400);
+        assertThat(sale(s2).get("paid_minor").asLong()).isZero();
+        // Once it is reversed, inside the reversal path only the exact sum is accepted, and outside it nothing is.
+        assertThatThrownBy(() -> updatePaid(s1, 100, true)).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(s1, 0, false)).hasStackTraceContaining("only the paid amount");
+        // A sale whose paid amount no payment row backs (as a database from before the payment rows had) cannot be
+        // written down by a plain UPDATE either.
+        UUID legacy = UUID.randomUUID();
+        TestDatabase.owner().sql("""
+                        INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, customer_id,
+                            currency, total_minor, cost_total_minor, paid_minor, status, created_by)
+                        VALUES (?, ?, ?, 'RS9LEGACY1', DATE '2026-01-15', 'credit', ?, 'UGX', 300, 249, 100, 'completed',
+                            gen_random_uuid())
+                        """).params(legacy, t.tenantId(), hq, c).update();
+        assertThatThrownBy(() -> updatePaid(legacy, 0, false)).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(legacy, 40, true)).hasStackTraceContaining("only the paid amount");
+        assertThat(sale(legacy).get("paid_minor").asLong()).isEqualTo(100);
+    }
+
+    /** One UPDATE of a sale's paid amount as the application role, in its own transaction; with the reversal setting or without. */
+    void updatePaid(UUID sale, long paid, boolean reversalSetting) throws Exception {
+        try (Connection conn = TestDatabase.appDataSource().getConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                st.execute("SELECT set_config('app.tenant_id', '" + t.tenantId() + "', true)");
+                if (reversalSetting) {
+                    st.execute("SELECT set_config('bms.reverse_account_payment', 'on', true)");
+                }
+                st.executeUpdate("UPDATE retail_sales SET paid_minor = " + paid + " WHERE id = '" + sale + "'");
+            }
+            conn.commit();
+        }
     }
 
     // ---- statement -------------------------------------------------------------------------------
@@ -1309,6 +1398,20 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(row.get("over_limit").asBoolean()).isFalse();
         ResponseEntity<JsonNode> over = creditSale(hq, c, "5", "2026-01-08", null, "Standing arrangement", MANAGER);
         assertThat(over.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        // The credit control report says it the same way: over the limit only to a caller whose scope covers every
+        // branch.
+        JsonNode controlRow = api.get("/reports/credit-control", ADMIN)
+                .getBody()
+                .get("buyers")
+                .get(0);
+        assertThat(controlRow.get("over_limit").asBoolean()).isTrue();
+        JsonNode scopedControlRow = api.call(
+                        HttpMethod.GET, "/reports/credit-control", null, ADMIN, hq.toString(), Map.of())
+                .getBody()
+                .get("buyers")
+                .get(0);
+        assertThat(scopedControlRow.get("credit_limit_minor").asLong()).isEqualTo(9_000);
+        assertThat(scopedControlRow.has("over_limit")).isFalse();
         JsonNode overRow = api.get("/reports/customer-ageing", ADMIN)
                 .getBody()
                 .get("customers")
@@ -1428,9 +1531,10 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(control.get("totals").get("over90_minor").asLong()).isEqualTo(100);
         // A payment takes the oldest first, so the oldest bucket empties first.
         assertThat(pay(c, hq, 150).getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        // Allocation is by sale date, not by due date: all eight share a date, so the order is creation order, and the
-        // first one created is the one due today. What matters here is that the total fell and the buckets still add
-        // up.
+        // Allocation is oldest first by sale date, ties in the order the sales were made. All eight share a sale date
+        // here,
+        // so the order is creation order; that the sale date and not the due date decides is its own test. What matters
+        // here is that the total fell and the buckets still add up.
         JsonNode after = api.get("/reports/customer-ageing", ADMIN)
                 .getBody()
                 .get("customers")
@@ -1443,5 +1547,232 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                 + after.get("days61_to90_minor").asLong()
                 + after.get("over90_minor").asLong();
         assertThat(sum).isEqualTo(750);
+    }
+
+    // ---- the account, scoped views -----------------------------------------------------------------
+
+    @Test
+    void anAccountRequestMustDecideTheLimitAndTheTermsOnPurpose() {
+        UUID c = buyer("Test Buyer 30", 7_000L, 14);
+        int v = version(c);
+        String path = "/customers/" + c + "/account";
+        Map<String, String> match = Map.of("If-Match", String.valueOf(v));
+        // An empty body, or one that leaves a field out, is refused and changes nothing.
+        ResponseEntity<JsonNode> empty = api.call(HttpMethod.PUT, path, Map.of(), MANAGER, "*", match);
+        assertThat(empty.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        List<String> fields = new ArrayList<>();
+        empty.getBody().get("errors").forEach(e -> fields.add(e.get("field").asString()));
+        assertThat(fields).containsExactlyInAnyOrder("credit_limit_minor", "terms_days");
+        assertThat(api.call(HttpMethod.PUT, path, Map.of("credit_limit_minor", 1), MANAGER, "*", match)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.call(HttpMethod.PUT, path, Map.of("terms_days", 1), MANAGER, "*", match)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // A value and its clear flag together contradict each other.
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                path,
+                                Map.of("credit_limit_minor", 1, "clear_credit_limit", true, "terms_days", 1),
+                                MANAGER,
+                                "*",
+                                match)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(version(c)).isEqualTo(v);
+        JsonNode kept = api.get(path, ADMIN).getBody();
+        assertThat(kept.get("credit_limit_minor").asLong()).isEqualTo(7_000);
+        assertThat(kept.get("terms_days").asInt()).isEqualTo(14);
+        // One cleared on purpose and one given: the limit goes, the terms change.
+        ResponseEntity<JsonNode> changed = api.call(
+                HttpMethod.PUT, path, Map.of("clear_credit_limit", true, "terms_days", 21), MANAGER, "*", match);
+        assertThat(changed.getStatusCode()).as("%s", changed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(changed.getBody().has("credit_limit_minor")).isFalse();
+        assertThat(changed.getBody().get("terms_days").asInt()).isEqualTo(21);
+    }
+
+    @Test
+    void aScopedCallerSeesTheReceiptsAndAllocationsOfTheirBranchSalesAndTheStatementAgrees() {
+        UUID c = buyer("Test Buyer 31", null, null);
+        UUID atHq = sold(hq, c, "10", "2026-01-05");
+        UUID atBr2 = sold(br2, c, "8", "2026-02-05");
+        // 1,500 received at head office pays all of the head office sale and 500 of the other branch's.
+        JsonNode mixed = pay(
+                        c,
+                        hq,
+                        1_500,
+                        "cash",
+                        null,
+                        "2026-03-01",
+                        MANAGER,
+                        "*",
+                        UUID.randomUUID().toString())
+                .getBody();
+        // 300 received at head office pays the other branch's sale only.
+        JsonNode elsewhere = pay(
+                        c,
+                        hq,
+                        300,
+                        "cash",
+                        null,
+                        "2026-03-02",
+                        MANAGER,
+                        "*",
+                        UUID.randomUUID().toString())
+                .getBody();
+        assertThat(elsewhere.get("allocations").get(0).get("sale_id").asString())
+                .isEqualTo(atBr2.toString());
+
+        // Full scope: both receipts at their full amounts with every allocation.
+        JsonNode full =
+                api.get("/customers/" + c + "/payments", ADMIN).getBody().get("items");
+        assertThat(full).hasSize(2);
+        assertThat(full.get(1).get("amount_minor").asLong()).isEqualTo(1_500);
+        assertThat(full.get(1).get("allocations")).hasSize(2);
+
+        // Head office only: the mixed receipt shows the 1,000 it paid there and the one allocation; the receipt that
+        // paid
+        // only the other branch is not listed, though head office banked it.
+        JsonNode hqList = api.call(
+                        HttpMethod.GET, "/customers/" + c + "/payments", null, ADMIN, hq.toString(), Map.of())
+                .getBody()
+                .get("items");
+        assertThat(hqList).hasSize(1);
+        assertThat(hqList.get(0).get("receipt_no").asString())
+                .isEqualTo(mixed.get("receipt_no").asString());
+        assertThat(hqList.get(0).get("amount_minor").asLong()).isEqualTo(1_000);
+        assertThat(hqList.get(0).get("allocations")).hasSize(1);
+        assertThat(hqList.get(0).get("allocations").get(0).get("sale_id").asString())
+                .isEqualTo(atHq.toString());
+
+        // The other branch: 500 of the mixed receipt and the whole of the second, the amounts the allocations add up
+        // to.
+        JsonNode br2List = api.call(
+                        HttpMethod.GET, "/customers/" + c + "/payments", null, ADMIN, br2.toString(), Map.of())
+                .getBody()
+                .get("items");
+        assertThat(br2List).hasSize(2);
+        for (JsonNode r : br2List) {
+            long allocated = 0;
+            for (JsonNode a : r.get("allocations")) {
+                allocated += a.get("amount_minor").asLong();
+                assertThat(a.get("branch_id").asString()).isEqualTo(br2.toString());
+            }
+            assertThat(r.get("amount_minor").asLong()).isEqualTo(allocated);
+        }
+        assertThat(br2List.get(0).get("amount_minor").asLong()).isEqualTo(300);
+        assertThat(br2List.get(1).get("amount_minor").asLong()).isEqualTo(500);
+
+        // The statement of each scope carries a line for the same receipts at the same amounts.
+        for (UUID scope : List.of(hq, br2)) {
+            JsonNode listed = api.call(
+                            HttpMethod.GET, "/customers/" + c + "/payments", null, ADMIN, scope.toString(), Map.of())
+                    .getBody()
+                    .get("items");
+            Map<String, Long> fromList = new LinkedHashMap<>();
+            listed.forEach(r -> fromList.put(
+                    r.get("receipt_no").asString(), r.get("amount_minor").asLong()));
+            Map<String, Long> fromStatement = new LinkedHashMap<>();
+            statement(c, "2026-01-01", TODAY, ADMIN, scope.toString())
+                    .get("lines")
+                    .forEach(l -> {
+                        if (l.get("kind").asString().equals("account_payment")) {
+                            fromStatement.put(
+                                    l.get("reference").asString(),
+                                    l.get("credit_minor").asLong());
+                        }
+                    });
+            assertThat(fromStatement).as("scope %s", scope).isEqualTo(fromList);
+        }
+    }
+
+    @Test
+    void paymentsReceivedInCreditControlFollowTheReceivingBranchLikeTheLedgerAndTheCashBook() {
+        UUID c = buyer("Test Buyer 32", null, null);
+        UUID s1 = sold(hq, c, "10", "2026-01-05");
+        // A direct payment on the sale counts in the sale's branch; a payment on account counts where it was received.
+        assertThat(api.postKeyed(
+                                "/sales/" + s1 + "/payments",
+                                Map.of("amount_minor", 250, "method", "cash", "paid_on", "2026-01-10"),
+                                MANAGER,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(pay(
+                                c,
+                                br2,
+                                400,
+                                "cash",
+                                null,
+                                "2026-01-10",
+                                MANAGER,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        String path = "/reports/credit-control?from=2026-01-01&to=2026-01-31";
+        assertThat(api.get(path, ADMIN).getBody().get("payments_minor").asLong())
+                .isEqualTo(650);
+        assertThat(api.call(HttpMethod.GET, path, null, ADMIN, br2.toString(), Map.of())
+                        .getBody()
+                        .get("payments_minor")
+                        .asLong())
+                .isEqualTo(400);
+        assertThat(api.call(HttpMethod.GET, path, null, ADMIN, hq.toString(), Map.of())
+                        .getBody()
+                        .get("payments_minor")
+                        .asLong())
+                .isEqualTo(250);
+        // The cash book of the receiving branch holds the same 400.
+        JsonNode days = api.get(
+                        "/reports/cash/daily?branch_id=" + br2 + "&from=2026-01-10&to=2026-01-10",
+                        ADMIN + ",retail.cashbook.read")
+                .getBody();
+        assertThat(days.get("items").get(0).get("cash_takings_minor").asLong()).isEqualTo(400);
+    }
+
+    @Test
+    void aPaymentOnAccountClearsTheOldestSaleDateFirstWhateverTheDueDatesAre() {
+        UUID c = buyer("Test Buyer 33", null, null);
+        // Sale dates run A, B, C; due dates run the other way round. Today is 2026-10-08.
+        UUID a = UUID.fromString(creditSale(hq, c, "1", "2026-01-05", "2026-11-15", null, MANAGER)
+                .getBody()
+                .get("id")
+                .asString());
+        UUID b = UUID.fromString(creditSale(hq, c, "1", "2026-02-05", "2026-03-01", null, MANAGER)
+                .getBody()
+                .get("id")
+                .asString());
+        UUID d = UUID.fromString(creditSale(hq, c, "1", "2026-03-05", "2026-07-20", null, MANAGER)
+                .getBody()
+                .get("id")
+                .asString());
+        JsonNode before = api.get("/reports/customer-ageing", ADMIN)
+                .getBody()
+                .get("customers")
+                .get(0)
+                .get("ageing");
+        assertThat(before.get("not_due_minor").asLong()).isEqualTo(100);
+        assertThat(before.get("days61_to90_minor").asLong()).isEqualTo(100);
+        assertThat(before.get("over90_minor").asLong()).isEqualTo(100);
+        // 150 clears A (the oldest sale, though due last) and takes 50 of B; C is untouched.
+        JsonNode receipt = pay(c, hq, 150).getBody();
+        JsonNode parts = receipt.get("allocations");
+        assertThat(parts).hasSize(2);
+        assertThat(parts.get(0).get("sale_id").asString()).isEqualTo(a.toString());
+        assertThat(parts.get(0).get("amount_minor").asLong()).isEqualTo(100);
+        assertThat(parts.get(1).get("sale_id").asString()).isEqualTo(b.toString());
+        assertThat(parts.get(1).get("amount_minor").asLong()).isEqualTo(50);
+        assertThat(sale(d).get("paid_minor").asLong()).isZero();
+        JsonNode after = api.get("/reports/customer-ageing", ADMIN)
+                .getBody()
+                .get("customers")
+                .get(0)
+                .get("ageing");
+        assertThat(after.get("owed_minor").asLong()).isEqualTo(150);
+        assertThat(after.get("not_due_minor").asLong()).isZero();
+        assertThat(after.get("days61_to90_minor").asLong()).isEqualTo(100);
+        assertThat(after.get("over90_minor").asLong()).isEqualTo(50);
     }
 }

@@ -6438,6 +6438,10 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "over_limit" : {
+            "description" : "Owed is above the limit. Present only with a limit and only when the report covers every branch, because the limit is measured across all of them",
+            "type" : "boolean"
+          },
           "sale_count" : {
             "format" : "int32",
             "type" : "integer"
@@ -6609,17 +6613,25 @@
         }
       },
       "RetailCustomerAccountRequest" : {
-        "description" : "Replaces the credit limit and the payment terms; an absent field clears it (no limit, no terms). Sent under If-Match with the customer's version",
+        "description" : "Replaces the credit limit and the payment terms, sent under If-Match with the customer's version. Each of the two is either given or cleared on purpose: a value, or its clear flag set to true, never neither and never both (422), so a body of {} changes nothing",
         "properties" : {
+          "clear_credit_limit" : {
+            "description" : "true removes the limit; do not send it with credit_limit_minor",
+            "type" : "boolean"
+          },
+          "clear_terms_days" : {
+            "description" : "true removes the terms; do not send it with terms_days",
+            "type" : "boolean"
+          },
           "credit_limit_minor" : {
-            "description" : "The most the buyer may owe on credit sales, all branches together; absent: no limit",
+            "description" : "The most the buyer may owe on credit sales, all branches together",
             "format" : "int64",
             "maximum" : 10000000000000,
             "minimum" : 0,
             "type" : "integer"
           },
           "terms_days" : {
-            "description" : "Days after the sale a credit sale falls due; 0 is the day of the sale; absent: none",
+            "description" : "Days after the sale a credit sale falls due; 0 is the day of the sale",
             "format" : "int32",
             "maximum" : 365,
             "minimum" : 0,

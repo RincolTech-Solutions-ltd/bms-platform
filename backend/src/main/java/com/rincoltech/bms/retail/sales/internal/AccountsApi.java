@@ -28,18 +28,25 @@ final class AccountsApi {
     @Schema(
             name = "RetailCustomerAccountRequest",
             description =
-                    "Replaces the credit limit and the payment terms; an absent field clears it (no limit, no terms)."
-                            + " Sent under If-Match with the customer's version")
+                    "Replaces the credit limit and the payment terms, sent under If-Match with the customer's version."
+                            + " Each of the two is either given or cleared on purpose: a value, or its clear flag"
+                            + " set to true, never neither and never both (422), so a body of {} changes nothing")
     record AccountRequest(
             @PositiveOrZero
             @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
-            @Schema(description = "The most the buyer may owe on credit sales, all branches together; absent: no limit")
+            @Schema(description = "The most the buyer may owe on credit sales, all branches together")
             Long creditLimitMinor,
+
+            @Schema(description = "true removes the limit; do not send it with credit_limit_minor")
+            Boolean clearCreditLimit,
 
             @Min(0)
             @Max(365)
-            @Schema(description = "Days after the sale a credit sale falls due; 0 is the day of the sale; absent: none")
-            Integer termsDays) {}
+            @Schema(description = "Days after the sale a credit sale falls due; 0 is the day of the sale")
+            Integer termsDays,
+
+            @Schema(description = "true removes the terms; do not send it with terms_days")
+            Boolean clearTermsDays) {}
 
     @Schema(name = "RetailCustomerAccount")
     record Account(

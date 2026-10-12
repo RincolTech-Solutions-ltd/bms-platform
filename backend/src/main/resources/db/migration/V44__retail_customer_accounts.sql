@@ -145,10 +145,14 @@ SELECT bms_make_append_only('retail_account_payment_allocations');
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_sales guard (V14): paid_minor could only go up. Reversing a payment on account has to give the paid
--- amount back, so the guard now lets it go down, but never below what the sale's payments that were not
--- reversed add up to. Everything else the guard refuses stays refused. Replacing the function body takes no
--- lock on retail_sales (the trigger stays as it is); the new rule reads the two tables created above, and
--- only when paid_minor goes down, which no other code path does.
+-- amount back, so the guard now lets it go down, but only inside that reversal and only to exactly what the
+-- sale's payments that were not reversed add up to. Two conditions, both required: the transaction-local
+-- setting bms.reverse_account_payment is 'on' (the reversal code sets it with set_config(..., true) just before
+-- it gives the amount back and clears it after, so a plain UPDATE from bms_app, which never sets it, is refused
+-- as it was before V44), and the new value equals that sum, so even inside the reversal no other value is
+-- accepted. Everything else the guard refuses stays refused. Replacing the function body takes no lock on
+-- retail_sales (the trigger stays as it is); the new rule reads the two tables created above, and only when
+-- paid_minor goes down, which no other code path does.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION retail_sales_guard_update() RETURNS trigger
@@ -165,13 +169,14 @@ BEGIN
         OLD.customer_id, OLD.buyer_name, OLD.buyer_contact, OLD.due_date, OLD.currency, OLD.total_minor,
         OLD.cost_total_minor, OLD.historical, OLD.created_by)
        OR (NEW.paid_minor < OLD.paid_minor
-           AND NEW.paid_minor < (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p
-                                  WHERE p.tenant_id = NEW.tenant_id AND p.sale_id = NEW.id
-                                    AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
-                                                      JOIN retail_account_payments r
-                                                        ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id
-                                                     WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id
-                                                       AND r.status = 'reversed')))
+           AND (coalesce(current_setting('bms.reverse_account_payment', true), '') <> 'on'
+                OR NEW.paid_minor <> (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p
+                                       WHERE p.tenant_id = NEW.tenant_id AND p.sale_id = NEW.id
+                                         AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
+                                                           JOIN retail_account_payments r
+                                                             ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id
+                                                          WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id
+                                                            AND r.status = 'reversed'))))
        OR (OLD.sale_entry_id IS NOT NULL AND NEW.sale_entry_id IS DISTINCT FROM OLD.sale_entry_id)
        OR (OLD.cost_entry_id IS NOT NULL AND NEW.cost_entry_id IS DISTINCT FROM OLD.cost_entry_id)
        OR (OLD.status = 'voided' AND (NEW.status, NEW.voided_at, NEW.voided_by, NEW.void_reason)

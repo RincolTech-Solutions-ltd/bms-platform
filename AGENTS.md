@@ -105,8 +105,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `/retail/customers/{id}/account`, `/statement`, `/payments` and `/payments/{id}/reverse`, and `/retail/reports/customer-ageing`;
   a credit sale locks the buyer's row, refuses above the limit (or takes a reason from a holder of the override), needs a customer
   record, and takes its due date from the terms; the credit control report carries the limit; the cash book takes a payment on
-  account in the receiving branch; the V14 guard of `retail_sales` lets `paid_minor` fall to the unreversed payments. The Customer
-  accounts page, the account page (summary, take a payment, payments taken, statement), the Credit buyers and Credit control links
+  account in the receiving branch; the V14 guard of `retail_sales` lets `paid_minor` fall only inside the reversal and only to the unreversed payments. The Customer
+  accounts page, the Customer ageing page, the account page (summary, take a payment, payments taken, statement), the Credit buyers and Credit control links
   and the sale screen's limit handling show while `module_capabilities` lists `customer_accounts`, which is marked ready with its own
   tour (`capability-customer-accounts`). The statement as a PDF is the documents slice.
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with

@@ -220,6 +220,7 @@ class AccountsService {
     @Transactional
     Account updateAccount(UUID id, String ifMatch, AccountRequest r) {
         capabilities.require(RetailCapabilities.CUSTOMER_ACCOUNTS);
+        requireBothDecided(r);
         int expected = Versions.fromIfMatch(ifMatch);
         Terms before = repo.terms(id, true).orElseThrow(ApiException::notFound);
         if (before.version() != expected) {
@@ -244,6 +245,35 @@ class AccountsService {
         }
         audit.record(new AuditLog.Entry("retail.customer.account_changed", "retail.customer", id, null, was, now));
         return view(id, repo.terms(id, false).orElseThrow());
+    }
+
+    /**
+     * The limit and the terms are each given or cleared on purpose, never left out: a body that names neither changes
+     * nothing and is refused, so an empty request cannot wipe a buyer's limit.
+     */
+    private static void requireBothDecided(AccountRequest r) {
+        List<FieldProblem> problems = new ArrayList<>();
+        decided(
+                problems,
+                "credit_limit_minor",
+                "clear_credit_limit",
+                r.creditLimitMinor() != null,
+                r.clearCreditLimit());
+        decided(problems, "terms_days", "clear_terms_days", r.termsDays() != null, r.clearTermsDays());
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+    }
+
+    private static void decided(
+            List<FieldProblem> problems, String field, String clearField, boolean given, Boolean clear) {
+        boolean cleared = Boolean.TRUE.equals(clear);
+        if (!given && !cleared) {
+            problems.add(new FieldProblem(
+                    field, "required", "Give " + field + ", or set " + clearField + " to true to remove it."));
+        } else if (given && cleared) {
+            problems.add(new FieldProblem(field, "conflict", "Give " + field + " or " + clearField + ", not both."));
+        }
     }
 
     // ---- The statement ---------------------------------------------------------------------------
@@ -598,6 +628,11 @@ class AccountsService {
     private AccountPayment reverseReceipt(UUID customerId, UUID receiptId, ReverseRequest r) {
         capabilities.require(RetailCapabilities.CUSTOMER_ACCOUNTS);
         Principal principal = CurrentPrincipal.require();
+        String reason = r.reason().trim();
+        if (reason.length() < MIN_REASON) {
+            throw ApiException.validation(List.of(
+                    new FieldProblem("reason", "invalid", "Give a reason of at least " + MIN_REASON + " characters.")));
+        }
         repo.terms(customerId, true).orElseThrow(ApiException::notFound);
         Receipt receipt = repo.receipt(receiptId, customerId, true)
                 .filter(x -> principal.may("retail.sale.void", x.branchId()))
@@ -637,7 +672,6 @@ class AccountsService {
                         "Sale " + a.saleNo() + " no longer holds this payment, so it cannot be reversed.");
             }
         }
-        String reason = r.reason().trim();
         LocalDate today = clock.today(tenant.profile().timezone());
         PostedEntry reversal =
                 books.reverse(receipt.journalEntryId(), today, receipt.receiptNo(), RECEIPT + "_void:" + receiptId);
@@ -649,10 +683,11 @@ class AccountsService {
                     "Receipt reversed",
                     "This payment has been reversed already.");
         }
-        // After the receipt reads reversed: the sales guard lets paid_minor fall only to what the payments that were
-        // not reversed add up to.
+        // After the receipt reads reversed: the sales guard lets paid_minor fall only inside this path (releasePaid
+        // raises
+        // the transaction-local setting) and only to exactly what the payments that were not reversed add up to.
         for (AllocationRow a : parts) {
-            sales.addPaid(a.saleId(), -a.amountMinor());
+            sales.releasePaid(a.saleId(), a.amountMinor());
         }
         audit.record(new AuditLog.Entry(
                 "retail.customer.account_payment_reversed",

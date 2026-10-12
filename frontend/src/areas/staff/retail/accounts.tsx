@@ -40,6 +40,7 @@ function AccountsPage() {
   return (
     <Gate screen="customerAccounts" title="Customer accounts">
       <p className="hint" data-tour="accounts-help">Open a buyer to set their credit limit and payment terms, take a payment, or read their statement.</p>
+      <p><Link to="/staff/retail/customer-ageing">See what every buyer owes, by how late it is</Link></p>
       {rows.isPending && <p className="loading">Loading</p>}
       <Problem error={rows.error} />
       <SearchBox id="search-accounts" label="Search by name or phone" search={search} fetching={finding} count={rows.data ? people.length : undefined} more={rows.hasNextPage} />

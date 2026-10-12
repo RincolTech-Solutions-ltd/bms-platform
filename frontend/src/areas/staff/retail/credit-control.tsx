@@ -28,7 +28,8 @@ const methodName = (m?: string) => METHODS[m ?? ''] ?? m ?? '';
 
 /**
  * `accounts` is true while customer accounts are on (ADR-033, issue #196): a buyer with a record then links to their account and,
- * with a limit, shows it, and says so when what they owe is above it. Off, the table is what it was.
+ * with a limit, shows it, and says so when the server says what they owe is above it (`over_limit`, sent only for a report
+ * over every branch: the limit is measured across all of them, so a branch's share is never compared with it). Off, the table is what it was.
  */
 export function CreditControlView({ data, nameOf, sort, accounts = false }: { data: CreditControl; nameOf: (id: string | undefined) => string; sort: 'amount' | 'age'; accounts?: boolean }) {
   const phone = useIsPhone();
@@ -63,7 +64,7 @@ export function CreditControlView({ data, nameOf, sort, accounts = false }: { da
                     <td>
                       {accounts && b.customer_id ? <Link to="/staff/retail/accounts/$customerId" params={{ customerId: b.customer_id }} aria-label={`Open the account of ${b.name}`}>{b.name}</Link> : b.name}
                       <br /><span className="hint">{b.sale_count} {b.sale_count === 1 ? 'sale' : 'sales'}</span>
-                      {accounts && b.credit_limit_minor !== undefined && (b.ageing?.owed_minor ?? 0) > b.credit_limit_minor && <><br /><span className="rt-flag">Above the credit limit</span></>}
+                      {accounts && b.over_limit === true && <><br /><span className="rt-flag">Above the credit limit</span></>}
                     </td>
                     <td className="num">{money(b.ageing?.owed_minor ?? 0)}</td>
                     {accounts && !phone && <td className="num">{b.credit_limit_minor !== undefined ? money(b.credit_limit_minor) : ''}</td>}

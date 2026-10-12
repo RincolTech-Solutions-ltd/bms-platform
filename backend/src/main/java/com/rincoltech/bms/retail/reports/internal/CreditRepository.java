@@ -200,7 +200,10 @@ class CreditRepository {
                 .list();
     }
 
-    /** Payments on credit sales dated in the range, by day and method, in the branches of the sales they paid. */
+    /**
+     * Payments on credit sales dated in the range, by day and method. A payment on account (issue #196) counts in the branch
+     * that received the money, as the ledger and the cash book post it; any other payment counts in the branch of its sale.
+     */
     List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
@@ -213,7 +216,10 @@ class CreditRepository {
         }
         return jdbc.sql("SELECT p.paid_on, p.method, count(*) AS payments, sum(p.amount_minor) AS amount"
                         + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
-                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + branch(branchIds)
+                        + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
+                        + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
+                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'"
+                        + (branchIds == null ? "" : " AND coalesce(ap.branch_id, s.branch_id) IN (:branchIds)")
                         // A payment on account that was reversed (issue #196) was not money received after all.
                         + " AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a"
                         + " JOIN retail_account_payments r ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id"

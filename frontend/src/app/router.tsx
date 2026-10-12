@@ -89,6 +89,7 @@ const retailBranchRolesRoute = retailScreen('/branch-roles', 'Branch roles').laz
 const retailPriceListsRoute = retailScreen('/price-lists', 'Price lists').lazy(() => import('../areas/staff/retail/price-lists').then((m) => m.Route));
 const retailCustomerGroupsRoute = retailScreen('/customer-groups', 'Customer groups').lazy(() => import('../areas/staff/retail/customer-groups').then((m) => m.Route));
 const retailAccountsRoute = retailScreen('/accounts', 'Customer accounts').lazy(() => import('../areas/staff/retail/accounts').then((m) => m.Route));
+const retailCustomerAgeingRoute = retailScreen('/customer-ageing', 'Customer ageing').lazy(() => import('../areas/staff/retail/customer-ageing').then((m) => m.Route));
 const retailAccountRoute = retailScreen('/accounts/$customerId', 'Account').lazy(() => import('../areas/staff/retail/account').then((m) => m.Route));
 
 // The living style page (#106): every component and illustration, for development builds and the
@@ -205,6 +206,7 @@ export const router = createRouter({
         retailCustomerGroupsRoute,
         retailAccountsRoute,
         retailAccountRoute,
+        retailCustomerAgeingRoute,
         retailBankingRoute,
         retailBankingReportRoute,
       ]), staffLendingRoute.addChildren([

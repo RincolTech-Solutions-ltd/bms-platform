@@ -12,7 +12,7 @@ export type RetailScreen =
   | 'sale' | 'creditSales' | 'salesHistory' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation'
   | 'catalogue' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer'
   // The trade screens of ADR-033: offered only while their capability is on (SCREEN_CAPABILITY below).
-  | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts'
+  | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts' | 'customerAgeing'
   // The cash book (ADR-022, FR-RET-31).
   | 'savings' | 'banking' | 'expenses' | 'withdrawals' | 'advances' | 'cashSummary' | 'bankingReport' | 'expensesReport' | 'expenseSetup'
   // The administrator's retail settings (profile and capabilities) and the screens of a capability (ADR-033).
@@ -30,6 +30,7 @@ export const SCREEN_CAPABILITY: Partial<Record<RetailScreen, string>> = {
   priceLists: 'price_lists',
   customerGroups: 'price_lists',
   customerAccounts: 'customer_accounts',
+  customerAgeing: 'customer_accounts',
 };
 
 /** The catalogue management screens (#146); the Catalogue tile opens when any of them may be used. */
@@ -83,6 +84,9 @@ const NEEDS: Record<RetailScreen, string[]> = {
   // The Customer accounts tile is the administrator's (limits and terms are retail.credit.manage); a seller opens one buyer's
   // account from Credit buyers or Credit control, which the account page allows with a sales read (canOpenAccount).
   customerAccounts: [CREDIT_MANAGE, 'retail.sale.read'],
+  // Customer ageing is a tile of the administrator's, like Customer accounts, so a seller's menu is the same with the feature on or
+  // off; the report itself is a sales read on the server and agrees with Credit control.
+  customerAgeing: [CREDIT_MANAGE, 'retail.sale.read'],
   // Stock value is a stock read; its cost columns and the profit report need retail.profit.read.
   valuation: ['retail.stock.read'],
   profit: [PROFIT],
@@ -256,6 +260,7 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'priceLists', path: '/staff/retail/price-lists', label: 'Price lists', hint: 'Different prices for different customers, with quantity discounts' },
   { screen: 'customerGroups', path: '/staff/retail/customer-groups', label: 'Customer groups', hint: 'Group customers that share a price list' },
   { screen: 'customerAccounts', path: '/staff/retail/accounts', label: 'Customer accounts', hint: 'Credit limits, statements and payments from customers' },
+  { screen: 'customerAgeing', path: '/staff/retail/customer-ageing', label: 'Customer ageing', hint: 'What each credit buyer owes, by how late it is' },
   { screen: 'branchRoles', path: '/staff/retail/branch-roles', label: 'Branch roles', hint: 'Which branches are stores and which are shops' },
   { screen: 'settings', path: '/staff/retail/settings', label: 'Retail settings', hint: 'Shop or trade, and the features you use' },
 ];

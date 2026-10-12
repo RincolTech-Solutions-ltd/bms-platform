@@ -208,10 +208,10 @@ describe('credit control', () => {
   const data: CreditControl = {
     from: '2026-03-01', to: '2026-04-01', as_of: '2026-04-01', currency: 'UGX', top: 20, buyer_count: 1, overdue_count: 0, sort: 'amount', overdue: [], payments: [], payments_by_method: [], payments_minor: 0,
     totals: { owed_minor: 6000 },
-    buyers: [{ customer_id: 'c1', name: 'Test Buyer 01', sale_count: 2, ageing: { owed_minor: 6000 }, credit_limit_minor: 5000 }],
+    buyers: [{ customer_id: 'c1', name: 'Test Buyer 01', sale_count: 2, ageing: { owed_minor: 6000 }, credit_limit_minor: 5000, over_limit: true }],
   };
-  const view = (accounts: boolean) =>
-    renderToString(<RouterContextProvider router={router}><CreditControlView data={data} nameOf={() => ''} sort="amount" accounts={accounts} /></RouterContextProvider>);
+  const view = (accounts: boolean, report: CreditControl = data) =>
+    renderToString(<RouterContextProvider router={router}><CreditControlView data={report} nameOf={() => ''} sort="amount" accounts={accounts} /></RouterContextProvider>);
 
   it('adds the limit, a mark above it and the link to the account only while the feature is on', () => {
     const html = view(true);
@@ -222,5 +222,17 @@ describe('credit control', () => {
     expect(off).not.toContain('Above the credit limit');
     expect(off).not.toContain('Open the account');
     expect(off).not.toContain('Limit');
+  });
+
+  it('marks a buyer above the limit only when the server says so, never from a branch\'s share of what they owe', () => {
+    // A report over one branch: the buyer owes 6,000 here against a limit of 5,000 that is measured across every branch, and the
+    // server sends no over_limit, so the screen says nothing about the limit being passed.
+    const scoped: CreditControl = { ...data, buyers: [{ customer_id: 'c1', name: 'Test Buyer 01', sale_count: 2, ageing: { owed_minor: 6000 }, credit_limit_minor: 5000 }] };
+    const html = view(true, scoped);
+    expect(html).not.toContain('Above the credit limit');
+    expect(html).toContain('UGX 5,000');
+    // And a buyer the server says is within the limit is not marked either.
+    const within: CreditControl = { ...data, buyers: [{ customer_id: 'c1', name: 'Test Buyer 01', sale_count: 2, ageing: { owed_minor: 3000 }, credit_limit_minor: 5000, over_limit: false }] };
+    expect(view(true, within)).not.toContain('Above the credit limit');
   });
 });

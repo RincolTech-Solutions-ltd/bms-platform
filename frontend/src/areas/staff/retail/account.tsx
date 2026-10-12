@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { businessToday, retail, type AccountPayment, type CustomerAccount, type OpenSale, type Statement } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import {
-  accountFormOf, accountProblem, accountRequest, allocatableMinor, buildPaymentRequest, defaultStatementRange, kindWords, limitWords, methodWords, oldestFirst,
-  payableSales, paymentProblem, termsWords, type AccountForm, type ManualRow, type PaymentForm,
+  MIN_REASON, accountFormOf, accountProblem, accountRequest, allocatableMinor, buildPaymentRequest, defaultStatementRange, kindWords, limitWords, methodWords, oldestFirst,
+  payableSales, paymentProblem, reasonOf, reversalKeys, termsWords, type AccountForm, type ManualRow, type PaymentForm,
 } from './account-state';
 import { usePersistedDraft, newIdempotencyKey } from './idempotency';
 import { CREDIT_MANAGE, SALE_VOID, branchesWhere, canOpenAccount, holds, holdsAt } from './permissions';
@@ -178,12 +178,12 @@ export function ReceiptList({ items, canReverse, busy, error, nameOf, onReverse 
             <p><button type="button" className="btn-sm" onClick={() => { setReversing(r.id ?? null); setReason(''); }} aria-label={`Reverse payment ${r.receipt_no}`}>Reverse</button></p>
           )}
           {reversing === r.id && (
-            <form className="stack" onSubmit={(e) => { e.preventDefault(); if (reason.trim().length >= 5 && !busy) { onReverse(r, reason.trim()); setReversing(null); } }}>
-              <label htmlFor={`reverse-${r.id}`}>Why is it reversed? (at least 5 characters)</label>
+            <form className="stack" onSubmit={(e) => { e.preventDefault(); const why = reasonOf(reason); if (why && !busy) { onReverse(r, why); setReversing(null); } }}>
+              <label htmlFor={`reverse-${r.id}`}>Why is it reversed? (at least {MIN_REASON} characters)</label>
               <input id={`reverse-${r.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
               <p className="hint">The sales owe this money again. To pay different sales, take the payment again afterwards.</p>
               <p className="cluster">
-                <button type="submit" disabled={reason.trim().length < 5 || busy}>Reverse this payment</button>
+                <button type="submit" disabled={reasonOf(reason) === null || busy}>Reverse this payment</button>
                 <button type="button" className="btn-ghost" onClick={() => setReversing(null)}>Cancel</button>
               </p>
             </form>
@@ -254,7 +254,8 @@ export function AccountScreen({ customerId, me, branch }: { customerId: string; 
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
   const [message, setMessage] = useState<string | null>(null);
-  const [reverseKey, setReverseKey] = useState(newIdempotencyKey());
+  // One key per receipt: a failed reversal of one receipt must not give the next receipt the same key on another path.
+  const reverseKeys = useRef(reversalKeys(newIdempotencyKey));
   const payBranches = branchesWhere(me, 'retail.sale.create');
   const firstBranch = payBranches.find((b) => b.id === branch)?.id ?? (payBranches.length === 1 ? payBranches[0]?.id : undefined) ?? '';
   const { key, draft, setDraft, discard } = usePersistedDraft<PaymentForm>(`account-payment:${me.user_id ?? ''}:${customerId}`, blankPayment(firstBranch, today));
@@ -275,8 +276,8 @@ export function AccountScreen({ customerId, me, branch }: { customerId: string; 
     onSuccess: (r) => { discard(); done(`Saved ${r.receipt_no}: ${money(r.amount_minor ?? 0)}.`); },
   });
   const reverse = useMutation({
-    mutationFn: (v: { receipt: AccountPayment; reason: string }) => retail.reverseAccountPayment(customerId, v.receipt.id ?? '', v.reason, reverseKey),
-    onSuccess: (r) => { setReverseKey(newIdempotencyKey()); done(`Reversed ${r.receipt_no}.`); },
+    mutationFn: (v: { receipt: AccountPayment; reason: string }) => retail.reverseAccountPayment(customerId, v.receipt.id ?? '', v.reason, reverseKeys.current.keyFor(v.receipt.id ?? '', v.reason)),
+    onSuccess: (r, v) => { reverseKeys.current.done(v.receipt.id ?? ''); done(`Reversed ${r.receipt_no}.`); },
   });
   const nameOf = (id: string | undefined) => branchLabel((me.branches ?? []).find((b) => b.id === id));
   if (!allowed) {

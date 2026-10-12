@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { RetailError, type OpenSale } from '../../../api/retail';
 import {
-  accountFormOf, accountProblem, accountRequest, allocatableMinor, buildPaymentRequest, defaultStatementRange, exceededBy, isLimitRefusal, kindWords, limitWords,
-  oldestFirst, payableSales, paymentProblem, termsWords, type PaymentForm,
+  MIN_REASON, accountFormOf, accountProblem, accountRequest, allocatableMinor, buildPaymentRequest, defaultStatementRange, exceededBy, isLimitRefusal, kindWords, limitWords,
+  oldestFirst, payableSales, paymentProblem, reasonOf, reversalKeys, termsWords, type PaymentForm,
 } from './account-state';
 
 // Customer accounts, the pure rules (ADR-033, issue #196). Fabricated sales and amounts; the server decides all of it again.
@@ -94,9 +94,11 @@ describe('the limit and the terms', () => {
     expect(accountProblem({ limit: '-5', terms: '' })).toMatch(/limit/i);
     expect(accountProblem({ limit: '', terms: '3.5' })).toMatch(/days/i);
     expect(accountProblem({ limit: '', terms: '366' })).toMatch(/365/);
-    expect(accountRequest({ limit: '5000', terms: '' })).toEqual({ credit_limit_minor: 5000 });
-    expect(accountRequest({ limit: '', terms: '0' })).toEqual({ terms_days: 0 });
-    expect(accountRequest({ limit: '', terms: '' })).toEqual({});
+    // Each field is a value or an explicit clear: the request never leaves one out, so an empty form cannot wipe by omission.
+    expect(accountRequest({ limit: '5000', terms: '' })).toEqual({ credit_limit_minor: 5000, clear_terms_days: true });
+    expect(accountRequest({ limit: '', terms: '0' })).toEqual({ clear_credit_limit: true, terms_days: 0 });
+    expect(accountRequest({ limit: '', terms: '' })).toEqual({ clear_credit_limit: true, clear_terms_days: true });
+    expect(accountRequest({ limit: '5000', terms: '30' })).toEqual({ credit_limit_minor: 5000, terms_days: 30 });
   });
 });
 
@@ -126,5 +128,50 @@ describe('the statement', () => {
   it('starts 90 days back and ends on the business day, not the UTC day (22:30 UTC is already the next day in Kampala)', () => {
     expect(defaultStatementRange(new Date('2026-10-07T22:30:00Z'))).toEqual({ from: '2026-07-11', to: '2026-10-08' });
     expect(defaultStatementRange(new Date('2026-10-07T20:59:00Z'))).toEqual({ from: '2026-07-10', to: '2026-10-07' });
+  });
+});
+
+describe('the reason for a reversal', () => {
+  it('is the same five characters, once trimmed, as the server asks', () => {
+    expect(MIN_REASON).toBe(5);
+    expect(reasonOf('oops')).toBeNull();
+    expect(reasonOf('  oops ')).toBeNull();
+    expect(reasonOf('  Wrong buyer ')).toBe('Wrong buyer');
+  });
+});
+
+describe('the Idempotency-Key of a reversal', () => {
+  const counter = () => {
+    let n = 0;
+    return () => `key-${++n}`;
+  };
+
+  it('is one per receipt, so a failed reversal of one never lends its key to another', () => {
+    const keys = reversalKeys(counter());
+    const a = keys.keyFor('receipt-a', 'Wrong buyer');
+    // The reversal of A failed; the cashier now reverses B: B must not send A's key.
+    const b = keys.keyFor('receipt-b', 'Wrong buyer');
+    expect(b).not.toBe(a);
+  });
+
+  it('repeats for a retry of the same receipt with the same reason, so a lost reply is replayed and not done twice', () => {
+    const keys = reversalKeys(counter());
+    const first = keys.keyFor('receipt-a', 'Wrong buyer');
+    expect(keys.keyFor('receipt-a', 'Wrong buyer')).toBe(first);
+    keys.keyFor('receipt-b', 'Wrong buyer');
+    expect(keys.keyFor('receipt-a', 'Wrong buyer')).toBe(first);
+  });
+
+  it('changes when the reason is edited, because the request is no longer the same one', () => {
+    const keys = reversalKeys(counter());
+    const first = keys.keyFor('receipt-a', 'Wrong buyer');
+    expect(keys.keyFor('receipt-a', 'Wrong buyer, entered twice')).not.toBe(first);
+  });
+
+  it('is forgotten once the reversal went through', () => {
+    const keys = reversalKeys(counter());
+    const first = keys.keyFor('receipt-a', 'Wrong buyer');
+    keys.done('receipt-a');
+    expect(keys.keyFor('receipt-a', 'Wrong buyer')).not.toBe(first);
   });
 });

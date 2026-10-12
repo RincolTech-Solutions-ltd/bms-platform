@@ -66,7 +66,11 @@ class CreditService {
                         b.sales(),
                         ageing(b.buckets()),
                         b.oldestDays(),
-                        accounts ? b.creditLimitMinor() : null))
+                        accounts ? b.creditLimitMinor() : null,
+                        // The limit is measured across every branch: "over limit" is said only when the report is.
+                        accounts && filter == null && b.creditLimitMinor() != null
+                                ? b.buckets().owed() > b.creditLimitMinor()
+                                : null))
                 .toList();
         List<OverdueRow> overdue = repo.overdue(filter, today, sort.equals("age"), top);
 

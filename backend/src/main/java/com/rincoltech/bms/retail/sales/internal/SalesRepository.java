@@ -390,6 +390,27 @@ class SalesRepository {
                         """).params(amountMinor, saleId).update();
     }
 
+    /**
+     * Gives a reversed payment on account back to the sale (V44): the sales guard lets paid_minor fall only while the
+     * transaction-local setting {@code bms.reverse_account_payment} is on, and only to the sum of the payments that were not
+     * reversed. The setting is raised for this one statement and cleared after it.
+     */
+    void releasePaid(UUID saleId, long amountMinor) {
+        jdbc.sql("SELECT set_config('bms.reverse_account_payment', 'on', true)")
+                .query()
+                .singleValue();
+        try {
+            jdbc.sql("""
+                            UPDATE retail_sales SET paid_minor = paid_minor - ?, updated_at = now(), version = version + 1
+                             WHERE id = ?
+                            """).params(amountMinor, saleId).update();
+        } finally {
+            jdbc.sql("SELECT set_config('bms.reverse_account_payment', '', true)")
+                    .query()
+                    .singleValue();
+        }
+    }
+
     List<Payment> payments(UUID saleId) {
         return jdbc.sql("""
                         SELECT id, sale_id, amount_minor, currency, method, paid_on, journal_entry_id, created_at, created_by

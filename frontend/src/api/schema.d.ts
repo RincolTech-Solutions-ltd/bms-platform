@@ -6616,6 +6616,8 @@ export interface components {
              * @description Days past the due date of the oldest overdue sale; absent when none is overdue
              */
             oldest_overdue_days?: number;
+            /** @description Owed is above the limit. Present only with a limit and only when the report covers every branch, because the limit is measured across all of them */
+            over_limit?: boolean;
             /** Format: int32 */
             sale_count?: number;
         };
@@ -6721,16 +6723,20 @@ export interface components {
              */
             version?: number;
         };
-        /** @description Replaces the credit limit and the payment terms; an absent field clears it (no limit, no terms). Sent under If-Match with the customer's version */
+        /** @description Replaces the credit limit and the payment terms, sent under If-Match with the customer's version. Each of the two is either given or cleared on purpose: a value, or its clear flag set to true, never neither and never both (422), so a body of {} changes nothing */
         RetailCustomerAccountRequest: {
+            /** @description true removes the limit; do not send it with credit_limit_minor */
+            clear_credit_limit?: boolean;
+            /** @description true removes the terms; do not send it with terms_days */
+            clear_terms_days?: boolean;
             /**
              * Format: int64
-             * @description The most the buyer may owe on credit sales, all branches together; absent: no limit
+             * @description The most the buyer may owe on credit sales, all branches together
              */
             credit_limit_minor?: number;
             /**
              * Format: int32
-             * @description Days after the sale a credit sale falls due; 0 is the day of the sale; absent: none
+             * @description Days after the sale a credit sale falls due; 0 is the day of the sale
              */
             terms_days?: number;
         };

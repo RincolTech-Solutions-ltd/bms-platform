@@ -234,24 +234,38 @@ class AccountsRepository {
                 .optional();
     }
 
-    /** Newest first, in the given receiving branches (null: every branch). */
+    /**
+     * Newest first. With {@code branchIds} (null: every branch) a receipt is listed when it paid a sale of one of those
+     * branches, and then {@code amount_minor} is the part of it that paid those sales, so the list agrees with the
+     * statement, which counts a payment in the branch of the sale it paid. The receiving branch is only the place the
+     * money was banked; the ledger and the cash book use it, this view does not.
+     */
     List<Receipt> receipts(UUID customerId, List<UUID> branchIds, Instant afterCreated, UUID afterId, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
-        StringBuilder sql = new StringBuilder(SELECT_RECEIPT + " WHERE customer_id = :customer");
+        String inScope = "(SELECT sum(a.amount_minor) FROM retail_account_payment_allocations a"
+                + " JOIN retail_sales s ON s.tenant_id = a.tenant_id AND s.id = a.sale_id"
+                + " WHERE a.tenant_id = p.tenant_id AND a.receipt_id = p.id AND s.branch_id IN (:branchIds))";
+        StringBuilder sql = new StringBuilder(
+                branchIds == null
+                        ? SELECT_RECEIPT.replace("FROM retail_account_payments", "FROM retail_account_payments p")
+                        : SELECT_RECEIPT
+                                .replace("amount_minor,", inScope + " AS amount_minor,")
+                                .replace("FROM retail_account_payments", "FROM retail_account_payments p"));
+        sql.append(" WHERE p.customer_id = :customer");
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("customer", customerId);
         if (branchIds != null) {
-            sql.append(" AND branch_id IN (:branchIds)");
+            sql.append(" AND ").append(inScope).append(" IS NOT NULL");
             params.put("branchIds", branchIds);
         }
         if (afterCreated != null) {
-            sql.append(" AND (created_at, id) < (:afterCreated, :afterId)");
+            sql.append(" AND (p.created_at, p.id) < (:afterCreated, :afterId)");
             params.put("afterCreated", Timestamp.from(afterCreated));
             params.put("afterId", afterId);
         }
-        sql.append(" ORDER BY created_at DESC, id DESC LIMIT :limit");
+        sql.append(" ORDER BY p.created_at DESC, p.id DESC LIMIT :limit");
         params.put("limit", limit);
         return jdbc.sql(sql.toString())
                 .params(params)

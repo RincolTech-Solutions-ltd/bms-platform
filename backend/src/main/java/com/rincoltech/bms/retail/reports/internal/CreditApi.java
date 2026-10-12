@@ -41,7 +41,13 @@ final class CreditApi {
                     description =
                             "The buyer's credit limit; present only while the customer_accounts capability is on and"
                                     + " the buyer has a record with a limit")
-            Long creditLimitMinor) {}
+            Long creditLimitMinor,
+
+            @Schema(
+                    description =
+                            "Owed is above the limit. Present only with a limit and only when the report covers every"
+                                    + " branch, because the limit is measured across all of them")
+            Boolean overLimit) {}
 
     @Schema(name = "RetailOverdueSale")
     @JsonInclude(JsonInclude.Include.NON_NULL)

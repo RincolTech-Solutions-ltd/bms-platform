@@ -43,7 +43,7 @@ describe('customer accounts in the mock', () => {
     const { api, productId } = await trade();
     await expect(api.createSale({ branch_id: branch, payment_method: 'credit', buyer_name: 'Typed Buyer 01', lines: [{ product_id: productId, qty: '1' }] }, 'k1')).rejects.toMatchObject({ code: 'customer_required' });
     const account = await api.customerAccount(buyer);
-    await api.setCustomerAccount(buyer, account.version ?? 1, { credit_limit_minor: 12000 });
+    await api.setCustomerAccount(buyer, account.version ?? 1, { credit_limit_minor: 12000, clear_terms_days: true });
     await creditSale(api, productId, '2'); // 12,000: exactly the limit
     const refused = creditSale(api, productId, '1');
     await expect(refused).rejects.toMatchObject({ code: 'credit_limit_exceeded', problem: { exceeded_by_minor: 6000 } });
@@ -54,7 +54,7 @@ describe('customer accounts in the mock', () => {
 
   it('dates a credit sale from the terms unless a date is typed', async () => {
     const { api, productId } = await trade();
-    await api.setCustomerAccount(buyer, (await api.customerAccount(buyer)).version ?? 1, { terms_days: 30 });
+    await api.setCustomerAccount(buyer, (await api.customerAccount(buyer)).version ?? 1, { terms_days: 30, clear_credit_limit: true });
     const dated = await creditSale(api, productId, '1', {}, '2026-01-05');
     expect(dated.due_date).toBe('2026-02-04');
     expect((await creditSale(api, productId, '1', { due_date: '2026-03-01' }, '2026-01-05')).due_date).toBe('2026-03-01');

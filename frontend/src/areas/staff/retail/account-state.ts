@@ -1,4 +1,4 @@
-import { RETAIL_CURRENCY, RetailError, businessToday, daysBefore, type AccountPaymentRequest, type CustomerAccount, type OpenSale } from '../../../api/retail';
+import { RETAIL_CURRENCY, RetailError, businessToday, daysBefore, type AccountEdit, type AccountPaymentRequest, type CustomerAccount, type OpenSale } from '../../../api/retail';
 import { formatMinor, parseMinor } from '../../../components/money';
 
 const fmt = (minor: number): string => formatMinor(minor, RETAIL_CURRENCY);
@@ -164,10 +164,46 @@ export function accountProblem(form: AccountForm): string | null {
   return null;
 }
 
-export function accountRequest(form: AccountForm): { credit_limit_minor?: number; terms_days?: number } {
+/**
+ * The request for a valid form. The server wants each of the two decided on purpose: a value, or its clear flag set when the
+ * field was left empty. A body that names neither would change nothing, so one field is never left out.
+ */
+export function accountRequest(form: AccountForm): AccountEdit {
+  const limit = form.limit.trim() !== '';
+  const terms = form.terms.trim() !== '';
   return {
-    ...(form.limit.trim() !== '' ? { credit_limit_minor: parseMinor(form.limit, RETAIL_CURRENCY) ?? 0 } : {}),
-    ...(form.terms.trim() !== '' ? { terms_days: Number(form.terms) } : {}),
+    ...(limit ? { credit_limit_minor: parseMinor(form.limit, RETAIL_CURRENCY) ?? 0 } : { clear_credit_limit: true }),
+    ...(terms ? { terms_days: Number(form.terms) } : { clear_terms_days: true }),
+  };
+}
+
+// ---- Reversing a payment ---------------------------------------------------------------------------------
+
+/** The fewest characters of a reason for a reversal or a credit override: the same on the screen and on the server. */
+export const MIN_REASON = 5;
+
+/** A reason as the server reads it (trimmed), or null while it is too short. */
+export const reasonOf = (text: string): string | null => (text.trim().length >= MIN_REASON ? text.trim() : null);
+
+/**
+ * The Idempotency-Key of each reversal, one per receipt: a retry of the same receipt with the same reason repeats its key (so
+ * a reply lost on the way is replayed, not done twice), while another receipt, or the same receipt with another reason, gets a
+ * key of its own. One key shared by every receipt on the page would be sent on a different path after a failure and refused.
+ */
+export function reversalKeys(make: () => string) {
+  const keys = new Map<string, { reason: string; key: string }>();
+  return {
+    keyFor(receiptId: string, reason: string): string {
+      const held = keys.get(receiptId);
+      if (held && held.reason === reason) return held.key;
+      const key = make();
+      keys.set(receiptId, { reason, key });
+      return key;
+    },
+    /** The reversal went through: the receipt will not be reversed again. */
+    done(receiptId: string): void {
+      keys.delete(receiptId);
+    },
   };
 }
 
