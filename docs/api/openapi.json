@@ -3570,6 +3570,26 @@
           "document_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "reversed" : {
+            "description" : "The transaction was reversed. The stored copy is as issued and unchanged; show the document as reversed",
+            "type" : "boolean"
+          },
+          "reversed_on" : {
+            "description" : "The value date of the reversal; null when not reversed",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "LoanDocumentList" : {
+        "description" : "The receipts and vouchers stored for a loan, newest first",
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/LoanDocumentIssued"
+            },
+            "type" : "array"
           }
         }
       },
@@ -15051,6 +15071,34 @@
           }
         },
         "summary" : "Request disbursement of an approved loan (FR-DIS-01); 201 when executed below the threshold, 202 when it waits for a checker",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/documents" : {
+      "get" : {
+        "operationId" : "listLoanDocuments",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanDocumentList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The receipts and vouchers stored for a loan, each marked when its transaction was reversed",
         "tags" : [ "lending-loans" ]
       }
     },

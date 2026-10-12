@@ -1173,6 +1173,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lending/loans/{loan_id}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipts and vouchers stored for a loan, each marked when its transaction was reversed */
+        get: operations["listLoanDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/loans/{loan_id}/documents/{doc_type}": {
         parameters: {
             query?: never;
@@ -5166,6 +5183,17 @@ export interface components {
             doc_type?: string;
             /** Format: uuid */
             document_id?: string;
+            /** @description The transaction was reversed. The stored copy is as issued and unchanged; show the document as reversed */
+            reversed?: boolean;
+            /**
+             * Format: date
+             * @description The value date of the reversal; null when not reversed
+             */
+            reversed_on?: string;
+        };
+        /** @description The receipts and vouchers stored for a loan, newest first */
+        LoanDocumentList: {
+            items?: components["schemas"]["LoanDocumentIssued"][];
         };
         LoanGuarantor: {
             /** Format: int64 */
@@ -11104,6 +11132,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoanActionOutcome"];
+                };
+            };
+        };
+    };
+    listLoanDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanDocumentList"];
                 };
             };
         };

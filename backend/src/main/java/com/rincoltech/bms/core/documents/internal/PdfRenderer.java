@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.documents.internal;
 
 import com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder.FontStyle;
+import com.openhtmltopdf.outputdevice.helper.ExternalResourceControlPriority;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -15,7 +16,9 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 /**
  * ADR-034: Thymeleaf in XML mode (strict XHTML, every value escaped) laid out by OpenHTMLtoPDF on
  * PDFBox, with the self-hosted Open Sans embedded in three weights. Templates live under
- * {@code templates/documents/} and share {@code layout.html} for the header and footer.
+ * {@code templates/documents/} and share {@code layout.html} for the header and footer. The renderer
+ * loads nothing from outside the document: an access rule, checked before any URI is resolved, allows
+ * only {@code data:} URIs (the tenant logo), so no template value can reach a file or a URL.
  */
 @Component
 class PdfRenderer {
@@ -45,6 +48,9 @@ class PdfRenderer {
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.useFastMode();
             builder.withProducer("BMS Platform");
+            builder.useExternalResourceAccessControl(
+                    (uri, type) -> uri != null && uri.regionMatches(true, 0, "data:", 0, 5),
+                    ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
             builder.withHtmlContent(html, "/");
             font(builder, "Regular", 400);
             font(builder, "SemiBold", 600);

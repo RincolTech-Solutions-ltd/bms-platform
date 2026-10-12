@@ -41,16 +41,47 @@ Four questions are open:
    - **Receipt and voucher.** These are fixed once the transaction exists. The first download
      renders the document in the request (well under a second for one page), stores it under
      FR-DOC-02 and records it in `documents`. Every later download returns a signed URL to the
-     stored copy. A reversal does not change the stored receipt; the reversal shows on the
-     statement.
+     stored copy. What a receipt shows must therefore be what was true when the payment was
+     recorded and nothing later: what the payment was applied to is the transaction's own
+     allocation rows, and "Loan after this payment" (outstanding, credit held, next due date) is
+     computed from the transactions recorded up to and including that payment (`LoanLedger.after`),
+     never from the loan's balances today, and carries no "as at today" date. A receipt first opened
+     a month later is identical to one opened at once.
+   - **Reversals.** A receipt is never first issued for a transaction that was reversed (422
+     `transaction_reversed`: the repayment no longer stands, and the reversal shows on the
+     statement). A receipt issued before the reversal stays byte for byte as issued, since a
+     stored document is immutable, and the way a client shows it as reversed is the response of
+     `POST /lending/loans/{loan_id}/transactions/{txn_id}/document` and the list
+     `GET /lending/loans/{loan_id}/documents`, which carry `reversed` and `reversed_on`. The core
+     `GET /documents/{id}` and download URL serve the stored copy and know nothing of the loan.
    - **Schedule and statement.** These change with every repayment, so they are rendered on each
      request "as at" the business date and are not stored. Storing them would mean invalidating
-     them on every money event.
+     them on every money event. The statement is the loan account: the disbursement at its gross
+     amount (with the fees deducted from the proceeds and the net paid out as notes), the interest
+     and fees of the schedule as charges, each repayment, rebate, reversal and write-off as a credit
+     or a charge with a running balance, and a closing balance that is the loan's outstanding (a
+     difference the ledger cannot explain shows as an explicit adjustment line, never as a closing
+     balance that disagrees with the loan). Money that does not move the balance (an upfront fee, a
+     recovery after a write-off, credit held from an overpayment) is a note.
+   - **No render under a lock.** A repayment waits on the loan's row lock, so no document work
+     happens while it is held, and none inside a transaction. The data is read in a short read-only
+     transaction; the PDF is rendered and uploaded with no database connection held
+     (`Documents.putGenerated`); the loan's row lock is then taken only to look again, and record
+     (`Documents.recordGenerated`). Two concurrent first requests both render, one records and the
+     other gets that document back and deletes its own upload. That lock is the guarantee of one
+     stored document per transaction, so no unique constraint on `documents` was added (a migration
+     would add nothing the only writer does not already enforce); `frDoc02_concurrentFirstRequests`
+     proves it.
    - **The worker.** The outbox path stays for what is slow or not interactive, such as report
      exports and documents attached to SMS or email. Nothing in the MVP four needs it.
 4. **Golden files compare text, not bytes.** Tests render with a fixed creation date and document
    id. They extract the text with PDFBox and compare it with a checked-in `.txt` golden file per
-   document. A second check asserts the page count and that the logo image is present.
+   document. A second check asserts the page count and that the logo image is present. Every golden
+   file is one page, so a separate test renders a statement of several pages and asserts that the
+   table header repeats on each page and that the footer reads "page x of y" with the real numbers.
+5. **The renderer loads only `data:` URIs.** The logo is passed as a `data:` URI; an access rule on
+   the renderer (checked before any URI is resolved) refuses every other address, so a value in a
+   template can never make it read a file or fetch a URL (`PdfRendererTest`).
 
 ## Alternatives considered
 
@@ -95,5 +126,9 @@ request.
    `backend/target/document-samples`.
 
 **Watch for:** the logo must stay PNG, JPEG or WebP (FR-TEN-08); SVG is never passed to the
-renderer. A template change does not alter receipts already stored; that is intended, and the
+renderer. A deducted fee that equals or exceeds the principal is refused (422 `fees_exceed_principal`)
+instead of failing in the amount in words. Penalties (increment 6) will change a schedule item's
+penalties due after a receipt was issued; the "loan after this payment" of the receipts issued
+before then is unaffected, but increment 6 must record the penalty charge with a date so the
+statement and `LoanLedger.after` can place it in time. A template change does not alter receipts already stored; that is intended, and the
 stored copy is the one issued.

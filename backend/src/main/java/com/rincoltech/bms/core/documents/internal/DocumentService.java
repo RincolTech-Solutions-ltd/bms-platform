@@ -286,42 +286,55 @@ class DocumentService implements Documents {
     }
 
     @Override
-    @Transactional(propagation = Propagation.MANDATORY)
-    public StoredDocument storeGenerated(
-            byte[] bytes, String docType, String docNumber, String subjectType, UUID subjectId, UUID branchId) {
+    public GeneratedObject putGenerated(byte[] bytes, String docType) {
         UUID id = UUID.randomUUID();
         ZonedDateTime at = clock.now().atZone(ZoneOffset.UTC);
         String key = "tenants/%s/%s/%04d/%02d/%s.pdf"
                 .formatted(TenantContext.require(), docType, at.getYear(), at.getMonthValue(), id);
-        String sha = sha256(bytes);
         storage.put(key, bytes, "application/pdf");
-        deleteIfRolledBack(key);
+        return new GeneratedObject(id, key, docType, sha256(bytes), bytes.length);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredDocument recordGenerated(
+            GeneratedObject object, String docNumber, String subjectType, UUID subjectId, UUID branchId) {
+        deleteIfRolledBack(object.key());
         jdbc.sql("""
                         INSERT INTO documents (id, tenant_id, branch_id, doc_type, doc_number, subject_type, subject_id,
                                                object_key, content_type, size_bytes, sha256, created_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, ?)
                         """)
                 .params(
-                        id,
+                        object.id(),
                         branchId,
-                        docType,
+                        object.docType(),
                         docNumber,
                         subjectType,
                         subjectId,
-                        key,
-                        bytes.length,
-                        sha,
+                        object.key(),
+                        object.sizeBytes(),
+                        object.sha256(),
                         CurrentPrincipal.require().userId())
                 .update();
         Map<String, Object> after = new LinkedHashMap<>();
-        after.put("doc_type", docType);
+        after.put("doc_type", object.docType());
         after.put("doc_number", docNumber);
         after.put("subject_type", subjectType);
         after.put("subject_id", subjectId);
-        after.put("size_bytes", bytes.length);
-        after.put("sha256", sha);
-        audit.record(AuditLog.Entry.created("core.document.generated", "core.document", id, branchId, after));
-        return find(id).orElseThrow();
+        after.put("size_bytes", object.sizeBytes());
+        after.put("sha256", object.sha256());
+        audit.record(AuditLog.Entry.created("core.document.generated", "core.document", object.id(), branchId, after));
+        return find(object.id()).orElseThrow();
+    }
+
+    @Override
+    public void discardGenerated(GeneratedObject object) {
+        try {
+            storage.delete(object.key());
+        } catch (RuntimeException e) {
+            log.warn("could not delete the unused generated object {}", object.key(), e);
+        }
     }
 
     @Override

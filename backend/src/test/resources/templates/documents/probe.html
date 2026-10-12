@@ -1,0 +1,14 @@
+<!-- Test only: a page whose image and background take their address from the model, to prove what the renderer will load. -->
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    body { font-family: 'Open Sans'; }
+  </style>
+</head>
+<body>
+  <p>probe</p>
+  <img th:src="${src}" alt="" style="width: 20mm;"/>
+  <div th:style="'height: 10mm; background-image: url(' + ${src} + ');'"></div>
+</body>
+</html>

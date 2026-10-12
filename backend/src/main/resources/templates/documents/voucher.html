@@ -32,7 +32,7 @@
     <tr>
       <td><div class="signline"><span th:text="${'Prepared by ' + signs.preparedBy}">Prepared by</span><br/><span class="muted" th:text="${signs.preparedOn}">date</span></div></td>
       <td><div class="signline"><span th:text="${'Approved by ' + signs.approvedBy}">Approved by</span><br/><span class="muted" th:text="${signs.approvedOn}">date</span></div></td>
-      <td><div class="signline"><span th:text="${'Received by ' + member.name}">Received by</span><br/><span class="muted">Signature and date</span></div></td>
+      <td class="last"><div class="signline"><span th:text="${'Received by ' + member.name}">Received by</span><br/><span class="muted">Signature and date</span></div></td>
     </tr>
   </table>
 </body>

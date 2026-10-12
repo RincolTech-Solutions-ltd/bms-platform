@@ -295,7 +295,15 @@ Coverage gate for the lending calculation code: 95 percent lines (NFR-MNT-02).
 Generated documents (ADR-034, #120). `LoanServicingIT` renders the voucher, the receipt, the
 schedule and the loan statement for a fabricated loan and compares the text PDFBox extracts
 (every printed date replaced by `{DATE}`) with `src/test/resources/golden/documents/*.txt`; a
-receipt is one page, receipts and vouchers are stored once and schedules and statements never.
+receipt is one page with the logo on it, receipts and vouchers are stored once and schedules and statements never.
+The review cases are tests of their own: a receipt first opened after later payments still shows the
+loan right after its own payment; a reversed repayment has no new receipt and an issued one is
+unchanged and marked reversed (response and list); the statement of a loan with fees, partial
+payments, a reversal that re-allocates, a write-off and a recovery parses back to lines that add up
+to the closing balance, which equals the loan's outstanding (`LoanLedgerTest` checks the same
+arithmetic against the servicing rules without a database); a statement of several pages repeats its
+header and numbers its footer; four concurrent first requests store one receipt; and `PdfRendererTest`
+proves the renderer fetches no URL and reads no file.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

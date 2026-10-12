@@ -1,6 +1,7 @@
 package com.rincoltech.bms.lending.loans.internal;
 
 import com.rincoltech.bms.core.documents.Documents;
+import com.rincoltech.bms.core.documents.Documents.GeneratedObject;
 import com.rincoltech.bms.core.documents.Documents.StoredDocument;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.Letterheads;
@@ -10,6 +11,9 @@ import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.lending.loans.internal.LoanLedger.After;
+import com.rincoltech.bms.lending.loans.internal.LoanLedger.Deduction;
+import com.rincoltech.bms.lending.loans.internal.LoanLedger.Entry;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.AllocationRow;
 import com.rincoltech.bms.lending.loans.internal.ServicingApi.LoanBalances;
@@ -32,19 +36,28 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * FR-DOC-01 for loans (ADR-034): the repayment receipt and the disbursement voucher, rendered on
  * first request and stored once (FR-DOC-02), and the repayment schedule and loan statement, rendered
  * as at the business date on each request. Every document carries the tenant's letterhead and the
  * branch of the loan; amounts appear in figures and in words.
+ *
+ * <p>No render and no upload happens inside a transaction or under the loan's row lock, which a
+ * repayment needs: the data is read in a short read-only transaction, the PDF is rendered and
+ * uploaded with no database connection held, and the lock is taken only to look again and record.
  */
 @Service
 class LoanDocuments {
+
+    private static final Logger log = LoggerFactory.getLogger(LoanDocuments.class);
 
     static final String SUBJECT = "lending.loan";
     static final Set<String> RECEIPTED = Set.of("repayment", "recovery", "fee_upfront");
@@ -73,6 +86,8 @@ class LoanDocuments {
     private final CurrentTenant currentTenant;
     private final BusinessClock clock;
     private final JdbcClient jdbc;
+    private final TransactionTemplate reading;
+    private final TransactionTemplate writing;
 
     LoanDocuments(
             LoanRepository loans,
@@ -84,7 +99,8 @@ class LoanDocuments {
             Documents documents,
             CurrentTenant currentTenant,
             BusinessClock clock,
-            JdbcClient jdbc) {
+            JdbcClient jdbc,
+            PlatformTransactionManager transactions) {
         this.loans = loans;
         this.repo = repo;
         this.servicing = servicing;
@@ -95,20 +111,59 @@ class LoanDocuments {
         this.currentTenant = currentTenant;
         this.clock = clock;
         this.jdbc = jdbc;
+        this.reading = new TransactionTemplate(transactions);
+        this.reading.setReadOnly(true);
+        this.writing = new TransactionTemplate(transactions);
     }
 
-    record Issued(UUID documentId, String docType, String docNumber, boolean created) {}
+    /**
+     * @param reversed the repayment or recovery was reversed after the receipt was issued: the stored
+     *     copy is unchanged (it is what was issued), and this flag is how a client shows it
+     */
+    record Issued(
+            UUID documentId,
+            String docType,
+            String docNumber,
+            boolean created,
+            boolean reversed,
+            LocalDate reversedOn) {}
+
+    /** What the read step found: the stored document, or the model to render and what to record. */
+    private record Draft(Issued existing, String docType, String docNumber, Map<String, Object> model) {}
 
     /**
      * The receipt of a repayment, recovery or upfront fee, or the voucher of a disbursement: the
-     * stored copy when there is one, else rendered now and stored. The loan's row lock serialises
-     * two first requests for the same transaction, so a document is stored once.
+     * stored copy when there is one, else rendered now and stored.
+     *
+     * <p>A receipt is never first issued for a transaction that was reversed (422 {@code
+     * transaction_reversed}); one issued before the reversal stays as it was, and the response says it
+     * was reversed. Two first requests for the same transaction both render, but the loan's row lock
+     * is taken only to record, after looking again, so one document is stored and the other request
+     * gets it back (and drops its own upload).
      */
-    @Transactional
     Issued issue(UUID loanId, UUID txnId) {
+        Draft draft = reading.execute(status -> draft(loanId, txnId));
+        if (draft.existing() != null) {
+            return draft.existing();
+        }
+        byte[] pdf = documents.renderPdf(draft.docType(), draft.model());
+        GeneratedObject object = documents.putGenerated(pdf, draft.docType());
+        boolean recorded = false;
+        try {
+            Issued issued = writing.execute(status -> record(loanId, txnId, draft, object));
+            recorded = issued.created();
+            return issued;
+        } finally {
+            if (!recorded) {
+                documents.discardGenerated(object);
+            }
+        }
+    }
+
+    private Draft draft(UUID loanId, UUID txnId) {
         Loan loan = inScope(loanId);
-        loans.lock(loanId);
-        LoanTransaction txn = repo.transaction(loanId, txnId).orElseThrow(ApiException::notFound);
+        List<LoanTransaction> all = repo.transactions(loanId);
+        LoanTransaction txn = find(all, txnId);
         boolean voucher = txn.txnType().equals("disbursement");
         if (!voucher && !RECEIPTED.contains(txn.txnType())) {
             throw new ApiException(
@@ -120,23 +175,86 @@ class LoanDocuments {
         String docType = voucher ? "voucher" : "receipt";
         Optional<StoredDocument> stored = documents.findGenerated(SUBJECT, loanId, docType, txn.receiptNo());
         if (stored.isPresent()) {
-            return new Issued(stored.get().id(), docType, txn.receiptNo(), false);
+            return new Draft(issued(stored.get(), txn, all, false), docType, txn.receiptNo(), null);
         }
+        requireNotReversed(txn);
         Map<String, Object> model = common(loan, voucher ? "VOUCHER" : "RECEIPT", txn.receiptNo(), txn.valueDate());
         model.put("txn", txnModel(loan, txn));
         if (voucher) {
             voucherModel(loan, txn, model);
         } else {
-            receiptModel(loan, txn, model);
+            receiptModel(loan, all, txn, model);
         }
-        byte[] pdf = documents.renderPdf(docType, model);
-        StoredDocument doc = documents.storeGenerated(pdf, docType, txn.receiptNo(), SUBJECT, loanId, loan.branchId());
-        return new Issued(doc.id(), docType, txn.receiptNo(), true);
+        return new Draft(null, docType, txn.receiptNo(), model);
+    }
+
+    /** Under the loan's row lock: look again, then record. Nothing slow happens here. */
+    private Issued record(UUID loanId, UUID txnId, Draft draft, GeneratedObject object) {
+        Principal principal = CurrentPrincipal.require();
+        Loan loan = loans.lock(loanId)
+                .filter(l -> principal.may("lending.loans.read", l.branchId()))
+                .orElseThrow(ApiException::notFound);
+        List<LoanTransaction> all = repo.transactions(loanId);
+        LoanTransaction txn = find(all, txnId);
+        Optional<StoredDocument> stored = documents.findGenerated(SUBJECT, loanId, draft.docType(), draft.docNumber());
+        if (stored.isPresent()) {
+            return issued(stored.get(), txn, all, false);
+        }
+        requireNotReversed(txn);
+        StoredDocument doc = documents.recordGenerated(object, draft.docNumber(), SUBJECT, loanId, loan.branchId());
+        return issued(doc, txn, all, true);
+    }
+
+    /** The receipts and vouchers stored for the loan, newest first, each marked when its transaction was reversed. */
+    List<Issued> issuedDocuments(UUID loanId) {
+        return reading.execute(status -> {
+            inScope(loanId);
+            List<LoanTransaction> all = repo.transactions(loanId);
+            List<Issued> out = new ArrayList<>();
+            for (LoanTransaction t : all) {
+                boolean voucher = t.txnType().equals("disbursement");
+                if (t.receiptNo() == null || !(voucher || RECEIPTED.contains(t.txnType()))) {
+                    continue;
+                }
+                documents
+                        .findGenerated(SUBJECT, loanId, voucher ? "voucher" : "receipt", t.receiptNo())
+                        .ifPresent(d -> out.add(issued(d, t, all, false)));
+            }
+            return out;
+        });
+    }
+
+    private static Issued issued(StoredDocument doc, LoanTransaction txn, List<LoanTransaction> all, boolean created) {
+        LocalDate reversedOn = all.stream()
+                .filter(r -> r.id().equals(txn.reversedByTxnId()))
+                .map(LoanTransaction::valueDate)
+                .findFirst()
+                .orElse(null);
+        return new Issued(doc.id(), doc.docType(), txn.receiptNo(), created, txn.reversedByTxnId() != null, reversedOn);
+    }
+
+    private static LoanTransaction find(List<LoanTransaction> all, UUID txnId) {
+        return all.stream().filter(t -> t.id().equals(txnId)).findFirst().orElseThrow(ApiException::notFound);
+    }
+
+    private static void requireNotReversed(LoanTransaction txn) {
+        if (txn.reversedByTxnId() != null) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "transaction_reversed",
+                    "Transaction reversed",
+                    "This " + txn.txnType()
+                            + " was reversed, so it has no receipt. The reversal shows on the loan statement.");
+        }
     }
 
     /** The repayment schedule as at the business date (FR-DOC-01), never stored. */
-    @Transactional(readOnly = true)
     byte[] schedule(UUID loanId) {
+        Map<String, Object> model = reading.execute(status -> scheduleModel(loanId));
+        return documents.renderPdf("schedule", model);
+    }
+
+    private Map<String, Object> scheduleModel(UUID loanId) {
         Loan loan = inScope(loanId);
         requireDisbursed(loan);
         LocalDate today = today();
@@ -167,79 +285,73 @@ class LoanDocuments {
         totals.put("outstandingWords", AmountInWords.of(t.outstandingMinor(), loan.currency()));
         model.put("rows", rows);
         model.put("totals", totals);
-        return documents.renderPdf("schedule", model);
+        return model;
     }
 
-    /** The loan statement as at the business date (FR-DOC-01), never stored. */
-    @Transactional(readOnly = true)
+    /**
+     * The loan statement as at the business date (FR-DOC-01), never stored: the loan account from
+     * disbursement to now with a running balance, whose closing balance is the loan's outstanding
+     * ({@link LoanLedger}).
+     */
     byte[] statement(UUID loanId) {
+        Map<String, Object> model = reading.execute(status -> statementModel(loanId));
+        return documents.renderPdf("loan_statement", model);
+    }
+
+    private Map<String, Object> statementModel(UUID loanId) {
         Loan loan = inScope(loanId);
         requireDisbursed(loan);
+        String cur = loan.currency();
         LocalDate today = today();
         Map<String, Object> model = common(loan, "STATEMENT", series("ST", loan), today);
-        List<LoanTransaction> txns = new ArrayList<>(repo.transactions(loanId));
-        txns.sort((a, b) -> a.valueDate().equals(b.valueDate())
-                ? a.createdAt().compareTo(b.createdAt())
-                : a.valueDate().compareTo(b.valueDate()));
-        Map<UUID, String> numbers = new LinkedHashMap<>();
-        txns.forEach(t -> numbers.put(t.id(), t.receiptNo()));
-        long paidOut = 0;
-        long received = 0;
-        List<Map<String, Object>> lines = new ArrayList<>();
-        for (LoanTransaction t : txns) {
-            Map<String, Object> line = new LinkedHashMap<>();
-            line.put("date", date(t.valueDate()));
-            line.put("number", t.receiptNo() == null ? "" : t.receiptNo());
-            line.put("out", "");
-            line.put("in", "");
-            switch (t.txnType()) {
-                case "disbursement" -> {
-                    line.put("description", "Disbursement");
-                    line.put("out", money(t.amountMinor(), loan.currency()));
-                    paidOut = Math.addExact(paidOut, t.amountMinor());
-                }
-                case "repayment", "recovery", "fee_upfront" -> {
-                    line.put(
-                            "description",
-                            switch (t.txnType()) {
-                                case "recovery" -> "Recovery";
-                                case "fee_upfront" -> "Upfront fee";
-                                default -> "Repayment";
-                            });
-                    line.put("in", money(t.amountMinor(), loan.currency()));
-                    received = Math.addExact(received, t.amountMinor());
-                }
-                case "reversal" -> {
-                    String reversed = numbers.get(t.reversesTxnId());
-                    line.put("description", "Reversal of " + (reversed == null ? "a repayment" : reversed));
-                    line.put("in", "-" + money(t.amountMinor(), loan.currency()));
-                    received = Math.subtractExact(received, t.amountMinor());
-                }
-                case "write_off" ->
-                    line.put("description", "Written off: " + money(t.amountMinor(), loan.currency()) + " principal");
-                default -> line.put("description", t.txnType().replace('_', ' '));
-            }
-            lines.add(line);
-        }
+        List<LoanTransaction> txns = repo.transactions(loanId);
         LoanBalances b = repo.balances(loanId).orElseThrow();
+        List<Deduction> deductions = txns.stream()
+                .filter(t -> t.txnType().equals("disbursement"))
+                .findFirst()
+                .map(d -> products.fees(loan.productVersionId(), d.amountMinor()).stream()
+                        .filter(f -> f.timing().equals("deducted_at_disbursement"))
+                        .map(f -> new Deduction(f.name(), f.amountMinor()))
+                        .toList())
+                .orElse(List.of());
+        LoanLedger.Statement st = LoanLedger.statement(
+                txns, repo.scheduleRows(loanId), deductions, today, b.totalOutstandingMinor(), v -> money(v, cur));
+        long charged = 0;
+        long credited = 0;
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (Entry e : st.entries()) {
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("date", date(e.date()));
+            line.put("number", e.number());
+            line.put("description", e.description());
+            line.put("note", e.note());
+            line.put("charged", e.chargedMinor() == 0 ? "-" : money(e.chargedMinor(), cur));
+            line.put("credited", e.creditedMinor() == 0 ? "-" : money(e.creditedMinor(), cur));
+            line.put("balance", money(e.balanceMinor(), cur));
+            lines.add(line);
+            charged = Math.addExact(charged, e.chargedMinor());
+            credited = Math.addExact(credited, e.creditedMinor());
+            if (e.description().startsWith("Other adjustments")) {
+                log.warn("loan {} statement needed an adjustment line to reach the recorded outstanding", loanId);
+            }
+        }
         Map<String, Object> totals = new LinkedHashMap<>();
-        totals.put("out", money(paidOut, loan.currency()));
-        totals.put("in", money(received, loan.currency()));
+        totals.put("charged", money(charged, cur));
+        totals.put("credited", money(credited, cur));
+        totals.put("closing", money(st.closingMinor(), cur));
+        totals.put("closingWords", AmountInWords.of(st.closingMinor(), cur));
         Map<String, Object> position = new LinkedHashMap<>();
-        position.put("principal", money(b.principalOutstandingMinor(), loan.currency()));
-        position.put("interest", money(b.interestOutstandingMinor(), loan.currency()));
-        position.put("fees", money(b.feesOutstandingMinor(), loan.currency()));
+        position.put("principal", money(b.principalOutstandingMinor(), cur));
+        position.put("interest", money(b.interestOutstandingMinor(), cur));
+        position.put("fees", money(b.feesOutstandingMinor(), cur));
         position.put(
-                "penalties",
-                b.penaltiesOutstandingMinor() == 0 ? null : money(b.penaltiesOutstandingMinor(), loan.currency()));
-        position.put("total", money(b.totalOutstandingMinor(), loan.currency()));
-        position.put("totalWords", AmountInWords.of(b.totalOutstandingMinor(), loan.currency()));
-        position.put("credit", b.creditBalanceMinor() == 0 ? null : money(b.creditBalanceMinor(), loan.currency()));
+                "penalties", b.penaltiesOutstandingMinor() == 0 ? null : money(b.penaltiesOutstandingMinor(), cur));
+        position.put("credit", b.creditBalanceMinor() == 0 ? null : money(b.creditBalanceMinor(), cur));
         position.put("dpd", b.daysPastDue());
         model.put("txns", lines);
         model.put("totals", totals);
         model.put("position", position);
-        return documents.renderPdf("loan_statement", model);
+        return model;
     }
 
     // ---- models ------------------------------------------------------------------------------
@@ -307,9 +419,16 @@ class LoanDocuments {
         return m;
     }
 
-    private void receiptModel(Loan loan, LoanTransaction t, Map<String, Object> model) {
+    /**
+     * The receipt as it stood when the payment was recorded: what the payment was applied to is its own
+     * allocation rows, and the loan after it is computed from the transactions recorded up to it
+     * ({@link LoanLedger#after}), never from today's balances, so the stored receipt is the same
+     * whenever it is first opened.
+     */
+    private void receiptModel(Loan loan, List<LoanTransaction> all, LoanTransaction t, Map<String, Object> model) {
         Map<Integer, LocalDate> dueDates = new LinkedHashMap<>();
-        repo.scheduleRows(loan.id()).forEach(r -> dueDates.put(r.no(), r.dueDate()));
+        List<ScheduleRow> items = repo.scheduleRows(loan.id());
+        items.forEach(r -> dueDates.put(r.no(), r.dueDate()));
         List<Map<String, Object>> rows = new ArrayList<>();
         if (t.txnType().equals("fee_upfront")) {
             rows.add(allocation("", "", "Upfront fee", money(t.amountMinor(), t.currency())));
@@ -328,13 +447,14 @@ class LoanDocuments {
             }
         }
         model.put("allocations", rows);
-        LoanBalances b = repo.balances(loan.id()).orElseThrow();
+        After now = LoanLedger.after(all, items, t.id());
         Map<String, Object> after = new LinkedHashMap<>();
         after.put(
                 "outstanding",
-                money(b.totalOutstandingMinor(), loan.currency()) + " " + loan.currency() + " as at " + date(today()));
-        after.put("credit", b.creditBalanceMinor() == 0 ? null : money(b.creditBalanceMinor(), loan.currency()));
-        after.put("nextDue", b.nextDueDate() == null ? "None" : date(b.nextDueDate()));
+                money(now.outstandingMinor(), loan.currency()) + " " + loan.currency()
+                        + (now.writtenOff() ? " (the loan is written off)" : ""));
+        after.put("credit", now.creditMinor() == 0 ? null : money(now.creditMinor(), loan.currency()));
+        after.put("nextDue", now.nextDue() == null ? "None" : date(now.nextDue()));
         model.put("after", after);
     }
 
@@ -357,6 +477,10 @@ class LoanDocuments {
                 case "paid_upfront" -> upfront = Math.addExact(upfront, f.amountMinor());
                 default -> added = Math.addExact(added, f.amountMinor());
             }
+        }
+        if (deducted >= principal) {
+            throw ApiException.rule(
+                    "fees_exceed_principal", "The deducted fees leave nothing paid out, so there is no voucher.");
         }
         Map<String, Object> v = new LinkedHashMap<>();
         v.put("principal", money(principal, t.currency()));

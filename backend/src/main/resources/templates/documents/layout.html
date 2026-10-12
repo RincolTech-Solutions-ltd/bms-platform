@@ -34,7 +34,8 @@
     table.grid td { padding: 1.4mm 2mm; border-bottom: 0.2mm solid #E3E3E3; }
     table.grid tr { page-break-inside: avoid; }
     table.grid tbody tr:nth-child(even) td { background: [[${lh.tint}]]; }
-    table.grid tr.total td { font-weight: 700; border-top: 0.5mm solid [[${lh.colour}]]; border-bottom: 0.5mm solid [[${lh.colour}]]; background: #FFFFFF; }
+    table.grid tr.note td { font-size: 8.5pt; font-style: italic; color: #666666; }
+    table.grid tbody tr.total td { font-weight: 700; border-top: 0.5mm solid [[${lh.colour}]]; border-bottom: 0.5mm solid [[${lh.colour}]]; background: #FFFFFF; }
     .num { text-align: right; white-space: nowrap; }
     table.grid th.num { text-align: right; }
     table.facts { width: 100%; border-collapse: collapse; }
@@ -43,14 +44,14 @@
     .amount { font-size: 17pt; font-weight: 700; color: #222222; }
     .words { font-style: italic; color: #444444; margin-top: 1mm; }
     .box { border: 0.3mm solid #D5D5D5; padding: 3mm 4mm; margin: 2mm 0 4mm 0; }
-    table.signs { width: 100%; border-collapse: separate; border-spacing: 4mm 0; margin-top: 10mm; page-break-inside: avoid; }
-    table.signs td { vertical-align: bottom; width: 33%; padding: 0; }
+    table.signs { width: 100%; border-collapse: collapse; margin-top: 10mm; page-break-inside: avoid; }
+    table.signs td { vertical-align: bottom; width: 33%; padding: 0 6mm 0 0; }
+    table.signs td.last { padding-right: 0; }
     .signline { border-top: 0.3mm solid #555555; padding-top: 1mm; font-size: 8.5pt; }
     .verify { width: 26mm; height: 26mm; }
     .foot { width: 100%; border-collapse: collapse; font-size: 7.5pt; color: #777777; border-top: 0.3mm solid #DDDDDD; }
     .foot td { padding-top: 1.5mm; vertical-align: top; }
-    .pageno:before { content: counter(page); }
-    .pagecount:before { content: counter(pages); }
+    .pageinfo:before { content: "page " counter(page) " of " counter(pages); }
   </style>
 </head>
 <body>
@@ -75,7 +76,7 @@
     <table class="foot">
       <tr>
         <td style="width: 65%;" th:text="${lh.footer}">Footer</td>
-        <td style="text-align: right;"><span th:text="${doc.number}">RC-HQ-000001</span>, page <span class="pageno"></span> of <span class="pagecount"></span></td>
+        <td style="text-align: right;"><span th:text="${doc.number}">RC-HQ-000001</span>, <span class="pageinfo"></span></td>
       </tr>
     </table>
   </div>

@@ -5,11 +5,14 @@ import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -34,7 +37,18 @@ class LoanDocumentController {
             String docNumber,
 
             @Schema(description = "True when this request rendered and stored it")
-            boolean created) {}
+            boolean created,
+
+            @Schema(
+                    description =
+                            "The transaction was reversed. The stored copy is as issued and unchanged; show the document as reversed")
+            boolean reversed,
+
+            @Schema(description = "The value date of the reversal; null when not reversed")
+            LocalDate reversedOn) {}
+
+    @Schema(name = "LoanDocumentList", description = "The receipts and vouchers stored for a loan, newest first")
+    record ListResponse(List<IssuedResponse> items) {}
 
     private final LoanDocuments documents;
 
@@ -48,8 +62,23 @@ class LoanDocumentController {
             summary = "The receipt or voucher of a loan transaction, stored on first request (FR-DOC-01)",
             operationId = "issueLoanTransactionDocument")
     IssuedResponse issue(@PathVariable("loan_id") UUID loanId, @PathVariable("txn_id") UUID txnId) {
-        LoanDocuments.Issued i = documents.issue(loanId, txnId);
-        return new IssuedResponse(i.documentId(), i.docType(), i.docNumber(), i.created());
+        return response(documents.issue(loanId, txnId));
+    }
+
+    @GetMapping(path = "/documents", produces = MediaType.APPLICATION_JSON_VALUE)
+    @RequiresPermission("lending.loans.read")
+    @Operation(
+            summary = "The receipts and vouchers stored for a loan, each marked when its transaction was reversed",
+            operationId = "listLoanDocuments")
+    ListResponse list(@PathVariable("loan_id") UUID loanId) {
+        return new ListResponse(documents.issuedDocuments(loanId).stream()
+                .map(LoanDocumentController::response)
+                .toList());
+    }
+
+    private static IssuedResponse response(LoanDocuments.Issued i) {
+        return new IssuedResponse(
+                i.documentId(), i.docType(), i.docNumber(), i.created(), i.reversed(), i.reversedOn());
     }
 
     @PostMapping(

@@ -3,7 +3,7 @@ Head Office
 Plot 1, Test Road, Kampala
 VC-HQ-000001
 {DATE}
-Test Lending Ltd, Plot 1 Test Road. Keep this document safe. VC-HQ-000001, page  of 1 1
+Test Lending Ltd, Plot 1 Test Road. Keep this document safe. VC-HQ-000001, page 1 of 1
 VOUCHER
 Paid to Test Borrower 81 (M000001)
 Loan LN000001, DOCS
