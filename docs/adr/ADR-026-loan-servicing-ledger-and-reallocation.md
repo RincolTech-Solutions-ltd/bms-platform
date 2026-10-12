@@ -112,7 +112,16 @@ Also decided here, within the rules of chapter 3:
   schedule and must then add penalty charges and charge waivers before re-applying repayments.
 - When FR-GL-08's `payment_methods` arrives, the default mapping must stay as the fallback or be
   seeded as rows, so existing tenants keep posting. Done in #160 (V43): the defaults stay the
-  fallback, in one place (`core.ledger`'s `PaymentMethods`), and the three lending copies are gone.
-  Retail is not covered yet: its postings and the cash book still use the seeded system keys, so
-  remapping `cash` moves lending cash out of the retail cash book (#236). A correction credits the
-  account the original entry debited, never the method's mapping at the time of the correction.
+  fallback, in one place (`core.ledger`'s `PaymentMethods`), and the three lending copies of the
+  default table are gone. That is lending only. Retail still hard-codes its accounts: sales,
+  purchases, the cash book postings and the cash figures use `cash_on_hand` and `bank` by system key
+  and do not read the mapping (#236). On a tenant with both verticals those two accounts are shared,
+  so remapping lending's `cash` or `bank` would take lending money out of the retail cash book. The
+  mapping therefore refuses it: while the retail module is on, `cash` and `bank` can be mapped only
+  to those two seeded accounts (`account_used_by_retail`), at the tenant or a branch; mobile money,
+  the gateway and savings transfer stay free, and so does switching a method off. If a remap of cash
+  or bank already exists when the retail module is switched on, nothing re-checks it: lending cash
+  is outside the retail cash book until it is mapped back. Lifting the restriction needs retail to
+  post and read through `PaymentMethods` (#236). A correction credits the account the original entry
+  debited, never the method's mapping at the time of the correction. A request is checked at the
+  branch of the loan, account or investment, the same row that execution resolves.

@@ -566,7 +566,8 @@ posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_mo
 `is_active = false` switches the method off. `core.ledger`'s `PaymentMethods` is the one lookup;
 lending's loans, savings and investments post through it, at the branch of the loan, account or
 investment (request checks included). A correction credits the account its original entry debited.
-Retail postings and the cash book do not use it yet (#236).
+Retail postings and the cash book do not use it yet (#236), so while the retail module is on `cash`
+and `bank` can be mapped only to `cash_on_hand` and `bank` (`account_used_by_retail`, ADR-026).
 
 ### `payment_intents` (RLS)
 

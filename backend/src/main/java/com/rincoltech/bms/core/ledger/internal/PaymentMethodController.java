@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.ledger.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.Branches;
+import com.rincoltech.bms.core.tenancy.TenantModules;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
@@ -67,13 +68,22 @@ class PaymentMethodController {
             @Schema(description = "Default true; false switches the method off for this scope")
             Boolean isActive) {}
 
+    /**
+     * The methods whose seeded account retail also posts to and reads (ADR-026): retail's sales,
+     * purchases, cash book and cash figures use {@code cash_on_hand} and {@code bank} by key, not through
+     * this table, so with the retail module on these two stay on those accounts.
+     */
+    static final Map<String, String> RETAIL_SHARED = Map.of("cash", "cash_on_hand", "bank", "bank");
+
     private final JdbcClient jdbc;
     private final Branches branches;
+    private final TenantModules modules;
     private final AuditLog audit;
 
-    PaymentMethodController(JdbcClient jdbc, Branches branches, AuditLog audit) {
+    PaymentMethodController(JdbcClient jdbc, Branches branches, TenantModules modules, AuditLog audit) {
         this.jdbc = jdbc;
         this.branches = branches;
+        this.modules = modules;
         this.audit = audit;
     }
 
@@ -120,21 +130,36 @@ class PaymentMethodController {
         if (r.branchId() != null && branches.findActive(r.branchId()).isEmpty()) {
             problems.add(new FieldProblem("branch_id", "unknown_branch", "No such active branch."));
         }
-        Optional<String> code =
-                jdbc.sql("""
-                        SELECT code FROM gl_accounts
+        Optional<String[]> account = jdbc.sql("""
+                        SELECT code, system_key FROM gl_accounts
                          WHERE id = ? AND is_postable AND is_active AND account_type = 'asset' AND NOT is_system_controlled
-                        """).param(r.glAccountId()).query(String.class).optional();
+                        """)
+                .param(r.glAccountId())
+                .query((rs, n) -> new String[] {rs.getString(1), rs.getString(2)})
+                .optional();
+        Optional<String> code = account.map(a -> a[0]);
+        boolean active = r.isActive() == null || r.isActive();
         if (code.isEmpty()) {
             problems.add(new FieldProblem(
                     "gl_account_id",
                     "invalid_payment_account",
                     "Must be a postable, active asset account that no module controls."));
+        } else if (active
+                && RETAIL_SHARED.containsKey(r.methodKey())
+                && !RETAIL_SHARED.get(r.methodKey()).equals(account.get()[1])
+                && modules.isEnabled("retail")) {
+            problems.add(new FieldProblem(
+                    "gl_account_id",
+                    "account_used_by_retail",
+                    "Retail posts its cash and bank to the seeded accounts, so with the retail module on "
+                            + r.methodKey()
+                            + " stays on "
+                            + RETAIL_SHARED.get(r.methodKey())
+                            + "."));
         }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
-        boolean active = r.isActive() == null || r.isActive();
         UUID user = CurrentPrincipal.require().userId();
         Optional<Mapping> before = jdbc.sql("""
                         SELECT method_key, branch_id, gl_account_id, '' AS code, is_active FROM payment_methods

@@ -302,16 +302,6 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     /** A postable asset account under the fixture tenant, as a payment method target would be. */
-    String assetAccount(String code, String name) {
-        UUID id = UUID.randomUUID();
-        TestDatabase.owner().sql("""
-                        INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
-                            is_postable, is_system_controlled)
-                        VALUES (?, ?, ?, ?, 'asset', 'debit', 'UGX', true, false)
-                        """).params(id, t.tenantId(), code, name).update();
-        return id.toString();
-    }
-
     ResponseEntity<JsonNode> setMethod(String method, UUID branch, String account, Boolean active, String perms) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("method_key", method);
@@ -433,6 +423,79 @@ class LoanServicingIT extends LoanFixtures {
                 requestDisbursement(approved(exampleB("BRANCHOFF"), 1_200_000, 3, 74), today, key());
         assertThat(off.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(off.getBody().get("code").asString()).isEqualTo("payment_method_unmapped");
+    }
+
+    /**
+     * Review of #206: retail posts its cash and bank to the seeded accounts and reads them for its
+     * cash book, so with the retail module on cash and bank cannot be mapped elsewhere (it would take
+     * lending cash out of the retail cash book). Other methods, and switching a method off, stay free.
+     */
+    @Test
+    void frGl08_withRetailOnCashAndBankStayOnTheSeededAccounts() {
+        String perms = permissionsOf("tenant_admin");
+        String till = assetAccount("1017", "Test till");
+        TestDatabase.owner()
+                .sql("SELECT platform_set_tenant_modules(?, ?::text[], NULL)")
+                .params(t.tenantId(), "{lending,retail}")
+                .query((rs, n) -> 1)
+                .single();
+
+        for (String method : List.of("cash", "bank")) {
+            ResponseEntity<JsonNode> refused = setMethod(method, null, till, null, perms);
+            assertThat(refused.getStatusCode().value())
+                    .as("%s", refused.getBody())
+                    .isEqualTo(422);
+            assertThat(refused.getBody().get("errors").findValuesAsString("code"))
+                    .containsExactly("account_used_by_retail");
+            assertThat(setMethod(method, t.headOffice(), till, null, perms)
+                            .getBody()
+                            .get("errors")
+                            .findValuesAsString("code"))
+                    .as("a branch mapping is refused too")
+                    .containsExactly("account_used_by_retail");
+        }
+        assertThat(setMethod("mtn_momo", null, till, null, perms).getStatusCode())
+                .as("mobile money is not retail's")
+                .isEqualTo(HttpStatus.OK);
+        assertThat(setMethod("cash", t.headOffice(), till, false, perms).getStatusCode())
+                .as("switching lending cash off at a branch leaves retail alone")
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /**
+     * Review of #206: two first saves of one method at once. The unique index decides; the loser is
+     * told 409 payment_method_changed, never a 500, and exactly one row exists.
+     */
+    @Test
+    void frGl08_twoFirstSavesAtOnceAreOneRowAndNoServerError() throws Exception {
+        String perms = permissionsOf("tenant_admin");
+        String tillA = assetAccount("1018", "Test till A");
+        String tillB = assetAccount("1019", "Test till B");
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            List<Future<ResponseEntity<JsonNode>>> results = List.of(tillA, tillB).stream()
+                    .map(till -> pool.submit(() -> {
+                        start.await();
+                        return setMethod("airtel_money", null, till, null, perms);
+                    }))
+                    .toList();
+            start.countDown();
+            List<Integer> statuses = new ArrayList<>();
+            for (Future<ResponseEntity<JsonNode>> r : results) {
+                ResponseEntity<JsonNode> response = r.get(30, TimeUnit.SECONDS);
+                statuses.add(response.getStatusCode().value());
+                if (response.getStatusCode().value() == 409) {
+                    assertThat(response.getBody().get("code").asString()).isEqualTo("payment_method_changed");
+                }
+            }
+            assertThat(statuses).allMatch(s -> s == 200 || s == 409).contains(200);
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM payment_methods WHERE tenant_id = ? AND method_key = 'airtel_money'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
     }
 
     /** FR-GL-08: only a postable, active asset account that no module controls, a real branch, and the permission. */
