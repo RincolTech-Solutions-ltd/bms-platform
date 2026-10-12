@@ -460,7 +460,7 @@ Today a transfer is one action: out at the source and in at the destination in o
 stays the default. With `transfer_receipt` on, a transfer is **dispatched** (the source's out
 movement and entry post at once, status `in_transit`) and later **received** (the destination's in
 movement and entry), possibly with a received quantity different from dispatched, in which case the
-difference is a recorded `transfer_shortage` posted as stock shrinkage at the destination's cost.
+difference is a recorded `transfer_shortage` posted as stock shrinkage at the source cost (the cost it left the source at).
 While in transit the stock is in neither branch's balance. The in-transit value is the sum of the
 open dispatches' source entries (the report is built from the transfers, not from the account):
 account 1190 is shared with the lending chart, so its balance is **never** read as the in-flight
@@ -685,7 +685,7 @@ Answers written after one pass looking for what breaks.
 | Switching `price_lists` off with open quotations | A quotation keeps its stored prices; conversion re-prices at the product price when lists are off, and says so |
 | Landed cost after goods were sold | Documented simplification (7.2) reported through the revaluation difference; mitigation setting `purchasing.require_costing_before_sale` |
 | Pack cost rounding | One visible account `purchase_rounding`, bounded by half a minor unit per base unit |
-| Migrations | Mostly additive, but not all: slice 3 replaces the transfer status check, entry-pair check and update guard, and slice 8 replaces the stock movement kind and sign checks. Replacements add the new constraint `NOT VALID` first and `VALIDATE` in a later migration, and drop the old one last, so no long lock is taken on the largest table. Numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
+| Migrations | Mostly additive, but not all: slice 3 replaces the transfer status check, entry-pair check and update guard, and slice 8 replaces the stock movement kind and sign checks. Replacements add the new constraint `NOT VALID` first and `VALIDATE` in the same migration for a small table (a later migration for the largest tables), and drop the old one last. Numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
 
 ### 14.3 Permissions
 

@@ -9,8 +9,7 @@
 -- check forced out_entry_id and in_entry_id to be both null or both set; its two void-columns
 -- checks tied voided_at, voided_by and void_reason to the status voided alone; and its update
 -- guard allowed one change, the void. All five are replaced here. The transfer table is small
--- (a handful of rows a day), so each new check is added NOT VALID, validated (SHARE UPDATE
--- EXCLUSIVE, no write block) and only then is the old one dropped: at no point is a rule missing.
+-- (a handful of rows a day), so each new check is added NOT VALID, validated and only then is the old one dropped: at no point is a rule missing.
 -- Flyway runs with outOfOrder off, so the number is assigned at merge time above the highest one.
 
 -- ---------------------------------------------------------------------------------------------

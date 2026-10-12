@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { retail, type InFlightReport, type InFlightTransfer } from '../../../api/retail';
 import { EmptyState, SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
@@ -34,8 +34,9 @@ function ReceiveForm({ transfer }: { transfer: InFlightTransfer }) {
   const lines = transfer.lines ?? [];
   const [arrived, setArrived] = useState<Arrived>(() => everythingArrived(lines));
   const problem = receiveProblem(lines, arrived);
+  const idempotencyKey = useRef(newIdempotencyKey());
   const save = useMutation({
-    mutationFn: () => retail.receiveTransfer(transfer.id ?? '', buildReceive(lines, arrived), newIdempotencyKey()),
+    mutationFn: () => retail.receiveTransfer(transfer.id ?? '', buildReceive(lines, arrived), idempotencyKey.current),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
   });
   const id = transfer.id ?? '';
@@ -68,8 +69,9 @@ function ReceiveForm({ transfer }: { transfer: InFlightTransfer }) {
 function TakeBackForm({ transfer }: { transfer: InFlightTransfer }) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState('');
+  const idempotencyKey = useRef(newIdempotencyKey());
   const take = useMutation({
-    mutationFn: () => retail.cancelTransfer(transfer.id ?? '', reason.trim(), newIdempotencyKey()),
+    mutationFn: () => retail.cancelTransfer(transfer.id ?? '', reason.trim(), idempotencyKey.current),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['retail'] }),
   });
   const id = transfer.id ?? '';
