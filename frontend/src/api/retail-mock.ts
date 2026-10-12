@@ -1,6 +1,6 @@
 import type {
-  AllBranchesRow, Category, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, Stocktake, StockByLocation, StockRow, Supplier,
-  Transfer, Unit, Usage, Valuation, ValuationRow,
+  AllBranchesRow, Category, CapabilitiesRead, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, Stocktake, StockByLocation, StockRow,
+  Supplier, Transfer, Unit, Usage, Valuation, ValuationRow,
 } from './retail';
 import { RetailError, businessToday, daysBefore } from './retail';
 import { retailMessage } from './retail-errors';
@@ -31,7 +31,7 @@ const SALES_PERMISSIONS = [
 const CASHIER_PERMISSIONS = SALES_PERMISSIONS;
 const ADMIN_PERMISSIONS = [
   ...SALES_PERMISSIONS, 'retail.catalogue.manage', 'retail.price.edit', 'retail.sale.void',
-  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage',
+  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage',
   'retail.savings.record', 'retail.savings.overwrite', 'retail.banking.record', 'retail.expense.record', 'retail.expense.manage',
   'retail.withdrawal.record', 'retail.advance.create', 'retail.advance.repay', 'retail.cashbook.read', 'retail.cashbook.void',
 ];
@@ -57,18 +57,12 @@ export function mockMe(role: string | undefined): Me & { modules: string[] } {
 
 let profitAccess = true;
 let transferReceipt = false;
-let mockRoles: Record<string, 'store' | 'shop' | 'both'> = {};
 
-/** Switches the two-step transfer on for the mock (the transfer_receipt capability, ADR-033); off by default, as for a tenant. */
+/** Forces the two-step transfer on for every mock instance, besides the capability a mock instance's settings switch (ADR-033). */
 export function setMockTransferReceipt(on: boolean): void {
   transferReceipt = on;
 }
 
-/** Sets branch roles by branch id for the mock; a branch with none is `both`. */
-export function setMockBranchRoles(roles: Record<string, 'store' | 'shop' | 'both'>): void {
-  mockRoles = roles;
-}
-const roleOf = (branch: string): 'store' | 'shop' | 'both' => mockRoles[branch] ?? 'both';
 /** The staff layout tells the mock what the session may see; the real API decides by itself. */
 export function setMockProfitAccess(allowed: boolean): void {
   profitAccess = allowed;
@@ -125,7 +119,16 @@ const refuse = (status: number, code: string, detail: string): never => {
   throw new RetailError(retailMessage({ code, detail }, status), status, code);
 };
 
+const MOCK_FLAGS = ['branch_roles', 'units', 'price_lists', 'customer_accounts', 'documents', 'purchasing', 'transfer_receipt', 'returns'] as const;
+const MOCK_TRADE_PRESET: readonly string[] = ['branch_roles', 'units', 'price_lists', 'customer_accounts', 'returns', 'transfer_receipt'];
+
 export function createMockRetail(): RetailApi {
+  // Branch roles and capabilities of this mock instance (ADR-033): every branch both, every capability off.
+  const roles = new Map<string, 'store' | 'shop' | 'both'>();
+  const roleOf = (branch: string): 'store' | 'shop' | 'both' => roles.get(branch) ?? 'both';
+  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shop' }, version: 1 };
+  const twoStep = () => transferReceipt || caps.value['transfer_receipt'] === true;
+  const read = (): CapabilitiesRead => ({ capabilities: { ...caps.value, ...Object.fromEntries(MOCK_FLAGS.map((k) => [k, caps.value[k] === true])) }, version: caps.version });
   const balances = new Map<string, number>();
   PRODUCTS.forEach((p, i) => {
     balances.set(`${BRANCH_A}|${p.id}`, (i % 5 === 3 ? -2 : 4 + i * 3) * 1000);
@@ -557,12 +560,27 @@ export function createMockRetail(): RetailApi {
 
     stockedBranches: () => delay([BRANCH_A, BRANCH_B].filter((b) => [...products.values()].some((p) => bal(b, p.id) > 0))),
 
-    branchRoles: () => delay(MOCK_BRANCHES.map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: roleOf(b.id), can_sell: roleOf(b.id) !== 'store' }))),
+    branchRoles: () => delay(MOCK_BRANCHES.map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: roles.get(b.id) ?? 'both', can_sell: (roles.get(b.id) ?? 'both') !== 'store' }))),
 
     setBranchRole: (branchId, role) => {
       const b = MOCK_BRANCHES.find((x) => x.id === branchId);
-      mockRoles = { ...mockRoles, [branchId]: role };
+      roles.set(branchId, role);
       return delay({ branch_id: branchId, code: b?.code, name: b?.name, role, can_sell: role !== 'store' });
+    },
+
+    capabilities: () => delay(read()),
+
+    // The server's rule (RetailCapabilityGroup): a profile writes its preset first, then the flags sent win.
+    changeCapabilities: (body, version) => {
+      if (version !== caps.version) return Promise.reject(new RetailError(retailMessage({ code: 'version_conflict' }, 409), 409, 'version_conflict'));
+      const next: Record<string, unknown> = { ...caps.value };
+      if (body.profile) {
+        next.profile = body.profile;
+        for (const key of MOCK_FLAGS) next[key] = body.profile === 'shop' ? false : MOCK_TRADE_PRESET.includes(key) ? true : next[key];
+      }
+      for (const key of MOCK_FLAGS) if (typeof body[key] === 'boolean') next[key] = body[key];
+      caps = { value: next, version: caps.version + 1 };
+      return delay(read());
     },
 
     dailyProfit: ({ branchId, from, to }) => {
@@ -598,12 +616,12 @@ export function createMockRetail(): RetailApi {
         const lines = body.lines.map((l, n) => {
           const p = find(l.product_id);
           move(from, p.id, -toMilli(l.qty));
-          if (!transferReceipt) move(body.to_branch_id, p.id, toMilli(l.qty));
+          if (!twoStep()) move(body.to_branch_id, p.id, toMilli(l.qty));
           return { line_no: n + 1, product_id: p.id, code: p.code, description: p.description, qty: fromMilli(toMilli(l.qty)), unit_cost_minor: p.costMinor, line_cost_minor: lineTotal(p.costMinor, toMilli(l.qty)) };
         });
         const t: Transfer = {
           id: nextId('9'), from_branch_id: from, to_branch_id: body.to_branch_id, transfer_date: body.transfer_date ?? today(),
-          status: transferReceipt ? 'in_transit' : 'completed', currency: 'UGX', lines, cost_total_minor: lines.reduce((sum, l) => sum + l.line_cost_minor, 0),
+          status: twoStep() ? 'in_transit' : 'completed', currency: 'UGX', lines, cost_total_minor: lines.reduce((sum, l) => sum + l.line_cost_minor, 0),
           created_at: new Date().toISOString(), ...(body.note ? { note: body.note } : {}),
         };
         transfers.unshift(t);
@@ -669,7 +687,7 @@ export function createMockRetail(): RetailApi {
     stockByLocation: ({ query, categoryId: category, negativeOnly }) => {
       const order = { store: 0, shop: 1, both: 2 } as const;
       const columns = [...MOCK_BRANCHES].sort((a, b) => order[roleOf(a.id)] - order[roleOf(b.id)]);
-      const roles = [...new Set(columns.map((b) => roleOf(b.id)))];
+      const groups = [...new Set(columns.map((b) => roleOf(b.id)))];
       const open = transfers.filter((t) => t.status === 'in_transit');
       const items = [...products.values()].filter((p) => matches(p, query) && (!category || categoryId(p.category) === category)).map((p): LocationRow => {
         const held = columns.map((b) => bal(b.id, p.id));
@@ -679,7 +697,7 @@ export function createMockRetail(): RetailApi {
         const row: LocationRow = {
           product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit,
           balances: columns.map((b, i) => ({ branch_id: b.id, qty: fromMilli(held[i] ?? 0), negative: (held[i] ?? 0) < 0, ...(profitAccess ? { value_minor: lineTotal(p.costMinor, held[i] ?? 0) } : {}) })),
-          subtotals: roles.map((r) => ({ role: r, qty: fromMilli(columns.reduce((x, b, i) => x + (roleOf(b.id) === r ? (held[i] ?? 0) : 0), 0)) })),
+          subtotals: groups.map((r) => ({ role: r, qty: fromMilli(columns.reduce((x, b, i) => x + (roleOf(b.id) === r ? (held[i] ?? 0) : 0), 0)) })),
           in_transit_qty: fromMilli(wayMilli), combined_qty: fromMilli(total + wayMilli), negative: held.some((m) => m < 0), sell_minor: p.sellMinor,
         };
         if (!profitAccess) return row;
@@ -698,7 +716,7 @@ export function createMockRetail(): RetailApi {
         totals: profitAccess
           ? {
               by_branch: columns.map((b) => ({ branch_id: b.id, value_minor: worth(b.id) })),
-              by_role: roles.map((r) => ({ role: r, value_minor: columns.filter((b) => roleOf(b.id) === r).reduce((x, b) => x + worth(b.id), 0) })),
+              by_role: groups.map((r) => ({ role: r, value_minor: columns.filter((b) => roleOf(b.id) === r).reduce((x, b) => x + worth(b.id), 0) })),
               value_minor: value, in_transit_value_minor: transit, combined_value_minor: value + transit,
             }
           : { by_branch: [], by_role: [] },

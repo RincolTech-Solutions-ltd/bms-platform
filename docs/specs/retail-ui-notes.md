@@ -20,8 +20,8 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/stocktake` | Count, review variance, commit | `retail.stocktake.commit` and `retail.stock.read` |
 | `/staff/retail/transfer` | Move stock: to which branch, items with the source's stock, date and note | `retail.stock.transfer` and `retail.stock.read` |
 | `/staff/retail/transfers` | Stock moves from or to the branch; open one; cancel it | `retail.stock.read` (cancel: `retail.stock.transfer`) |
-| `/staff/retail/stock-by-location` | Stores and shops: every product in each branch, stores first, a subtotal per role, stock on the way, the combined total (#193); only while `branch_roles` is on | `retail.stock.read` (value: `retail.profit.read`) |
-| `/staff/retail/in-transit` | On the way: transfers sent and not yet received, the longest wait first; check what arrived and mark received, or take back (#193); only while `transfer_receipt` is on | `retail.stock.read` (receive and take back: `retail.stock.transfer` at the destination or the source) |
+| `/staff/retail/stock-by-location` | Stores and shops: every product in each branch, stores first, a subtotal per role, stock on the way, the combined total (#193); only while `branch_roles` is on | `retail.stock.transfer` and `retail.stock.read` (the API needs only the read; value: `retail.profit.read`) |
+| `/staff/retail/in-transit` | On the way: transfers sent and not yet received, the longest wait first; check what arrived and mark received, or take back (#193); only while `transfer_receipt` is on | `retail.stock.transfer` and `retail.stock.read` (receive at the destination, take back at the source) |
 | `/staff/retail/valuation` | Stock at price; at cost too with `retail.profit.read` | `retail.stock.read` (cost columns: `retail.profit.read`) |
 | `/staff/retail/profit` | Daily profit per branch, with the stock-take difference as its own column (#121) | `retail.profit.read` |
 | `/staff/retail/sales-analysis` | Sales analysis: totals by day, week or month, top items as bars, by branch, category, item and seller, slow movers, items with no sale (#149) | `retail.sale.read` (profit columns: `retail.profit.read`) |
@@ -390,6 +390,30 @@ widths: see its README), and the script is not committed. Notes:
 - The receipt photo is skipped: the frontend has no documents upload client yet.
 - The savings report endpoint (`GET /retail/reports/cash/savings`) is built but has no screen; the savings
   records list covers it. CSV export of the reports waits for the report runs.
+
+## Retail settings and branch roles (#192, ADR-033)
+
+The administrator's two screens for the trade capabilities, and the rule every capability screen follows.
+
+- **Retail settings** (`/staff/retail/settings`, tile "Retail settings", `core.settings.manage`): the profile as a
+  choice of Shop or Trade, and a switch for each of the eight features. Choosing a profile writes its preset over
+  the switches (Trade: branch roles, pack sizes, price lists, customer accounts, returns, received transfers;
+  documents and purchasing stay as they are, spec 1.2) and every switch stays editable. "Review changes" reads the
+  change back in words (the features a preset switches on, the features switched off and that their data is kept);
+  "Confirm" sends `PUT /retail/settings/capabilities` with the settings version as `If-Match`, and the server audits
+  the old and new values. Afterwards `/me` is read again, so the menu follows at once. A feature whose pages are not
+  released yet says so; it can be switched on and changes nothing visible.
+- **Branch roles** (`/staff/retail/branch-roles`, tile "Branch roles", `retail.branch_role.manage`): one choice per
+  branch (store, shop, both). It exists only while `branch_roles` is on.
+- **The rule** (`SCREEN_CAPABILITY` in `retail/permissions.ts`): a screen of a capability is offered, in the tiles,
+  the bottom bar shortcuts and the route gate, only while `/me` lists the capability, whatever permissions the user
+  holds. A screen not listed there behaves as before capabilities existed, so a shop (every capability off) sees the
+  same menu as today plus, for the administrator, the Retail settings tile. A later slice adds its screens to that
+  map, sets `ready` for its capability in `retail/capabilities-state.ts` and adds its tour; `capabilities.test.tsx`
+  fails if a ready capability has no tour.
+- **Tours**: a tour with a `capability` starts by itself once, the first time a user it is for signs in with that
+  capability on, after the first-run tour; a dismissal is for good and a new version shows once more. The Retail
+  settings page has a page tour in Help. Built: the branch roles tour.
 
 ## Trade screens (#193, ADR-033)
 

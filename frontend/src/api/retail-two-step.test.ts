@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMockRetail, mockMe, setMockBranchRoles, setMockProfitAccess, setMockTransferReceipt } from './retail-mock';
+import { createMockRetail, mockMe, setMockProfitAccess, setMockTransferReceipt } from './retail-mock';
 
 // The two-step transfer through the adapter the screens use (ADR-033, issue #193): the mock answers
 // in the server's shapes and refusals, so these are also the contract the screens rely on.
@@ -10,7 +10,6 @@ const B = to?.id ?? '';
 
 afterEach(() => {
   setMockTransferReceipt(false);
-  setMockBranchRoles({});
   setMockProfitAccess(true);
 });
 
@@ -114,7 +113,8 @@ describe('transfers with the capability off', () => {
 describe('stock by location', () => {
   it('puts stores before shops, subtotals each role, and counts stock on the way once', async () => {
     const { api, product } = await setup();
-    setMockBranchRoles({ [A]: 'shop', [B]: 'store' });
+    await api.setBranchRole(A, 'shop');
+    await api.setBranchRole(B, 'store');
     const t = await api.createTransfer({ from_branch_id: A, to_branch_id: B, lines: [{ product_id: product, qty: '2' }] }, 'k-dispatch-7');
     const report = await api.stockByLocation({});
     expect(report.branches?.map((b) => b.role)).toEqual(['store', 'shop']);

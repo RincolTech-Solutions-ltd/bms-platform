@@ -18,9 +18,9 @@ const REPAY = 'lending.repayments.create';
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
+const isSeller = (me: Me) => held(me, SELL) && !isTenantAdmin(me);
 /** A retail capability the tenant switched on (ADR-033); /me lists them per module. */
 const capable = (me: Me, capability: string) => (me.module_capabilities?.['retail'] ?? []).includes(capability);
-const isSeller = (me: Me) => held(me, SELL) && !isTenantAdmin(me);
 
 const help: TourStep = {
   id: 'help',
@@ -520,8 +520,73 @@ export const stocktakePage: Tour = {
   ],
 };
 
-// The trade capabilities add their own page tours (ADR-033): they start only from Help, and only
-// for a user who may use the page on a tenant that switched its capability on.
+export const retailSettingsPage: Tour = {
+  id: 'page-retail-settings',
+  version: 1,
+  title: 'This page: retail settings',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/retail/settings',
+  steps: [
+    {
+      id: 'profile',
+      target: 'retail-profile',
+      title: 'Shop or trade',
+      body: 'Pick Shop for a plain shop. Pick Trade if stores feed a shop and you sell in bulk. It switches on a set of features for you.',
+    },
+    {
+      id: 'features',
+      target: 'retail-capabilities',
+      title: 'Each feature',
+      body: 'Switch any feature on or off yourself. Switching one off hides it. What you recorded with it is kept.',
+    },
+    {
+      id: 'review',
+      target: 'retail-settings-save',
+      title: 'Check, then save',
+      body: 'Tap Review changes to read what will change. Nothing is saved until you tap Confirm.',
+    },
+  ],
+};
+
+// A tour per capability (ADR-033): it starts once, the first time a user it is for signs in with the
+// capability on. A capability whose screens are not released has none yet; the slice that releases its
+// screens adds the tour here and sets `ready` in capabilities-state.ts (tours.test.tsx checks both).
+export const branchRolesCapability: Tour = {
+  id: 'capability-branch-roles',
+  version: 1,
+  title: 'New: branch roles',
+  audience: (me) => held(me, 'retail.branch_role.manage'),
+  autoStart: true,
+  capability: { module: 'retail', key: 'branch_roles' },
+  steps: [
+    {
+      id: 'intro',
+      title: 'Branch roles are on',
+      body: 'Each branch can now be a store, a shop or both. Stores keep stock and feed the shop. Only shops sell to customers.',
+    },
+    {
+      id: 'tile',
+      route: '/staff/retail',
+      target: 'retail-branchRoles',
+      module: 'retail',
+      optional: true,
+      title: 'Set the roles',
+      body: 'Open Branch roles to say which branches are stores and which are shops.',
+    },
+    {
+      id: 'roles',
+      route: '/staff/retail/branch-roles',
+      target: 'retail-roles',
+      module: 'retail',
+      title: 'Pick a role for each branch',
+      body: 'Until you pick, every branch works as before. A store cannot record a sale.',
+    },
+  ],
+};
+
+// The page tours of the trade screens (ADR-033, issue #193): Help only, for a user who may use the page
+// on a tenant that switched its capability on.
 export const stockByLocationPage: Tour = {
   id: 'page-stock-by-location',
   version: 1,
@@ -572,8 +637,42 @@ export const inTransitPage: Tour = {
   ],
 };
 
+// The tour of the receive-transfers capability: it starts once for whoever moves stock, when first enabled.
+export const transferReceiptCapability: Tour = {
+  id: 'capability-transfer-receipt',
+  version: 1,
+  title: 'New: receive transfers',
+  audience: (me) => held(me, 'retail.stock.transfer'),
+  autoStart: true,
+  capability: { module: 'retail', key: 'transfer_receipt' },
+  steps: [
+    {
+      id: 'intro',
+      title: 'Stock moves are now sent, then received',
+      body: 'When you send stock to another branch it leaves yours at once. The other branch counts it when they receive it.',
+    },
+    {
+      id: 'tile',
+      route: '/staff/retail',
+      target: 'retail-inTransit',
+      module: 'retail',
+      optional: true,
+      title: 'Stock on the way',
+      body: 'Open On the way to receive stock that was sent to you, or to take back stock you sent.',
+    },
+    {
+      id: 'list',
+      route: '/staff/retail/in-transit',
+      target: 'transit-list',
+      module: 'retail',
+      title: 'Check what arrived',
+      body: 'Type how many of each item arrived. If less came than was sent, the difference is written off as a loss.',
+    },
+  ],
+};
+
 /** Every tour, in the order the first matching auto tour is chosen. */
 export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
-  stockByLocationPage, inTransitPage,
+  retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability,
 ];

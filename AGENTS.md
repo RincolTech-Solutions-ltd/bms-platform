@@ -69,6 +69,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   role and the menu follows the tenant's modules (issue #185). Deferred to the next slices: units, price
   lists, customer accounts, documents, purchasing, transfer receipt, returns, and an administrator screen
   for the flags and roles (the routes exist).
+- **Built (trade 2 of 10, issue #192, ADR-033):** PWA only, no migration: the Retail settings screen (shop or trade
+  profile, the eight feature switches, a review before saving, `If-Match` on the settings version), the branch roles
+  screen, `SCREEN_CAPABILITY` so a screen of a capability is offered only while `/me` lists it, and a tour per
+  capability that starts once when first enabled (branch roles built; the others arrive with their screens).
 - **Built (trade 3 of 10, issue #193, ADR-033):** migration `V38` (the two-step transfer: it replaces the
   `retail_transfers` status check, entry-pair check, void-column checks and update guard, adds the receipt
   columns and `received_qty`, all expand only); with the `transfer_receipt` capability a transfer is

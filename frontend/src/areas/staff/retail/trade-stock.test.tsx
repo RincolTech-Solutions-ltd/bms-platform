@@ -40,12 +40,14 @@ describe('capabilities off: the retail menu is today\'s', () => {
     expect(page(admin, <Gate screen="inTransit" title="On the way"><p>SECRET</p></Gate>)).toContain('You do not have access');
   });
 
-  it('offers each screen with its own capability and the stock read, and a seller with neither capability sees none', () => {
+  it('offers each screen with its own capability and the permission to move stock, and a seller sees neither', () => {
     const admin = mockMe('admin');
     expect(canUse(trade(admin, 'branch_roles'), 'stockByLocation')).toBe(true);
     expect(canUse(trade(admin, 'branch_roles'), 'inTransit')).toBe(false);
     expect(canUse(trade(admin, 'transfer_receipt'), 'inTransit')).toBe(true);
     expect(canUse(trade(admin, 'transfer_receipt'), 'stockByLocation')).toBe(false);
+    expect(canUse(trade(mockMe('sales'), 'branch_roles', 'transfer_receipt'), 'stockByLocation')).toBe(false);
+    expect(canUse(trade(mockMe('sales'), 'branch_roles', 'transfer_receipt'), 'inTransit')).toBe(false);
     expect(canUse({ permissions: ['retail.sale.create'], module_capabilities: { retail: ['branch_roles', 'transfer_receipt'] } }, 'inTransit')).toBe(false);
     expect(screensFor(trade(mockMe('admin'), 'branch_roles', 'transfer_receipt')).map((s) => s.screen)).toEqual(
       expect.arrayContaining(['stockByLocation', 'inTransit']),
