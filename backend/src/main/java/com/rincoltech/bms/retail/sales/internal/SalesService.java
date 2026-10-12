@@ -16,15 +16,20 @@ import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.PackUnit;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue.ProductSnapshot;
+import com.rincoltech.bms.retail.catalogue.RetailPricing;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Customer;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.CustomerBalance;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.CustomerList;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.CustomerPricingRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.CustomerRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.OpenSale;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Payment;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.PaymentList;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.PaymentRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.PaymentResult;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.Resolution;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.ResolveRequest;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.ResolvedLine;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Sale;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.SaleLine;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.SaleLineRequest;
@@ -32,7 +37,10 @@ import com.rincoltech.bms.retail.sales.internal.SalesApi.SalePage;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.SaleRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.UpdateCustomerRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.VoidRequest;
+import com.rincoltech.bms.retail.sales.internal.SalesPricing.Chosen;
+import com.rincoltech.bms.retail.sales.internal.SalesPricing.Decision;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
+import com.rincoltech.bms.retail.sales.internal.SalesRepository.LinePricing;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.NewLine;
 import com.rincoltech.bms.retail.stock.BranchRoles;
 import com.rincoltech.bms.retail.stock.Quantities;
@@ -82,6 +90,8 @@ class SalesService {
     private final AuditLog audit;
     private final BranchRoles roles;
     private final RetailCapabilities capabilities;
+    private final SalesPricing pricing;
+    private final RetailPricing priceLists;
 
     SalesService(
             SalesRepository repo,
@@ -95,7 +105,9 @@ class SalesService {
             BusinessClock clock,
             AuditLog audit,
             BranchRoles roles,
-            RetailCapabilities capabilities) {
+            RetailCapabilities capabilities,
+            SalesPricing pricing,
+            RetailPricing priceLists) {
         this.repo = repo;
         this.catalogue = catalogue;
         this.stock = stock;
@@ -108,6 +120,8 @@ class SalesService {
         this.audit = audit;
         this.roles = roles;
         this.capabilities = capabilities;
+        this.pricing = pricing;
+        this.priceLists = priceLists;
     }
 
     /** The general ledger account a payment method lands in (chapter 6 section 6.11.1). */
@@ -140,7 +154,9 @@ class SalesService {
         }
         boolean credit = r.paymentMethod().equals("credit");
         String buyerName = blankToNull(r.buyerName());
-        if (r.customerId() != null && repo.customer(r.customerId()).isEmpty()) {
+        Customer buyer =
+                r.customerId() == null ? null : repo.customer(r.customerId()).orElse(null);
+        if (r.customerId() != null && buyer == null) {
             problems.add(new FieldProblem("customer_id", "unknown_customer", "No such customer."));
         }
         if (credit && r.customerId() == null && buyerName == null) {
@@ -153,6 +169,13 @@ class SalesService {
             problems.add(new FieldProblem("due_date", "invalid", "The payment date cannot be before the sale."));
         }
         String currency = tenant.profile().currency();
+        Principal principal = CurrentPrincipal.require();
+        boolean priced = pricing.on();
+        if (!priced && r.priceListId() != null) {
+            problems.add(new FieldProblem(
+                    "price_list_id", "capability_not_enabled", "Price lists are not enabled for this business."));
+        }
+        Chosen list = priced ? pricing.choose(branch, r.priceListId(), buyer, problems) : null;
         List<NewLine> lines = new ArrayList<>();
         for (int i = 0; i < r.lines().size(); i++) {
             SaleLineRequest l = r.lines().get(i);
@@ -174,35 +197,54 @@ class SalesService {
                 problems.add(new FieldProblem(field + ".qty", "invalid", "At most three decimal places."));
                 continue;
             }
-            if (l.unitId() != null && !l.unitId().equals(p.unitId())) {
-                // ADR-033: a pack. Stock moves in base units; the entered unit, quantity and price are kept on the
-                // line.
-                if (!capabilities.enabled(RetailCapabilities.UNITS)) {
-                    problems.add(new FieldProblem(
-                            field + ".unit_id",
-                            "capability_not_enabled",
-                            "Pack sizes are not enabled for this business."));
-                    continue;
+            SaleUnit unit = saleUnit(field, p, l.unitId(), l.qty(), problems);
+            if (unit == null) {
+                continue;
+            }
+            PackUnit pack = unit.pack();
+            long defaultPrice = pack == null ? p.sellMinor() : Quantities.packPrice(p.sellMinor(), pack.factor());
+            long price = l.unitPriceMinor() == null ? defaultPrice : l.unitPriceMinor();
+            LinePricing linePricing = null;
+            if (priced) {
+                // ADR-033, issue #195: the server resolves the price; a different typed price is an override.
+                Decision d = pricing.decide(
+                        list, p.id(), pack == null ? p.unitId() : pack.unitId(), l.qty(), defaultPrice, saleDate);
+                if (d.refused()) {
+                    throw ApiException.rule(
+                            "no_price_in_list",
+                            "The price list " + list.name() + " has no price for " + p.description() + " on line "
+                                    + (i + 1) + ".");
                 }
-                PackUnit pack = catalogue.packUnit(p.id(), l.unitId()).orElse(null);
-                if (pack == null || !pack.active()) {
-                    problems.add(new FieldProblem(
-                            field + ".unit_id", "unknown_pack_unit", "This item is not sold in that unit."));
-                    continue;
+                price = d.priceMinor();
+                String source = d.source();
+                String reason = null;
+                if (l.unitPriceMinor() != null && l.unitPriceMinor() != d.priceMinor()) {
+                    if (!principal.may(SalesPricing.OVERRIDE, branch)) {
+                        throw new ApiException(
+                                HttpStatus.FORBIDDEN,
+                                "permission_denied",
+                                "Permission denied",
+                                "You do not have permission to change the price on line " + (i + 1) + ".");
+                    }
+                    reason = blankToNull(l.priceOverrideReason());
+                    if (reason == null || reason.length() < SalesPricing.MIN_REASON) {
+                        throw ApiException.rule(
+                                "override_reason_required",
+                                "Give a reason of at least " + SalesPricing.MIN_REASON
+                                        + " characters for changing the price on line " + (i + 1) + ".");
+                    }
+                    price = l.unitPriceMinor();
+                    source = "override";
                 }
-                BigDecimal baseQty = Quantities.toBase(l.qty(), pack.factor())
-                        .orElseThrow(() -> ApiException.rule(
-                                "quantity_not_representable",
-                                l.qty() + " " + pack.unit() + " does not convert exactly to thousandths of " + p.unit()
-                                        + ". Change the quantity."));
-                long packPrice = l.unitPriceMinor() == null
-                        ? Quantities.packPrice(p.sellMinor(), pack.factor())
-                        : l.unitPriceMinor();
-                long total = Quantities.value(l.qty(), packPrice);
+                linePricing = new LinePricing(source, d.listId(), d.breakMinQty(), d.priceMinor(), reason);
+            }
+            if (pack != null) {
+                BigDecimal baseQty = unit.baseQty();
+                long total = Quantities.value(l.qty(), price);
                 long perBase = Quantities.perBase(total, baseQty);
                 // The column CHECKs bound a price at 10^13 (review F7); a defaulted pack price or the derived price per
                 // base unit can exceed it.
-                if (packPrice > RetailCatalogue.MAX_AMOUNT_MINOR || perBase > RetailCatalogue.MAX_AMOUNT_MINOR) {
+                if (price > RetailCatalogue.MAX_AMOUNT_MINOR || perBase > RetailCatalogue.MAX_AMOUNT_MINOR) {
                     throw ApiException.rule(
                             "amount_out_of_range", "The price on " + field + " is too large to compute.");
                 }
@@ -217,11 +259,11 @@ class SalesService {
                         Quantities.value(baseQty, p.costMinor()),
                         pack.unitId(),
                         l.qty(),
-                        packPrice,
-                        pack.factor()));
+                        price,
+                        pack.factor(),
+                        linePricing));
                 continue;
             }
-            long price = l.unitPriceMinor() == null ? p.sellMinor() : l.unitPriceMinor();
             lines.add(new NewLine(
                     UUID.randomUUID(),
                     i + 1,
@@ -234,13 +276,14 @@ class SalesService {
                     null,
                     null,
                     null,
-                    null));
+                    null,
+                    linePricing));
         }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
         // ADR-020 decision 5: the message never carries the cost, which a sales caller cannot read.
-        if (!CurrentPrincipal.require().may("retail.price.below_cost", branch)) {
+        if (!principal.may("retail.price.below_cost", branch)) {
             for (NewLine l : lines) {
                 // A pack line is judged on its line total, never on the rounded price per base unit (spec 3.3).
                 boolean below = l.saleUnitId() == null
@@ -256,7 +299,7 @@ class SalesService {
         long total = lines.stream().mapToLong(NewLine::lineTotalMinor).reduce(0, Math::addExact);
         long cost = lines.stream().mapToLong(NewLine::lineCostMinor).reduce(0, Math::addExact);
         UUID id = UUID.randomUUID();
-        UUID by = CurrentPrincipal.require().userId();
+        UUID by = principal.userId();
         String saleNo = "RS%08d".formatted(sequences.next("retail_sale_no"));
         Sale header = new Sale(
                 id,
@@ -275,6 +318,8 @@ class SalesService {
                 credit ? total : 0,
                 cost,
                 total - cost,
+                list == null ? null : list.id(),
+                list == null ? null : list.name(),
                 List.of(),
                 false,
                 null,
@@ -334,6 +379,148 @@ class SalesService {
         after.put("lines", lines.size());
         audit.record(AuditLog.Entry.created("retail.sale.created", SALE, id, branch, after));
         return visible(repo.find(id, false).orElseThrow().sale());
+    }
+
+    /** What a sale line's unit comes to: the pack (null for the base unit) and the quantity in base units. */
+    private record SaleUnit(PackUnit pack, BigDecimal baseQty) {}
+
+    /**
+     * ADR-033: a pack. Stock moves in base units; the entered unit, quantity and price are kept on the line. Returns null
+     * (with a field problem added) when the unit cannot be used; a quantity that does not convert exactly is refused.
+     */
+    private SaleUnit saleUnit(
+            String field, ProductSnapshot p, UUID unitId, BigDecimal qty, List<FieldProblem> problems) {
+        if (unitId == null || unitId.equals(p.unitId())) {
+            return new SaleUnit(null, qty);
+        }
+        if (!capabilities.enabled(RetailCapabilities.UNITS)) {
+            problems.add(new FieldProblem(
+                    field + ".unit_id", "capability_not_enabled", "Pack sizes are not enabled for this business."));
+            return null;
+        }
+        PackUnit pack = catalogue.packUnit(p.id(), unitId).orElse(null);
+        if (pack == null || !pack.active()) {
+            problems.add(
+                    new FieldProblem(field + ".unit_id", "unknown_pack_unit", "This item is not sold in that unit."));
+            return null;
+        }
+        BigDecimal baseQty = Quantities.toBase(qty, pack.factor())
+                .orElseThrow(() -> ApiException.rule(
+                        "quantity_not_representable",
+                        qty + " " + pack.unit() + " does not convert exactly to thousandths of " + p.unit()
+                                + ". Change the quantity."));
+        return new SaleUnit(pack, baseQty);
+    }
+
+    /**
+     * Issue #195: the price and its source for each line, as the sale would take them, without making a sale. The
+     * cost is never in the answer. A strict list with no price for a line is reported on the line, not refused.
+     */
+    @Transactional(readOnly = true)
+    Resolution resolve(ResolveRequest r) {
+        capabilities.require(RetailCapabilities.PRICE_LISTS);
+        UUID branch = branches.resolve("retail.sale.create", r.branchId());
+        LocalDate today = clock.today(tenant.profile().timezone());
+        LocalDate saleDate = r.saleDate() == null ? today : r.saleDate();
+        List<FieldProblem> problems = new ArrayList<>();
+        if (saleDate.isAfter(today)) {
+            problems.add(new FieldProblem("sale_date", "invalid", "A sale cannot be dated in the future."));
+        }
+        Customer buyer =
+                r.customerId() == null ? null : repo.customer(r.customerId()).orElse(null);
+        if (r.customerId() != null && buyer == null) {
+            problems.add(new FieldProblem("customer_id", "unknown_customer", "No such customer."));
+        }
+        Chosen list = pricing.choose(branch, r.priceListId(), buyer, problems);
+        List<ResolvedLine> out = new ArrayList<>();
+        for (int i = 0; i < r.lines().size(); i++) {
+            SalesApi.ResolveLineRequest l = r.lines().get(i);
+            String field = "lines[" + i + "]";
+            ProductSnapshot p = catalogue.find(l.productId()).orElse(null);
+            if (p == null) {
+                problems.add(new FieldProblem(field + ".product_id", "unknown_product", "No such product."));
+                continue;
+            }
+            if (!Quantities.exact(l.qty())) {
+                problems.add(new FieldProblem(field + ".qty", "invalid", "At most three decimal places."));
+                continue;
+            }
+            SaleUnit unit = saleUnit(field, p, l.unitId(), l.qty(), problems);
+            if (unit == null) {
+                continue;
+            }
+            PackUnit pack = unit.pack();
+            long defaultPrice = pack == null ? p.sellMinor() : Quantities.packPrice(p.sellMinor(), pack.factor());
+            Decision d = pricing.decide(
+                    list, p.id(), pack == null ? p.unitId() : pack.unitId(), l.qty(), defaultPrice, saleDate);
+            out.add(new ResolvedLine(
+                    p.id(),
+                    pack == null ? null : pack.unitId(),
+                    Quantities.format(l.qty()),
+                    d.priceMinor(),
+                    Quantities.value(l.qty(), d.priceMinor()),
+                    d.source(),
+                    d.listId(),
+                    d.breakMinQty() == null ? null : Quantities.format(d.breakMinQty()),
+                    d.refused() ? "no_price_in_list" : null));
+        }
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+        return new Resolution(
+                list == null ? null : list.id(),
+                list == null ? null : list.name(),
+                list == null ? null : list.origin(),
+                out);
+    }
+
+    /** Issue #195: the group and the own price list of a credit buyer, replaced under If-Match. */
+    @Transactional
+    Customer setCustomerPricing(UUID id, String ifMatch, CustomerPricingRequest r) {
+        capabilities.require(RetailCapabilities.PRICE_LISTS);
+        int expected = Versions.fromIfMatch(ifMatch);
+        Customer before = repo.customer(id).orElseThrow(ApiException::notFound);
+        if (before.version() != expected) {
+            throw Versions.conflict(before.version());
+        }
+        List<FieldProblem> problems = new ArrayList<>();
+        // What the customer holds already may stay even if it was switched off since; a new choice must be on.
+        if (r.customerGroupId() != null
+                && !r.customerGroupId().equals(before.customerGroupId())
+                && priceLists
+                        .customerGroup(r.customerGroupId())
+                        .filter(g -> g.active())
+                        .isEmpty()) {
+            problems.add(new FieldProblem(
+                    "customer_group_id", "unknown_customer_group", "Choose a group that exists and is switched on."));
+        }
+        if (r.priceListId() != null
+                && !r.priceListId().equals(before.priceListId())
+                && priceLists.priceList(r.priceListId()).filter(l -> l.active()).isEmpty()) {
+            problems.add(new FieldProblem(
+                    "price_list_id", "unknown_price_list", "Choose a price list that exists and is switched on."));
+        }
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+        Map<String, Object> was = new LinkedHashMap<>();
+        Map<String, Object> now = new LinkedHashMap<>();
+        if (!java.util.Objects.equals(before.customerGroupId(), r.customerGroupId())) {
+            was.put("customer_group_id", before.customerGroupId());
+            now.put("customer_group_id", r.customerGroupId());
+        }
+        if (!java.util.Objects.equals(before.priceListId(), r.priceListId())) {
+            was.put("price_list_id", before.priceListId());
+            now.put("price_list_id", r.priceListId());
+        }
+        if (now.isEmpty()) {
+            return before;
+        }
+        if (repo.updateCustomerPricing(id, r.customerGroupId(), r.priceListId(), expected) == 0) {
+            throw repo.customer(id).map(c -> Versions.conflict(c.version())).orElseGet(ApiException::notFound);
+        }
+        audit.record(new AuditLog.Entry("retail.customer.pricing_changed", "retail.customer", id, null, was, now));
+        return repo.customer(id).orElseThrow();
     }
 
     private static final java.util.Set<String> OWING_FILTERS = java.util.Set.of("owing", "overdue", "paid");
@@ -563,11 +750,20 @@ class SalesService {
 
     @Transactional
     Customer createCustomer(CustomerRequest r) {
-        Customer c = new Customer(UUID.randomUUID(), r.name().trim(), blankToNull(r.contact()), null, null, 1);
+        Customer c =
+                new Customer(UUID.randomUUID(), r.name().trim(), blankToNull(r.contact()), null, null, null, null, 1);
         repo.insertCustomer(c, CurrentPrincipal.require().userId());
         audit.record(AuditLog.Entry.created(
                 "retail.customer.created", "retail.customer", c.id(), null, Map.of("name", c.name())));
-        return repo.customer(c.id()).orElseThrow();
+        return forCaller(repo.customer(c.id()).orElseThrow());
+    }
+
+    /** The group and list of a buyer are shown only while the capability is on; off, the buyer reads as before. */
+    private Customer forCaller(Customer c) {
+        if (c.customerGroupId() == null && c.priceListId() == null || pricing.on()) {
+            return c;
+        }
+        return new Customer(c.id(), c.name(), c.contact(), c.createdAt(), c.balanceMinor(), null, null, c.version());
     }
 
     /** #146: edit a credit buyer's name or contact. Nothing else about a buyer changes, and none is deleted. */
@@ -594,13 +790,13 @@ class SalesService {
             now.put("contact_changed", true);
         }
         if (now.isEmpty()) {
-            return before;
+            return forCaller(before);
         }
         if (repo.updateCustomer(id, name, contact, expected) == 0) {
             throw repo.customer(id).map(c -> Versions.conflict(c.version())).orElseGet(ApiException::notFound);
         }
         audit.record(new AuditLog.Entry("retail.customer.updated", "retail.customer", id, null, was, now));
-        return repo.customer(id).orElseThrow();
+        return forCaller(repo.customer(id).orElseThrow());
     }
 
     @Transactional(readOnly = true)
@@ -618,7 +814,11 @@ class SalesService {
                         + page.getLast().customer().id())
                 : null;
         return new CustomerList(
-                page.stream().map(SalesRepository.CustomerRow::customer).toList(), next);
+                page.stream()
+                        .map(SalesRepository.CustomerRow::customer)
+                        .map(this::forCaller)
+                        .toList(),
+                next);
     }
 
     /** FR-RET-05: what the customer owes on credit sales in the caller's branch scope. */
@@ -653,6 +853,8 @@ class SalesService {
                 s.balanceMinor(),
                 null,
                 null,
+                s.priceListId(),
+                s.priceList(),
                 s.lines().stream()
                         .map(l -> new SaleLine(
                                 l.id(),
@@ -669,7 +871,8 @@ class SalesService {
                                 l.saleUnit(),
                                 l.saleQty(),
                                 l.saleUnitPriceMinor(),
-                                l.unitFactor()))
+                                l.unitFactor(),
+                                l.price()))
                         .toList(),
                 s.historical(),
                 s.createdAt(),
