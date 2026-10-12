@@ -31,14 +31,13 @@ public final class TestDatabase {
                     "/docker-entrypoint-initdb.d/01-roles.sh");
 
     static {
-        POSTGRES.start();
-        DatabaseMigrator.migrate(POSTGRES.getJdbcUrl(), "bms_owner", OWNER_PASSWORD);
+        DatabaseMigrator.migrate(url(), "bms_owner", OWNER_PASSWORD);
     }
 
     private TestDatabase() {}
 
     public static String url() {
-        return POSTGRES.getJdbcUrl();
+        return "jdbc:postgresql://127.0.0.1:5439/bms";
     }
 
     public static DataSource ownerDataSource() {

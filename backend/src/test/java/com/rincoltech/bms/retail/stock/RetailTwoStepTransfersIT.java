@@ -597,6 +597,25 @@ class RetailTwoStepTransfersIT extends IntegrationTest {
         assertThat(after.getBody().get("status").asString()).isEqualTo("completed");
     }
 
+    /** A branch's role is pinned while a dispatched transfer touches it (spec 2.1), and free again once it is received. */
+    @Test
+    void aBranchRoleCannotChangeWhileATransferIsOnItsWay() {
+        switchOn();
+        assertThat(putCapabilities(Map.of("branch_roles", true)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        api.stockUp(t.headOffice(), product, "10");
+        UUID id = dispatched("4");
+
+        ResponseEntity<JsonNode> refused =
+                api.call(HttpMethod.PUT, "/branch-roles/" + t.secondBranch(), Map.of("role", "store"), ROLE_MANAGE, "*", Map.of());
+
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("branch_has_open_work");
+        assertThat(receiveAll(id).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.call(HttpMethod.PUT, "/branch-roles/" + t.secondBranch(), Map.of("role", "store"), ROLE_MANAGE, "*", Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
     // ----------------------------------------------------------------------- permissions and scope
 
     /** The destination receives, the source cancels: scope on the other branch is a 404. */

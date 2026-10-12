@@ -18,6 +18,8 @@ const REPAY = 'lending.repayments.create';
 
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const isTenantAdmin = (me: Me) => held(me, SETTINGS);
+/** A retail capability the tenant switched on (ADR-033); /me lists them per module. */
+const capable = (me: Me, capability: string) => (me.module_capabilities?.['retail'] ?? []).includes(capability);
 const isSeller = (me: Me) => held(me, SELL) && !isTenantAdmin(me);
 
 const help: TourStep = {
@@ -518,7 +520,60 @@ export const stocktakePage: Tour = {
   ],
 };
 
+// The trade capabilities add their own page tours (ADR-033): they start only from Help, and only
+// for a user who may use the page on a tenant that switched its capability on.
+export const stockByLocationPage: Tour = {
+  id: 'page-stock-by-location',
+  version: 1,
+  title: 'This page: stores and shops',
+  audience: (me) => held(me, 'retail.stock.read') && capable(me, 'branch_roles'),
+  autoStart: false,
+  page: '/staff/retail/stock-by-location',
+  steps: [
+    {
+      id: 'search',
+      target: 'location-search',
+      module: 'retail',
+      title: 'Find an item',
+      body: 'Type a name or code to see that item in every store and shop you can read.',
+    },
+    {
+      id: 'report',
+      target: 'location-report',
+      module: 'retail',
+      title: 'Stores, shops and the total',
+      body: 'Stores come first, then shops. Stock that was sent and not yet received has its own column, so the combined total counts it once.',
+    },
+  ],
+};
+
+export const inTransitPage: Tour = {
+  id: 'page-in-transit',
+  version: 1,
+  title: 'This page: stock on the way',
+  audience: (me) => held(me, 'retail.stock.read') && capable(me, 'transfer_receipt'),
+  autoStart: false,
+  page: '/staff/retail/in-transit',
+  steps: [
+    {
+      id: 'help',
+      target: 'transit-help',
+      module: 'retail',
+      title: 'Stock on the way',
+      body: 'When one branch sends stock to another, it waits here until the other branch receives it.',
+    },
+    {
+      id: 'list',
+      target: 'transit-list',
+      module: 'retail',
+      title: 'Receive or take back',
+      body: 'At the branch it was sent to, check what arrived and tap Mark as received. At the branch that sent it, you can take it back until then.',
+    },
+  ],
+};
+
 /** Every tour, in the order the first matching auto tour is chosen. */
 export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
+  stockByLocationPage, inTransitPage,
 ];
