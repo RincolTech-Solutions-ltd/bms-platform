@@ -7,14 +7,21 @@
 -- switched on: the price_lists capability lives in the tenant settings group retail.capabilities and is
 -- off until an administrator turns it on. The retail price stays the product's sell_minor (it is not
 -- copied into a list); a sale priced without a list, or with the capability off, is priced as before and
--- its line keeps null in every new column. The new checks and foreign keys on the existing tables are
--- added NOT VALID and validated in the same file. Flyway runs the file in one transaction, so NOT VALID
--- does not shorten the lock: the SHARE ROW EXCLUSIVE lock that ADD CONSTRAINT takes on each existing
--- table (it blocks inserts and updates, not reads) is held through VALIDATE to the commit, and validation
--- scans the table once. That is accepted here because the new columns are null on every existing row
--- (validation cannot fail) and the sale tables of a small or medium business are modest; a very large
--- tenant would want the VALIDATE statements moved to a later migration. Flyway runs with outOfOrder off,
--- so the number is assigned at merge time above the highest one on main.
+-- its line keeps null in every new column.
+--
+-- Locks, said plainly. ALTER TABLE ... ADD COLUMN and ADD CONSTRAINT ... CHECK take an ACCESS
+-- EXCLUSIVE lock on the table; ADD CONSTRAINT ... FOREIGN KEY takes SHARE ROW EXCLUSIVE on it (and on
+-- the table it references). Flyway runs this file in one transaction, so every one of those locks is
+-- held to the commit: retail_sale_lines, retail_sales and retail_customers cannot be read or written
+-- while the migration runs, and so sale history and the daily profit report wait for it. NOT VALID does
+-- not change that here. The checks and foreign keys are still added NOT VALID and then validated, and
+-- the validation is kept, for this reason: the scan is one pass over rows whose new columns are all null
+-- (it cannot fail), the table is already locked against reads by the ADD COLUMN in the same transaction
+-- so the scan blocks nothing more, and leaving a constraint NOT VALID would leave it unvalidated for
+-- good (pg_constraint.convalidated false, unused by the planner). At the size of a small or medium
+-- business the migration is brief; a very large tenant would want the new columns added in one
+-- migration and the constraints validated in a later one (the transaction boundary is the file).
+-- Flyway runs with outOfOrder off, so the number is assigned at merge time above the highest one on main.
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_price_lists: a named list (wholesale, a trade partner, a contractor). The currency is the
@@ -187,6 +194,7 @@ ALTER TABLE retail_sale_lines
             AND resolved_unit_price_minor >= 0 AND price_override_reason IS NULL)
         OR (price_source = 'override' AND resolved_unit_price_minor IS NOT NULL AND resolved_unit_price_minor >= 0
             AND price_override_reason IS NOT NULL AND btrim(price_override_reason) <> ''
+            AND char_length(price_override_reason) <= 300
             AND (price_list_id IS NULL) = (price_break_min_qty IS NULL))) NOT VALID,
     ADD CONSTRAINT retail_sale_lines_price_list_fk FOREIGN KEY (tenant_id, price_list_id)
         REFERENCES retail_price_lists (tenant_id, id) NOT VALID;

@@ -12,7 +12,7 @@ import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useDebounced, useProfitAccess, useSingleBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
 import type { BranchRole } from '../../../api/retail';
-import { BRANCH_ROLES, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, needsOf, sellingBranches } from './permissions';
+import { BRANCH_ROLES, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -156,7 +156,8 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
 
   const pricesOn = capabilityOn(me, 'retail', PRICE_LISTS);
   const customers = useQuery({ queryKey: ['retail', 'customers'], queryFn: () => retail.listCustomers(), enabled: draft.method === 'credit' || pricesOn });
-  const canChooseList = pricesOn && holds(me, PRICELIST_USE);
+  // Reading the lists needs retail.pricelist.manage too (a list is a customer's negotiated price); the checks are the server's, per branch.
+  const canChooseList = pricesOn && holdsAt(me, PRICELIST_USE, branchId) && holds(me, PRICELIST_MANAGE);
   const lists = useQuery({ queryKey: ['retail', 'price-lists'], queryFn: () => retail.listPriceLists(), enabled: canChooseList });
   // Price lists on: the server prices every line (the customer's list, the group's, the quantity break) and the form shows it.
   const asked = pricesOn ? JSON.stringify(resolveRequestOf(draft)) : 'null';
@@ -220,7 +221,7 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
           line={l}
           index={i}
           unitsOn={unitsOn}
-          price={pricesOn ? { resolved: resolved?.[i], listName: resolution.data?.price_list, canOverride: holds(me, PRICE_OVERRIDE) } : undefined}
+          price={pricesOn ? { resolved: resolved?.[i], listName: resolution.data?.price_list, canOverride: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           onQty={(v) => setLine(i, { qty: v })}
           onPrice={(v) => setLine(i, { price: v, typed: true })}
           onReason={(v) => setLine(i, { reason: v })}

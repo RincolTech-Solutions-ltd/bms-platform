@@ -135,14 +135,13 @@ describe('a credit buyer', () => {
     expect(page(mockMe('admin'), <BuyerPricing row={buyer} />, client)).toBe('');
   });
 
-  it('shows the group and the own list, and offers the change only to the administrator', () => {
+  it('shows the administrator the group and the own list, and shows a seller nothing', () => {
     const html = page(admin, <BuyerPricing row={buyer} />, client);
     expect(html).toContain('Group: Contractors');
     expect(html).toContain('Own price list: Wholesale');
     expect(html).toContain('Change prices');
-    const seen = page(seller, <BuyerPricing row={buyer} />, client);
-    expect(seen).toContain('Group: Contractors');
-    expect(seen).not.toContain('Change prices');
+    // A seller sees nothing of what a buyer pays: the lists are read with retail.pricelist.manage only.
+    expect(page(seller, <BuyerPricing row={buyer} />, client)).toBe('');
   });
 
   it('says a buyer with neither pays the retail price', () => {

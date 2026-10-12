@@ -377,6 +377,28 @@ class SalesService {
         after.put("payment_method", r.paymentMethod());
         after.put("total_minor", total);
         after.put("lines", lines.size());
+        if (list != null) {
+            after.put("price_list_id", list.id());
+        }
+        // Issue #195: every changed price is in the audit entry of the sale, with the price the list resolved and why.
+        List<Map<String, Object>> overrides = lines.stream()
+                .filter(l -> l.pricing() != null && l.pricing().source().equals("override"))
+                .map(l -> {
+                    Map<String, Object> o = new LinkedHashMap<>();
+                    o.put("line_no", l.lineNo());
+                    o.put("product_id", l.productId());
+                    if (l.pricing().priceListId() != null) {
+                        o.put("price_list_id", l.pricing().priceListId());
+                    }
+                    o.put("resolved_unit_price_minor", l.pricing().resolvedUnitPriceMinor());
+                    o.put("unit_price_minor", l.saleUnitId() == null ? l.unitPriceMinor() : l.saleUnitPriceMinor());
+                    o.put("reason", l.pricing().overrideReason());
+                    return o;
+                })
+                .toList();
+        if (!overrides.isEmpty()) {
+            after.put("price_overrides", overrides);
+        }
         audit.record(AuditLog.Entry.created("retail.sale.created", SALE, id, branch, after));
         return visible(repo.find(id, false).orElseThrow().sale());
     }
@@ -420,6 +442,8 @@ class SalesService {
     Resolution resolve(ResolveRequest r) {
         capabilities.require(RetailCapabilities.PRICE_LISTS);
         UUID branch = branches.resolve("retail.sale.create", r.branchId());
+        // The same refusal as the sale: a store never sells, so it is not priced either (ADR-033).
+        roles.requireMaySell(branch);
         LocalDate today = clock.today(tenant.profile().timezone());
         LocalDate saleDate = r.saleDate() == null ? today : r.saleDate();
         List<FieldProblem> problems = new ArrayList<>();
@@ -595,7 +619,7 @@ class SalesService {
                 ? Cursor.encode((newestFirst ? "desc:" : "asc:")
                         + items.getLast().createdAt() + "|" + items.getLast().id())
                 : null;
-        return new SalePage(items.stream().map(SalesService::visible).toList(), next);
+        return new SalePage(items.stream().map(this::visible).toList(), next);
     }
 
     @Transactional(readOnly = true)
@@ -604,7 +628,7 @@ class SalesService {
         return repo.find(id, false)
                 .map(Header::sale)
                 .filter(s -> principal.may("retail.sale.read", s.branchId()))
-                .map(SalesService::visible)
+                .map(this::visible)
                 .orElseThrow(ApiException::notFound);
     }
 
@@ -758,9 +782,13 @@ class SalesService {
         return forCaller(repo.customer(c.id()).orElseThrow());
     }
 
-    /** The group and list of a buyer are shown only while the capability is on; off, the buyer reads as before. */
+    /**
+     * The group and list of a buyer are shown only while the capability is on and only to retail.pricelist.manage (they
+     * say what the buyer pays); otherwise the buyer reads as before price lists.
+     */
     private Customer forCaller(Customer c) {
-        if (c.customerGroupId() == null && c.priceListId() == null || pricing.on()) {
+        if (c.customerGroupId() == null && c.priceListId() == null
+                || pricing.on() && CurrentPrincipal.require().hasPermission("retail.pricelist.manage")) {
             return c;
         }
         return new Customer(c.id(), c.name(), c.contact(), c.createdAt(), c.balanceMinor(), null, null, c.version());
@@ -831,9 +859,15 @@ class SalesService {
         return new CustomerBalance(customerId, tenant.profile().currency(), owed, open);
     }
 
-    /** Cost and profit need {@code retail.profit.read} in the sale's branch (ADR-017; review F5). */
-    static Sale visible(Sale s) {
-        if (CurrentPrincipal.require().may("retail.profit.read", s.branchId())) {
+    /**
+     * Cost and profit need {@code retail.profit.read} in the sale's branch (ADR-017; review F5). While the
+     * {@code price_lists} capability is off a sale says nothing about price lists, whatever it was made with: the list
+     * and the way each line was priced are left out (issue #195), so the capability off reads exactly as before.
+     */
+    Sale visible(Sale s) {
+        boolean hideCost = !CurrentPrincipal.require().may("retail.profit.read", s.branchId());
+        boolean hidePricing = !pricing.on();
+        if (!hideCost && !hidePricing) {
             return s;
         }
         return new Sale(
@@ -851,10 +885,10 @@ class SalesService {
                 s.totalMinor(),
                 s.paidMinor(),
                 s.balanceMinor(),
-                null,
-                null,
-                s.priceListId(),
-                s.priceList(),
+                hideCost ? null : s.costTotalMinor(),
+                hideCost ? null : s.profitMinor(),
+                hidePricing ? null : s.priceListId(),
+                hidePricing ? null : s.priceList(),
                 s.lines().stream()
                         .map(l -> new SaleLine(
                                 l.id(),
@@ -865,14 +899,14 @@ class SalesService {
                                 l.qty(),
                                 l.unitPriceMinor(),
                                 l.lineTotalMinor(),
-                                null,
-                                null,
+                                hideCost ? null : l.unitCostMinor(),
+                                hideCost ? null : l.lineCostMinor(),
                                 l.saleUnitId(),
                                 l.saleUnit(),
                                 l.saleQty(),
                                 l.saleUnitPriceMinor(),
                                 l.unitFactor(),
-                                l.price()))
+                                hidePricing ? null : l.price()))
                         .toList(),
                 s.historical(),
                 s.createdAt(),

@@ -33,7 +33,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code /api/v1/retail} price list and customer group routes (ADR-033, issue #195; chapter 7 section 7.11.20). All of
- * them answer 404 {@code capability_not_enabled} while the {@code price_lists} capability is off.
+ * them answer 404 {@code capability_not_enabled} while the {@code price_lists} capability is off. Reading needs
+ * {@code retail.pricelist.manage} too: a list is a customer's negotiated price, so a seller never lists them; the sale
+ * asks {@code POST /retail/prices/resolve} for the price it needs.
  */
 @RestController
 @RequestMapping(path = "/api/v1/retail", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -47,7 +49,7 @@ class PriceListController {
     }
 
     @GetMapping("/price-lists")
-    @RequiresPermission("retail.sale.create")
+    @RequiresPermission("retail.pricelist.manage")
     @Operation(summary = "The price lists (issue #195)", operationId = "listRetailPriceLists")
     PriceListList lists() {
         return service.lists();
@@ -64,7 +66,7 @@ class PriceListController {
     }
 
     @GetMapping("/price-lists/{price_list_id}")
-    @RequiresPermission("retail.sale.create")
+    @RequiresPermission("retail.pricelist.manage")
     @Operation(summary = "A price list", operationId = "getRetailPriceList")
     ResponseEntity<PriceList> list(@PathVariable("price_list_id") UUID id) {
         PriceList l = service.list(id);
@@ -85,7 +87,7 @@ class PriceListController {
     }
 
     @GetMapping("/price-lists/{price_list_id}/items")
-    @RequiresPermission("retail.sale.create")
+    @RequiresPermission("retail.pricelist.manage")
     @Operation(
             summary = "The items of a list, by product; ended items only with include_ended (issue #195)",
             operationId = "listRetailPriceListItems")
@@ -122,7 +124,7 @@ class PriceListController {
     }
 
     @GetMapping("/customer-groups")
-    @RequiresPermission("retail.sale.create")
+    @RequiresPermission("retail.pricelist.manage")
     @Operation(summary = "The customer groups (issue #195)", operationId = "listRetailCustomerGroups")
     GroupList groups() {
         return service.groups();

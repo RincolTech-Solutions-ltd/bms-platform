@@ -38,6 +38,8 @@ class RetailPriceListsIT extends IntegrationTest {
     /** The retail administrator column after migration V41: the price list permissions and the price floor. */
     static final String MANAGER =
             ADMIN + ",retail.pricelist.manage,retail.pricelist.use,retail.price.override,retail.price.below_cost";
+    /** An administrator who may manage lists but may not read cost. */
+    static final String MANAGER_NO_PROFIT = MANAGER.replace(",retail.profit.read", "");
     /** The sales role after migration V41: it holds the price override, as it holds retail.sale.create. */
     static final String CLERK = RetailTestSupport.SALES + ",retail.price.override";
     /** A sales user whose administrator removed the override. */
@@ -267,14 +269,28 @@ class RetailPriceListsIT extends IntegrationTest {
         price(wholesale, pen, piece, "0", 90);
         UUID buyers = group("Contractors", wholesale);
         UUID c = customer("Test Buyer 01", buyers, wholesale);
-        assertThat(one(CLERK, c, "1")
-                        .get("lines")
-                        .get(0)
-                        .get("unit_price_minor")
-                        .asLong())
-                .isEqualTo(90);
+        JsonNode made = one(CLERK, c, "1");
+        assertThat(made.get("lines").get(0).get("unit_price_minor").asLong()).isEqualTo(90);
+        assertThat(made.get("lines").get(0).has("price")).isTrue();
 
         capability("price_lists", false);
+
+        // A sale made while it was on says nothing about price lists once it is off; the rows are kept.
+        JsonNode old = api.get("/sales/" + made.get("id").asString(), ADMIN).getBody();
+        assertThat(old.has("price_list_id")).isFalse();
+        assertThat(old.has("price_list")).isFalse();
+        assertThat(old.get("lines").get(0).has("price")).isFalse();
+        assertThat(old.get("lines").get(0).get("unit_price_minor").asLong()).isEqualTo(90);
+        for (JsonNode listed : api.get("/sales", ADMIN).getBody().get("items")) {
+            assertThat(listed.has("price_list_id")).isFalse();
+            assertThat(listed.get("lines").get(0).has("price")).isFalse();
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_sale_lines WHERE tenant_id = ? AND price_source = 'list'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
 
         for (String path : List.of("/price-lists", "/customer-groups", "/price-lists/" + wholesale + "/items")) {
             ResponseEntity<JsonNode> r = api.get(path, MANAGER);
@@ -307,7 +323,7 @@ class RetailPriceListsIT extends IntegrationTest {
         ResponseEntity<JsonNode> named = sale(MANAGER, null, wholesale, null, line(pen, null, "1", null, null));
         assertThat(named.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(named.getBody().toString()).contains("capability_not_enabled");
-        // What was recorded while it was on is kept, and its sale still shows how it was priced.
+        // What was recorded while it was on is kept.
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM retail_price_list_items WHERE tenant_id = ?")
                         .param(t.tenantId())
@@ -475,6 +491,12 @@ class RetailPriceListsIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused = sale(CLERK, inStrict, null, null, line(ream, null, "2", null, null));
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("no_price_in_list");
+        // Strict means strict: a holder of the override with a reason cannot sell the missing item either, because an
+        // override changes a price the system resolved and a strict list resolves none (spec section 3).
+        ResponseEntity<JsonNode> typed =
+                sale(MANAGER, inStrict, null, null, line(ream, null, "2", 45L, "Agreed with the owner today"));
+        assertThat(typed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(typed)).isEqualTo("no_price_in_list");
         assertThat(saleOk(CLERK, inStrict, null, null, line(pen, null, "2", null, null))
                         .get("lines")
                         .get(0)
@@ -829,8 +851,9 @@ class RetailPriceListsIT extends IntegrationTest {
                 .getBody()
                 .get("items");
         assertThat(withProfit.toString()).contains("below_cost");
-        JsonNode without =
-                api.get("/price-lists/" + wholesale + "/items", CLERK).getBody().get("items");
+        JsonNode without = api.get("/price-lists/" + wholesale + "/items", MANAGER_NO_PROFIT)
+                .getBody()
+                .get("items");
         assertThat(without).hasSize(2);
         assertThat(without.toString()).doesNotContain("below_cost").doesNotContain("cost");
 
@@ -866,9 +889,24 @@ class RetailPriceListsIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.CONFLICT);
         assertThat(api.post("/price-lists", Map.of("name", "Late"), CLERK).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        // Reading needs only retail.sale.create.
-        assertThat(api.get("/price-lists", CLERK).getBody().get("items")).hasSize(1);
-        assertThat(api.get("/customer-groups", CLERK)
+        // Reading needs retail.pricelist.manage too: a list is a customer's negotiated price. The sales role gets 403
+        // on
+        // every read of a list, its items and the groups, and 200 on the resolve route its sale form uses.
+        assertThat(api.get("/price-lists", MANAGER).getBody().get("items")).hasSize(1);
+        for (String path : List.of(
+                "/price-lists",
+                "/price-lists/" + wholesale,
+                "/price-lists/" + wholesale + "/items",
+                "/customer-groups")) {
+            assertThat(api.get(path, CLERK).getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(api.get(path, CLERK_NO_OVERRIDE).getStatusCode())
+                    .as(path)
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+        }
+        assertThat(resolve(CLERK, null, null, Map.of("product_id", pen, "qty", "1"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/customer-groups", MANAGER)
                         .getBody()
                         .get("items")
                         .get(0)
@@ -882,6 +920,11 @@ class RetailPriceListsIT extends IntegrationTest {
         assertThat(clerk.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         ResponseEntity<JsonNode> set = pricing(c, contractors, wholesale, MANAGER);
         assertThat(set.getStatusCode()).as("%s", set.getBody()).isEqualTo(HttpStatus.OK);
+        // The buyer's group and list are shown to the list manager only; the sales role reads the buyer as before.
+        for (JsonNode seen : api.get("/customers", CLERK).getBody().get("items")) {
+            assertThat(seen.has("customer_group_id")).isFalse();
+            assertThat(seen.has("price_list_id")).isFalse();
+        }
         assertThat(set.getBody().get("customer_group_id").asString()).isEqualTo(contractors.toString());
         assertThat(set.getBody().get("price_list_id").asString()).isEqualTo(wholesale.toString());
         assertThat(api.get("/customer-groups", MANAGER)
@@ -992,6 +1035,122 @@ class RetailPriceListsIT extends IntegrationTest {
                                     resolved_unit_price_minor)
                                 VALUES (gen_random_uuid(), ?, ?, 2, ?, 1, 100, 83, 100, 83, 'override', 100)
                                 """).params(t.tenantId(), saleId, pen).update())
+                .hasStackTraceContaining("retail_sale_lines_price_chk");
+    }
+
+    String stock() {
+        return TestDatabase.owner()
+                .sql(
+                        "SELECT qty::text FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ? AND product_id = ?")
+                .params(t.tenantId(), t.headOffice(), pen)
+                .query(String.class)
+                .single();
+    }
+
+    /** Issue #195: every changed price is in the audit entry of the sale, with what the list resolved and why. */
+    @Test
+    void anOverrideIsAuditedWithTheResolvedPriceAndTheReason() {
+        UUID wholesale = list("Wholesale", false);
+        price(wholesale, pen, piece, "0", 90);
+        UUID c = customer("Test Buyer 01", null, wholesale);
+        JsonNode changed = saleOk(CLERK, c, null, null, line(pen, null, "2", 85L, "Loyal buyer, agreed with owner"));
+        JsonNode plain = one(CLERK, c, "1");
+
+        String audit = TestDatabase.owner()
+                .sql(
+                        "SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.sale.created' AND entity_id = ?")
+                .params(t.tenantId(), UUID.fromString(changed.get("id").asString()))
+                .query(String.class)
+                .single();
+        assertThat(audit).contains("price_overrides").contains("Loyal buyer, agreed with owner");
+        assertThat(audit).contains("\"resolved_unit_price_minor\": 90").contains("\"unit_price_minor\": 85");
+        assertThat(audit).contains(wholesale.toString());
+        String quiet = TestDatabase.owner()
+                .sql(
+                        "SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.sale.created' AND entity_id = ?")
+                .params(t.tenantId(), UUID.fromString(plain.get("id").asString()))
+                .query(String.class)
+                .single();
+        assertThat(quiet).doesNotContain("price_overrides");
+    }
+
+    /** A void restores stock and books and never rewrites how a line was priced, for a list price and for an override. */
+    @Test
+    void voidingAListPricedAndAnOverriddenSaleLeavesTheirPricesAsTheyWere() {
+        UUID wholesale = list("Wholesale", false);
+        price(wholesale, pen, piece, "0", 90);
+        UUID c = customer("Test Buyer 01", null, wholesale);
+        for (boolean override : new boolean[] {false, true}) {
+            JsonNode made = override
+                    ? saleOk(MANAGER, c, null, null, line(pen, null, "2", 85L, "Loyal buyer, agreed"))
+                    : one(MANAGER, c, "2");
+            UUID id = UUID.fromString(made.get("id").asString());
+            assertThat(stock()).isEqualTo("998.000");
+            ResponseEntity<JsonNode> voided =
+                    api.post("/sales/" + id + "/void", Map.of("reason", "Test void"), MANAGER);
+            assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+            JsonNode after = api.get("/sales/" + id, ADMIN).getBody();
+            assertThat(after.get("status").asString()).isEqualTo("voided");
+            JsonNode before = made.get("lines").get(0);
+            JsonNode kept = after.get("lines").get(0);
+            assertThat(kept.get("unit_price_minor")).isEqualTo(before.get("unit_price_minor"));
+            assertThat(kept.get("line_total_minor")).isEqualTo(before.get("line_total_minor"));
+            assertThat(kept.get("price")).isEqualTo(before.get("price"));
+            assertThat(kept.get("price").get("source").asString()).isEqualTo(override ? "override" : "list");
+            assertThat(after.get("price_list_id").asString()).isEqualTo(wholesale.toString());
+            assertThat(stock()).isEqualTo("1000.000");
+        }
+        // The price sits in the database row too, untouched by the void.
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM retail_sale_lines WHERE tenant_id = ? AND price_source IN ('list', 'override')")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2);
+    }
+
+    /** The resolve route refuses a store as the sale does, and the reason column is bounded as the API is. */
+    @Test
+    void aStoreIsNotPricedAndTheReasonHasTheSameBoundAsTheApi() {
+        capability("branch_roles", true);
+        ResponseEntity<JsonNode> role = api.call(
+                HttpMethod.PUT,
+                "/branch-roles/" + t.secondBranch(),
+                Map.of("role", "store"),
+                ADMIN + ",retail.branch_role.manage",
+                "*",
+                Map.of());
+        assertThat(role.getStatusCode()).as("%s", role.getBody()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.secondBranch());
+        body.put("lines", List.of(Map.of("product_id", pen, "qty", "1")));
+        ResponseEntity<JsonNode> store = api.post("/prices/resolve", body, CLERK);
+        assertThat(store.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(store)).isEqualTo("branch_role_forbids_sales");
+        body.put("branch_id", t.headOffice());
+        assertThat(api.post("/prices/resolve", body, CLERK).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // 300 characters is accepted, 301 is refused by the API and by the database.
+        UUID wholesale = list("Wholesale", false);
+        price(wholesale, pen, piece, "0", 90);
+        UUID c = customer("Test Buyer 01", null, wholesale);
+        assertThat(sale(MANAGER, c, null, null, line(pen, null, "1", 85L, "x".repeat(300)))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(sale(MANAGER, c, null, null, line(pen, null, "1", 85L, "x".repeat(301)))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        UUID saleId = UUID.fromString(one(MANAGER, c, "1").get("id").asString());
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("""
+                                INSERT INTO retail_sale_lines (id, tenant_id, sale_id, line_no, product_id, qty,
+                                    unit_price_minor, unit_cost_minor, line_total_minor, line_cost_minor, price_source,
+                                    resolved_unit_price_minor, price_override_reason)
+                                VALUES (gen_random_uuid(), ?, ?, 9, ?, 1, 100, 30, 100, 30, 'override', 100, ?)
+                                """)
+                        .params(t.tenantId(), saleId, pen, "y".repeat(301))
+                        .update())
                 .hasStackTraceContaining("retail_sale_lines_price_chk");
     }
 

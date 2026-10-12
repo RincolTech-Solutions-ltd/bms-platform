@@ -157,6 +157,16 @@ export function holds(me: Pick<Me, 'permissions'>, permission: string): boolean 
   return permissionsOf(me).includes(permission);
 }
 
+/**
+ * True when the session holds `permission` at `branchId`: the check the server makes (ADR-017), so a user whose override
+ * covers one branch is not offered it at another. Without a branch it is the plain `holds`.
+ */
+export function holdsAt(me: Pick<Me, 'permissions' | 'permission_scopes' | 'branches'>, permission: string, branchId: string | null | undefined): boolean {
+  if (!holds(me, permission)) return false;
+  if (!branchId) return true;
+  return branchesWhere(me, permission).some((b) => b.id === branchId);
+}
+
 export function hasAnyRetailPermission(me: Pick<Me, 'permissions'>): boolean {
   return permissionsOf(me).some((p) => p.startsWith('retail.'));
 }

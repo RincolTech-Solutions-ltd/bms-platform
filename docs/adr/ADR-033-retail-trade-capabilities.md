@@ -202,12 +202,15 @@ Decision 4 is built in slice 5 (migration V41; `docs/specs/trade-capabilities.md
    only. A list and a group are switched off, never deleted. The buyer's own list wins over the group's.
 6. **Expand only, and the lock is honest.** Three tables with forced RLS, two nullable columns on `retail_customers`, one on
    `retail_sales`, five on `retail_sale_lines`, and three permissions. The foreign keys and the check on the existing tables are
-   added `NOT VALID` and validated in the same migration. Flyway runs the file in one transaction, so this does not shorten the
-   lock: the share row exclusive lock of `ADD CONSTRAINT` (it blocks writes, not reads) on each existing table is held through
-   the validation scan to the commit. That is accepted because every new column is null on every existing row and the sale
-   tables of a small or medium business are modest; a very large tenant would move the `VALIDATE` statements to a later
-   migration. The covering index of V26 is untouched. The 25-times benchmark (k01 to k15, needs Docker) was not run for this
-   change: no column is indexed on a sale table and no existing report statement changed.
+   added `NOT VALID` and validated in the same migration. The lock cost is this, and not the milder one an earlier draft
+   claimed: `ADD COLUMN` and `ADD CONSTRAINT ... CHECK` take an access exclusive lock, a foreign key takes share row
+   exclusive, and Flyway runs the file in one transaction, so every one is held to the commit. Sales, sale history and the daily
+   profit report on `retail_sale_lines`, `retail_sales` and `retail_customers` therefore wait for the migration; at the size
+   of a small or medium business that is brief. The validation scan is kept because it is one pass over rows whose new columns
+   are all null, it blocks nothing the `ADD COLUMN` lock did not already block, and a constraint left `NOT VALID` stays
+   unvalidated for good. A very large tenant would add the columns in one migration and validate in a later one. The covering
+   index of V26 is untouched. The 25-times benchmark (k01 to k15, needs Docker) was not run for this change: no column is
+   indexed on a sale table and no existing report statement changed.
 7. **Cost stays out.** Resolution returns the price and its source, never the cost; an item carries `below_cost` only for a
    caller with `retail.profit.read`; the refusal for a price at or below cost carries no figure.
 

@@ -292,7 +292,7 @@ Notes:
   customer's own or the customer group's), both administrators only, and `retail.price.override`, which
   guards behaviour the sales role already has (a typed unit price), so the migration grants it to every role
   that holds `retail.sale.create`; it is consulted only while the `price_lists` capability is on, and then
-  also needs a reason on the line. Design only: five more permissions, `retail.credit.manage`,
+  also needs a reason on the line (the changed price is written to the audit entry of the sale). Reading a price list, its items or the customer groups, and seeing a buyer's group and list, needs `retail.pricelist.manage` too, because they are negotiated prices; the sales role asks `POST /retail/prices/resolve` for what it needs. Design only: five more permissions, `retail.credit.manage`,
   `retail.credit.override`, `retail.sale.return`, `retail.document.issue` and `retail.payable.manage`.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares
   the seeded permissions with the matrix; all of them go to administrators only.

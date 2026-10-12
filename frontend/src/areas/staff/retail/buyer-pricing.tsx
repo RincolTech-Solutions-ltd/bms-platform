@@ -6,14 +6,13 @@ import { PRICELIST_MANAGE, PRICE_LISTS, capabilityOn, holds } from './permission
 import { Problem, changeFailureText, requireVersion } from './ui';
 
 // A credit buyer's customer group and own price list (ADR-033, issue #195). Shown on the Credit buyers page only while
-// the price_lists feature is on. Seeing them needs nothing more than the page; changing them needs
-// retail.pricelist.manage, because choosing a buyer's list is choosing what that buyer pays. The buyer's own list wins
+// the price_lists feature is on and only to retail.pricelist.manage: the list a buyer is on is what that buyer pays. The buyer's own list wins
 // over the group's list; with neither, the buyer pays the retail price.
 
 export function BuyerPricing({ row }: { row: Customer }) {
   const { me } = useStaff();
-  // The lists and groups are read with retail.sale.create; without it there is nothing to show the names from.
-  const on = capabilityOn(me, 'retail', PRICE_LISTS) && holds(me, 'retail.sale.create');
+  // The lists and groups are read with retail.pricelist.manage (they are negotiated prices); without it a buyer shows nothing here.
+  const on = capabilityOn(me, 'retail', PRICE_LISTS) && holds(me, PRICELIST_MANAGE);
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [groupId, setGroupId] = useState(row.customer_group_id ?? '');
@@ -27,15 +26,14 @@ export function BuyerPricing({ row }: { row: Customer }) {
   if (!on) return null;
   const group = (groups.data ?? []).find((g) => g.id === row.customer_group_id);
   const list = (lists.data ?? []).find((l) => l.id === row.price_list_id);
-  const mayChange = holds(me, PRICELIST_MANAGE);
   return (
     <div data-tour="buyer-pricing" data-testid="buyer-pricing">
       <p className="hint">
         {group ? `Group: ${group.name}. ` : 'No group. '}
         {list ? `Own price list: ${list.name}.` : group?.price_list ? `Priced from the group's list ${group.price_list}.` : 'Pays the retail price.'}
       </p>
-      {mayChange && !editing && <p><button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Change the prices of ${row.name}`}>Change prices</button></p>}
-      {mayChange && editing && (
+      {!editing && <p><button type="button" className="btn-sm" onClick={() => setEditing(true)} aria-label={`Change the prices of ${row.name}`}>Change prices</button></p>}
+      {editing && (
         <div className="stack">
           <label htmlFor={`buyer-group-${row.id}`}>Customer group</label>
           <select id={`buyer-group-${row.id}`} value={groupId} onChange={(e) => setGroupId(e.target.value)}>
