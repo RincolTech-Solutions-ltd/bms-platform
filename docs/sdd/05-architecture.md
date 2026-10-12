@@ -26,9 +26,12 @@ packages.
 | Backend: Java 25, Spring Boot 4.1, Spring Modulith 2.1, Flyway | ADR-010 |
 | Retail vertical brought forward; stock as append-only movements; retail events post to the ledger | ADR-020 |
 | First run signs the invitee in; guided tours are data with per-user progress on the server | ADR-025 (proposed) |
-| Payment gateway | pending ADR-011 |
+| Mobile money and card collections through Pesapal v3: hosted orders, notification as a hint, status query as the truth | ADR-035 (proposed) |
 | Credit scoring model beyond the rules-based default | pending ADR-012 |
-| SMS and USSD aggregator | pending ADR-013 |
+| SMS as a channel of the notification outbox, Africa's Talking first, tenant delivery log, sink outside production | ADR-036 (proposed) |
+| USSD aggregator | pending ADR-013 |
+| AI portfolio monitoring: advisory, aggregates and aliases only, numbers validated in code, off by default | ADR-037 (proposed) |
+| The reports pack: async runs over one snapshot, PDF through the shared templates, streamed Excel | ADR-038 (proposed) |
 
 ## 5.3 Containers
 
@@ -43,8 +46,8 @@ packages.
 | PostgreSQL 16 | Database | System of record for all tenants (chapter 6), and the job store (`scheduled_tasks`, ADR-008) |
 | Object storage | Cloudflare R2 (S3 API) | Generated PDFs, uploads, encrypted database backups |
 
-External systems: SMS and USSD aggregator (pending ADR-013), payment gateway
-(pending ADR-011) connecting to mobile money operators, transactional email provider.
+External systems: the SMS provider (Africa's Talking, ADR-036; USSD pending ADR-013), the payment gateway (Pesapal, ADR-035)
+connecting to mobile money operators, a language model provider (ADR-037, off by default), transactional email provider.
 
 Deployment: one virtual machine per environment (staging, production), all containers
 under Docker Compose, object storage external. There is no Redis: jobs, the outbox and
@@ -68,7 +71,9 @@ core
   documents       PDF rendering, object storage, signed URLs
   reporting       report catalogue, report runs, export formats
   imports         batches, rows, issues, review queue, commit orchestration
-  payments        payment intents, gateway adapters, callbacks, unallocated receipts
+  payments        payment intents, gateway adapters (Pesapal, ADR-035), callbacks, unallocated receipts,
+                  reconciliation, statement upload
+  ai              LlmClient port, OpenAI-compatible adapter, caps, call log, circuit breaker (ADR-037)
   jobs            db-scheduler tasks, per-tenant job runner (ADR-008)
   operations      version endpoint, readiness checks, database role guard
   platform        platform console API: tenant creation, modules, subscriptions (ADR-016);
@@ -84,6 +89,8 @@ lending           vertical module (ADR-001)
   investments     products, investments, schedule, returns job, maturity, rollover, early
                   withdrawal, reversal, certificate, statement, maturity ladder (ADR-031)
   collections     due list, arrears list, officer assignment, collection actions
+  advisor         AI brief and question box over insights facts: aliases, numeric validator, fallback (ADR-037)
+  reports         the definitions of the formal reports and the pack, built on insights figures through a public port (ADR-038)
   lending reports, lending import templates, lending posting rules, lending jobs
 retail            vertical module (future)
 ```
@@ -106,7 +113,8 @@ core.onboarding       -> core.tenancy, core.platform, core.audit, core.notificat
 core.notifications    -> core.audit (the operator's "send again" is audited)
 core.imports          -> core.ledger, core.documents   (templates register into it)
 core.payments         -> core.ledger, core.notifications (booking is delegated through a registry)
-core.reporting        -> core.documents
+core.reporting        -> core.documents (runs, snapshot transaction, Excel and PDF builders; ADR-038)
+core.ai               -> core.tenancy, core.audit, core.jobs (no vertical)
 lending               -> any core module
 lending.loans         -> lending.members, lending.products, lending.collateral, lending.savings (transfer)
 lending.seed          -> lending.loans (LoanServicing), lending.savings (SavingsServicing),
@@ -116,6 +124,9 @@ lending.insights      -> core.tenancy, core.audit, core.jobs, core.notifications
                          lending.savings (SavingsMetrics), lending.investments (InvestmentMetrics)
                          (reads the lending and ledger tables with SQL, read-only, under RLS; ADR-030)
 lending.collections   -> lending.loans, lending.members
+lending.reports       -> core.reporting, core.documents, lending.insights (the public InsightsFigures port, ADR-038)
+lending.advisor       -> core.ai, core.tenancy, core.audit, core.jobs, lending.insights (PortfolioFacts)
+                         (never reads member rows; sends aggregates and aliases only; ADR-037)
 lending.savings       -> lending.members (member lookup, the receipt SMS phone; ADR-032)
 lending.investments   -> lending.members; lending.savings (monthly return credit) in a follow-up
                          (increment 10 pays due returns in cash, ADR-031)
@@ -137,6 +148,7 @@ registers into through its manifest at startup:
 | Registry (core) | What the vertical registers | Example |
 |---|---|---|
 | Module manifest | Module key, routers, permissions, default chart of accounts entries, notification templates | `lending` |
+| Module settings group | A tenant settings group the core stores as opaque jsonb, validates through the vertical and lists in `/me` (ADR-033; built: `retail.capabilities`, supplied by `retail.manifest`) | Retail capability flags |
 | Approval actions | One `ApprovalAction` bean per action type it owns (ADR-015) | `loan_disbursement` executes the disbursement |
 | Branch deactivation guards | Whether a branch still has open accounts of the module | Loans, savings, investments |
 | Import templates | Parser, classifier, normaliser, committer | `pilot_loan_register_v1` |
@@ -237,6 +249,11 @@ frontend/src/
 
 Each area is a lazily loaded route tree. The staff area reads the principal's permissions
 from `/me` and hides actions the user cannot take.
+
+Breadcrumbs (FR-UXN-01) are one component in `components/breadcrumbs.tsx`, drawn once by the staff layout. The trail is read
+from the router's route table: each staff route declares a `crumb` label in its static data (`app/router.tsx`), so there is no
+second map to keep; a test fails when a staff route has no label. Category grouping of item lists (FR-UXN-02) is a pure
+function and a small hook in `areas/staff/retail/category-groups.tsx`; both are frontend only.
 
 Guided tours (FR-IAM-14, ADR-025) live in `frontend/src/tour/`: `model.ts` (the step type, who sees
 a step by permission, module and feature flag, when a tour starts, the focus trap and key rules),

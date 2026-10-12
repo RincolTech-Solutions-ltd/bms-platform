@@ -72,8 +72,9 @@ most one open loan.**
 A two-thread test pledges one item to two drafts at once and expects one 200 and one 409.
 
 Addendum (2026-10-10, issue #176): a repayment reversal that reopens a closed loan restores that
-loan's released pledges under the same item locks (in pledging's order), for each item still held
+loan's released pledges under the same item locks (in pledging's order: the text order of the UUID,
+which is PostgreSQL's, never `UUID.compareTo`), for each item still held
 and securing no other loan. An item handed back or pledged elsewhere stays where it is: the reversal
 request lists it for the checker, and the reopen is audited as partly unsecured. The reversal is
-never refused for collateral. The one-open-pledge index stays the backstop; V35 narrows the guard
+never refused for collateral. The one-open-pledge index stays the backstop; V41 narrows the guard
 exception to the reopened loan alone.

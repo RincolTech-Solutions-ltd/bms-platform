@@ -104,7 +104,7 @@ Also decided here, within the rules of chapter 3:
 **Watch for:**
 
 - A closed loan releases its pledges (FR-COL-04); a reversal that reopens it did not re-pledge
-  them, because pledges changed only on a draft. Done in #176 (V35): the reopened loan takes back
+  them, because pledges changed only on a draft. Done in #176 (V41): the reopened loan takes back
   each item still held and free; an item handed back or pledged elsewhere is not restored, the
   reversal request shows it to the checker, and the reopen is audited as partly unsecured. A
   reversal is never refused for collateral, because handing the item back after payoff is normal.

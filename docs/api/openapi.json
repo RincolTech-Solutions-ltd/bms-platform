@@ -4304,6 +4304,26 @@
           "mfa_required" : {
             "type" : "boolean"
           },
+          "module_capabilities" : {
+            "additionalProperties" : {
+              "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
+              "items" : {
+                "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
+                "type" : "string"
+              },
+              "type" : "array"
+            },
+            "description" : "Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed",
+            "type" : "object"
+          },
+          "modules" : {
+            "description" : "Keys of the modules the tenant has switched on, sorted (issue #185)",
+            "items" : {
+              "description" : "Keys of the modules the tenant has switched on, sorted (issue #185)",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "permission_scopes" : {
             "additionalProperties" : {
               "$ref" : "#/components/schemas/MePermissionScope"
@@ -5687,6 +5707,36 @@
         },
         "required" : [ "branch_id", "qty" ]
       },
+      "RetailBranchRole" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "can_sell" : {
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailBranchRoleList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailBranchRole"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "RetailBusinessEvaluation" : {
         "properties" : {
           "branches" : {
@@ -5720,6 +5770,38 @@
           },
           "total" : {
             "$ref" : "#/components/schemas/RetailEvaluationTotal"
+          }
+        }
+      },
+      "RetailCapabilities" : {
+        "properties" : {
+          "branch_roles" : {
+            "type" : "boolean"
+          },
+          "customer_accounts" : {
+            "type" : "boolean"
+          },
+          "documents" : {
+            "type" : "boolean"
+          },
+          "price_lists" : {
+            "type" : "boolean"
+          },
+          "profile" : {
+            "enum" : [ "shop", "trade" ],
+            "type" : "string"
+          },
+          "purchasing" : {
+            "type" : "boolean"
+          },
+          "returns" : {
+            "type" : "boolean"
+          },
+          "transfer_receipt" : {
+            "type" : "boolean"
+          },
+          "units" : {
+            "type" : "boolean"
           }
         }
       },
@@ -7039,6 +7121,238 @@
         },
         "required" : [ "amount_minor", "category_id", "item_id" ]
       },
+      "RetailInFlightTransfer" : {
+        "description" : "Dispatched and not received or cancelled, the longest wait first",
+        "properties" : {
+          "age_days" : {
+            "description" : "Days from the transfer date to today",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "cost_total_minor" : {
+            "description" : "Present only with retail.profit.read in either branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "dispatched_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "from_branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailTransferLine"
+            },
+            "type" : "array"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "to_branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "transfer_date" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailLocationBalance" : {
+        "description" : "One entry per branch of the report, in its order",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "negative" : {
+            "description" : "Below zero in this branch",
+            "type" : "boolean"
+          },
+          "qty" : {
+            "type" : "string"
+          },
+          "value_minor" : {
+            "description" : "Quantity at the current cost; present only with retail.profit.read in this branch",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailLocationBranch" : {
+        "description" : "A column of the report; ordered stores, shops, then both",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "head_office" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "role" : {
+            "description" : "both for every branch while the branch_roles capability is off",
+            "enum" : [ "store", "shop", "both" ],
+            "type" : "string"
+          }
+        }
+      },
+      "RetailLocationBranchValue" : {
+        "description" : "Only the branches where the caller holds retail.profit.read",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "value_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailLocationRoleValue" : {
+        "description" : "Only the roles whose branches in the report all show cost",
+        "properties" : {
+          "role" : {
+            "type" : "string"
+          },
+          "value_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailLocationRow" : {
+        "description" : "One product: its balance in every branch, by role, and in transit",
+        "properties" : {
+          "balances" : {
+            "description" : "One entry per branch of the report, in its order",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailLocationBalance"
+            },
+            "type" : "array"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "category_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "combined_qty" : {
+            "description" : "All the branches' balances plus the quantity in transit",
+            "type" : "string"
+          },
+          "combined_value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "cost_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "in_transit_qty" : {
+            "description" : "Dispatched and not yet received, from or to a branch of the report; in neither balance",
+            "type" : "string"
+          },
+          "in_transit_value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report; the quantity in transit at the cost it was dispatched at",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "negative" : {
+            "description" : "True when any branch's balance is below zero",
+            "type" : "boolean"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sell_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "subtotals" : {
+            "description" : "The sum of the balances of each role present in the report",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailRoleQuantity"
+            },
+            "type" : "array"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report; the balances at the current cost",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailLocationTotals" : {
+        "description" : "Over every product in the caller's branches, not only the page; cost fields as the rows",
+        "properties" : {
+          "by_branch" : {
+            "description" : "Only the branches where the caller holds retail.profit.read",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailLocationBranchValue"
+            },
+            "type" : "array"
+          },
+          "by_role" : {
+            "description" : "Only the roles whose branches in the report all show cost",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailLocationRoleValue"
+            },
+            "type" : "array"
+          },
+          "combined_value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "in_transit_value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report; the value of the dispatches still on their way",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "inventory_ledger_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report; the inventory account of those branches",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "revaluation_difference_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report; value at cost less the inventory account, as in the valuation",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "value_minor" : {
+            "description" : "Present only with retail.profit.read in every branch of the report",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailMarginBelowTarget" : {
         "properties" : {
           "items" : {
@@ -7233,6 +7547,74 @@
           "total_minor" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailPack" : {
+        "description" : "The pack sizes of the product; present only while the units capability is on",
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "factor" : {
+            "description" : "Base units in one pack, three places, for example 12.000",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "version" : {
+            "description" : "Send as If-Match when updating",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailPackList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPack"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "RetailPackRequest" : {
+        "description" : "A pack size: factor base units in one pack of the unit",
+        "properties" : {
+          "factor" : {
+            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5",
+            "type" : "string"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "factor", "unit_id" ]
+      },
+      "RetailPackUpdate" : {
+        "description" : "Omitted fields are unchanged; a pack is never deleted, only switched off",
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "factor" : {
+            "description" : "Base units in one pack, at least 1; required to switch a pack on again",
+            "type" : "string"
           }
         }
       },
@@ -7551,6 +7933,13 @@
             "description" : "True when the branch balance is below zero",
             "type" : "boolean"
           },
+          "packs" : {
+            "description" : "The pack sizes of the product; present only while the units capability is on",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPack"
+            },
+            "type" : "array"
+          },
           "qty" : {
             "description" : "The branch balance, when branch_id was given",
             "type" : "string"
@@ -7716,6 +8105,7 @@
             "type" : "string"
           },
           "cost_minor" : {
+            "description" : "Per base unit: the movement snapshot and the product's cost",
             "format" : "int64",
             "type" : "integer"
           },
@@ -7731,6 +8121,7 @@
             "type" : "integer"
           },
           "line_total_minor" : {
+            "description" : "The amount paid or owed for the line, as entered",
             "format" : "int64",
             "type" : "integer"
           },
@@ -7745,11 +8136,33 @@
             "type" : "array"
           },
           "qty_total" : {
+            "description" : "In base units",
             "type" : "string"
           },
           "sell_minor" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "unit_cost_minor" : {
+            "description" : "Cost per unit as entered",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit_factor" : {
+            "description" : "Base units in one unit when the line was made",
+            "type" : "string"
+          },
+          "unit_id" : {
+            "description" : "The unit the line was entered in; absent means the base unit",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "unit_qty_total" : {
+            "description" : "Quantity in the unit",
+            "type" : "string"
           }
         }
       },
@@ -7760,6 +8173,11 @@
             "type" : "string"
           },
           "qty" : {
+            "description" : "In base units, always",
+            "type" : "string"
+          },
+          "unit_qty" : {
+            "description" : "The quantity in the unit the line was entered in; absent for a base unit line",
             "type" : "string"
           }
         }
@@ -7767,7 +8185,7 @@
       "RetailPurchaseLineRequest" : {
         "properties" : {
           "cost_minor" : {
-            "description" : "Unit cost; becomes the product's cost",
+            "description" : "Cost per unit_id when one is given, otherwise per base unit; becomes the product's cost per base unit (a pack cost divided by the factor, rounded half up)",
             "format" : "int64",
             "maximum" : 10000000000000,
             "minimum" : 0,
@@ -7791,6 +8209,11 @@
             "maximum" : 10000000000000,
             "minimum" : 0,
             "type" : "integer"
+          },
+          "unit_id" : {
+            "description" : "A pack unit of the product (units capability): the quantities and cost_minor are then in that unit and stock moves in base units. Absent or the base unit: as before",
+            "format" : "uuid",
+            "type" : "string"
           }
         },
         "required" : [ "cost_minor", "product_id", "qty_by_branch" ]
@@ -7924,6 +8347,18 @@
         },
         "required" : [ "amount_minor", "method" ]
       },
+      "RetailRoleQuantity" : {
+        "description" : "The sum of the balances of each role present in the report",
+        "properties" : {
+          "qty" : {
+            "type" : "string"
+          },
+          "role" : {
+            "enum" : [ "store", "shop", "both" ],
+            "type" : "string"
+          }
+        }
+      },
       "RetailSale" : {
         "properties" : {
           "balance_minor" : {
@@ -8050,14 +8485,37 @@
             "type" : "string"
           },
           "qty" : {
+            "description" : "In base units, always",
             "type" : "string"
+          },
+          "sale_qty" : {
+            "description" : "Quantity in sale_unit",
+            "type" : "string"
+          },
+          "sale_unit" : {
+            "type" : "string"
+          },
+          "sale_unit_id" : {
+            "description" : "The unit the line was entered in; absent means the base unit",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_unit_price_minor" : {
+            "description" : "Price per sale_unit; line_total_minor = sale_qty x this, rounded half up once",
+            "format" : "int64",
+            "type" : "integer"
           },
           "unit_cost_minor" : {
             "description" : "Present only with retail.profit.read",
             "format" : "int64",
             "type" : "integer"
           },
+          "unit_factor" : {
+            "description" : "Base units in one sale_unit when the line was made",
+            "type" : "string"
+          },
           "unit_price_minor" : {
+            "description" : "Per base unit; for a pack line the derived, rounded display value",
             "format" : "int64",
             "type" : "integer"
           }
@@ -8073,8 +8531,13 @@
             "example" : "2.5",
             "type" : "string"
           },
+          "unit_id" : {
+            "description" : "A pack unit of the product (units capability): qty and unit_price_minor are then in that unit and stock moves in base units. Absent or the base unit: as before",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "unit_price_minor" : {
-            "description" : "Defaults to the product's sell price",
+            "description" : "Per unit_id when one is given, otherwise per base unit. Defaults to the product's sell price (times the pack factor, rounded half up once, for a pack)",
             "format" : "int64",
             "maximum" : 10000000000000,
             "minimum" : 0,
@@ -8591,6 +9054,31 @@
           }
         }
       },
+      "RetailStockByLocation" : {
+        "properties" : {
+          "branches" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailLocationBranch"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailLocationRow"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : "string"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/RetailLocationTotals"
+          }
+        }
+      },
       "RetailStockHealth" : {
         "properties" : {
           "cover" : {
@@ -9015,8 +9503,22 @@
           "note" : {
             "type" : "string"
           },
+          "received_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "received_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "shortage_cost_minor" : {
+            "description" : "The source cost of what did not arrive; Present only with retail.profit.read in either branch",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "status" : {
-            "enum" : [ "completed", "voided" ],
+            "description" : "completed: a one-step transfer. in_transit, received, cancelled: the two-step transfer of the transfer_receipt capability. voided: undone after completion or receipt",
+            "enum" : [ "completed", "in_transit", "received", "cancelled", "voided" ],
             "type" : "string"
           },
           "to_branch_id" : {
@@ -9031,6 +9533,7 @@
             "type" : "string"
           },
           "voided_at" : {
+            "description" : "When the transfer was voided or cancelled",
             "format" : "date-time",
             "type" : "string"
           },
@@ -9039,6 +9542,16 @@
             "type" : "string"
           }
         }
+      },
+      "RetailTransferCancelRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
       },
       "RetailTransferLine" : {
         "properties" : {
@@ -9062,6 +9575,10 @@
             "type" : "string"
           },
           "qty" : {
+            "type" : "string"
+          },
+          "received_qty" : {
+            "description" : "What arrived, once the transfer was received (two-step transfers only)",
             "type" : "string"
           },
           "unit_cost_minor" : {
@@ -9093,6 +9610,39 @@
             "type" : "array"
           },
           "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailTransferReceiveLine" : {
+        "description" : "What arrived, one entry per line of the transfer; omit to receive everything as dispatched",
+        "properties" : {
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty" : {
+            "description" : "What arrived; not more than was dispatched",
+            "example" : "2.5",
+            "type" : "string"
+          }
+        },
+        "required" : [ "product_id", "qty" ]
+      },
+      "RetailTransferReceiveRequest" : {
+        "properties" : {
+          "lines" : {
+            "description" : "What arrived, one entry per line of the transfer; omit to receive everything as dispatched",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailTransferReceiveLine"
+            },
+            "maxItems" : 200,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "note" : {
+            "maxLength" : 300,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -9139,6 +9689,34 @@
           }
         },
         "required" : [ "reason" ]
+      },
+      "RetailTransfersInFlight" : {
+        "properties" : {
+          "clearing_minor" : {
+            "description" : "Tenant-wide net of inter-branch clearing over retail transfer entries only (account 1190 is shared with lending); present for a caller who reads every branch with cost",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "in_transit_value_minor" : {
+            "description" : "The sum of the open dispatches, built from the transfers (never read from the ledger)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "items" : {
+            "description" : "Dispatched and not received or cancelled, the longest wait first",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailInFlightTransfer"
+            },
+            "type" : "array"
+          },
+          "reconciled" : {
+            "description" : "True when clearing_minor equals the value of every open dispatch",
+            "type" : "boolean"
+          }
+        }
       },
       "RetailUnit" : {
         "properties" : {
@@ -10521,6 +11099,16 @@
         },
         "required" : [ "guarantors" ]
       },
+      "SetRetailBranchRoleRequest" : {
+        "properties" : {
+          "role" : {
+            "enum" : [ "store", "shop", "both" ],
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "role" ]
+      },
       "SignInRequest" : {
         "properties" : {
           "login" : {
@@ -11040,6 +11628,38 @@
             "maxLength" : 60,
             "minLength" : 0,
             "type" : "string"
+          }
+        }
+      },
+      "UpdateRetailCapabilitiesRequest" : {
+        "properties" : {
+          "branch_roles" : {
+            "type" : "boolean"
+          },
+          "customer_accounts" : {
+            "type" : "boolean"
+          },
+          "documents" : {
+            "type" : "boolean"
+          },
+          "price_lists" : {
+            "type" : "boolean"
+          },
+          "profile" : {
+            "enum" : [ "shop", "trade" ],
+            "type" : "string"
+          },
+          "purchasing" : {
+            "type" : "boolean"
+          },
+          "returns" : {
+            "type" : "boolean"
+          },
+          "transfer_receipt" : {
+            "type" : "boolean"
+          },
+          "units" : {
+            "type" : "boolean"
           }
         }
       },
@@ -17435,6 +18055,63 @@
         "tags" : [ "retail-cashbook" ]
       }
     },
+    "/api/v1/retail/branch-roles" : {
+      "get" : {
+        "operationId" : "listRetailBranchRoles",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBranchRoleList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The active branches in the caller's stock scope with their roles; 404 capability_not_enabled when off",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/branch-roles/{branch_id}" : {
+      "put" : {
+        "operationId" : "setRetailBranchRole",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetRetailBranchRoleRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBranchRole"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set a branch's role (store, shop or both); audited; 422 branch_has_open_work while a transfer is unreceived",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/cash-parties" : {
       "get" : {
         "operationId" : "listRetailCashParties",
@@ -18374,6 +19051,123 @@
         "tags" : [ "retail-catalogue" ]
       }
     },
+    "/api/v1/retail/products/{product_id}/units" : {
+      "get" : {
+        "operationId" : "listRetailProductUnits",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPackList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The pack sizes of a product; the units capability (issue #194)",
+        "tags" : [ "retail-catalogue" ]
+      },
+      "post" : {
+        "operationId" : "createRetailProductUnit",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailPackRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPack"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Add a pack size to a product: a unit and the base units in one pack (issue #194)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/products/{product_id}/units/{unit_id}" : {
+      "patch" : {
+        "operationId" : "updateRetailProductUnit",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "unit_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailPackUpdate"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPack"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Change a pack's factor or switch it off under If-Match; never deleted (issue #194)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
     "/api/v1/retail/purchases" : {
       "get" : {
         "operationId" : "listRetailPurchases",
@@ -19037,6 +19831,64 @@
         "tags" : [ "retail-reports" ]
       }
     },
+    "/api/v1/retail/reports/stock-by-location" : {
+      "get" : {
+        "operationId" : "getRetailStockByLocation",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "category_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "negative_only",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailStockByLocation"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Every product's balance in each store and shop the caller may read, subtotals by role, stock in transit and the combined total (ADR-033)",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/reports/stock-health" : {
       "get" : {
         "operationId" : "getRetailStockHealth",
@@ -19106,6 +19958,25 @@
         },
         "summary" : "Days of cover, reorder suggestions, dead stock and shrinkage by branch (issue #149)",
         "tags" : [ "retail-reports" ]
+      }
+    },
+    "/api/v1/retail/reports/transfers-in-flight" : {
+      "get" : {
+        "operationId" : "getRetailTransfersInFlight",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailTransfersInFlight"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Transfers dispatched and not yet received, with age and value; needs the transfer_receipt capability (ADR-033)",
+        "tags" : [ "retail-stock" ]
       }
     },
     "/api/v1/retail/reports/valuation" : {
@@ -19619,6 +20490,60 @@
         "tags" : [ "retail-cashbook" ]
       }
     },
+    "/api/v1/retail/settings/capabilities" : {
+      "get" : {
+        "operationId" : "getRetailCapabilities",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailCapabilities"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The tenant's retail capabilities, absent keys off",
+        "tags" : [ "retail-stock" ]
+      },
+      "put" : {
+        "operationId" : "updateRetailCapabilities",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateRetailCapabilitiesRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailCapabilities"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Switch retail capabilities or choose the shop or trade profile; audited with old and new values",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/stock" : {
       "get" : {
         "operationId" : "listRetailStock",
@@ -20027,6 +20952,13 @@
           }
         }, {
           "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "from",
           "required" : false,
           "schema" : {
@@ -20104,7 +21036,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Move stock from one branch to another at cost, in one transaction (FR-RET-16); M",
+        "summary" : "Move stock from one branch to another at cost, in one transaction; with the transfer_receipt capability on, dispatch it instead and leave it in transit until received (FR-RET-16); M",
         "tags" : [ "retail-stock" ]
       }
     },
@@ -20133,6 +21065,95 @@
           }
         },
         "summary" : "A transfer with its lines",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/transfers/{transfer_id}/cancel" : {
+      "post" : {
+        "operationId" : "cancelRetailTransfer",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "transfer_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailTransferCancelRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailTransfer"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The source takes a dispatched transfer back before it is received (capability transfer_receipt, FR-RET-16); M",
+        "tags" : [ "retail-stock" ]
+      }
+    },
+    "/api/v1/retail/transfers/{transfer_id}/receive" : {
+      "post" : {
+        "operationId" : "receiveRetailTransfer",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "transfer_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailTransferReceiveRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailTransfer"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The destination receives a dispatched transfer, all of it or less; the shortage is posted as stock shrinkage at the source cost (capability transfer_receipt, FR-RET-16); M",
         "tags" : [ "retail-stock" ]
       }
     },

@@ -129,6 +129,7 @@ class ServicingService {
         payload.put(ReversalAction.REASON, r.reason().trim());
         List<String> unrestorable = servicer.unrestorable(loan);
         if (!unrestorable.isEmpty()) {
+            payload.put("unsecured_reopen_if_reopened", true);
             payload.put("collateral_not_restored_on_reopen", unrestorable);
         }
         return payload;

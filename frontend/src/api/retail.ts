@@ -12,10 +12,17 @@ import type { components } from './schema';
 type S = components['schemas'];
 
 export type Product = S['RetailProduct'];
+/** A pack size of an item (units of measure, ADR-033): `factor` base units in one pack of `unit`, three places ("12.000"). */
+export type Pack = S['RetailPack'];
 export type StockRow = S['RetailStockRow'];
 export type AllBranchesRow = S['RetailAllBranchesRow'];
 export type StockBranch = S['RetailStockBranch'];
 export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[] };
+export type BranchRole = S['RetailBranchRole'];
+export type RetailCapabilities = S['RetailCapabilities'];
+export type CapabilityChange = S['UpdateRetailCapabilitiesRequest'];
+/** The capabilities with the settings version they were read at, the If-Match of the next change. */
+export interface CapabilitiesRead { capabilities: RetailCapabilities; version: number }
 export type Category = S['RetailCategory'];
 export type Unit = S['RetailUnit'];
 export type ProductPage = S['RetailProductPage'];
@@ -30,10 +37,13 @@ export type CustomerPage = S['RetailCustomerList'];
 export type Supplier = S['RetailSupplier'];
 export type SaleRequest = S['RetailSaleRequest'];
 export type Sale = S['RetailSale'];
+/** `sale_*` and `unit_factor` are present only for a line entered in a pack; `qty` and `unit_price_minor` are always per base unit. */
 export type SaleLine = S['RetailSaleLine'];
 export type SalePage = S['RetailSalePage'];
 export type PurchaseRequest = S['RetailPurchaseRequest'];
 export type Purchase = S['RetailPurchase'];
+/** `unit*` are present only for a line entered in a pack; `cost_minor` and `qty_total` are always per base unit. */
+export type PurchaseLine = S['RetailPurchaseLine'];
 export type UsageRequest = S['RetailUsageRequest'];
 export type Usage = S['RetailUsageReport'];
 export type StocktakeRequest = S['RetailStocktakeRequest'];
@@ -47,6 +57,14 @@ export type TransferRequest = S['RetailTransferRequest'];
 export type Transfer = S['RetailTransfer'];
 export type TransferLine = S['RetailTransferLine'];
 export type TransferPage = S['RetailTransferPage'];
+export type TransferStatus = 'completed' | 'in_transit' | 'received' | 'cancelled' | 'voided';
+export type ReceiveLine = S['RetailTransferReceiveLine'];
+export type StockByLocation = S['RetailStockByLocation'];
+export type LocationRow = S['RetailLocationRow'];
+export type LocationBranch = S['RetailLocationBranch'];
+export type LocationBalance = S['RetailLocationBalance'];
+export type InFlightReport = S['RetailTransfersInFlight'];
+export type InFlightTransfer = S['RetailInFlightTransfer'];
 export type Savings = S['RetailSavings'];
 export type SavingsRequest = S['RetailSavingsRequest'];
 export type SavingsSuggestion = S['RetailSavingsSuggestion'];
@@ -100,6 +118,8 @@ export function daysBefore(date: string, days: number): string {
 export type StockLevel = 'out' | 'low';
 
 export interface SalesQuery {
+  /** Aborts the request when the search that asked for it has moved on. */
+  signal?: AbortSignal;
   /** One branch; absent means every branch the caller may read. */
   branchId?: string;
   from?: string;
@@ -138,10 +158,10 @@ export type SalePayment = 'cash' | 'mobile_money' | 'bank' | 'credit';
 export type PurchasePayment = 'cash' | 'bank' | 'credit';
 
 export interface RetailApi {
-  listProducts(q: { query?: string; branchId?: string }): Promise<Product[]>;
+  listProducts(q: { query?: string; branchId?: string; signal?: AbortSignal }): Promise<Product[]>;
   listCategories(): Promise<Category[]>;
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
-  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string }): Promise<ProductPage>;
+  listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
   getProduct(id: string): Promise<Product>;
   createProduct(body: NewProduct): Promise<Product>;
   /** Non-price fields, under If-Match with the version read. */
@@ -149,6 +169,11 @@ export interface RetailApi {
   /** A price change under If-Match; the server writes the history row. */
   editPrices(id: string, version: number, body: PriceEdit): Promise<Product>;
   priceHistory(id: string): Promise<PriceChange[]>;
+  /** The pack sizes of an item (the units capability, issue #194); 404 capability_not_enabled while it is off. */
+  listPacks(productId: string): Promise<Pack[]>;
+  addPack(productId: string, body: { unit_id: string; factor: string }): Promise<Pack>;
+  /** Under If-Match with the pack's version: a new factor, or switch the pack off or on. */
+  updatePack(productId: string, unitId: string, version: number, body: { factor?: string; active?: boolean }): Promise<Pack>;
   /** The CSV item import: a dry run reports, an apply adds the rows that are fine (administrators only). */
   importProducts(csv: string, dryRun: boolean): Promise<ImportResult>;
   createCategory(name: string): Promise<Category>;
@@ -156,13 +181,13 @@ export interface RetailApi {
   listUnits(): Promise<Unit[]>;
   createUnit(name: string): Promise<Unit>;
   updateUnit(id: string, version: number, body: { name?: string; active?: boolean }): Promise<Unit>;
-  listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel }): Promise<StockRow[]>;
+  listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<StockRow[]>;
   /** One page of sales, newest first, narrowed by the filters (#145). */
   listSales(q: SalesQuery): Promise<SalePage>;
   getSale(id: string): Promise<Sale>;
   listCustomers(): Promise<Customer[]>;
   /** The credit buyers screen: server-side search and cursor paging. */
-  listCustomerPage(q: { query?: string; cursor?: string }): Promise<CustomerPage>;
+  listCustomerPage(q: { query?: string; cursor?: string; signal?: AbortSignal }): Promise<CustomerPage>;
   listSuppliers(): Promise<Supplier[]>;
   createSupplier(body: { name: string; contact?: string }): Promise<Supplier>;
   updateSupplier(id: string, version: number, body: { name?: string; contact?: string; active?: boolean }): Promise<Supplier>;
@@ -174,16 +199,31 @@ export interface RetailApi {
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   commitStocktake(id: string): Promise<Stocktake>;
   /** Every product with its balance in each branch the caller may read (#144). */
-  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel }): Promise<AllBranchesStock>;
+  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<AllBranchesStock>;
   /** One branch, or every branch in the caller's scope when `branchId` is absent (#144). */
   valuation(q: { branchId?: string; asOf?: string }): Promise<Valuation>;
   /** The branches in the caller's stock scope holding a quantity above zero of anything (#103). */
   stockedBranches(): Promise<string[]>;
+  /** The branches in the caller's stock scope with their roles (ADR-033); 404 capability_not_enabled while branch_roles is off. */
+  branchRoles(): Promise<BranchRole[]>;
+  setBranchRole(branchId: string, role: 'store' | 'shop' | 'both'): Promise<BranchRole>;
+  /** The tenant's capabilities and profile (administrators only, ADR-033 section 1). */
+  capabilities(): Promise<CapabilitiesRead>;
+  /** Switches the profile or flags under If-Match; the server audits the old and new values. */
+  changeCapabilities(body: CapabilityChange, version: number): Promise<CapabilitiesRead>;
   dailyProfit(q: { branchId?: string; from: string; to: string }): Promise<DailyProfit>;
   createTransfer(body: TransferRequest, idempotencyKey: string): Promise<Transfer>;
-  listTransfers(q: { branchId?: string; cursor?: string }): Promise<TransferPage>;
+  listTransfers(q: { branchId?: string; status?: TransferStatus; cursor?: string }): Promise<TransferPage>;
   getTransfer(id: string): Promise<Transfer>;
   voidTransfer(id: string, reason: string): Promise<Transfer>;
+  /** The destination receives a dispatched transfer: what arrived per line, or every line in full when `lines` is absent (ADR-033; capability transfer_receipt). */
+  receiveTransfer(id: string, lines: ReceiveLine[] | undefined, idempotencyKey: string): Promise<Transfer>;
+  /** The source takes a dispatched transfer back before it is received. */
+  cancelTransfer(id: string, reason: string, idempotencyKey: string): Promise<Transfer>;
+  /** Every product with its balance in each store and shop, by role, with stock on the way and a combined total (ADR-033). */
+  stockByLocation(q: { query?: string; categoryId?: string; negativeOnly?: boolean; signal?: AbortSignal }): Promise<StockByLocation>;
+  /** Dispatched and not yet received transfers (capability transfer_receipt), the longest wait first. */
+  transfersInFlight(): Promise<InFlightReport>;
 
   // The cash book (FR-RET-17 to FR-RET-29, ADR-022). Every write takes the Idempotency-Key of its draft;
   // a void takes one too. Figures the schema marks "present only with retail.profit.read" are absent
@@ -244,6 +284,11 @@ export function unwrap<T>(result: { data?: T; error?: unknown; response: Respons
   return result.data;
 }
 
+/** The settings version in an ETag (`"3"`), or 0 when the response carries none. */
+function versionOf(response: Response): number {
+  return Number.parseInt((response.headers.get('ETag') ?? '').replace(/\D/g, ''), 10) || 0;
+}
+
 const PAGE = 500;
 
 /** Every page of a cursor-paged list, in the server's order. */
@@ -261,10 +306,11 @@ async function allPages<T>(
 }
 
 const realRetail: RetailApi = {
-  async listProducts({ query, branchId }) {
+  async listProducts({ query, branchId, signal }) {
     const page = unwrap(
       await api.GET('/api/v1/retail/products', {
         params: { query: { query: query || undefined, branch_id: branchId, active: true, limit: 50 } },
+        signal,
       }),
     );
     return page.items ?? [];
@@ -274,10 +320,11 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/categories')).items ?? [];
   },
 
-  async listCatalogue({ query, categoryId, active, cursor }) {
+  async listCatalogue({ query, categoryId, active, cursor, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/products', {
         params: { query: { query: query || undefined, category_id: categoryId || undefined, active, limit: 50, cursor } },
+        signal,
       }),
     );
   },
@@ -306,6 +353,23 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/products/{product_id}/price-history', { params: { path: { product_id: id } } })).items ?? [];
   },
 
+  async listPacks(productId) {
+    return unwrap(await api.GET('/api/v1/retail/products/{product_id}/units', { params: { path: { product_id: productId } } })).items ?? [];
+  },
+
+  async addPack(productId, body) {
+    return unwrap(await api.POST('/api/v1/retail/products/{product_id}/units', { params: { path: { product_id: productId } }, body }));
+  },
+
+  async updatePack(productId, unitId, version, body) {
+    return unwrap(
+      await api.PATCH('/api/v1/retail/products/{product_id}/units/{unit_id}', {
+        params: { path: { product_id: productId, unit_id: unitId }, header: { 'If-Match': `"${version}"` } },
+        body,
+      }),
+    );
+  },
+
   async importProducts(csv, dryRun) {
     return unwrap(await api.POST('/api/v1/retail/products/import', { params: { query: { dry_run: dryRun } }, body: { csv } }));
   },
@@ -330,13 +394,14 @@ const realRetail: RetailApi = {
     return unwrap(await api.PATCH('/api/v1/retail/units/{unit_id}', { params: { path: { unit_id: id }, header: { 'If-Match': `"${version}"` } }, body }));
   },
 
-  async listStock({ branchId, query, categoryId, negativeOnly, level }) {
+  async listStock({ branchId, query, categoryId, negativeOnly, level, signal }) {
     const rows: StockRow[] = [];
     let cursor: string | undefined;
     do {
       const page = unwrap(
         await api.GET('/api/v1/retail/stock', {
           params: { query: { branch_id: branchId, query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, limit: PAGE, cursor } },
+          signal,
         }),
       );
       rows.push(...(page.items ?? []));
@@ -345,7 +410,7 @@ const realRetail: RetailApi = {
     return rows;
   },
 
-  async listStockAllBranches({ query, categoryId, negativeOnly, level }) {
+  async listStockAllBranches({ query, categoryId, negativeOnly, level, signal }) {
     const items: AllBranchesRow[] = [];
     let branches: StockBranch[] = [];
     let cursor: string | undefined;
@@ -353,6 +418,7 @@ const realRetail: RetailApi = {
       const page = unwrap(
         await api.GET('/api/v1/retail/stock/all-branches', {
           params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, limit: PAGE, cursor } },
+          signal,
         }),
       );
       branches = page.branches ?? branches;
@@ -363,7 +429,7 @@ const realRetail: RetailApi = {
   },
 
   async listSales(q) {
-    return unwrap(await api.GET('/api/v1/retail/sales', { params: { query: salesParams(q) } }));
+    return unwrap(await api.GET('/api/v1/retail/sales', { params: { query: salesParams(q) }, signal: q.signal }));
   },
 
   async getSale(id) {
@@ -374,8 +440,8 @@ const realRetail: RetailApi = {
     return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: {} } })).items ?? [];
   },
 
-  async listCustomerPage({ query, cursor }) {
-    return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: { query: query || undefined, limit: 50, cursor } } }));
+  async listCustomerPage({ query, cursor, signal }) {
+    return unwrap(await api.GET('/api/v1/retail/customers', { params: { query: { query: query || undefined, limit: 50, cursor } }, signal }));
   },
 
   async listSuppliers() {
@@ -427,6 +493,24 @@ const realRetail: RetailApi = {
     return [...new Set((all.rows ?? []).filter((r) => r.qty !== undefined && !r.qty.startsWith('-')).map((r) => r.branch_id ?? ''))];
   },
 
+  async branchRoles() {
+    return unwrap(await api.GET('/api/v1/retail/branch-roles')).items ?? [];
+  },
+
+  async setBranchRole(branchId, role) {
+    return unwrap(await api.PUT('/api/v1/retail/branch-roles/{branch_id}', { params: { path: { branch_id: branchId } }, body: { role } }));
+  },
+
+  async capabilities() {
+    const result = await api.GET('/api/v1/retail/settings/capabilities');
+    return { capabilities: unwrap(result), version: versionOf(result.response) };
+  },
+
+  async changeCapabilities(body, version) {
+    const result = await api.PUT('/api/v1/retail/settings/capabilities', { params: { header: { 'If-Match': `"${version}"` } }, body });
+    return { capabilities: unwrap(result), version: versionOf(result.response) };
+  },
+
   async dailyProfit({ branchId, from, to }) {
     return unwrap(await api.GET('/api/v1/retail/reports/profit/daily', { params: { query: { branch_id: branchId ? [branchId] : undefined, from, to } } }));
   },
@@ -435,9 +519,9 @@ const realRetail: RetailApi = {
     return unwrap(await api.POST('/api/v1/retail/transfers', { body, params: { header: { 'Idempotency-Key': key } } }));
   },
 
-  async listTransfers({ branchId, cursor }) {
+  async listTransfers({ branchId, status, cursor }) {
     return unwrap(
-      await api.GET('/api/v1/retail/transfers', { params: { query: { branch_id: branchId ? [branchId] : undefined, limit: 50, cursor } } }),
+      await api.GET('/api/v1/retail/transfers', { params: { query: { branch_id: branchId ? [branchId] : undefined, status, limit: 50, cursor } } }),
     );
   },
 
@@ -447,6 +531,46 @@ const realRetail: RetailApi = {
 
   async voidTransfer(id, reason) {
     return unwrap(await api.POST('/api/v1/retail/transfers/{transfer_id}/void', { params: { path: { transfer_id: id } }, body: { reason } }));
+  },
+
+  async receiveTransfer(id, lines, key) {
+    return unwrap(
+      await api.POST('/api/v1/retail/transfers/{transfer_id}/receive', {
+        params: { path: { transfer_id: id }, header: { 'Idempotency-Key': key } },
+        body: lines ? { lines } : {},
+      }),
+    );
+  },
+
+  async cancelTransfer(id, reason, key) {
+    return unwrap(
+      await api.POST('/api/v1/retail/transfers/{transfer_id}/cancel', {
+        params: { path: { transfer_id: id }, header: { 'Idempotency-Key': key } },
+        body: { reason },
+      }),
+    );
+  },
+
+  async stockByLocation({ query, categoryId, negativeOnly, signal }) {
+    const items: LocationRow[] = [];
+    let report: StockByLocation = { branches: [], items: [] };
+    let cursor: string | undefined;
+    do {
+      const page = unwrap(
+        await api.GET('/api/v1/retail/reports/stock-by-location', {
+          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, limit: PAGE, cursor } },
+          signal,
+        }),
+      );
+      report = page;
+      items.push(...(page.items ?? []));
+      cursor = page.next_cursor;
+    } while (cursor);
+    return { ...report, items };
+  },
+
+  async transfersInFlight() {
+    return unwrap(await api.GET('/api/v1/retail/reports/transfers-in-flight'));
   },
 
   // The cash book. Lists read every page of the window asked for (200 a page, the most the server allows).

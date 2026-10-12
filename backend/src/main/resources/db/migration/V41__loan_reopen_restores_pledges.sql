@@ -1,5 +1,5 @@
--- V35: a reversal that reopens a closed loan restores that loan's own pledges (issue #176).
--- V35 is claimed for lending on issue #50.
+-- V41: a reversal that reopens a closed loan restores that loan's own pledges (issue #176).
+-- V41 is the next free number above V40 on main.
 --
 -- Closing a loan releases its pledges (FR-COL-04, the #45 rule). A repayment reversal that
 -- reopens it (FR-REP-05, for example a bounced payoff) left it active with no collateral,

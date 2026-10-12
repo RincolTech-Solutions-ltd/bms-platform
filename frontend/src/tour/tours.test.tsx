@@ -11,11 +11,15 @@ import { StaffContext } from '../areas/staff/context';
 import { StaffHome } from '../areas/staff/home';
 import { LoanView } from '../areas/staff/lending/loan';
 import { Loans } from '../areas/staff/lending/loans';
+import { BranchRoles } from '../areas/staff/retail/branch-roles';
 import { CataloguePage } from '../areas/staff/retail/catalogue';
 import { RetailHome } from '../areas/staff/retail/home';
 import { RetailNav } from '../areas/staff/retail/nav';
 import { RecordSale } from '../areas/staff/retail/sale';
+import { InTransitPage } from '../areas/staff/retail/in-transit';
+import { RetailSettings } from '../areas/staff/retail/settings';
 import { StockPage } from '../areas/staff/retail/stock';
+import { StockByLocationPage } from '../areas/staff/retail/stock-by-location';
 import { StocktakePage } from '../areas/staff/retail/stocktake';
 import { StaffBar } from '../areas/staff/route';
 import { Setup } from '../areas/staff/setup';
@@ -69,8 +73,16 @@ function screen(path: string | undefined): ReactElement {
       return <StockPage />;
     case '/staff/retail/stocktake':
       return <StocktakePage />;
+    case '/staff/retail/stock-by-location':
+      return <StockByLocationPage />;
+    case '/staff/retail/in-transit':
+      return <InTransitPage />;
     case '/staff/retail/catalogue':
       return <CataloguePage />;
+    case '/staff/retail/settings':
+      return <RetailSettings />;
+    case '/staff/retail/branch-roles':
+      return <BranchRoles />;
     case '/staff/lending':
       return <Loans />;
     case '/staff/lending/loans/$loanId':
@@ -97,6 +109,9 @@ function render(me: Me, path: string | undefined): string {
   current = me;
   const client = new QueryClient();
   client.setQueryData(['settings'], settings);
+  // What the retail settings screens read, so their targets are in the static markup.
+  client.setQueryData(['retail', 'capabilities'], { capabilities: { profile: 'shop' }, version: 1 });
+  client.setQueryData(['retail', 'branch-roles'], (me.branches ?? []).map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role: 'both', can_sell: true })));
   const branch = path === undefined ? (me.default_branch_id ?? null) : (me.branches?.[0]?.id ?? null);
   return renderToString(
     <RouterContextProvider router={router}>
@@ -115,6 +130,8 @@ const branches = mockMe('sales').branches;
 const ADMIN: Me = {
   ...mockMe('admin'),
   modules: ['retail', 'lending'],
+  // Branch roles on, so the tile and the screen of that capability are on the pages its tour points at.
+  module_capabilities: { retail: ['branch_roles'] },
   full_name: 'Test Owner 01',
   all_branches: true,
   permissions: [
@@ -143,6 +160,9 @@ const OFFICER: Me = {
   branches,
 } as Me;
 
+// A wholesaler's manager: the trade capabilities are on (ADR-033).
+const TRADER: Me = { ...MANAGER, full_name: 'Test Trader 01', module_capabilities: { retail: ['branch_roles', 'transfer_receipt'] } };
+
 const AUDIENCE: Record<string, Me[]> = {
   'admin-welcome': [ADMIN],
   'retail-sales': [SELLER, MANAGER],
@@ -154,6 +174,12 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-loan': [OFFICER],
   'page-catalogue': [ADMIN, MANAGER],
   'page-stocktake': [ADMIN, MANAGER],
+  'page-retail-settings': [ADMIN],
+  'capability-branch-roles': [ADMIN],
+  'page-stock-by-location': [TRADER],
+  'page-in-transit': [TRADER],
+  'capability-transfer-receipt': [TRADER],
+  'capability-units': [ADMIN],
 };
 
 describe('every tour target exists on its screen', () => {

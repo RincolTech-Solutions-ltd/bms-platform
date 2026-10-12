@@ -394,7 +394,7 @@ class LoanServicer implements LoanServicing {
     /**
      * #176: the reopened loan takes back the pledges its closure released, when the item is still
      * held and secures no other loan. Items are locked in the order pledging uses
-     * ({@code UUID.compareTo}), so a reversal and a pledge of the same items cannot deadlock. An item
+     * ({@link LoanRepository#ITEM_LOCK_ORDER}), so a reversal and a pledge of the same items cannot deadlock. An item
      * handed back or pledged elsewhere is not restored and the loan reopens without it: the checker
      * saw that on the request ({@link #unrestorable}), and the audit row names it.
      */
@@ -403,7 +403,8 @@ class LoanServicer implements LoanServicing {
         if (released.isEmpty()) {
             return;
         }
-        released.sort(java.util.Comparator.comparing(LoanRepository.PledgeRow::collateralId));
+        released.sort(
+                java.util.Comparator.comparing(LoanRepository.PledgeRow::collateralId, LoanRepository.ITEM_LOCK_ORDER));
         List<UUID> restore = new ArrayList<>();
         List<UUID> notRestored = new ArrayList<>();
         for (LoanRepository.PledgeRow p : released) {
@@ -421,6 +422,7 @@ class LoanServicer implements LoanServicing {
         after.put("restored_collateral_ids", restore);
         after.put("not_restored_collateral_ids", notRestored);
         after.put("restored_by", by);
+        after.put("unsecured_reopen", !notRestored.isEmpty());
         audit.record(AuditLog.Entry.created(
                 notRestored.isEmpty() ? "lending.loan.pledges_restored" : "lending.loan.reopened_partly_unsecured",
                 SUBJECT,

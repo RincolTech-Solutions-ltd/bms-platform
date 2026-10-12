@@ -10,6 +10,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -517,10 +522,18 @@ class LoanServicingIT extends LoanFixtures {
      * is released. Returns {loan, item, payoff transaction}.
      */
     String[] securedPaidOff(String code, int memberNo) {
+        return securedPaidOff(code, memberNo, 1);
+    }
+
+    /** As above with {@code items} pledged items; returns {loan, first item, payoff transaction, other items...}. */
+    String[] securedPaidOff(String code, int memberNo, int items) {
         String product = product(code, false, true);
         String member = member(
                 "Test Borrower %02d".formatted(memberNo), "07000000%02d".formatted(memberNo), t.headOffice(), true);
-        String item = collateralItem(member, "TEST-PLEDGE-%02d".formatted(memberNo));
+        List<String> pledged = new ArrayList<>();
+        for (int i = 0; i < items; i++) {
+            pledged.add(collateralItem(member, "TEST-PLEDGE-%02d-%d".formatted(memberNo, i)));
+        }
         String loan = apply(member, product, 500_000, null).getBody().get("id").asString();
         assertThat(asOfficer(
                                 HttpMethod.PUT,
@@ -528,7 +541,9 @@ class LoanServicingIT extends LoanFixtures {
                                 "\"1\"",
                                 Map.of(
                                         "collateral",
-                                        List.of(Map.of("collateral_id", item, "pledged_value_minor", 1_000_000))))
+                                        pledged.stream()
+                                                .map(i -> Map.of("collateral_id", i, "pledged_value_minor", 1_000_000))
+                                                .toList()))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(asOfficer(HttpMethod.POST, LOANS + "/" + loan + "/submit", "\"2\"", null)
@@ -552,7 +567,9 @@ class LoanServicingIT extends LoanFixtures {
         String txn = repaid(loan, 650_000, today).get("transaction").get("id").asString();
         assertThat(loan(loan).get("status").asString()).isEqualTo("closed");
         assertThat(openPledges(loan)).as("closing released the pledge").isZero();
-        return new String[] {loan, item, txn};
+        List<String> out = new ArrayList<>(List.of(loan, pledged.get(0), txn));
+        out.addAll(pledged.subList(1, pledged.size()));
+        return out.toArray(String[]::new);
     }
 
     static long openPledges(String loan) {
@@ -622,7 +639,8 @@ class LoanServicingIT extends LoanFixtures {
         String[] s = securedPaidOff("GONE", 62);
         custody(s[1], "released");
         String approval = requestReversal(s[0], s[2]);
-        assertThat(approvalPayload(approval)).contains("collateral_not_restored_on_reopen", s[1]);
+        assertThat(approvalPayload(approval))
+                .contains("collateral_not_restored_on_reopen", "unsecured_reopen_if_reopened", s[1]);
         ResponseEntity<JsonNode> d = decide(approval, manager, managerPerms);
         assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
@@ -656,7 +674,62 @@ class LoanServicingIT extends LoanFixtures {
         assertThat(openPledges(next)).isEqualTo(1);
     }
 
-    /** V35's guard: un-releasing a pledge needs the transaction to name that loan, and only that loan. */
+    /**
+     * #176 (review of #202): a reversal that restores three pledges and a draft that pledges the same
+     * three items at the same moment (in the opposite order) take the item locks in one order, so
+     * neither is a deadlock (40P01, a 500). Whoever gets the items first keeps them: the other either
+     * reopens without them or sees collateral_already_pledged, and no item is open on two loans.
+     */
+    @Test
+    void frRep05_aReopeningReversalAndAPledgeOfTheSameItemsNeverDeadlock() throws Exception {
+        String[] s = securedPaidOff("RACE", 66, 3);
+        List<String> items = new ArrayList<>(List.of(s[1], s[3], s[4]));
+        String borrower = loan(s[0]).get("member_id").asString();
+        String next = apply(borrower, product("RACE2", false, false), 500_000, null)
+                .getBody()
+                .get("id")
+                .asString();
+        List<String> reversed = new ArrayList<>(items);
+        java.util.Collections.reverse(reversed);
+        String approval = requestReversal(s[0], s[2]);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<ResponseEntity<JsonNode>> reversal = pool.submit(() -> {
+                start.await();
+                return decide(approval, manager, managerPerms);
+            });
+            Future<ResponseEntity<JsonNode>> pledge = pool.submit(() -> {
+                start.await();
+                return asOfficer(
+                        HttpMethod.PUT,
+                        LOANS + "/" + next + "/collateral",
+                        "\"1\"",
+                        Map.of(
+                                "collateral",
+                                reversed.stream()
+                                        .map(i -> Map.of("collateral_id", i, "pledged_value_minor", 1_000_000))
+                                        .toList()));
+            });
+            start.countDown();
+            ResponseEntity<JsonNode> r = reversal.get(30, TimeUnit.SECONDS);
+            ResponseEntity<JsonNode> p = pledge.get(30, TimeUnit.SECONDS);
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+            assertThat(p.getStatusCode().value()).as("%s", p.getBody()).isIn(200, 409);
+        }
+        assertThat(loan(s[0]).get("status").asString()).isEqualTo("active");
+        for (String item : items) {
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM lending_loan_collateral WHERE collateral_id = ?::uuid"
+                                    + " AND released_at IS NULL")
+                            .param(item)
+                            .query(Long.class)
+                            .single())
+                    .as("item %s is open on exactly one loan", item)
+                    .isEqualTo(1);
+        }
+    }
+
+    /** V41's guard: un-releasing a pledge needs the transaction to name that loan, and only that loan. */
     @Test
     void theGuardRefusesAnUnreleaseTheTransactionDidNotName() throws Exception {
         String[] s = securedPaidOff("GUARD", 65);
