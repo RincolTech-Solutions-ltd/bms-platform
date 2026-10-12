@@ -8,6 +8,7 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
+import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
@@ -171,24 +172,29 @@ class PriceListService {
         LocalDate today = today();
         repo.list(listId, today).orElseThrow(ApiException::notFound);
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
-        Cursor.Key after = Cursor.decodeKey(cursor).orElse(null);
-        String q = query == null || query.isBlank() ? null : query.trim();
-        List<ItemRow> rows = repo.items(
+        Search.Query search = Search.parse(query);
+        Search.After position = Search.unwrap(search, cursor);
+        Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
+        List<Search.Ranked<ItemRow>> rows = repo.items(
                 listId,
                 productId,
-                q,
+                search,
                 Boolean.TRUE.equals(includeEnded),
                 today,
+                position.rank(),
                 after == null ? null : after.sortKey(),
                 after == null ? null : after.id(),
                 size + 1);
         boolean more = rows.size() > size;
-        List<ItemRow> page = more ? rows.subList(0, size) : rows;
+        List<Search.Ranked<ItemRow>> page = more ? rows.subList(0, size) : rows;
         String next = more
-                ? Cursor.encode(
-                        page.getLast().sortKey() + "|" + page.getLast().item().id())
+                ? Search.wrap(
+                        search,
+                        page.getLast().rank(),
+                        Cursor.encode(page.getLast().row().sortKey() + "|"
+                                + page.getLast().row().item().id()))
                 : null;
-        return new ItemPage(page.stream().map(x -> visible(x.item())).toList(), next);
+        return new ItemPage(page.stream().map(x -> visible(x.row().item())).toList(), next);
     }
 
     /**

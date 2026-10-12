@@ -1,12 +1,14 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { RETAIL_CURRENCY, businessToday, retail, type PriceList, type PriceListItem } from '../../../api/retail';
 import { formatMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { AddPanel } from './catalogue';
 import { STATUS_LABEL, belowCostHint, buildItemRequest, emptyItemForm, fromQty, itemProblem, unitChoices, withProduct, type ItemForm } from './price-list-state';
-import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion, useDebounced } from './ui';
+import { Gate, Note, ProductPicker, Problem, Success, changeFailureText, requireVersion } from './ui';
 
 // Price lists (ADR-033, issue #195; docs/specs/trade-capabilities.md section 3). A list holds the price of an item in a
 // unit (its base unit or a pack) from a quantity and for a date range. The retail price stays the item's own and is
@@ -128,19 +130,21 @@ export function AddPriceForm({ today, busy, error, onSubmit, onCancel }: {
 
 function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState('');
+  const search = useLiveSearch();
   const [ended, setEnded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const query = useDebounced(search);
+  const query = search.term;
   const today = businessToday();
   const rows = useInfiniteQuery({
     queryKey: ['retail', 'price-list-items', list.id, query, ended],
-    queryFn: ({ pageParam }) => retail.listPriceListItems(list.id ?? '', { query, includeEnded: ended, ...(pageParam ? { cursor: pageParam } : {}) }),
+    queryFn: ({ pageParam, signal }) => retail.listPriceListItems(list.id ?? '', { query, includeEnded: ended, ...(pageParam ? { cursor: pageParam } : {}), signal }),
     initialPageParam: '',
     getNextPageParam: (last) => last.next_cursor || undefined,
+    placeholderData: keepPreviousData,
   });
+  const finding = rows.isPlaceholderData || (rows.isFetching && !rows.isFetchingNextPage);
   const items = (rows.data?.pages ?? []).flatMap((p) => p.items ?? []);
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['retail'] });
   const add = useMutation({
@@ -168,12 +172,12 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
       )}
       {message && <Success>{message}</Success>}
       <Problem error={failure && new Error(failure)} />
-      <label htmlFor="price-search">Search prices by item name or code</label>
-      <input id="price-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} autoComplete="off" />
+      <SearchBox id="price-search" label="Search prices by item name or code" search={search} fetching={finding} count={rows.data ? items.length : undefined} more={rows.hasNextPage} />
       <label><input type="checkbox" checked={ended} onChange={(e) => setEnded(e.target.checked)} /> Show ended prices</label>
       {rows.isPending && <p className="loading">Loading</p>}
       <Problem error={rows.error} />
-      {rows.data && items.length === 0 && <p className="empty-state">{query ? 'No prices match that search.' : 'No prices in this list yet. Items without a price are sold at the retail price.'}</p>}
+      {rows.data && items.length === 0 && (query ? <NoResults term={query} onClear={search.clear} noun="prices" /> : <p className="empty-state">No prices in this list yet. Items without a price are sold at the retail price.</p>)}
+      <SearchResults fetching={finding}>
       {items.length > 0 && (
         <div className="table-wrap" tabIndex={0}>
           <table>
@@ -186,6 +190,7 @@ function Items({ list, showCost }: { list: PriceList; showCost: boolean }) {
           </table>
         </div>
       )}
+      </SearchResults>
       {rows.hasNextPage && <button type="button" onClick={() => void rows.fetchNextPage()} disabled={rows.isFetchingNextPage}>{rows.isFetchingNextPage ? 'Loading' : 'Show more prices'}</button>}
     </section>
   );

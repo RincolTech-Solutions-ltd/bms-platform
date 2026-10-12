@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.catalogue.internal;
 
+import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.retail.catalogue.RetailPricing.ListedPrice;
 import com.rincoltech.bms.retail.catalogue.internal.PriceListApi.Group;
 import com.rincoltech.bms.retail.catalogue.internal.PriceListApi.Item;
@@ -137,42 +138,65 @@ class PriceListRepository {
                 .optional();
     }
 
-    /** By product description, then id; ended items only when asked for. */
-    List<ItemRow> items(
+    /** What an item search matches (ADR-039): the product's code and description. */
+    static final Search.Fields ITEM_SEARCH =
+            Search.Fields.of().names("p.description").codes("p.code");
+
+    /**
+     * By product description, then id, or by match rank and then description when {@code query} is given; ended
+     * items only when asked for.
+     */
+    List<Search.Ranked<ItemRow>> items(
             UUID listId,
             UUID productId,
-            String query,
+            Search.Query query,
             boolean includeEnded,
             LocalDate today,
+            int afterRank,
             String afterKey,
             UUID afterId,
             int limit) {
-        StringBuilder sql = new StringBuilder(SELECT_ITEM + " WHERE i.price_list_id = :list");
+        Search.Match match = query == null ? null : query.match(ITEM_SEARCH);
+        String select = match == null
+                ? SELECT_ITEM
+                : SELECT_ITEM.replace("SELECT i.id,", "SELECT " + match.rank() + " AS search_rank, i.id,");
+        StringBuilder sql = new StringBuilder(select + " WHERE i.price_list_id = :list");
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("list", listId);
         if (productId != null) {
             sql.append(" AND i.product_id = :product");
             params.put("product", productId);
         }
-        if (query != null) {
-            sql.append(" AND (p.code ILIKE :q OR p.description ILIKE :q)");
-            params.put(
-                    "q", "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%");
+        if (match != null) {
+            sql.append(" AND ").append(match.where());
+            params.putAll(match.params());
         }
         if (!includeEnded) {
             sql.append(" AND (i.valid_to IS NULL OR i.valid_to >= :today)");
             params.put("today", Date.valueOf(today));
         }
-        if (afterKey != null) {
-            sql.append(" AND (lower(p.description), i.id) > (:afterKey, :afterId)");
-            params.put("afterKey", afterKey);
-            params.put("afterId", afterId);
+        String statement;
+        if (match == null) {
+            if (afterKey != null) {
+                sql.append(" AND (lower(p.description), i.id) > (:afterKey, :afterId)");
+                params.put("afterKey", afterKey);
+                params.put("afterId", afterId);
+            }
+            statement = sql + " ORDER BY lower(p.description), i.id LIMIT :limit";
+        } else {
+            String keyset = null;
+            if (afterKey != null) {
+                keyset = "(search_rank, sort_key, id) > (:afterRank, :afterKey, :afterId)";
+                params.put("afterRank", afterRank);
+                params.put("afterKey", afterKey);
+                params.put("afterId", afterId);
+            }
+            statement = Search.page(sql.toString(), keyset, "search_rank, sort_key, id");
         }
-        sql.append(" ORDER BY lower(p.description), i.id LIMIT :limit");
         params.put("limit", limit);
-        return jdbc.sql(sql.toString())
+        return jdbc.sql(statement)
                 .params(params)
-                .query((rs, n) -> itemRow(rs, today))
+                .query(Search.ranked((rs, n) -> itemRow(rs, today), match != null))
                 .list();
     }
 

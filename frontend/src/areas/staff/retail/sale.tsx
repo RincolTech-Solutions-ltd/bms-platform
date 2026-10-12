@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { SEARCH_DELAY_MS, createDebouncer } from '../../../app/ui/useLiveSearch';
 import { retail, type Product, type ResolvedLine, type Sale, type SalePayment } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
@@ -9,7 +10,7 @@ import { buildSaleRequest, draftProblem, draftTotal, lineFigures, lineHint, newL
 import { MIN_REASON, hasNoPrice, isOverride, pricedLines, receiptNote, reasonOk, sourceNote } from './price-state';
 import { activePacks, chosenPack, enteredPriceMinor, enteredQty } from './units-state';
 import { EmptyState } from '../../../components/states';
-import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useDebounced, useProfitAccess, useSingleBranch } from './ui';
+import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useSingleBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
 import type { BranchRole } from '../../../api/retail';
 import { BRANCH_ROLES, PRICELIST_MANAGE, PRICELIST_USE, PRICE_LISTS, PRICE_OVERRIDE, UNITS, branchesWhere, capabilityOn, holds, holdsAt, needsOf, sellingBranches } from './permissions';
@@ -24,6 +25,17 @@ const METHODS: { value: SalePayment; label: string }[] = [
   { value: 'bank', label: 'Bank' },
   { value: 'credit', label: 'Credit (pay later)' },
 ];
+
+/** The value once it has stopped changing for the search delay, with the shared debouncer of the live search. */
+function useSettled<T>(value: T): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const debouncer = createDebouncer(SEARCH_DELAY_MS, setSettled);
+    debouncer.push(value);
+    return debouncer.cancel;
+  }, [value]);
+  return settled;
+}
 
 export function Receipt({ sale, onNew }: { sale: Sale; onNew?: () => void }) {
   const canProfit = useProfitAccess();
@@ -161,7 +173,7 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
   const lists = useQuery({ queryKey: ['retail', 'price-lists'], queryFn: () => retail.listPriceLists(), enabled: canChooseList });
   // Price lists on: the server prices every line (the customer's list, the group's, the quantity break) and the form shows it.
   const asked = pricesOn ? JSON.stringify(resolveRequestOf(draft)) : 'null';
-  const settled = useDebounced(asked);
+  const settled = useSettled(asked);
   const resolution = useQuery({
     queryKey: ['retail', 'prices', settled],
     queryFn: () => retail.resolvePrices(JSON.parse(settled)),
