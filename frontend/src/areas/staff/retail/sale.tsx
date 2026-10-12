@@ -5,13 +5,13 @@ import { retail, type Product, type Sale, type SalePayment } from '../../../api/
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { showQty } from './maths';
-import { buildSaleRequest, draftProblem, draftTotal, lineFigures, lineHint, newLine, withUnit, type Draft } from './sale-state';
+import { buildSaleRequest, draftProblem, draftTotal, lineFigures, lineHint, newLine, withUnit, type Draft, type DraftLine } from './sale-state';
 import { activePacks, chosenPack, enteredPriceMinor, enteredQty } from './units-state';
 import { EmptyState } from '../../../components/states';
 import { BranchRequired, Gate, NoStockHere, Note, ProductPicker, Problem, money, useBranchRoles, useProfitAccess, useSingleBranch } from './ui';
 import { branchLabel } from '../../../auth/branch';
 import type { BranchRole } from '../../../api/retail';
-import { BRANCH_ROLES, branchesWhere, capabilityOn, needsOf, sellingBranches } from './permissions';
+import { BRANCH_ROLES, UNITS, branchesWhere, capabilityOn, needsOf, sellingBranches } from './permissions';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -70,6 +70,57 @@ export function Receipt({ sale, onNew }: { sale: Sale; onNew?: () => void }) {
   );
 }
 
+/**
+ * One line of the sale being made. The unit choice is drawn only while the tenant has the units capability
+ * (`unitsOn`) and the item has active pack sizes; otherwise the line is exactly what it was before packs.
+ */
+export function SaleLineCard({ line, index, unitsOn, onQty, onPrice, onUnit, onRemove }: {
+  line: DraftLine;
+  index: number;
+  unitsOn: boolean;
+  onQty: (v: string) => void;
+  onPrice: (v: string) => void;
+  onUnit: (unitId: string) => void;
+  onRemove: () => void;
+}) {
+  const i = index;
+  const f = lineFigures(line);
+  const hint = lineHint(line);
+  const packs = unitsOn ? activePacks(line.product) : [];
+  const pack = unitsOn ? chosenPack(line.product, line.unitId) : undefined;
+  return (
+    <div className="rt-card">
+      <strong>{line.product.description}</strong>
+      {packs.length > 0 && (
+        <div>
+          <label htmlFor={`unit-${i}`}>Sell by</label>
+          <select id={`unit-${i}`} data-tour="sale-unit" value={pack?.unit_id ?? ''} onChange={(e) => onUnit(e.target.value)}>
+            <option value="">{line.product.unit}</option>
+            {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {line.product.unit})</option>)}
+          </select>
+        </div>
+      )}
+      <div className="rt-row">
+        <div>
+          <label htmlFor={`qty-${i}`}>Quantity ({pack?.unit ?? line.product.unit})</label>
+          <input id={`qty-${i}`} inputMode="decimal" value={line.qty} onChange={(e) => onQty(e.target.value)} aria-invalid={f === null || hint !== null} />
+        </div>
+        <div>
+          <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
+          <input id={`price-${i}`} inputMode="numeric" value={line.price} onChange={(e) => onPrice(e.target.value)} aria-invalid={f === null} />
+        </div>
+      </div>
+      {hint && <p role="alert" className="rt-flag">{hint}</p>}
+      <p className="line-foot">
+        {f ? `Line total ${money(f.totalMinor)}` : <span className="rt-flag">Check quantity and price</span>}{' '}
+        <button type="button" className="btn-ghost" onClick={onRemove} aria-label={`Remove ${line.product.description}`}>
+          Remove
+        </button>
+      </p>
+    </div>
+  );
+}
+
 export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (sale: Sale) => void }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
@@ -95,8 +146,10 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? { ...l, ...patch } : l)) }));
   const setUnit = (i: number, unitId: string) =>
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? withUnit(l, unitId) : l)) }));
+  const unitsOn = capabilityOn(me, 'retail', UNITS);
+  // An item can be on the sale twice (cartons and loose pieces) only while it has pack sizes to choose from.
   const add = (p: Product) =>
-    setDraft((d) => (d.lines.some((l) => l.product.id === p.id) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
+    setDraft((d) => (d.lines.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
 
   const problem = draftProblem(draft);
   const total = draftTotal(draft.lines);
@@ -114,43 +167,18 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
 
       <h2>Items</h2>
       {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
-      {draft.lines.map((l, i) => {
-        const f = lineFigures(l);
-        const hint = lineHint(l);
-        const packs = activePacks(l.product);
-        const pack = chosenPack(l.product, l.unitId);
-        return (
-          <div key={l.product.id} className="rt-card">
-            <strong>{l.product.description}</strong>
-            {packs.length > 0 && (
-              <div>
-                <label htmlFor={`unit-${i}`}>Sell by</label>
-                <select id={`unit-${i}`} data-tour="sale-unit" value={pack?.unit_id ?? ''} onChange={(e) => setUnit(i, e.target.value)}>
-                  <option value="">{l.product.unit}</option>
-                  {packs.map((k) => <option key={k.unit_id} value={k.unit_id}>{k.unit} ({showQty(k.factor ?? '')} {l.product.unit})</option>)}
-                </select>
-              </div>
-            )}
-            <div className="rt-row">
-              <div>
-                <label htmlFor={`qty-${i}`}>Quantity ({pack?.unit ?? l.product.unit})</label>
-                <input id={`qty-${i}`} inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} aria-invalid={f === null || hint !== null} />
-              </div>
-              <div>
-                <label htmlFor={`price-${i}`}>{pack ? `Price per ${pack.unit}` : 'Unit price'}</label>
-                <input id={`price-${i}`} inputMode="numeric" value={l.price} onChange={(e) => setLine(i, { price: e.target.value })} aria-invalid={f === null} />
-              </div>
-            </div>
-            {hint && <p role="alert" className="rt-flag">{hint}</p>}
-            <p className="line-foot">
-              {f ? `Line total ${money(f.totalMinor)}` : <span className="rt-flag">Check quantity and price</span>}{' '}
-              <button type="button" className="btn-ghost" onClick={() => setDraft((d) => ({ ...d, lines: d.lines.filter((_, n) => n !== i) }))} aria-label={`Remove ${l.product.description}`}>
-                Remove
-              </button>
-            </p>
-          </div>
-        );
-      })}
+      {draft.lines.map((l, i) => (
+        <SaleLineCard
+          key={`${l.product.id}-${i}`}
+          line={l}
+          index={i}
+          unitsOn={unitsOn}
+          onQty={(v) => setLine(i, { qty: v })}
+          onPrice={(v) => setLine(i, { price: v })}
+          onUnit={(unitId) => setUnit(i, unitId)}
+          onRemove={() => setDraft((d) => ({ ...d, lines: d.lines.filter((_, n) => n !== i) }))}
+        />
+      ))}
 
       <fieldset data-tour="sale-payment">
         <legend>How is it paid?</legend>

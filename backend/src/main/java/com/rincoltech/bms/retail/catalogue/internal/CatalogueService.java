@@ -65,9 +65,13 @@ class CatalogueService {
         this.settings = settings;
     }
 
-    /** The {@code units} capability of the tenant (ADR-033); off is the default and means no packs anywhere. */
+    /**
+     * The {@code units} capability of the tenant (ADR-033); off is the default and means no packs anywhere. The catalogue
+     * cannot use {@code retail.stock}'s {@code RetailCapabilities} (stock depends on the catalogue, and the boundary test
+     * forbids the cycle), so it reads the same settings group with the shared key; one read per request that needs it.
+     */
     boolean unitsOn() {
-        return Boolean.TRUE.equals(settings.group("retail").get("units"));
+        return Boolean.TRUE.equals(settings.group("retail").get(RetailCatalogue.UNITS_CAPABILITY));
     }
 
     private void requireUnits() {
@@ -186,7 +190,8 @@ class CatalogueService {
         }
         if (before.active() && !active && repo.unitHasPacks(id)) {
             throw ApiException.rule(
-                    "unit_in_use_by_pack", "This unit is the unit of a pack size. Remove it from the products first.");
+                    "unit_in_use_by_pack",
+                    "This unit is the unit of an active pack size. Switch those packs off on their items first.");
         }
         try {
             if (repo.updateUnit(id, name, active, expected) == 0) {
@@ -336,7 +341,7 @@ class CatalogueService {
         if (!before.unitId().equals(after.unitId()) && repo.productHasPacks(id)) {
             throw ApiException.rule(
                     "unit_in_use_by_pack",
-                    "The unit cannot change while the product has pack sizes: they count base units. Remove the packs first.");
+                    "The unit cannot change while the product has active pack sizes: they count base units. Switch them off first.");
         }
         try {
             repo.update(after);
@@ -403,13 +408,31 @@ class CatalogueService {
     Pack updatePack(UUID productId, UUID unitId, String ifMatch, UpdatePackRequest r) {
         requireUnits();
         int expected = Versions.fromIfMatch(ifMatch);
-        repo.lock(productId).orElseThrow(ApiException::notFound);
+        Product product = repo.lock(productId).orElseThrow(ApiException::notFound);
         Pack before = repo.pack(productId, unitId).orElseThrow(ApiException::notFound);
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
         java.math.BigDecimal factor = r.factor() == null ? new java.math.BigDecimal(before.factor()) : r.factor();
         boolean active = r.active() == null ? before.active() : r.active();
+        if (active && !before.active()) {
+            // Switching on again: the item's unit may have changed while the pack was off, so the factor is confirmed.
+            Unit unit = repo.unit(unitId).orElseThrow(ApiException::notFound);
+            if (r.factor() == null) {
+                throw ApiException.rule(
+                        "factor_required",
+                        "Confirm how many of the item are in one pack when switching it on again: the item's unit may have changed.");
+            }
+            if (!unit.active()) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "unit_id", "inactive_unit", "This unit is switched off. Switch it on first.")));
+            }
+            if (unitId.equals(product.unitId())) {
+                throw ApiException.rule(
+                        "pack_unit_is_base_unit",
+                        "This unit is now the one the item is counted in, so it cannot also be a pack.");
+            }
+        }
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         diff(was, now, "factor", before.factor(), factor.setScale(3).toPlainString());

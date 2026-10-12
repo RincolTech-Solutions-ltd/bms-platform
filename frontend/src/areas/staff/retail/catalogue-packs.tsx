@@ -11,10 +11,10 @@ import { factorMilli } from './units-state';
 // example a carton of twelve pieces. Offered only while /me lists the units capability and the user may
 // manage the catalogue. The sale and restock forms then offer the item in each active pack.
 
-/** True when the text is a factor the server accepts: above zero, at most three places. */
+/** True when the text is a factor the server accepts: at least 1, at most three places, no comma. */
 export function factorProblem(text: string): string | null {
   const milli = factorMilli(text);
-  if (milli === null || milli === 0n) return 'Enter how many of the item are in one pack, for example 12 or 12.5.';
+  if (milli === null || milli < 1000n) return 'Enter how many of the item are in one pack: 1 or more, for example 12 or 12.5.';
   return null;
 }
 
@@ -32,12 +32,21 @@ function PackRow({ productId, pack }: { productId: string; pack: Pack }) {
         <strong>{pack.unit}</strong> {pack.active === false && <span className="badge badge-warning">Switched off</span>}
       </p>
       <label htmlFor={`pack-factor-${pack.unit_id}`}>Items in one {pack.unit}</label>
-      <input id={`pack-factor-${pack.unit_id}`} inputMode="decimal" value={factor} onChange={(e) => setFactor(e.target.value)} aria-invalid={problem !== null} />
+      <input
+        id={`pack-factor-${pack.unit_id}`}
+        inputMode="decimal"
+        value={factor}
+        onChange={(e) => setFactor(e.target.value)}
+        aria-invalid={problem !== null}
+        aria-describedby={problem !== null ? `pack-factor-problem-${pack.unit_id}` : undefined}
+      />
+      {problem !== null && <p id={`pack-factor-problem-${pack.unit_id}`} className="rt-flag">{problem}</p>}
       <p className="cluster">
-        <button type="button" className="btn-sm" disabled={problem !== null || change.isPending || factor.trim() === showQty(pack.factor ?? '')} onClick={() => change.mutate({ factor: factor.trim() })}>
+        <button type="button" className="btn-sm" aria-label={`Save the number for ${pack.unit}`} disabled={problem !== null || change.isPending || factor.trim() === showQty(pack.factor ?? '')} onClick={() => change.mutate({ factor: factor.trim() })}>
           Save the number
         </button>
-        <button type="button" className="btn-sm" disabled={change.isPending} onClick={() => change.mutate({ active: pack.active === false })}>
+        {/* Switching on again confirms the number: the item's unit may have changed while the pack was off. */}
+        <button type="button" className="btn-sm" aria-label={`${pack.active === false ? 'Switch on' : 'Switch off'} the ${pack.unit} pack`} disabled={change.isPending || (pack.active === false && problem !== null)} onClick={() => change.mutate(pack.active === false ? { active: true, factor: factor.trim() } : { active: false })}>
           {pack.active === false ? 'Switch on' : 'Switch off'}
         </button>
       </p>
@@ -86,7 +95,16 @@ export function PackEditor({ product }: { product: Product }) {
         {choices.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
       </select>
       <label htmlFor="pack-factor">Items in one pack</label>
-      <input id="pack-factor" inputMode="decimal" value={factor} onChange={(e) => setFactor(e.target.value)} aria-invalid={factor.trim() !== '' && problem !== null} placeholder="12" />
+      <input
+        id="pack-factor"
+        inputMode="decimal"
+        value={factor}
+        onChange={(e) => setFactor(e.target.value)}
+        aria-invalid={factor.trim() !== '' && problem !== null}
+        aria-describedby={factor.trim() !== '' && problem !== null ? 'pack-factor-problem' : undefined}
+        placeholder="12"
+      />
+      {factor.trim() !== '' && problem !== null && <p id="pack-factor-problem" className="rt-flag">{problem}</p>}
       <Problem error={add.error} />
       <button type="button" disabled={unitId === '' || problem !== null || add.isPending} onClick={() => add.mutate()}>
         {add.isPending ? 'Saving' : 'Add pack'}

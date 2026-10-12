@@ -18,6 +18,9 @@ public interface RetailCatalogue {
      */
     long MAX_AMOUNT_MINOR = 10_000_000_000_000L;
 
+    /** The key of the units-of-measure capability in the tenant's retail.capabilities settings group (ADR-033). */
+    String UNITS_CAPABILITY = "units";
+
     Optional<ProductSnapshot> find(UUID productId);
 
     /**

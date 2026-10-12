@@ -292,16 +292,22 @@ final class CatalogueApi {
             @NotNull UUID unitId,
 
             @NotNull
-            @DecimalMin("0.001")
+            @DecimalMin("1")
             @Digits(integer = 11, fraction = 3)
-            @Schema(type = "string", example = "12.000", description = "Base units in one pack, up to three places")
+            @Schema(
+                    type = "string",
+                    description = "Base units in one pack, at least 1, up to three places, for example 12 or 12.5")
             BigDecimal factor) {}
 
     @Schema(
             name = "RetailPackUpdate",
             description = "Omitted fields are unchanged; a pack is never deleted, only switched off")
     record UpdatePackRequest(
-            @DecimalMin("0.001") @Digits(integer = 11, fraction = 3) @Schema(type = "string", example = "24.000")
+            @DecimalMin("1")
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    description = "Base units in one pack, at least 1; required to switch a pack on again")
             BigDecimal factor,
 
             Boolean active) {}

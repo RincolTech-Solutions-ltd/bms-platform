@@ -2,6 +2,7 @@ package com.rincoltech.bms.retail.stock;
 
 import com.rincoltech.bms.core.tenancy.ModuleSettings;
 import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -16,7 +17,7 @@ import org.springframework.stereotype.Component;
 public class RetailCapabilities {
 
     public static final String BRANCH_ROLES = "branch_roles";
-    public static final String UNITS = "units";
+    public static final String UNITS = RetailCatalogue.UNITS_CAPABILITY;
     private static final String MODULE = "retail";
 
     private final ModuleSettings settings;

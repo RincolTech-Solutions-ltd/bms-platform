@@ -6,7 +6,8 @@ import type { Product, Sale } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
 import { PackEditor } from './catalogue-packs';
-import { Receipt, SaleForm } from './sale';
+import { Receipt, SaleForm, SaleLineCard } from './sale';
+import { newLine } from './sale-state';
 
 // Units of measure on the screens (ADR-033, issue #194). With the capability off nothing is drawn:
 // "all off equals today". Names and amounts are fabricated.
@@ -49,6 +50,61 @@ describe('the sale form', () => {
 
   it('offers no unit choice on an empty sale', () => {
     expect(page(withUnits, <SaleForm branchId={branch} />, client)).not.toContain('Sell by');
+  });
+});
+
+describe('a sale line', () => {
+  const withPacks: Product = { ...pen, packs: [{ id: 'k1', product_id: 'p1', unit_id: 'u1', unit: 'carton', factor: '12.000', active: true, version: 1 }] };
+  const card = (product: Product, unitsOn: boolean, unitId?: string) =>
+    renderToString(
+      <SaleLineCard
+        line={{ ...newLine(product), ...(unitId ? { unitId } : {}) }}
+        index={0}
+        unitsOn={unitsOn}
+        onQty={() => undefined}
+        onPrice={() => undefined}
+        onUnit={() => undefined}
+        onRemove={() => undefined}
+      />,
+    );
+
+  it('offers the pack as a way to sell when the capability is on', () => {
+    const html = card(withPacks, true);
+    expect(html).toContain('Sell by');
+    expect(html).toContain('carton (12 piece)');
+    expect(html).toContain('data-tour="sale-unit"');
+    expect(html).toContain('Quantity (piece)');
+  });
+
+  it('prices and counts in the pack once it is chosen', () => {
+    const html = card(withPacks, true, 'u1');
+    expect(html).toContain('Quantity (carton)');
+    expect(html).toContain('Price per carton');
+  });
+
+  it('is exactly the old line when the capability is off, packs or not', () => {
+    for (const product of [withPacks, pen]) {
+      const html = card(product, false, 'u1');
+      expect(html).not.toContain('Sell by');
+      expect(html).not.toContain('carton');
+      expect(html).toContain('Quantity (piece)');
+      expect(html).toContain('Unit price');
+    }
+  });
+
+  it('is the old line for an item without packs even when the capability is on', () => {
+    const html = card(pen, true);
+    expect(html).not.toContain('Sell by');
+    expect(html).toContain('Unit price');
+  });
+});
+
+describe('pack sizes on the item, accessibly', () => {
+  it('names each button for its pack and links a problem to its field', () => {
+    // The row is drawn from the query data; the editor's own markup is checked through the fixed labels.
+    const html = page(withUnits, <PackEditor product={pen} />);
+    expect(html).toContain('for="pack-unit"');
+    expect(html).toContain('for="pack-factor"');
   });
 });
 

@@ -385,15 +385,16 @@ class CatalogueRepository {
                 .update();
     }
 
+    /** Active packs only: a pack that was switched off no longer ties the product's unit or the pack's unit down. */
     boolean productHasPacks(UUID productId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE product_id = ?)")
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE product_id = ? AND active)")
                 .param(productId)
                 .query(Boolean.class)
                 .single();
     }
 
     boolean unitHasPacks(UUID unitId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE unit_id = ?)")
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE unit_id = ? AND active)")
                 .param(unitId)
                 .query(Boolean.class)
                 .single();

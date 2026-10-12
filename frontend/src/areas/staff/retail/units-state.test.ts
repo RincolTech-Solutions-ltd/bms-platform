@@ -21,7 +21,7 @@ const pen: Product = {
   qty: '100.000',
   packs: [
     { id: 'k1', product_id: 'e1', unit_id: CARTON, unit: 'carton', factor: '12.000', active: true, version: 1 },
-    { id: 'k2', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '0.333', active: false, version: 1 },
+    { id: 'k2', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '2.000', active: false, version: 1 },
   ],
 };
 
@@ -43,8 +43,8 @@ describe('conversions', () => {
 
   it('converts a quantity exactly or not at all', () => {
     expect(baseQtyMilli(2000, '12.000')).toBe(24000);
-    expect(baseQtyMilli(1, '0.333')).toBeNull(); // 0.001 of a pack of 0.333 is 0.000333
-    expect(baseQtyMilli(3000, '0.333')).toBe(999);
+    expect(baseQtyMilli(1, '1.500')).toBeNull(); // 0.001 of a pack of 1.5 is 0.0015
+    expect(baseQtyMilli(2000, '1.500')).toBe(3000);
     expect(baseQtyMilli(99_999_999_999_999, '2.000')).toBeNull(); // does not fit numeric(14,3)
   });
 
@@ -52,6 +52,9 @@ describe('conversions', () => {
     expect(factorProblem('12')).toBeNull();
     expect(factorProblem('12.5')).toBeNull();
     expect(factorProblem('0')).not.toBeNull();
+    expect(factorProblem('0.5')).not.toBeNull(); // a pack holds at least one base unit
+    expect(factorProblem('1')).toBeNull();
+    expect(factorProblem('12,5')).not.toBeNull(); // a comma is refused, never dropped
     expect(factorProblem('1.2345')).not.toBeNull();
     expect(factorProblem('abc')).not.toBeNull();
   });
@@ -93,7 +96,7 @@ describe('the sale form with a pack', () => {
   });
 
   it('refuses a quantity that does not convert exactly', () => {
-    const odd: Product = { ...pen, packs: [{ id: 'k3', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '0.333', active: true, version: 1 }] };
+    const odd: Product = { ...pen, packs: [{ id: 'k3', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '1.500', active: true, version: 1 }] };
     const line = { ...withUnit(newLine(odd), BOX), qty: '0.001', price: '10' };
     expect(lineHint(line)).toContain('does not convert exactly');
   });
@@ -132,8 +135,8 @@ describe('the restock form with a pack', () => {
   });
 
   it('refuses a pack quantity that does not convert exactly', () => {
-    const odd: Product = { ...pen, packs: [{ id: 'k3', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '0.333', active: true, version: 1 }] };
-    expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '2.5' } })).toContain('does not convert exactly');
+    const odd: Product = { ...pen, packs: [{ id: 'k3', product_id: 'e1', unit_id: BOX, unit: 'box', factor: '1.500', active: true, version: 1 }] };
+    expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '0.001' } })).toContain('does not convert exactly');
     expect(restockLineProblem({ product: odd, unitId: BOX, cost: '100', sell: '100', qtyByBranch: { b1: '3' } })).toBeNull();
   });
 });

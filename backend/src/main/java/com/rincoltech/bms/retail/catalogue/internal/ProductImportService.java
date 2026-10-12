@@ -85,7 +85,7 @@ class ProductImportService {
         // ADR-033, issue #194: the optional pack columns, one pack per row. A file without them is read as before.
         boolean withPack = columns.containsKey("pack_unit") || columns.containsKey("pack_factor");
         boolean unitsOn =
-                withPack && Boolean.TRUE.equals(settings.group("retail").get("units"));
+                withPack && Boolean.TRUE.equals(settings.group("retail").get(RetailCatalogue.UNITS_CAPABILITY));
         if (withCost && !principal.hasPermission("retail.profit.read")) {
             throw ApiException.rule(
                     "cost_not_allowed",
@@ -147,8 +147,8 @@ class ProductImportService {
                         "Pack sizes need the units capability. Switch it on, or take the pack columns out of the file.";
             } else if (hasPack && (packUnit.isEmpty() || packUnit.length() > 30 || packFactor == null)) {
                 problem =
-                        "A pack needs both a pack unit (up to 30 characters) and a pack factor above zero with at most"
-                                + " three decimals, for example 12 or 12.5.";
+                        "A pack needs both a pack unit (up to 30 characters) and a pack factor of at least 1 with at most"
+                                + " three decimals and no commas, for example 12 or 12.5.";
             } else if (hasPack && packUnit.equalsIgnoreCase(unit)) {
                 problem = "The pack unit must differ from the unit.";
             } else if (sell == null) {
@@ -210,7 +210,11 @@ class ProductImportService {
                 newUnits.putIfAbsent(packKey, packUnit);
             }
             added++;
-            report.add(new ImportRow(line, code, description.strip(), "added", dryRun ? "Would be added." : "Added."));
+            String packNote = hasPack
+                    ? " With a pack of " + packFactor.setScale(3).toPlainString() + " in one " + packUnit + "."
+                    : "";
+            report.add(new ImportRow(
+                    line, code, description.strip(), "added", (dryRun ? "Would be added." : "Added.") + packNote));
             pending.add(new Pending(
                     code,
                     description.strip(),
@@ -362,12 +366,13 @@ class ProductImportService {
 
     /** A pack factor above zero with at most three decimals, or null. */
     private static java.math.BigDecimal factor(String text) {
-        java.util.regex.Matcher m = FACTOR.matcher(text.replace(",", ""));
+        // A comma is refused, not dropped: "12,5" must not become 125.
+        java.util.regex.Matcher m = FACTOR.matcher(text);
         if (!m.matches()) {
             return null;
         }
         java.math.BigDecimal value = new java.math.BigDecimal(m.group());
-        return value.signum() > 0 ? value : null;
+        return value.compareTo(java.math.BigDecimal.ONE) >= 0 ? value : null;
     }
 
     /** Header names are matched ignoring case, spaces, hyphens and underscores; a few plain synonyms are accepted. */

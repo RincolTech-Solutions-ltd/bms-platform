@@ -6812,10 +6812,7 @@ export interface components {
         };
         /** @description A pack size: factor base units in one pack of the unit */
         RetailPackRequest: {
-            /**
-             * @description Base units in one pack, up to three places
-             * @example 12.0
-             */
+            /** @description Base units in one pack, at least 1, up to three places, for example 12 or 12.5 */
             factor: string;
             /** Format: uuid */
             unit_id: string;
@@ -6823,7 +6820,7 @@ export interface components {
         /** @description Omitted fields are unchanged; a pack is never deleted, only switched off */
         RetailPackUpdate: {
             active?: boolean;
-            /** @example 24.0 */
+            /** @description Base units in one pack, at least 1; required to switch a pack on again */
             factor?: string;
         };
         RetailPayment: {

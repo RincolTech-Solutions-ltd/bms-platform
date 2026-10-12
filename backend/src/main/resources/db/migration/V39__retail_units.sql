@@ -5,8 +5,12 @@
 -- units in one pack). Sale lines and purchase lines gain nullable columns that record what was
 -- entered (the unit, the quantity in that unit, the price or cost in that unit, the factor in force):
 -- every existing row keeps null, which reads as "entered in the base unit". The new checks and
--- foreign keys are added NOT VALID and validated (the pattern of V38); the new columns are null on
--- every existing row, so validation cannot fail. The chart gains the account 5120 purchase_rounding
+-- foreign keys are added NOT VALID and validated in the same file. Flyway runs the
+-- file in one transaction, so NOT VALID does not shorten the lock: the ACCESS EXCLUSIVE lock of the
+-- ALTER TABLE is held through VALIDATE to the commit, and validation scans the table once. That is
+-- accepted here because the new columns are null on every existing row (validation cannot fail) and the
+-- two line tables of a small or medium business are modest; a very large tenant would want VALIDATE
+-- moved to a later migration. The chart gains the account 5120 purchase_rounding
 -- for the cost remainder of a restock priced per pack. Nothing is dropped or renamed, no tenant is
 -- switched on: the units capability lives in the tenant settings group retail.capabilities and is
 -- off until an administrator turns it on. Flyway runs with outOfOrder off, so the number is
@@ -14,9 +18,10 @@
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_product_units: the pack sizes of a product. One pack per unit per product. The pack's
--- unit must differ from the product's base unit and a base unit cannot change while a pack exists;
--- both are rules of the catalogue service (they span two tables). A row is never deleted: a pack
--- that is no longer sold is switched off.
+-- unit must differ from the product's base unit and a base unit cannot change while an active pack
+-- exists; both are rules of the catalogue service (they span two tables). A row is never deleted: a pack
+-- that is no longer sold is switched off. A factor is at least 1: a pack holds at least one base unit (a
+-- smaller unit is the base unit and the larger one the pack), because a fraction would drift stock.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_product_units (
@@ -27,7 +32,7 @@ CREATE TABLE retail_product_units (
     version    integer       NOT NULL DEFAULT 1,
     product_id uuid          NOT NULL,
     unit_id    uuid          NOT NULL,
-    factor     numeric(14,3) NOT NULL CHECK (factor > 0),
+    factor     numeric(14,3) NOT NULL CHECK (factor >= 1),
     active     boolean       NOT NULL DEFAULT true,
     created_by uuid,
     UNIQUE (tenant_id, id),
@@ -54,7 +59,7 @@ ALTER TABLE retail_sale_lines
 ALTER TABLE retail_sale_lines
     ADD CONSTRAINT retail_sale_lines_unit_chk CHECK (
         (sale_unit_id IS NULL AND sale_qty IS NULL AND sale_unit_price_minor IS NULL AND unit_factor IS NULL)
-        OR (sale_unit_id IS NOT NULL AND sale_qty > 0 AND unit_factor > 0
+        OR (sale_unit_id IS NOT NULL AND sale_qty > 0 AND unit_factor >= 1 AND qty = sale_qty * unit_factor
             AND sale_unit_price_minor >= 0 AND sale_unit_price_minor <= 10000000000000)) NOT VALID,
     ADD CONSTRAINT retail_sale_lines_unit_fk FOREIGN KEY (tenant_id, sale_unit_id)
         REFERENCES retail_units (tenant_id, id) NOT VALID;
@@ -76,7 +81,7 @@ ALTER TABLE retail_purchase_lines
 ALTER TABLE retail_purchase_lines
     ADD CONSTRAINT retail_purchase_lines_unit_chk CHECK (
         (unit_id IS NULL AND unit_qty_total IS NULL AND unit_cost_minor IS NULL AND unit_factor IS NULL)
-        OR (unit_id IS NOT NULL AND unit_qty_total > 0 AND unit_factor > 0
+        OR (unit_id IS NOT NULL AND unit_qty_total > 0 AND unit_factor >= 1 AND qty_total = unit_qty_total * unit_factor
             AND unit_cost_minor >= 0 AND unit_cost_minor <= 10000000000000)) NOT VALID,
     ADD CONSTRAINT retail_purchase_lines_unit_fk FOREIGN KEY (tenant_id, unit_id)
         REFERENCES retail_units (tenant_id, id) NOT VALID;

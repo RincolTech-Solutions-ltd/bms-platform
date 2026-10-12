@@ -104,12 +104,28 @@ left open:
    cost divides exactly. The account is added to the retail chart for existing retail tenants by the
    migration, and stays at zero until a restock names a pack.
 5. **Packs belong to the catalogue.** `retail_product_units` is catalogue data (a unit and a factor per
-   product, one per unit, switched off rather than deleted); the base unit of a product cannot change and a
-   unit cannot be switched off while a pack uses it (422 `unit_in_use_by_pack`), because factors are
-   relative to the base unit. No permission is added.
+   product, one per unit, switched off rather than deleted). A factor is at least 1: a pack holds at least
+   one base unit, so the smaller unit is the base unit and the larger the pack (a fraction such as a carton
+   base sold by the piece at 0.083 would drift stock). Factors are relative to the base unit, so while a
+   product has an **active** pack its base unit cannot change, and a unit that an **active** pack uses
+   cannot be switched off (422 `unit_in_use_by_pack`); a pack switched off ties nothing down. Switching a
+   pack on again must carry the factor (422 `factor_required`), and the unit must be active and no longer
+   the item's own unit, because the base unit may have changed while the pack was off. No permission is
+   added.
 6. **Expand only.** One table with forced RLS, eight nullable columns, and checks and foreign keys added
-   `NOT VALID` then validated in the same migration; the covering index of V26 is untouched. A database at
-   V37 holding sale and purchase lines is a migration test.
+   `NOT VALID` then validated in the same migration. Flyway runs the file in one transaction, so this does
+   not shorten the lock: the exclusive lock on each line table is held through the validation scan to the
+   commit. That is accepted because the new columns are null on every existing row and the line tables of a
+   small or medium business are modest; a very large tenant would move the validation to a later migration.
+   The checks also tie `qty` to `sale_qty x unit_factor` (and `qty_total` to `unit_qty_total x unit_factor`)
+   so a line cannot say one thing in each unit. The covering index of V26 is untouched; the sale line read
+   statements in `scripts/db-bench/queries` were updated to the new SQL, but the 25-times benchmark itself
+   (k01 to k15, needs Docker and about 3.6 GB) was not run for this change: no column is indexed, no existing
+   statement of the daily profit or analytics reports changed, and the new columns are nullable, so those
+   plans cannot move; the benchmark should be run on a Docker host before the first tenant switches
+   `units` on. A database at V37 holding sale and purchase lines is a migration test.
+7. **One sale, many lines of an item.** A sale may hold a carton line and a loose-pieces line of the same
+   item (the sale screen allows a second line of an item while the item has pack sizes).
 
 **Better:** a wholesaler can buy by the carton and sell by the carton or the piece against one stock figure,
 and nothing a plain shop reads has changed meaning. **Worse:** a pack cost that does not divide shows as a

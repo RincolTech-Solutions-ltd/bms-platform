@@ -24,12 +24,13 @@ class QuantitiesUnitsTest {
 
     @Test
     void aQuantityThatNeedsMoreThanThreePlacesIsRefusedNotRounded() {
-        // 0.001 of a pack of 0.333 is 0.000333 of the base unit.
-        assertThat(Quantities.toBase(d("0.001"), d("0.333"))).isEmpty();
-        // 2.5 packs of 0.333 is 0.8325.
-        assertThat(Quantities.toBase(d("2.5"), d("0.333"))).isEmpty();
-        // 3 packs of 0.333 is exactly 0.999.
-        assertThat(Quantities.toBase(d("3"), d("0.333"))).contains(d("0.999"));
+        // 0.001 of a pack of 1.5 is 0.0015 of the base unit.
+        assertThat(Quantities.toBase(d("0.001"), d("1.5"))).isEmpty();
+        // 0.003 packs of 1.25 is 0.00375.
+        assertThat(Quantities.toBase(d("0.003"), d("1.25"))).isEmpty();
+        // 0.002 packs of 1.5 is exactly 0.003, and 3 packs of 1.333 exactly 3.999.
+        assertThat(Quantities.toBase(d("0.002"), d("1.5"))).contains(d("0.003"));
+        assertThat(Quantities.toBase(d("3"), d("1.333"))).contains(d("3.999"));
     }
 
     @Test
@@ -81,7 +82,7 @@ class QuantitiesUnitsTest {
         int accepted = 0;
         int refused = 0;
         for (int n = 0; n < 5_000; n++) {
-            BigDecimal factor = BigDecimal.valueOf(1 + random.nextInt(200_000), 3);
+            BigDecimal factor = BigDecimal.valueOf(1_000 + random.nextInt(200_000), 3);
             BigDecimal qty = BigDecimal.valueOf(1 + random.nextInt(50_000), random.nextInt(4));
             var base = Quantities.toBase(qty, factor);
             if (base.isPresent()) {
@@ -103,7 +104,7 @@ class QuantitiesUnitsTest {
     void thePurchaseRoundingRemainderIsBoundedByHalfAMinorUnitPerBaseUnit() {
         Random random = new Random(1940);
         for (int n = 0; n < 5_000; n++) {
-            BigDecimal factor = BigDecimal.valueOf(1 + random.nextInt(100_000), 3);
+            BigDecimal factor = BigDecimal.valueOf(1_000 + random.nextInt(100_000), 3);
             long packCost = random.nextInt(2_000_000);
             BigDecimal qty = BigDecimal.valueOf(1 + random.nextInt(1_000));
             var base = Quantities.toBase(qty, factor);

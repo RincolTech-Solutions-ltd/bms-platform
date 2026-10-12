@@ -209,6 +209,9 @@ class RetailUnitsIT extends IntegrationTest {
         assertThat(sameAsBase.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(sameAsBase)).isEqualTo("pack_unit_is_base_unit");
         assertThat(addPack(pen, carton, "0").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // A pack holds at least one base unit: a fraction would drift stock (carton base, sold by the piece).
+        assertThat(addPack(pen, carton, "0.083").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(addPack(pen, carton, "0.999").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(addPack(pen, carton, "1.2345").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         // Writing needs retail.catalogue.manage; reading needs only retail.stock.read.
         assertThat(api.post(
@@ -280,6 +283,61 @@ class RetailUnitsIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isEqualTo(3);
+
+        // Only active packs tie a unit down: with the carton pack switched off the unit may be switched off and the
+        // item's own unit may change. Switching the pack on again then confirms the factor and re-checks the unit.
+        String packEtag = retired.getHeaders().getETag();
+        ResponseEntity<JsonNode> noFactor = api.call(
+                HttpMethod.PATCH,
+                "/products/" + pen + "/units/" + carton,
+                Map.of("active", true),
+                ADMIN,
+                "*",
+                Map.of("If-Match", packEtag));
+        assertThat(noFactor.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(noFactor)).isEqualTo("factor_required");
+        ResponseEntity<JsonNode> unitOff = api.call(
+                HttpMethod.PATCH,
+                "/units/" + carton,
+                Map.of("active", false),
+                ADMIN,
+                "*",
+                Map.of("If-Match", String.valueOf(unitVersion)));
+        assertThat(unitOff.getStatusCode()).as("%s", unitOff.getBody()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> onWithUnitOff = api.call(
+                HttpMethod.PATCH,
+                "/products/" + pen + "/units/" + carton,
+                Map.of("active", true, "factor", "12"),
+                ADMIN,
+                "*",
+                Map.of("If-Match", packEtag));
+        assertThat(onWithUnitOff.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        api.call(
+                HttpMethod.PATCH,
+                "/units/" + carton,
+                Map.of("active", true),
+                ADMIN,
+                "*",
+                Map.of("If-Match", unitOff.getHeaders().getETag()));
+        ResponseEntity<JsonNode> toCarton = api.call(
+                HttpMethod.PATCH,
+                "/products/" + pen,
+                Map.of("unit_id", carton),
+                ADMIN,
+                "*",
+                Map.of(
+                        "If-Match",
+                        api.get("/products/" + pen, ADMIN).getHeaders().getETag()));
+        assertThat(toCarton.getStatusCode()).as("%s", toCarton.getBody()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> nowTheBase = api.call(
+                HttpMethod.PATCH,
+                "/products/" + pen + "/units/" + carton,
+                Map.of("active", true, "factor", "12"),
+                ADMIN,
+                "*",
+                Map.of("If-Match", packEtag));
+        assertThat(nowTheBase.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(nowTheBase)).isEqualTo("pack_unit_is_base_unit");
     }
 
     // ---- selling in a pack ------------------------------------------------------------------
@@ -326,6 +384,28 @@ class RetailUnitsIT extends IntegrationTest {
         assertThat(stock(t.headOffice(), pen)).isEqualTo("100.000");
     }
 
+    /** A carton line and a loose-pieces line of one item can be in one sale. */
+    @Test
+    void oneSaleCanHoldCartonsAndLoosePiecesOfTheSameItem() {
+        switchUnits(true);
+        pack(pen, carton, "12");
+        api.stockUp(t.headOffice(), pen, "100");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("payment_method", "cash");
+        body.put(
+                "lines",
+                List.of(
+                        Map.of("product_id", pen, "qty", "2", "unit_id", carton),
+                        Map.of("product_id", pen, "qty", "5")));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("lines")).hasSize(2);
+        assertThat(r.getBody().get("total_minor").asLong()).isEqualTo(2_400 + 500);
+        assertThat(stock(t.headOffice(), pen)).isEqualTo("71.000");
+    }
+
     /** Spec 13: stock is conserved across a pack sale and a base sale. */
     @Test
     void stockIsConservedAcrossAPackSaleAndABaseSale() {
@@ -370,17 +450,17 @@ class RetailUnitsIT extends IntegrationTest {
     @Test
     void aQuantityThatDoesNotConvertExactlyIsRefused() {
         switchUnits(true);
-        pack(pen, carton, "0.333");
+        pack(pen, carton, "1.5");
         api.stockUp(t.headOffice(), pen, "100");
-        ResponseEntity<JsonNode> refused = sell(t.headOffice(), pen, carton, "0.001", 10L, null);
+        ResponseEntity<JsonNode> refused = sell(t.headOffice(), pen, carton, "0.001", 1_000L, null);
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("quantity_not_representable");
-        assertThat(sell(t.headOffice(), pen, carton, "2.5", 10L, null).getStatusCode())
+        assertThat(sell(t.headOffice(), pen, carton, "0.003", 1_000L, null).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        ResponseEntity<JsonNode> exact = sell(t.headOffice(), pen, carton, "3", 100L, null);
+        ResponseEntity<JsonNode> exact = sell(t.headOffice(), pen, carton, "3", 1_000L, null);
         assertThat(exact.getStatusCode()).as("%s", exact.getBody()).isEqualTo(HttpStatus.CREATED);
-        assertThat(exact.getBody().get("lines").get(0).get("qty").asString()).isEqualTo("0.999");
-        assertThat(stock(t.headOffice(), pen)).isEqualTo("99.001");
+        assertThat(exact.getBody().get("lines").get(0).get("qty").asString()).isEqualTo("4.500");
+        assertThat(stock(t.headOffice(), pen)).isEqualTo("95.500");
     }
 
     /**
@@ -390,21 +470,10 @@ class RetailUnitsIT extends IntegrationTest {
     @Test
     void aDerivedPriceBeyondTheBoundIsRefusedNotStored() {
         switchUnits(true);
-        pack(pen, carton, "0.001");
-        api.stockUp(t.headOffice(), pen, "100");
-        ResponseEntity<JsonNode> r = sell(t.headOffice(), pen, carton, "1", 10_000_000_000_000L, null);
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(code(r)).isEqualTo("amount_out_of_range");
-        assertThat(stock(t.headOffice(), pen)).isEqualTo("100.000");
         UUID big = api.product("UNIT-BIG", 1, 9_000_000_000_000L);
         pack(big, carton, "5000");
         api.stockUp(t.headOffice(), big, "100000");
         assertThat(code(sell(t.headOffice(), big, carton, "1", null, null))).isEqualTo("amount_out_of_range");
-        // A restock whose pack cost per base unit would pass the bound is refused the same way.
-        UUID small = api.product("UNIT-SMALL", 1, 2);
-        pack(small, carton, "0.001");
-        assertThat(code(restock(t.headOffice(), small, carton, "1", 10_000_000_000_000L)))
-                .isEqualTo("amount_out_of_range");
     }
 
     /** A pack the product does not have, or an unknown unit, is a field problem on the line. */
@@ -599,8 +668,8 @@ class RetailUnitsIT extends IntegrationTest {
     @Test
     void aRestockQuantityThatDoesNotConvertExactlyChangesNothing() {
         switchUnits(true);
-        pack(pen, carton, "0.333");
-        ResponseEntity<JsonNode> refused = restock(t.headOffice(), pen, carton, "2.5", 100);
+        pack(pen, carton, "1.5");
+        ResponseEntity<JsonNode> refused = restock(t.headOffice(), pen, carton, "0.001", 100);
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("quantity_not_representable");
         assertThat(stock(t.headOffice(), pen)).isEqualTo("none");
@@ -619,7 +688,9 @@ class RetailUnitsIT extends IntegrationTest {
                 + "IMP-U1,Test item one,Test Category,piece,100,carton,12\n"
                 + "IMP-U2,Test item two,Test Category,piece,200,,\n"
                 + "IMP-U3,Test item three,Test Category,piece,300,box,0\n"
-                + "IMP-U4,Test item four,Test Category,piece,400,piece,6\n";
+                + "IMP-U4,Test item four,Test Category,piece,400,piece,6\n"
+                + "IMP-U5,Test item five,Test Category,piece,500,box,\"12,5\"\n"
+                + "IMP-U6,Test item six,Test Category,piece,600,box,0.5\n";
         ResponseEntity<JsonNode> off = api.post("/products/import?dry_run=true", Map.of("csv", csv), ADMINISTRATOR);
         assertThat(off.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(off.getBody().get("rows").get(0).get("outcome").asString()).isEqualTo("error");
@@ -634,6 +705,11 @@ class RetailUnitsIT extends IntegrationTest {
         assertThat(rows.get(2).get("outcome").asString()).isEqualTo("error");
         assertThat(rows.get(3).get("outcome").asString()).isEqualTo("error");
         assertThat(rows.get(3).get("message").asString()).contains("must differ");
+        // A comma is refused, never dropped (12,5 must not become 125), and a pack holds at least one base unit.
+        assertThat(rows.get(4).get("outcome").asString()).isEqualTo("error");
+        assertThat(rows.get(5).get("outcome").asString()).isEqualTo("error");
+        // The dry run shows the factor it parsed.
+        assertThat(rows.get(0).get("message").asString()).contains("12.000").contains("carton");
 
         String good = csv.substring(0, csv.indexOf("IMP-U3"));
         ResponseEntity<JsonNode> applied =

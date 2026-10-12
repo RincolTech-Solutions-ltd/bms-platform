@@ -8,6 +8,7 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showQty } from './maths';
 import { CategoryLabel, Gate, Note, Problem, money, useProfitAccess } from './ui';
+import { UNITS, capabilityOn } from './permissions';
 import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, packPriceMinor } from './units-state';
 
 // Restock (FR-RET-06): supplier, lines with cost, sell price and a quantity per branch. Saving sets
@@ -141,9 +142,10 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
     },
   });
 
+  const unitsOn = capabilityOn(me, 'retail', UNITS);
   const add = (p: Product) =>
     setLines((ls) =>
-      ls.some((l) => l.product.id === p.id)
+      ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)
         ? ls
         : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: String(p.sell_minor ?? 0), qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
     );
@@ -189,12 +191,12 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
       {lines.map((l, i) => {
         const newSell = parseMinor(l.sell, RETAIL_CURRENCY);
         const enteredCost = parseMinor(l.cost, RETAIL_CURRENCY);
-        const packs = activePacks(l.product);
-        const pack = chosenPack(l.product, l.unitId);
+        const packs = unitsOn ? activePacks(l.product) : [];
+        const pack = unitsOn ? chosenPack(l.product, l.unitId) : undefined;
         // The product's cost is per base unit: a pack cost is divided by the factor, rounded half up, as the server does.
         const newCost = enteredCost !== null && pack ? baseCostMinor(enteredCost, pack.factor) : enteredCost;
         return (
-          <div key={l.product.id} className="rt-card">
+          <div key={`${l.product.id}-${i}`} className="rt-card">
             <strong>{l.product.description}</strong>
             {packs.length > 0 && (
               <div>

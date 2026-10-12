@@ -7364,8 +7364,7 @@
         "description" : "A pack size: factor base units in one pack of the unit",
         "properties" : {
           "factor" : {
-            "description" : "Base units in one pack, up to three places",
-            "example" : "12.0",
+            "description" : "Base units in one pack, at least 1, up to three places, for example 12 or 12.5",
             "type" : "string"
           },
           "unit_id" : {
@@ -7382,7 +7381,7 @@
             "type" : "boolean"
           },
           "factor" : {
-            "example" : "24.0",
+            "description" : "Base units in one pack, at least 1; required to switch a pack on again",
             "type" : "string"
           }
         }
