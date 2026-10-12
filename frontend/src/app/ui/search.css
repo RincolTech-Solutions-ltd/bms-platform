@@ -19,6 +19,11 @@
   min-width: 0;
 }
 
+/* The box has its own Clear button, so the browser's built-in cross would be a second one. */
+.sb-field input[type='search']::-webkit-search-cancel-button {
+  display: none;
+}
+
 .sb-clear {
   flex: none;
   min-width: 44px;
