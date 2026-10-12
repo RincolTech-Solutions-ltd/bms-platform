@@ -26,7 +26,7 @@ capabilities inside retail.
 2. **A tenant profile (`shop` or `trade`) is a preset of the flags, not a mode.** The module reads
    flags only. `shop` is the default and switches nothing on. Changing flags needs
    `core.settings.manage` and is audited. The core gains one vertical-neutral hook, a module settings group contract that the retail manifest supplies (SDD 5.4.3 style registry), because settings and `/me` are core and core may not depend on retail. The enabled capabilities travel in `/me` so the PWA's
-   menus, tiles and tours follow them (issue #185).
+   menus, tiles and tours follow them (issue #185). The administrator switches the profile and the flags on a Retail settings screen that reads the change back before it is saved (issue #192).
 3. **A branch has a role, `store`, `shop` or `both`, in a retail table `retail_branch_roles`; a
    missing row means `both`.** A store never sells (the service refuses, 422
    `branch_role_forbids_sales`); a store and a shop both restock and transfer. There is no "can
@@ -81,3 +81,92 @@ capabilities inside retail.
 - Imported credit sales: do not post them from this work; wait for issue #96.
 - Migration numbers: assigned at merge time, above the highest on any open branch; each slice updates
   the migration order test (issue #172).
+
+## Amendment of 2026-10-12 (issue #193): the two-step transfer, as built
+
+Decision 9 is built in slice 3 (migration V38; `docs/specs/trade-capabilities.md` sections 9.3 and
+10). The choices it left open:
+
+1. **One route, no mode.** With `transfer_receipt` on, `POST /retail/transfers` dispatches (status
+   `in_transit`); with it off the transfer is one step as before. Existing rows are all `completed` or
+   `voided` and satisfy every replaced rule; nothing is switched on by the migration.
+2. **Five rules replaced, not three.** V22 tied the status, the entry pair, the void columns (two
+   checks) and the update guard to a two-status world. V38 replaces all five: the status check, the
+   entry-pair check, both void-column checks (`voided_at`, `voided_by` and `void_reason` now belong to
+   `cancelled` as well as `voided`) and the guard. Each new check is added `NOT VALID`, validated and
+   only then is the old one dropped; the transfer table holds a few rows a day, so validation is in the
+   same migration. The guard allows exactly `in_transit` to `received`, `in_transit` to `cancelled`,
+   `completed` to `voided` and `received` to `voided`, each once; the transfer itself never changes.
+   The lines gain `received_qty`, settable once while in transit.
+3. **A transfer on its way is cancelled, never voided.** Cancel returns the lines to the source at the
+   original cost (a movement that reverses the dispatch movement) and reverses the source entry; the
+   destination never booked anything. Void keeps its V22 meaning for `completed` and `received`
+   transfers; on a received transfer with a shortage it reverses the shortage entry too, so the
+   transfer is undone as a whole.
+4. **The shortage is its own entry at the destination, at the source cost.** Debit `stock_shrinkage`,
+   credit `interbranch_clearing`; the receipt entry carries what arrived. Together they clear what the
+   dispatch debited, so the clearing legs of a transfer net to zero whatever the product cost is by then.
+5. **In flight is built from the transfers.** Account 1190 is shared with lending, so its balance is
+   never the in-flight figure; the reconciliation reads the net of clearing over entries whose source is
+   a retail transfer (`LedgerAccounts.balanceBySource`) and compares it with the open dispatches.
+6. **Who acts.** The destination's scope receives, the source's scope cancels, both under
+   `retail.stock.transfer`; no permission is added. Switching the capability off is refused while any
+   transfer is in transit.
+
+**Better:** the wholesaler's store-to-shop flow can carry stock in flight with a clear owner for each
+step, and plain shops see nothing new. **Worse:** a shortage is visible in the ledger (stock
+shrinkage) but not yet in the daily profit report, which reads sales, usage and stock-take
+differences only. **Watch for:** any later change to the transfer table must extend the guard's list
+of transitions and its test (`RetailTransferGuardIT`) in the same migration.
+
+## Amendment of 2026-10-12 (issue #194): units of measure, as built
+
+Decision 5 is built in slice 4 (migration V39; `docs/specs/trade-capabilities.md` section 4). The choices it
+left open:
+
+1. **The edge is the line.** A sale line or a restock line names a pack `unit_id` and enters the quantity and
+   the price or cost in that unit. The server converts once: the stock movement, the balance, the cost
+   snapshot and every existing report stay in base units. The line keeps the unit, the quantity, the price and
+   the factor in force, in four nullable columns; null means "entered in the base unit", which is every row
+   that existed and every line of a tenant with the capability off. Naming the base unit is the base unit.
+2. **Quantities refuse, money rounds.** `qty x factor` must be exact to three places and fit the column, or
+   the line is refused (422 `quantity_not_representable`); a pack price is `sell x factor` and a pack cost
+   per base unit is `pack cost / factor`, both rounded half up once; all of it is `BigDecimal` and `long`.
+3. **The price floor is judged on the line.** A pack line is below cost when its line total is not above its
+   line cost; the rounded price per base unit is never compared, so a carton of twelve costing 83 a piece is
+   accepted at 997 although 997 / 12 rounds to the cost.
+4. **The remainder has one home.** A restock priced per pack posts the amount as entered (cash, bank or the
+   supplier) and the movements at the rounded cost per base unit; the difference per branch posts to the new
+   system account `purchase_rounding` (5120) in the branch's own entry, a debit or a credit, nothing when the
+   cost divides exactly. The account is added to the retail chart for existing retail tenants by the
+   migration, and stays at zero until a restock names a pack.
+5. **Packs belong to the catalogue.** `retail_product_units` is catalogue data (a unit and a factor per
+   product, one per unit, switched off rather than deleted). A factor is at least 1: a pack holds at least
+   one base unit, so the smaller unit is the base unit and the larger the pack (a fraction such as a carton
+   base sold by the piece at 0.083 would drift stock). Factors are relative to the base unit, so while a
+   product has an **active** pack its base unit cannot change, and a unit that an **active** pack uses
+   cannot be switched off (422 `unit_in_use_by_pack`); a pack switched off ties nothing down. Switching a
+   pack on again must carry the factor (422 `factor_required`), and the unit must be active and no longer
+   the item's own unit, because the base unit may have changed while the pack was off. No permission is
+   added.
+6. **Expand only.** One table with forced RLS, eight nullable columns, and checks and foreign keys added
+   `NOT VALID` then validated in the same migration. Flyway runs the file in one transaction, so this does
+   not shorten the lock: the exclusive lock on each line table is held through the validation scan to the
+   commit. That is accepted because the new columns are null on every existing row and the line tables of a
+   small or medium business are modest; a very large tenant would move the validation to a later migration.
+   The checks also tie `qty` to `sale_qty x unit_factor` (and `qty_total` to `unit_qty_total x unit_factor`)
+   so a line cannot say one thing in each unit. The covering index of V26 is untouched; the sale line read
+   statements in `scripts/db-bench/queries` were updated to the new SQL, but the 25-times benchmark itself
+   (k01 to k15, needs Docker and about 3.6 GB) was not run for this change: no column is indexed, no existing
+   statement of the daily profit or analytics reports changed, and the new columns are nullable, so those
+   plans cannot move; the benchmark should be run on a Docker host before the first tenant switches
+   `units` on. A database at V37 holding sale and purchase lines is a migration test.
+7. **One sale, many lines of an item.** A sale may hold a carton line and a loose-pieces line of the same
+   item (the sale screen allows a second line of an item while the item has pack sizes).
+
+**Better:** a wholesaler can buy by the carton and sell by the carton or the piece against one stock figure,
+and nothing a plain shop reads has changed meaning. **Worse:** a pack cost that does not divide shows as a
+small expense or income in `purchase_rounding`, and a factor with decimals makes the pack price a rounded
+figure. **Watch for:** price lists (slice 5) key items by unit and must resolve a pack price before the
+default `sell x factor`; the product CSV import skips an existing code, so packs cannot be added to existing
+items by import, only by the pack routes.

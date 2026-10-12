@@ -2,7 +2,7 @@
 
 **Status:** Proposed (design only, issue #190) · **Decision record:** ADR-033 · **Module:** `retail`
 
-No code and no migration exist. This page designs how the retail module serves a wholesaler
+Slices 1 (branch roles), 3 (two-step transfers) and 4 (units of measure, section 4) are built; the others are design only. This page designs how the retail module serves a wholesaler
 without a second module and without changing anything for a plain shop. Migration numbers are not
 given here: they are assigned at merge time (AGENTS.md). Every amount and name in this page is
 fabricated.
@@ -90,6 +90,11 @@ user holds the permission. Tours are data with a version (ADR-025): each capabil
 tour, which starts the first time a user with the matching permission sees a newly enabled
 capability. The component test required by #185 (one per module combination) extends to one per
 capability, including "all off equals today".
+
+Built in slice 2 (issue #192, PWA only): the Retail settings screen with the review-then-confirm step, the
+branch roles screen, `SCREEN_CAPABILITY` (a screen of a capability is offered only while `/me` lists it) and
+tours with a `capability` that start once when it is first on. A capability whose pages are not released has
+no tour yet: the slice that releases its pages adds the tour and marks it `ready`, and a test fails otherwise.
 
 ## 2. Branch roles
 
@@ -224,6 +229,8 @@ the list row, so concurrent edits serialise and the second gets 409 `price_item_
 its snapshot, so back-dating a list gains nothing).
 
 ## 4. Units of measure
+
+**Built in slice 4 (issue #194, migration V39).** Choices the design left open: a pack's default price is `sell_minor x factor` rounded half up to a whole minor unit per pack, and the line is `sale_qty` times that price rounded half up once, so `line_total_minor = sale_qty x sale_unit_price_minor` holds exactly (for a whole factor the pack price is exact); the per-base price is `line_total / base_qty` rounded half up and is display only; a restock's `sell_minor` stays per base unit; `purchase_rounding` (5120) is seeded by the migration for every retail tenant and by the chart function for new ones, instead of when the capability is first switched on, because an account that stays at zero costs nothing and a switch-on hook would need the chart in the settings path; the pack list is read with `retail.stock.read` so the sales screen can offer it, and only changed with `retail.catalogue.manage`; a pack is addressed by its unit, keyed `/retail/products/{id}/units/{unit_id}`; a pack is switched off, never deleted (only an active pack ties its unit and the item's unit down; switching on again confirms the factor); a factor is at least 1, so the smaller unit is always the base unit; a naming of the base unit as `unit_id` is the base unit and takes the pre-existing path with the capability on or off. A factor change applies to later lines because every line keeps the factor it used.
 
 ### 4.1 Rules
 
@@ -460,7 +467,7 @@ Today a transfer is one action: out at the source and in at the destination in o
 stays the default. With `transfer_receipt` on, a transfer is **dispatched** (the source's out
 movement and entry post at once, status `in_transit`) and later **received** (the destination's in
 movement and entry), possibly with a received quantity different from dispatched, in which case the
-difference is a recorded `transfer_shortage` posted as stock shrinkage at the destination's cost.
+difference is a recorded `transfer_shortage` posted as stock shrinkage at the source cost (the cost it left the source at).
 While in transit the stock is in neither branch's balance. The in-transit value is the sum of the
 open dispatches' source entries (the report is built from the transfers, not from the account):
 account 1190 is shared with the lending chart, so its balance is **never** read as the in-flight
@@ -477,6 +484,33 @@ line back to the source with a `transfer_in` of the dispatched quantity at the o
 reverses the source's out entry (the destination never booked anything); status `cancelled`. The
 existing void remains for `completed` (atomic) and `received` transfers, with its rule that the
 destination still holds what came in, applied to the received quantity.
+
+**Built in slice 3 (issue #193, migration V38).** The choices the paragraphs above left open:
+
+- `POST /retail/transfers` is the dispatch while `transfer_receipt` is on (no mode flag); the response
+  status is `in_transit`. Only the source's `transfer_out` movement and entry exist until the receipt.
+- The destination receives with `POST /retail/transfers/{id}/receive` (scope on the destination).
+  The body names how much of every line arrived (0 up to the dispatched quantity), or is omitted for
+  "all of it". What arrived is a `transfer_in` movement per line and one entry (debit inventory, credit
+  clearing); the shortage is a second entry at the destination (debit `stock_shrinkage`, credit
+  clearing, key `retail.transfer_shortage:<id>`), stored as `shortage_entry_id`, valued per line at the
+  dispatch cost. A line with none received is allowed (a whole line of shortage).
+- The source cancels with `POST /retail/transfers/{id}/cancel` (scope on the source): each line comes
+  back as a `transfer_in` that reverses the dispatch movement, at the original cost, and the source
+  entry is reversed (key `retail.transfer_out_cancel:<id>`). Cancelling a received, completed, cancelled
+  or voided transfer is 409 `transfer_not_in_transit`.
+- A transfer on its way cannot be voided (409 `transfer_in_transit`: cancel it); a cancelled one cannot
+  (409 `transfer_cancelled`). Voiding a received transfer returns the dispatched quantity to the source
+  and takes what arrived back from the destination, which must still hold it (422
+  `transfer_stock_moved`), and reverses the dispatch, receipt and shortage entries, so the transfer is
+  undone as a whole.
+- Receive and cancel are money-moving (`Idempotency-Key`); a replayed key returns the first response and
+  two racing receipts receive once (the transfer row is locked).
+- Switching `transfer_receipt` off, directly or by choosing the `shop` profile, is refused (422
+  `transfers_in_transit`) while any transfer is in transit.
+- `GET /retail/transfers` gains a `status` filter, which is how the in-transit list is read with its
+  lines; `GET /retail/reports/transfers-in-flight` adds the age, the value and the reconciliation.
+- Not done here: the shortage is posted to the ledger but is not yet a line of the daily profit report.
 
 ## 10. Data model sketch
 
@@ -504,7 +538,7 @@ where noted, with the `reject_mutation` trigger. Names are provisional.
 | `retail_supplier_bills`, `_allocations` | supplier, number, date, due date, amount, `kind` (`goods`, `landed_cost`), allocations to GRNs | unique `(tenant_id, supplier_id, number)` ; `(tenant_id, supplier_id, due_date)` for ageing |
 | `retail_supplier_credits` | supplier, kind (`goods`, `price`), lines, amount | `(tenant_id, supplier_id)` |
 | `retail_supplier_payments` | supplier, method, amount, bill allocations, journal entry | `(tenant_id, supplier_id, paid_on)` |
-| `retail_transfers` (change) | V22 is not just extended. It (a) limits `status` to `completed` or `voided`, (b) requires `out_entry_id` and `in_entry_id` to be both null or both set, and (c) has a guard trigger that lets an UPDATE change only the void columns once. The migration **replaces** all three: (a) `status` in (`completed`, `in_transit`, `received`, `cancelled`, `voided`); (b) the entry pair is both null only for a zero-cost transfer, `in_entry_id` may be null while `in_transit` or `cancelled`, and both are set for `completed` and `received` unless the cost is zero; (c) the guard allows exactly these transitions: `in_transit` to `received` (sets `in_entry_id`, `received_at`, `received_by` once), `in_transit` to `cancelled` (void-style columns once), and `completed` or `received` to `voided` as today; every other change is refused. Added columns: `received_at`, `received_by`; line `received_qty`. The check and trigger replacements are done in the expand migration with the new constraint added `NOT VALID` first; existing rows are all `completed` or `voided` and satisfy it | partial `(tenant_id, status) where status = 'in_transit'` |
+| `retail_transfers` (change) | V22 is not just extended. It (a) limits `status` to `completed` or `voided`, (b) requires `out_entry_id` and `in_entry_id` to be both null or both set, (c) ties `voided_at`, `voided_by` and `void_reason` to the status `voided` in two further checks, and (d) has a guard trigger that lets an UPDATE change only the void columns once. Migration V38 **replaces** all five: (a) `status` in (`completed`, `in_transit`, `received`, `cancelled`, `voided`); (b) `completed` keeps both-or-neither, `in_transit` has the source entry only (none at zero cost), `cancelled` has no destination entry, `received` has the source entry unless the cost is zero (its destination entry is null only when nothing of value arrived), `voided` has no rule because it follows either; (c) the void columns belong to `voided` and `cancelled`, and `received_at` and `received_by` are set together, only on `received` or a received transfer later `voided`; (d) the guard allows exactly `in_transit` to `received` (sets `in_entry_id`, `shortage_entry_id`, `received_at`, `received_by`, once), `in_transit` to `cancelled` (void-style columns once), and `completed` or `received` to `voided` as before, and refuses every other change. Added columns: `received_at`, `received_by`, `shortage_entry_id`; line `received_qty` (set once while in transit, so the lines' append-only trigger becomes a guard that allows only that). Each new check is added `NOT VALID`, validated and the old one dropped last; the transfer table is small so this is one migration. Existing rows are all `completed` or `voided` and satisfy every new rule | partial `(tenant_id, created_at desc, id desc) where status = 'in_transit'` |
 
 Stock movement kinds gain `return_to_supplier` (negative). `retail_stock_movements` is the largest
 table and its `kind` and sign checks (V11) must be **replaced**, so the migration adds the new
@@ -529,7 +563,7 @@ Branch-bound routes check scope per ADR-017. Full catalogue goes in SDD 7.11.23.
 |---|---|---|---|
 | GET, PUT | `/retail/settings/capabilities` | `core.settings.manage`; PUT needs `If-Match` (the settings version, as `PATCH /settings`) | none |
 | GET, PUT | `/retail/branch-roles`, `/retail/branch-roles/{branch_id}` | read: `retail.stock.read`; write: `retail.branch_role.manage` | `branch_roles` |
-| GET, POST, PATCH | `/retail/products/{id}/units` | `retail.catalogue.manage` | `units` |
+| GET, POST, PATCH | `/retail/products/{id}/units`, `/retail/products/{id}/units/{unit_id}` | read: `retail.stock.read`; write: `retail.catalogue.manage` (built, issue #194) | `units` |
 | GET, POST, PATCH | `/retail/price-lists`, `/retail/price-lists/{id}/items` | read: `retail.sale.create`; write: `retail.pricelist.manage` | `price_lists` |
 | POST | `/retail/prices/resolve` | `retail.sale.create` | `price_lists`; `{customer_id?, price_list_id?, branch_id, lines: [{product_id, unit_id?, qty}]}` returns price and source per line, never cost |
 | POST | `/retail/sales` | `retail.sale.create` | existing route; lines gain `unit_id?`, request gains `price_list_id?` |
@@ -658,7 +692,7 @@ Answers written after one pass looking for what breaks.
 | Switching `price_lists` off with open quotations | A quotation keeps its stored prices; conversion re-prices at the product price when lists are off, and says so |
 | Landed cost after goods were sold | Documented simplification (7.2) reported through the revaluation difference; mitigation setting `purchasing.require_costing_before_sale` |
 | Pack cost rounding | One visible account `purchase_rounding`, bounded by half a minor unit per base unit |
-| Migrations | Mostly additive, but not all: slice 3 replaces the transfer status check, entry-pair check and update guard, and slice 8 replaces the stock movement kind and sign checks. Replacements add the new constraint `NOT VALID` first and `VALIDATE` in a later migration, and drop the old one last, so no long lock is taken on the largest table. Numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
+| Migrations | Mostly additive, but not all: slice 3 replaces the transfer status check, entry-pair check and update guard, and slice 8 replaces the stock movement kind and sign checks. Replacements add the new constraint `NOT VALID` first and `VALIDATE` in the same migration for a small table (a later migration for the largest tables), and drop the old one last. Numbering is assigned at merge, and the migration order test (issue #172) is updated by each slice |
 
 ### 14.3 Permissions
 
@@ -722,8 +756,8 @@ capabilities off changing nothing. Order matters: **slice 1 alone unblocks the w
 | Slice | Issue | Delivers | Depends on |
 |---|---|---|---|
 | 1 | #191 | Branch roles, the capability settings group and the core module-settings hook; enforcement on sales only | none |
-| 2 | #192 | Administrator screen for the profile and the flags, capability-aware menus and tours for the other capabilities (with #185). The profile preset and `module_capabilities` in `/me` are built in slice 1 | 1 |
-| 3 | #193 | Stock by store and shop report, combined total, and two-step transfers (replaced status check, entry-pair check, update guard) with the in-flight report | 1 |
+| 2 | #192 | Administrator screen for the profile and the flags, capability-aware menus and tours for the other capabilities (with #185). The profile preset and `module_capabilities` in `/me` are built in slice 1. Built: no migration and no API change; PWA only (`docs/specs/retail-ui-notes.md`, "Retail settings and branch roles") | 1 |
+| 3 | #193 | Stock by store and shop report, combined total, and two-step transfers (replaced status check, entry-pair check, void-column checks, update guard) with the in-flight report. **Built**, migration V38 | 1 |
 | 4 | #194 | Units of measure: packs, conversions, sale and restock in any unit, import columns | 1 |
 | 5 | #195 | Price lists, quantity breaks, effective dates, customer groups (adds the group and list columns to customers) | 4 |
 | 6 | #196 | Customer accounts: limit, terms (admin only), ageing, statement, payment on account | none |

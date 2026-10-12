@@ -20,6 +20,8 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/stocktake` | Count, review variance, commit | `retail.stocktake.commit` and `retail.stock.read` |
 | `/staff/retail/transfer` | Move stock: to which branch, items with the source's stock, date and note | `retail.stock.transfer` and `retail.stock.read` |
 | `/staff/retail/transfers` | Stock moves from or to the branch; open one; cancel it | `retail.stock.read` (cancel: `retail.stock.transfer`) |
+| `/staff/retail/stock-by-location` | Stores and shops: every product in each branch, stores first, a subtotal per role, stock on the way, the combined total (#193); only while `branch_roles` is on | `retail.stock.transfer` and `retail.stock.read` (the API needs only the read; value: `retail.profit.read`) |
+| `/staff/retail/in-transit` | On the way: transfers sent and not yet received, the longest wait first; check what arrived and mark received, or take back (#193); only while `transfer_receipt` is on | `retail.stock.transfer` and `retail.stock.read` (receive at the destination, take back at the source) |
 | `/staff/retail/valuation` | Stock at price; at cost too with `retail.profit.read` | `retail.stock.read` (cost columns: `retail.profit.read`) |
 | `/staff/retail/profit` | Daily profit per branch, with the stock-take difference as its own column (#121) | `retail.profit.read` |
 | `/staff/retail/sales-analysis` | Sales analysis: totals by day, week or month, top items as bars, by branch, category, item and seller, slow movers, items with no sale (#149) | `retail.sale.read` (profit columns: `retail.profit.read`) |
@@ -389,6 +391,55 @@ widths: see its README), and the script is not committed. Notes:
 - The savings report endpoint (`GET /retail/reports/cash/savings`) is built but has no screen; the savings
   records list covers it. CSV export of the reports waits for the report runs.
 
+## Retail settings and branch roles (#192, ADR-033)
+
+The administrator's two screens for the trade capabilities, and the rule every capability screen follows.
+
+- **Retail settings** (`/staff/retail/settings`, tile "Retail settings", `core.settings.manage`): the profile as a
+  choice of Shop or Trade, and a switch for each of the eight features. Choosing a profile writes its preset over
+  the switches (Trade: branch roles, pack sizes, price lists, customer accounts, returns, received transfers;
+  documents and purchasing stay as they are, spec 1.2) and every switch stays editable. "Review changes" reads the
+  change back in words (the features a preset switches on, the features switched off and that their data is kept);
+  "Confirm" sends `PUT /retail/settings/capabilities` with the settings version as `If-Match`, and the server audits
+  the old and new values. Afterwards `/me` is read again, so the menu follows at once. A feature whose pages are not
+  released yet says so; it can be switched on and changes nothing visible.
+- **Branch roles** (`/staff/retail/branch-roles`, tile "Branch roles", `retail.branch_role.manage`): one choice per
+  branch (store, shop, both). It exists only while `branch_roles` is on.
+- **The rule** (`SCREEN_CAPABILITY` in `retail/permissions.ts`): a screen of a capability is offered, in the tiles,
+  the bottom bar shortcuts and the route gate, only while `/me` lists the capability, whatever permissions the user
+  holds. A screen not listed there behaves as before capabilities existed, so a shop (every capability off) sees the
+  same menu as today plus, for the administrator, the Retail settings tile. A later slice adds its screens to that
+  map, sets `ready` for its capability in `retail/capabilities-state.ts` and adds its tour; `capabilities.test.tsx`
+  fails if a ready capability has no tour.
+- **Tours**: a tour with a `capability` starts by itself once, the first time a user it is for signs in with that
+  capability on, after the first-run tour; a dismissal is for good and a new version shows once more. The Retail
+  settings page has a page tour in Help. Built: the branch roles tour.
+
+## Trade screens (#193, ADR-033)
+
+Two screens and a changed one, all behind a tenant capability that `/me` lists as `module_capabilities.retail`;
+with every capability off the menu, the tiles and every screen are today's (`trade-stock.test.tsx` proves it).
+
+- **Stores and shops** (`/staff/retail/stock-by-location`, capability `branch_roles`). A wide screen draws a column
+  per branch under its role (stores, then shops, then both), a Subtotal column where a role has several branches,
+  then On the way and Combined; a phone draws a card per product with the combined total, a line per role and what is
+  on the way, and a button that opens the branches. The stock on its way is in neither branch's count, so Combined is
+  the balances plus that column. Value at cost, by role and combined, shows only with `retail.profit.read`.
+- **On the way** (`/staff/retail/in-transit`, capability `transfer_receipt`). One card per open dispatch: the route, the
+  date and how long it has waited, the items, and the value at cost with profit read. Where the user may act at the
+  destination the card has "Check what arrived" (each item prefilled with what was sent; less than sent is allowed
+  and says it is written off as a loss; more than sent is refused before the server is asked) and "Mark as received";
+  where they may act at the source it has "Take this back" with a reason. A user holding the permission at neither
+  sees the list only. Someone who reads every branch with cost also sees whether the books agree with the list.
+- **Move stock** says "Send stock" while `transfer_receipt` is on and tells the user that the other branch counts it
+  once they receive it. **Stock moves** shows "on its way", "received" or "received, some short" (less arrived than was
+  sent), "taken back" (the source cancelled it) and keeps "cancelled" for a void; a received or completed move can be
+  cancelled as before, a move on its way is taken back from On the way.
+- Tours: page tours for both new screens start only from Help, for a user who holds the permission on a tenant with the
+  capability on (`tours.ts`, `tours.test.tsx` renders each anchor).
+- The mock (`retail-mock.ts`) answers the same shapes; `setMockTransferReceipt(true)` and `setMockBranchRoles` switch the
+  two capabilities for tests and `VITE_RETAIL_MOCK` sessions (`retail-two-step.test.ts`).
+
 ## Breadcrumbs and category groups (issue #240, FR-UXN-01 and FR-UXN-02)
 
 Frontend only: no API, schema or permission change.
@@ -432,6 +483,17 @@ so they group too.
 - Search and filters stay the screen's own (plain component state, sent to the server as before); the grouping
   takes the already filtered items. Grouped lists drop the Category column and the per-row category label,
   since the header says it.
+
+## Units of measure (#194, ADR-033)
+
+While `/me` lists the `units` capability for retail, an item that has pack sizes shows a "Sell by" choice on the sale screen and "Bought by" on the
+restock screen (an item without packs, and every screen while the capability is off, is exactly as before). Choosing a pack changes the labels to the
+pack's unit (an item with packs may be added to the sale a second time, for cartons and loose pieces in one sale), sets the price or cost to the pack equivalent (`sell x factor`, rounded half up), and checks the stock and the price floor in base units, as
+the server does (`units-state.ts`). The receipt and All sales show a pack line as "2 carton" at the pack price; an older line shows as it always did. The
+item screen (Edit) has a Pack sizes group for a user who may manage the catalogue: add a pack (a unit other than the item's own and a number of items in
+one pack), change the number, switch a pack off. The unit choice on the sale screen carries `data-tour="sale-unit"`. The pack sizes capability has a tour that starts once for
+whoever manages the catalogue (`capability-units`: an introduction and the Catalogue tile); `units` is marked ready in `capabilities-state.ts`.
+It adds no routes, so there is no new breadcrumb: the item screen already adds the item's name as its last crumb.
 
 ## Left to do
 
