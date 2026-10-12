@@ -398,7 +398,7 @@ class LoanServicer implements LoanServicing {
      * handed back or pledged elsewhere is not restored and the loan reopens without it: the checker
      * saw that on the request ({@link #unrestorable}), and the audit row names it.
      */
-    private void restorePledges(Loan loan, UUID by) {
+    private void restorePledges(Loan loan, UUID by, Set<String> listedOnRequest) {
         List<LoanRepository.PledgeRow> released = new ArrayList<>(loans.releasedPledges(loan.id()));
         if (released.isEmpty()) {
             return;
@@ -414,6 +414,20 @@ class LoanServicer implements LoanServicing {
                     .orElse(false);
             (held && !loans.pledgedElsewhere(p.collateralId(), loan.id()) ? restore : notRestored)
                     .add(p.collateralId());
+        }
+        List<String> unlisted = notRestored.stream()
+                .map(UUID::toString)
+                .filter(id -> !listedOnRequest.contains(id))
+                .toList();
+        if (!unlisted.isEmpty()) {
+            // Handing an item back does not change the loan, so the checker may have approved on older
+            // facts: nothing is written, the maker asks again and the checker sees the current list.
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "collateral_facts_changed",
+                    "Collateral changed since the request",
+                    "The reopened loan would also go without " + unlisted
+                            + ", which the request did not list. Request the reversal again.");
         }
         if (!restore.isEmpty()) {
             loans.restorePledges(loan.id(), restore);
@@ -432,12 +446,13 @@ class LoanServicer implements LoanServicing {
     }
 
     /**
-     * For the reversal request on a closed loan: the released items that could not be restored
-     * now (handed back, seized, disposed or pledged elsewhere). Shown to the checker in the request
-     * payload; a read, not a lock, because it only informs the decision.
+     * For the reversal request on a closed loan, when reversing this repayment would reopen it: the
+     * released items that could not be restored now (handed back, seized, disposed or pledged
+     * elsewhere). Shown to the checker in the request payload; a read, not a lock, because it only
+     * informs the decision (the run re-checks it under the locks, {@link #restorePledges}).
      */
-    List<String> unrestorable(Loan loan) {
-        if (!loan.status().equals("closed")) {
+    List<String> unrestorable(Loan loan, Txn txn) {
+        if (!loan.status().equals("closed") || !wouldReopen(loan, txn)) {
             return List.of();
         }
         List<String> gone = new ArrayList<>();
@@ -453,12 +468,47 @@ class LoanServicer implements LoanServicing {
         return gone;
     }
 
+    /** The schedule replayed without this repayment: what the loan would owe once it is reversed. */
+    private Replay replayWithout(Loan loan, Txn txn, List<Txn> survivors) {
+        ProductTerms product = terms(loan);
+        return Servicing.replay(
+                repo.items(loan.id()),
+                survivors.stream()
+                        .map(t -> new Payment(t.id(), t.amountMinor(), t.valueDate()))
+                        .toList(),
+                loan.interestMethod(),
+                product.flatEarlySettlementRebate(),
+                product.allocationOrder());
+    }
+
+    private List<Txn> survivorsOf(Loan loan, Txn txn) {
+        return repo.activeRepayments(loan.id()).stream()
+                .filter(t -> !t.id().equals(txn.id()))
+                .toList();
+    }
+
+    /** True when reversing this repayment leaves a closed loan owing money, so it reopens (FR-REP-05). */
+    private boolean wouldReopen(Loan loan, Txn txn) {
+        if (!txn.txnType().equals("repayment")) {
+            return false;
+        }
+        return !Servicing.position(
+                        replayWithout(loan, txn, survivorsOf(loan, txn)).items(), today())
+                .settled();
+    }
+
     /**
      * FR-REP-05: takes the repayment's money out and re-applies the later repayments in value
      * date order. When nothing else moves, the journal is the mirror of the original entry;
      * otherwise one entry posts the net difference.
      */
-    void reverse(UUID txnId, String reason, UUID approvalId, UUID makerId, UUID checkerId) {
+    void reverse(
+            UUID txnId,
+            String reason,
+            UUID approvalId,
+            UUID makerId,
+            UUID checkerId,
+            Set<String> unsecuredItemsListedOnRequest) {
         Txn txn = repo.txn(txnId).orElseThrow(ApiException::notFound);
         Loan loan = loans.lock(txn.loanId()).orElseThrow(ApiException::notFound);
         checkReversible(loan, txn);
@@ -471,18 +521,8 @@ class LoanServicer implements LoanServicing {
         if (txn.txnType().equals("recovery")) {
             entry = books.reverse(txn.journalEntryId(), today, txn.receiptNo(), key);
         } else {
-            ProductTerms product = terms(loan);
-            List<Txn> survivors = repo.activeRepayments(loan.id()).stream()
-                    .filter(t -> !t.id().equals(txn.id()))
-                    .toList();
-            replay = Servicing.replay(
-                    repo.items(loan.id()),
-                    survivors.stream()
-                            .map(t -> new Payment(t.id(), t.amountMinor(), t.valueDate()))
-                            .toList(),
-                    loan.interestMethod(),
-                    product.flatEarlySettlementRebate(),
-                    product.allocationOrder());
+            List<Txn> survivors = survivorsOf(loan, txn);
+            replay = replayWithout(loan, txn, survivors);
             Map<UUID, List<Allocation>> before = repo.allocationsByRepayment(loan.id());
             deltas.put(txn.id(), Servicing.difference(before.getOrDefault(txn.id(), List.of()), List.of()));
             boolean othersMoved = false;
@@ -561,7 +601,7 @@ class LoanServicer implements LoanServicing {
             if (loan.status().equals("closed") && !position.settled()) {
                 loans.move(loan.id(), "closed", "active", by, "repayment_reversed", Map.of());
                 repo.closedOn(loan.id(), null);
-                restorePledges(loan, by);
+                restorePledges(loan, by, unsecuredItemsListedOnRequest);
             } else if (loan.status().equals("active") && position.settled()) {
                 close(loan, today, by);
             }

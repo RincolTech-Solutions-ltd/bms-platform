@@ -524,8 +524,12 @@ Origination rules that follow from the table above:
   collateral, because it is being recovered. A repayment reversal that reopens a closed loan
   (FR-REP-05) takes back each pledged item still held and securing no other loan. An item handed
   back after payoff, or pledged elsewhere since, is not restored: the reversal request (which always waits for a checker) lists it
-  (`collateral_not_restored_on_reopen`, with `unsecured_reopen_if_reopened`) so the checker approves
-  an unsecured reopen knowingly, and the audit records it (#176).
+  (`collateral_not_restored_on_reopen`, with `reopen_would_be_unsecured`), and only when the reversal
+  would actually reopen the loan. Such a request is approved only by a checker who also holds
+  `lending.collateral.release_approve` (tenant administrator, branch manager; not the accountant).
+  Handing an item back does not change the loan, so the run compares: if the reopen would also leave
+  out an item the request did not list, it writes nothing and answers `collateral_facts_changed` with
+  the item, and the maker requests again. The audit records the outcome (#176).
 - Pledged value (FR-ORG-02). A pledge states at most the item's value (latest forced sale value,
   else the estimate), so only a valued item can be pledged (`collateral_not_valued`), on any
   product. A loan takes at most 20 guarantors and 20 pledged items.
