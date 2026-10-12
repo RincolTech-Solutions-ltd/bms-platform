@@ -188,6 +188,9 @@ class RetailStockHealthIT extends IntegrationTest {
     @Test
     void aCallerWithoutProfitReadNeverSeesCostAnywhereAndAuditIsUntouched() {
         long audit = AnalyticsData.auditRows();
+        // Control: where profit may be read the scan does find these figures, the 27,200 as a number and the
+        // 255.0 cover as a string, so the absence below is a real result and not a scan that sees nothing.
+        assertThat(AnalyticsData.figures(report("", ADMIN))).contains("1450", "27200", "255.0");
         JsonNode r = report("", SALES);
         assertThat(r.get("profit_visible").asBoolean()).isFalse();
         assertThat(AnalyticsData.hasKey(r, "cost")).isFalse();
