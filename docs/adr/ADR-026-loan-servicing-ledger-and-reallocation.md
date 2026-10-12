@@ -111,7 +111,10 @@ Also decided here, within the rules of chapter 3:
   The unsecured reopen is approved by a checker who holds `lending.collateral.release_approve` (the
   existing seeded permission for letting collateral go; tenant administrator and branch manager),
   not by the accountant who approves other reversals; and the run refuses, writing nothing, when the
-  reopen would leave out an item the request did not list (`collateral_facts_changed`).
+  reopen would leave out an item the request did not list: 409 `collateral_facts_changed` with the full
+  current list, the request ends as stale (audited) and the maker requests again. The approvals SPI
+  gained `extraCheckerPermission(payload)` for this, which also hides the decision from approvers
+  who lack it, and `RequestSupersededException` for the stale ending.
 - Penalty charges and waivers arrive in increment 6; the replay starts from the contracted
   schedule and must then add penalty charges and charge waivers before re-applying repayments.
 - When FR-GL-08's `payment_methods` arrives, the default mapping must stay as the fallback or be

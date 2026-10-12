@@ -1,11 +1,10 @@
 package com.rincoltech.bms.lending.loans.internal;
 
 import com.rincoltech.bms.core.approvals.ApprovalAction;
-import com.rincoltech.bms.kernel.ApiException;
-import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -19,9 +18,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>A request that would reopen a closed loan without some of its pledges (#176) carries
  * {@link #UNSECURED_REOPEN} and the items in {@link #NOT_RESTORED}. Its approver also needs
- * {@link #UNSECURED_REOPEN_PERMISSION}, the seeded authority that releases collateral (tenant
- * administrator and branch manager, not the accountant), and the run refuses when it would leave
- * out an item the request did not list.
+ * {@link #UNSECURED_REOPEN_PERMISSION} ({@link #extraCheckerPermission}), the seeded authority that
+ * releases collateral (tenant administrator and branch manager, not the accountant), and the run
+ * ends the request as stale when it would leave out an item the request did not list.
  */
 @Component
 class ReversalAction implements ApprovalAction {
@@ -74,18 +73,19 @@ class ReversalAction implements ApprovalAction {
         return repo.txn(subjectId).flatMap(t -> loans.find(t.loanId())).map(Loan::version);
     }
 
+    /** The approver of an unsecured reopen also holds the right to let collateral go; the accountant does not. */
+    @Override
+    public Optional<String> extraCheckerPermission(Map<String, Object> payload) {
+        return Boolean.TRUE.equals(payload.get(UNSECURED_REOPEN))
+                ? Optional.of(UNSECURED_REOPEN_PERMISSION)
+                : Optional.empty();
+    }
+
     @Override
     public void execute(Execution e) {
         Set<String> listed = new HashSet<>();
         if (e.payload().get(NOT_RESTORED) instanceof List<?> items) {
             items.forEach(i -> listed.add(String.valueOf(i)));
-        }
-        if (Boolean.TRUE.equals(e.payload().get(UNSECURED_REOPEN))
-                && !CurrentPrincipal.require().may(UNSECURED_REOPEN_PERMISSION, e.branchId())) {
-            throw ApiException.rule(
-                    "unsecured_reopen_needs_manager",
-                    "Reopening this loan without its collateral needs an approver who may release collateral" + " ("
-                            + UNSECURED_REOPEN_PERMISSION + ").");
         }
         servicer.reverse(
                 e.subjectId(), (String) e.payload().get(REASON), e.approvalId(), e.makerId(), e.checkerId(), listed);

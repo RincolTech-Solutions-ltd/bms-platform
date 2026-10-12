@@ -528,8 +528,9 @@ Origination rules that follow from the table above:
   would actually reopen the loan. Such a request is approved only by a checker who also holds
   `lending.collateral.release_approve` (tenant administrator, branch manager; not the accountant).
   Handing an item back does not change the loan, so the run compares: if the reopen would also leave
-  out an item the request did not list, it writes nothing and answers `collateral_facts_changed` with
-  the item, and the maker requests again. The audit records the outcome (#176).
+  out an item the request did not list, it writes nothing, ends the request as stale (audited, with the
+  reason) and answers 409 `collateral_facts_changed` with every item that cannot come back, so the maker
+  requests again at once; an approver without that permission is not offered the decision. The audit records the outcome (#176).
 - Pledged value (FR-ORG-02). A pledge states at most the item's value (latest forced sale value,
   else the estimate), so only a valued item can be pledged (`collateral_not_valued`), on any
   product. A loan takes at most 20 guarantors and 20 pledged items.
