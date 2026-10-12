@@ -130,7 +130,11 @@ Also decided here, within the rules of chapter 3:
   direction is closed too: `platform_set_tenant_modules` (replaced in V43, body as in V10 plus the
   check) refuses to switch retail on for a tenant that has an active cash or bank mapping to any
   other account (`payment_methods_remap_blocks_retail`, 422 on the platform console); the operator
-  clears the mapping first. A mapping can be removed (`DELETE /ledger/payment-methods/{method_key}`,
+  clears the mapping first. A save and the module switch take one advisory lock per tenant
+  (`payment_methods:<tenant id>`), so they run one after the other and cannot both pass their check.
+  The platform console is the only way retail is switched on, and the function is the only place it
+  is done. Saving or removing a mapping needs the manage permission in the branch concerned, and
+  authority over every branch for the tenant-wide row. A mapping can be removed (`DELETE /ledger/payment-methods/{method_key}`,
   optional `branch_id`), which returns the method to its seeded account. Lifting the restrictions
   needs retail to post and read through `PaymentMethods` (#236). A correction credits the account the original entry
   debited, never the method's mapping at the time of the correction. A request is checked at the

@@ -398,7 +398,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ledger/payment-methods/{methodKey}": {
+    "/api/v1/ledger/payment-methods/{method_key}": {
         parameters: {
             query?: never;
             header?: never;
@@ -9712,8 +9712,26 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Not in the caller's branch scope (permission_denied) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+            /** @description Another first save of the same method and scope won (payment_method_changed) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+            /** @description invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9730,14 +9748,32 @@ export interface operations {
             };
             header?: never;
             path: {
-                methodKey: string;
+                method_key: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Not in the caller's branch scope (permission_denied) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+            /** @description That scope has no mapping for the method (not_found) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+            /** @description Not a payment method key (validation_failed) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -560,6 +560,58 @@ class LoanServicingIT extends LoanFixtures {
                 .isEqualTo(2);
     }
 
+    ResponseEntity<JsonNode> asScoped(HttpMethod method, String path, UUID branch, Object body) {
+        return send(method, path, as(UUID.randomUUID(), permissionsOf("accountant"), branch.toString(), null), body);
+    }
+
+    /**
+     * Third review of #206: the manage permission is branch scoped. A caller scoped to one branch
+     * maps and removes that branch's rows only; the tenant-wide row, or another branch's, is refused
+     * with 403 and left as it was.
+     */
+    @Test
+    void frGl08_aBranchScopedManagerCannotTouchTheTenantOrAnotherBranch() {
+        String perms = permissionsOf("tenant_admin");
+        String till = assetAccount("1026", "Test scope till");
+        setMethod("cash", null, till, null, perms);
+        setMethod("cash", t.secondBranch(), till, null, perms);
+        String path = "/api/v1/ledger/payment-methods";
+        Map<String, Object> tenantWide = new LinkedHashMap<>();
+        tenantWide.put("method_key", "bank");
+        tenantWide.put("gl_account_id", till);
+        Map<String, Object> other = new LinkedHashMap<>(tenantWide);
+        other.put("branch_id", t.secondBranch());
+        Map<String, Object> own = new LinkedHashMap<>(tenantWide);
+        own.put("branch_id", t.headOffice());
+
+        assertThat(asScoped(HttpMethod.PUT, path, t.headOffice(), tenantWide).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(asScoped(HttpMethod.PUT, path, t.headOffice(), other).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(asScoped(HttpMethod.PUT, path, t.headOffice(), own).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        assertThat(asScoped(HttpMethod.DELETE, path + "/cash", t.headOffice(), null)
+                        .getStatusCode())
+                .as("the tenant-wide row")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(asScoped(HttpMethod.DELETE, path + "/cash?branch_id=" + t.secondBranch(), t.headOffice(), null)
+                        .getStatusCode())
+                .as("another branch's row")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM payment_methods WHERE tenant_id = ? AND method_key = 'cash'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("both cash rows are still there")
+                .isEqualTo(2);
+        assertThat(asScoped(HttpMethod.DELETE, path + "/bank?branch_id=" + t.headOffice(), t.headOffice(), null)
+                        .getStatusCode())
+                .as("its own branch's row")
+                .isEqualTo(HttpStatus.OK);
+    }
+
     /** FR-GL-08: only a postable, active asset account that no module controls, a real branch, and the permission. */
     @Test
     void frGl08_aMappingIsValidated() {

@@ -271,6 +271,71 @@ class PlatformIT extends IntegrationTest {
         assertThat(JdbcCheck.moduleTenants("retail")).contains(tenantId);
     }
 
+    /**
+     * Third review of #206: saving a cash mapping and switching retail on at the same moment. Both
+     * take one advisory lock per tenant, so whichever runs second sees the other: afterwards retail
+     * is never on together with an active cash mapping to another account.
+     */
+    @Test
+    void aCashMappingAndSwitchingRetailOnAtOnceNeverEndUpTogether() throws Exception {
+        for (int round = 0; round < 4; round++) {
+            ResponseEntity<JsonNode> created = create(slug(), List.of("lending"));
+            UUID tenantId =
+                    UUID.fromString(created.getBody().get("tenant").get("id").asString());
+            String slug = created.getBody().get("tenant").get("slug").asString();
+            UUID till = UUID.randomUUID();
+            TestDatabase.owner().sql("""
+                            INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
+                                is_postable, is_system_controlled)
+                            VALUES (?, ?, '1091', 'Test till', 'asset', 'debit', 'UGX', true, false)
+                            """).params(till, tenantId).update();
+            Map<String, String> dev = Map.of(
+                    "X-Dev-User-Id", UUID.randomUUID().toString(),
+                    "X-Dev-Permissions", "core.payment_methods.manage,core.ledger.read",
+                    "X-Dev-Branch-Ids", "*");
+            Api tenant = Api.tenant(http, slug);
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            try (java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+                var mapping = pool.submit(() -> {
+                    start.await();
+                    return tenant.call(
+                            HttpMethod.PUT,
+                            "/api/v1/ledger/payment-methods",
+                            Map.of("method_key", "cash", "gl_account_id", till.toString()),
+                            null,
+                            dev);
+                });
+                var retail = pool.submit(() -> {
+                    start.await();
+                    return platform.call(
+                            HttpMethod.PUT,
+                            "/api/v1/platform/tenants/" + tenantId + "/modules",
+                            Map.of("modules", List.of("lending", "retail")),
+                            operator.accessToken());
+                });
+                start.countDown();
+                assertThat(mapping.get(30, java.util.concurrent.TimeUnit.SECONDS)
+                                .getStatusCode()
+                                .value())
+                        .isIn(200, 422);
+                assertThat(retail.get(30, java.util.concurrent.TimeUnit.SECONDS)
+                                .getStatusCode()
+                                .value())
+                        .isIn(200, 422);
+            }
+            boolean retailOn = JdbcCheck.moduleTenants("retail").contains(tenantId);
+            long activeCashRemaps = TestDatabase.owner()
+                    .sql(
+                            "SELECT count(*) FROM payment_methods WHERE tenant_id = ? AND method_key = 'cash' AND is_active")
+                    .param(tenantId)
+                    .query(Long.class)
+                    .single();
+            assertThat(retailOn && activeCashRemaps > 0)
+                    .as("round %d: retail on with an active cash remap", round)
+                    .isFalse();
+        }
+    }
+
     /** FR-TEN-05, FR-TEN-06: subscription moves are audited; suspension makes the tenant read only. */
     @Test
     void subscriptionMovesAndSuspension() {

@@ -6,9 +6,11 @@ import com.rincoltech.bms.core.tenancy.TenantModules;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -19,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -90,6 +93,30 @@ class PaymentMethodController {
         this.audit = audit;
     }
 
+    static final String MANAGE = "core.payment_methods.manage";
+
+    /**
+     * The caller's branch scope for the manage permission: a branch's row needs that branch in scope,
+     * the tenant-wide row needs authority over every branch. A request for a scope the caller does
+     * not hold is refused before anything is read.
+     */
+    private static void requireScope(UUID branchId) {
+        Principal principal = CurrentPrincipal.require();
+        boolean allowed = principal
+                .scopeOf(MANAGE)
+                .map(scope -> branchId == null ? scope.all() : scope.covers(branchId))
+                .orElse(false);
+        if (!allowed) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    branchId == null
+                            ? "The tenant-wide mapping needs authority over every branch."
+                            : "You do not manage payment methods at this branch.");
+        }
+    }
+
     @GetMapping
     @RequiresPermission("core.ledger.read")
     @Operation(
@@ -125,10 +152,26 @@ class PaymentMethodController {
 
     /** Sets one method's account for the tenant or one branch; the account is a postable, active asset account that no module controls. */
     @PutMapping
-    @RequiresPermission("core.payment_methods.manage")
+    @RequiresPermission(MANAGE)
     @Operation(summary = "Map a payment method to an asset account (FR-GL-08)", operationId = "setPaymentMethod")
+    @ApiResponse(responseCode = "403", description = "Not in the caller's branch scope (permission_denied)")
+    @ApiResponse(
+            responseCode = "409",
+            description = "Another first save of the same method and scope won (payment_method_changed)")
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on)")
     @Transactional
     MappingList set(@Valid @RequestBody SetRequest r) {
+        requireScope(r.branchId());
+        // Serialises with platform_set_tenant_modules (V43), which takes the same lock before it looks
+        // at the mappings: a save that passed the retail check cannot interleave with retail being
+        // switched on, and the other way round. The lock ends with the transaction.
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended('payment_methods:' || current_setting('app.tenant_id'), 0))")
+                .query()
+                .singleRow();
         List<FieldProblem> problems = new ArrayList<>();
         if (r.branchId() != null && branches.findActive(r.branchId()).isEmpty()) {
             problems.add(new FieldProblem("branch_id", "unknown_branch", "No such active branch."));
@@ -230,15 +273,19 @@ class PaymentMethodController {
      * Removes the mapping of one method for the tenant or one branch, so it posts to its seeded
      * account again (ADR-026). The tenant's mapping is not touched when a branch row is removed.
      */
-    @DeleteMapping("/{methodKey}")
+    @DeleteMapping("/{method_key}")
     @RequiresPermission("core.payment_methods.manage")
     @Operation(
             summary = "Return a payment method to its default account for the tenant or a branch (FR-GL-08)",
             operationId = "clearPaymentMethod")
+    @ApiResponse(responseCode = "403", description = "Not in the caller's branch scope (permission_denied)")
+    @ApiResponse(responseCode = "404", description = "That scope has no mapping for the method (not_found)")
+    @ApiResponse(responseCode = "422", description = "Not a payment method key (validation_failed)")
     @Transactional
     MappingList clear(
-            @PathVariable("methodKey") String methodKey,
+            @PathVariable("method_key") String methodKey,
             @RequestParam(name = "branch_id", required = false) UUID branchId) {
+        requireScope(branchId);
         if (!methodKey.matches(METHODS)) {
             throw ApiException.validation(
                     List.of(new FieldProblem("method_key", "invalid", "Not a payment method: " + methodKey + ".")));

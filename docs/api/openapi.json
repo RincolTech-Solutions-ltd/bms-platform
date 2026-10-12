@@ -12749,7 +12749,7 @@
           "required" : true
         },
         "responses" : {
-          "200" : {
+          "403" : {
             "content" : {
               "application/json" : {
                 "schema" : {
@@ -12757,19 +12757,39 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Not in the caller's branch scope (permission_denied)"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Another first save of the same method and scope won (payment_method_changed)"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on)"
           }
         },
         "summary" : "Map a payment method to an asset account (FR-GL-08)",
         "tags" : [ "ledger" ]
       }
     },
-    "/api/v1/ledger/payment-methods/{methodKey}" : {
+    "/api/v1/ledger/payment-methods/{method_key}" : {
       "delete" : {
         "operationId" : "clearPaymentMethod",
         "parameters" : [ {
           "in" : "path",
-          "name" : "methodKey",
+          "name" : "method_key",
           "required" : true,
           "schema" : {
             "type" : "string"
@@ -12784,7 +12804,7 @@
           }
         } ],
         "responses" : {
-          "200" : {
+          "403" : {
             "content" : {
               "application/json" : {
                 "schema" : {
@@ -12792,7 +12812,27 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "Not in the caller's branch scope (permission_denied)"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "That scope has no mapping for the method (not_found)"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Not a payment method key (validation_failed)"
           }
         },
         "summary" : "Return a payment method to its default account for the tenant or a branch (FR-GL-08)",

@@ -45,6 +45,9 @@ BEGIN
     IF NOT (coalesce(p_modules, '{}') <@ v_allowed) THEN
         RAISE EXCEPTION 'module not allowed by plan' USING ERRCODE = 'check_violation';
     END IF;
+    -- The same lock PaymentMethodController.set takes: a mapping save and this switch run one after the
+    -- other, so neither sees the other half done. Released when the transaction ends.
+    PERFORM pg_advisory_xact_lock(hashtextextended('payment_methods:' || p_tenant_id::text, 0));
     IF 'retail' = ANY (coalesce(p_modules, '{}'))
        AND EXISTS (SELECT 1 FROM payment_methods pm JOIN gl_accounts a ON a.id = pm.gl_account_id
                     WHERE pm.tenant_id = p_tenant_id AND pm.is_active
