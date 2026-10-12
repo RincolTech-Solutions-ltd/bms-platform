@@ -238,7 +238,7 @@ class LoanRepository {
     }
 
     /**
-     * #176: a reopened loan takes its released pledges back. The guard (V41) allows exactly this
+     * #176: a reopened loan takes its released pledges back. The guard (V42) allows exactly this
      * change, for the loan named in the transaction-local {@code bms.restore_pledges_loan}.
      */
     void restorePledges(UUID loanId, List<UUID> collateralIds) {

@@ -729,7 +729,7 @@ class LoanServicingIT extends LoanFixtures {
         }
     }
 
-    /** V41's guard: un-releasing a pledge needs the transaction to name that loan, and only that loan. */
+    /** V42's guard: un-releasing a pledge needs the transaction to name that loan, and only that loan. */
     @Test
     void theGuardRefusesAnUnreleaseTheTransactionDidNotName() throws Exception {
         String[] s = securedPaidOff("GUARD", 65);

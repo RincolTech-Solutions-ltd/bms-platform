@@ -958,7 +958,7 @@ is the backstop. `released_at` is set when the loan becomes `cancelled`, `reject
 a `written_off` loan keeps its pledges. A reversal that reopens a closed loan clears
 `released_at` again on that loan's own rows for each item still held and free (locked in
 pledging's order, the text order of the UUID; an item that is not is left released and the reopen is audited as partly
-unsecured); V41's guard allows that one change only on an active loan named in the
+unsecured); V42's guard allows that one change only on an active loan named in the
 transaction-local setting `bms.restore_pledges_loan` (#176). The collateral register asks the loans
 module through `CollateralPledges` before any release (FR-COL-04).
 
@@ -1415,7 +1415,7 @@ replaced status check, entry-pair check, void-column checks and update guard (ea
 `NOT VALID`, validated, the old one dropped last, on a table of a few rows a day), a guard that
 lets one line column be set once, and a partial index on the transfers in transit. It changes no
 existing row and no existing behaviour; the flow is behind the `transfer_receipt` capability.
-`V41__loan_reopen_restores_pledges.sql` (#176) replaces `lending_loan_collateral_guard` so a
+`V42__loan_reopen_restores_pledges.sql` (#176) replaces `lending_loan_collateral_guard` so a
 reversal that reopens a closed loan can restore that loan's own pledges (section 6.7). The next
 migration takes the number above the highest on `main` (`MigrationOrderIT`, chapter 15 section
 15.4.3).
