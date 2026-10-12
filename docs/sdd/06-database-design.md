@@ -567,7 +567,10 @@ posts to its seeded account (`cash` to `cash_on_hand`, `bank` to `bank`, `mtn_mo
 lending's loans, savings and investments post through it, at the branch of the loan, account or
 investment (request checks included). A correction credits the account its original entry debited.
 Retail postings and the cash book do not use it yet (#236), so while the retail module is on `cash`
-and `bank` can be mapped only to `cash_on_hand` and `bank` (`account_used_by_retail`, ADR-026).
+and `bank` can be mapped only to `cash_on_hand` and `bank` (`account_used_by_retail`, ADR-026), and
+`platform_set_tenant_modules` (replaced in V43) refuses to switch retail on while an active cash or
+bank mapping points elsewhere. `bms_app` holds SELECT, INSERT, UPDATE and DELETE on the table (a
+mapping is removed to return the method to its default).
 
 ### `payment_intents` (RLS)
 

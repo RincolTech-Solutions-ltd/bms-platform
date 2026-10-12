@@ -22,10 +22,13 @@ import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -220,6 +223,52 @@ class PaymentMethodController {
         now.put("account_code", code.orElseThrow());
         now.put("is_active", active);
         audit.record(new AuditLog.Entry("core.payment_method.set", "core.payment_method", id, r.branchId(), was, now));
+        return list();
+    }
+
+    /**
+     * Removes the mapping of one method for the tenant or one branch, so it posts to its seeded
+     * account again (ADR-026). The tenant's mapping is not touched when a branch row is removed.
+     */
+    @DeleteMapping("/{methodKey}")
+    @RequiresPermission("core.payment_methods.manage")
+    @Operation(
+            summary = "Return a payment method to its default account for the tenant or a branch (FR-GL-08)",
+            operationId = "clearPaymentMethod")
+    @Transactional
+    MappingList clear(
+            @PathVariable("methodKey") String methodKey,
+            @RequestParam(name = "branch_id", required = false) UUID branchId) {
+        if (!methodKey.matches(METHODS)) {
+            throw ApiException.validation(
+                    List.of(new FieldProblem("method_key", "invalid", "Not a payment method: " + methodKey + ".")));
+        }
+        Optional<Map<String, Object>> was = jdbc.sql("""
+                        SELECT id, gl_account_id, is_active FROM payment_methods
+                         WHERE method_key = :key AND branch_id IS NOT DISTINCT FROM CAST(:branch AS uuid) FOR UPDATE
+                        """)
+                .param("key", methodKey)
+                .param("branch", branchId)
+                .query((rs, n) -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("id", rs.getObject(1, UUID.class));
+                    row.put("gl_account_id", rs.getObject(2, UUID.class));
+                    row.put("is_active", rs.getBoolean(3));
+                    return row;
+                })
+                .optional();
+        Map<String, Object> row = was.orElseThrow(ApiException::notFound);
+        jdbc.sql("DELETE FROM payment_methods WHERE id = ?")
+                .param(row.get("id"))
+                .update();
+        Map<String, Object> before = new LinkedHashMap<>(row);
+        before.remove("id");
+        Map<String, Object> now = new LinkedHashMap<>();
+        now.put("method_key", methodKey);
+        now.put("branch_id", branchId);
+        now.put("source", "default");
+        audit.record(new AuditLog.Entry(
+                "core.payment_method.cleared", "core.payment_method", (UUID) row.get("id"), branchId, before, now));
         return list();
     }
 }

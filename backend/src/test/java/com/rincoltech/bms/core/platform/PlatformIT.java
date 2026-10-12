@@ -231,6 +231,46 @@ class PlatformIT extends IntegrationTest {
                 .isEqualTo(2);
     }
 
+    /**
+     * Review of #206: retail posts cash and bank to the seeded accounts, so it is not switched on for
+     * a tenant whose cash or bank is mapped elsewhere (the lending cash would leave the balance the
+     * retail cash book reads). Clearing the mapping, or an inactive one, lets it through.
+     */
+    @Test
+    void retailIsNotSwitchedOnWhileCashOrBankIsRemapped() {
+        ResponseEntity<JsonNode> created = create(slug(), List.of("lending"));
+        UUID tenantId =
+                UUID.fromString(created.getBody().get("tenant").get("id").asString());
+        UUID till = UUID.randomUUID();
+        TestDatabase.owner().sql("""
+                        INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
+                            is_postable, is_system_controlled)
+                        VALUES (?, ?, '1090', 'Test till', 'asset', 'debit', 'UGX', true, false)
+                        """).params(till, tenantId).update();
+        UUID mapping = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO payment_methods (id, tenant_id, method_key, gl_account_id) VALUES (?, ?, 'cash', ?)")
+                .params(mapping, tenantId, till)
+                .update();
+        String path = "/api/v1/platform/tenants/" + tenantId + "/modules";
+        Map<String, Object> both = Map.of("modules", List.of("lending", "retail"));
+
+        ResponseEntity<JsonNode> refused = platform.call(HttpMethod.PUT, path, both, operator.accessToken());
+        assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(422);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("payment_methods_remap_blocks_retail");
+        assertThat(JdbcCheck.moduleTenants("retail")).doesNotContain(tenantId);
+
+        TestDatabase.owner()
+                .sql("UPDATE payment_methods SET is_active = false WHERE id = ?")
+                .param(mapping)
+                .update();
+        assertThat(platform.call(HttpMethod.PUT, path, both, operator.accessToken())
+                        .getStatusCode())
+                .as("an inactive mapping does not move any cash")
+                .isEqualTo(HttpStatus.OK);
+        assertThat(JdbcCheck.moduleTenants("retail")).contains(tenantId);
+    }
+
     /** FR-TEN-05, FR-TEN-06: subscription moves are audited; suspension makes the tenant read only. */
     @Test
     void subscriptionMovesAndSuspension() {

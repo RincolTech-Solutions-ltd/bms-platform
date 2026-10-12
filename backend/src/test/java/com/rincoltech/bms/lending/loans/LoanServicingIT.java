@@ -498,6 +498,68 @@ class LoanServicingIT extends LoanFixtures {
                 .isEqualTo(1);
     }
 
+    ResponseEntity<JsonNode> clearMethod(String method, UUID branch, String perms) {
+        return send(
+                HttpMethod.DELETE,
+                "/api/v1/ledger/payment-methods/" + method + (branch == null ? "" : "?branch_id=" + branch),
+                as(admin, perms, "*", null),
+                null);
+    }
+
+    static List<String> sourcesOf(JsonNode list, String method) {
+        List<String> sources = new ArrayList<>();
+        for (JsonNode item : list.get("items")) {
+            if (item.get("method_key").asString().equals(method)) {
+                sources.add(item.get("source").asString());
+            }
+        }
+        return sources;
+    }
+
+    /**
+     * Review of #206: a mapping can be removed. The branch row goes first (the tenant's applies
+     * again), then the tenant's (the method is back on its seeded account and GET says default); a
+     * second delete is 404, the permission and the key are checked, and each removal is audited.
+     */
+    @Test
+    void frGl08_aMappingIsRemovedAndTheMethodReturnsToItsDefault() {
+        String perms = permissionsOf("tenant_admin");
+        String tenantTill = assetAccount("1024", "Test tenant till");
+        String branchTill = assetAccount("1025", "Test branch till");
+        setMethod("cash", null, tenantTill, null, perms);
+        setMethod("cash", t.headOffice(), branchTill, null, perms);
+
+        assertThat(clearMethod("cash", t.headOffice(), cashierPerms).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(clearMethod("petty_cash", null, perms).getStatusCode().value())
+                .isEqualTo(422);
+        ResponseEntity<JsonNode> branchGone = clearMethod("cash", t.headOffice(), perms);
+        assertThat(branchGone.getStatusCode()).as("%s", branchGone.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(sourcesOf(branchGone.getBody(), "cash")).containsExactly("mapped");
+        assertThat(clearMethod("cash", t.headOffice(), perms).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        ResponseEntity<JsonNode> tenantGone = clearMethod("cash", null, perms);
+        assertThat(tenantGone.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(sourcesOf(tenantGone.getBody(), "cash")).containsExactly("default");
+        assertThat(clearMethod("cash", null, perms).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        String loan = approved(exampleB("PMCLEAR"), 1_200_000, 3, 75);
+        disburse(loan, today);
+        String entry = get(loan, "/transactions")
+                .get("items")
+                .get(0)
+                .get("journal_entry_id")
+                .asString();
+        assertThat(creditCodes(entry)).as("back on the seeded cash account").containsExactly("1010");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'core.payment_method.cleared'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2);
+    }
+
     /** FR-GL-08: only a postable, active asset account that no module controls, a real branch, and the permission. */
     @Test
     void frGl08_aMappingIsValidated() {

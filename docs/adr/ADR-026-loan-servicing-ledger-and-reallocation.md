@@ -123,9 +123,12 @@ Also decided here, within the rules of chapter 3:
   so remapping lending's `cash` or `bank` would take lending money out of the retail cash book. The
   mapping therefore refuses it: while the retail module is on, `cash` and `bank` can be mapped only
   to those two seeded accounts (`account_used_by_retail`), at the tenant or a branch; mobile money,
-  the gateway and savings transfer stay free, and so does switching a method off. If a remap of cash
-  or bank already exists when the retail module is switched on, nothing re-checks it: lending cash
-  is outside the retail cash book until it is mapped back. Lifting the restriction needs retail to
-  post and read through `PaymentMethods` (#236). A correction credits the account the original entry
+  the gateway and savings transfer stay free, and so does switching a method off. The other
+  direction is closed too: `platform_set_tenant_modules` (replaced in V43, body as in V10 plus the
+  check) refuses to switch retail on for a tenant that has an active cash or bank mapping to any
+  other account (`payment_methods_remap_blocks_retail`, 422 on the platform console); the operator
+  clears the mapping first. A mapping can be removed (`DELETE /ledger/payment-methods/{method_key}`,
+  optional `branch_id`), which returns the method to its seeded account. Lifting the restrictions
+  needs retail to post and read through `PaymentMethods` (#236). A correction credits the account the original entry
   debited, never the method's mapping at the time of the correction. A request is checked at the
   branch of the loan, account or investment, the same row that execution resolves.

@@ -398,6 +398,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ledger/payment-methods/{methodKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Return a payment method to its default account for the tenant or a branch (FR-GL-08) */
+        delete: operations["clearPaymentMethod"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/lending/collateral": {
         parameters: {
             query?: never;
@@ -9694,6 +9711,30 @@ export interface operations {
                 "application/json": components["schemas"]["SetPaymentMethodRequest"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodMappingList"];
+                };
+            };
+        };
+    };
+    clearPaymentMethod: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+            };
+            header?: never;
+            path: {
+                methodKey: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
