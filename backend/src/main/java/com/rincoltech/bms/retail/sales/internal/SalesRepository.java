@@ -393,7 +393,12 @@ class SalesRepository {
     List<Payment> payments(UUID saleId) {
         return jdbc.sql("""
                         SELECT id, sale_id, amount_minor, currency, method, paid_on, journal_entry_id, created_at, created_by
-                          FROM retail_sale_payments WHERE sale_id = ? ORDER BY paid_on, created_at, id
+                          FROM retail_sale_payments p
+                         WHERE sale_id = ?
+                           AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
+                                             JOIN retail_account_payments r ON r.id = a.receipt_id
+                                            WHERE a.sale_payment_id = p.id AND r.status = 'reversed')
+                         ORDER BY paid_on, created_at, id
                         """)
                 .param(saleId)
                 .query((rs, n) -> new Payment(

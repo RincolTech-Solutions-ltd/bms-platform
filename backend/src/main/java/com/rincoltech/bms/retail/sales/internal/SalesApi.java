@@ -77,6 +77,13 @@ final class SalesApi {
                             + " needs retail.pricelist.use unless it is one of those (price_lists capability)")
             UUID priceListId,
 
+            @Size(max = 300)
+            @Schema(
+                    description = "Why a credit sale above the buyer's credit limit goes ahead; needed (at least five"
+                            + " characters) from a user who holds retail.credit.override, ignored when the sale is"
+                            + " within the limit or the customer_accounts capability is off")
+            String creditOverrideReason,
+
             @NotEmpty @Size(max = 200) List<@Valid @NotNull SaleLineRequest> lines) {}
 
     @Schema(

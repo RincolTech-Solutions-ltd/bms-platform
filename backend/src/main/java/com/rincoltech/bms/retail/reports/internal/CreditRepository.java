@@ -40,7 +40,15 @@ class CreditRepository {
 
     record Buckets(long owed, long notDue, long d30, long d60, long d90, long over90) {}
 
-    record BuyerRow(UUID customerId, String name, int sales, Buckets buckets, Integer oldestDays, int buyers) {}
+    record BuyerRow(
+            UUID customerId,
+            String name,
+            int sales,
+            Buckets buckets,
+            Integer oldestDays,
+            int buyers,
+            Long creditLimitMinor,
+            Integer termsDays) {}
 
     record OverdueRow(
             UUID saleId,
@@ -83,12 +91,13 @@ class CreditRepository {
     /** Everything owed in scope as one row, and how many buyers owe it. */
     BuyerRow totals(List<UUID> branchIds, LocalDate today) {
         if (branchIds != null && branchIds.isEmpty()) {
-            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0);
+            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null);
         }
         return jdbc.sql("SELECT " + BUCKETS + ", count(*) AS sales, count(DISTINCT " + key() + ") AS buyers"
                         + " FROM retail_sales s" + OPEN + branch(branchIds))
                 .params(params(branchIds, today))
-                .query((rs, n) -> new BuyerRow(null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers")))
+                .query((rs, n) -> new BuyerRow(
+                        null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers"), null, null))
                 .single();
     }
 
@@ -105,7 +114,8 @@ class CreditRepository {
         params.put("limit", limit);
         return jdbc.sql("SELECT max(s.customer_id::text)::uuid AS customer_id,"
                         + " coalesce(max(c.name), min(s.buyer_name)) AS name, count(*) AS sales, " + BUCKETS + ","
-                        + " max(CASE WHEN " + DAYS + " > 0 THEN " + DAYS + " END) AS oldest"
+                        + " max(CASE WHEN " + DAYS + " > 0 THEN " + DAYS + " END) AS oldest,"
+                        + " max(c.credit_limit_minor) AS credit_limit, max(c.terms_days) AS terms_days"
                         + " FROM retail_sales s LEFT JOIN retail_customers c ON c.tenant_id = s.tenant_id AND c.id = s.customer_id"
                         + OPEN + branch(branchIds) + " GROUP BY " + key()
                         + " ORDER BY sum(" + OWED + ") DESC, 2, 1 LIMIT :limit")
@@ -116,7 +126,48 @@ class CreditRepository {
                         rs.getInt("sales"),
                         buckets(rs),
                         (Integer) rs.getObject("oldest"),
-                        0))
+                        0,
+                        rs.getObject("credit_limit", Long.class),
+                        rs.getObject("terms_days", Integer.class)))
+                .list();
+    }
+
+    /** What the credit buyers with a record owe, as one row (the total row of the customer ageing). */
+    BuyerRow customerTotals(List<UUID> branchIds, LocalDate today) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return new BuyerRow(null, null, 0, new Buckets(0, 0, 0, 0, 0, 0), null, 0, null, null);
+        }
+        return jdbc.sql("SELECT " + BUCKETS + ", count(*) AS sales, count(DISTINCT s.customer_id) AS buyers"
+                        + " FROM retail_sales s" + OPEN + " AND s.customer_id IS NOT NULL" + branch(branchIds))
+                .params(params(branchIds, today))
+                .query((rs, n) -> new BuyerRow(
+                        null, null, rs.getInt("sales"), buckets(rs), null, rs.getInt("buyers"), null, null))
+                .single();
+    }
+
+    /** The credit buyers with a record that owe, the most first: owed, ageing, limit and terms (customer ageing). */
+    List<BuyerRow> customers(List<UUID> branchIds, LocalDate today, int limit) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = params(branchIds, today);
+        params.put("limit", limit);
+        return jdbc.sql("SELECT s.customer_id, max(c.name) AS name, count(*) AS sales, " + BUCKETS + ","
+                        + " max(CASE WHEN " + DAYS + " > 0 THEN " + DAYS + " END) AS oldest,"
+                        + " max(c.credit_limit_minor) AS credit_limit, max(c.terms_days) AS terms_days"
+                        + " FROM retail_sales s JOIN retail_customers c ON c.tenant_id = s.tenant_id AND c.id = s.customer_id"
+                        + OPEN + branch(branchIds) + " GROUP BY s.customer_id"
+                        + " ORDER BY sum(" + OWED + ") DESC, 2, 1 LIMIT :limit")
+                .params(params)
+                .query((rs, n) -> new BuyerRow(
+                        rs.getObject("customer_id", UUID.class),
+                        rs.getString("name"),
+                        rs.getInt("sales"),
+                        buckets(rs),
+                        (Integer) rs.getObject("oldest"),
+                        0,
+                        rs.getObject("credit_limit", Long.class),
+                        rs.getObject("terms_days", Integer.class)))
                 .list();
     }
 
@@ -163,6 +214,10 @@ class CreditRepository {
         return jdbc.sql("SELECT p.paid_on, p.method, count(*) AS payments, sum(p.amount_minor) AS amount"
                         + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
                         + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + branch(branchIds)
+                        // A payment on account that was reversed (issue #196) was not money received after all.
+                        + " AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a"
+                        + " JOIN retail_account_payments r ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id"
+                        + " WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id AND r.status = 'reversed')"
                         + " GROUP BY p.paid_on, p.method ORDER BY p.paid_on, p.method")
                 .params(params)
                 .query((rs, n) -> new Payment(
