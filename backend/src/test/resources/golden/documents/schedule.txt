@@ -1,9 +1,9 @@
 Test Lending Ltd
 Head Office
 Plot 1, Test Road, Kampala
-SCH-HQ-LN000001
+SCH-HQ-LN000001-{YYYYMMDD}
 {DATE}
-Test Lending Ltd, Plot 1 Test Road. Keep this document safe. SCH-HQ-LN000001, page 1 of 1
+Test Lending Ltd, Plot 1 Test Road. Keep this document safe. SCH-HQ-LN000001-{YYYYMMDD}, page 1 of 1
 LOAN SCHEDULE
 Member Test Borrower 82 (M000001)
 Loan LN000001, DOCS2

@@ -303,7 +303,12 @@ payments, a reversal that re-allocates, a write-off and a recovery parses back t
 to the closing balance, which equals the loan's outstanding (`LoanLedgerTest` checks the same
 arithmetic against the servicing rules without a database); a statement of several pages repeats its
 header and numbers its footer; four concurrent first requests store one receipt; and `PdfRendererTest`
-proves the renderer fetches no URL and reads no file.
+proves the renderer fetches no URL and reads no file, prints markup and non-Latin text without
+breaking, and answers 503 when no render slot is free. A statement read is one REPEATABLE READ
+snapshot (`LoanDocumentsIsolationIT`, with a READ COMMITTED control), a five hundred line statement
+renders in a child JVM with a 224 MB heap (`StatementMemoryTest`), document responses are
+`no-store`, another branch and another tenant get 404 (403 on the core document route across
+branches), and `PenaltyDatingGuardTest` stops penalties shipping without dated charges.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

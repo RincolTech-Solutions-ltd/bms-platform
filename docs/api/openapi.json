@@ -15124,20 +15124,44 @@
         "responses" : {
           "200" : {
             "content" : {
-              "application/json" : {
-                "schema" : {
-                  "format" : "byte",
-                  "type" : "string"
-                }
-              },
               "application/pdf" : {
                 "schema" : {
-                  "format" : "byte",
+                  "format" : "binary",
                   "type" : "string"
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The PDF"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "No such loan in the caller's branches, or no such document type"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "The loan is not disbursed yet (invalid_status_transition)"
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Too many documents are being produced; see Retry-After"
           }
         },
         "summary" : "The repayment schedule (schedule) or loan statement (loan_statement) as a PDF, as at today",

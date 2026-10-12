@@ -42,6 +42,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -111,8 +112,11 @@ class LoanDocuments {
         this.currentTenant = currentTenant;
         this.clock = clock;
         this.jdbc = jdbc;
+        // One snapshot for everything a document reads: a statement is built from several queries, and a
+        // repayment committing between them would otherwise show as a false "Other adjustments" line.
         this.reading = new TransactionTemplate(transactions);
         this.reading.setReadOnly(true);
+        this.reading.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         this.writing = new TransactionTemplate(transactions);
     }
 
@@ -127,6 +131,11 @@ class LoanDocuments {
             boolean created,
             boolean reversed,
             LocalDate reversedOn) {}
+
+    /** The template every document read runs in: read only, REPEATABLE READ. */
+    TransactionTemplate readingTemplate() {
+        return reading;
+    }
 
     /** What the read step found: the stored document, or the model to render and what to record. */
     private record Draft(Issued existing, String docType, String docNumber, Map<String, Object> model) {}
@@ -210,15 +219,19 @@ class LoanDocuments {
         return reading.execute(status -> {
             inScope(loanId);
             List<LoanTransaction> all = repo.transactions(loanId);
-            List<Issued> out = new ArrayList<>();
+            Map<String, LoanTransaction> byDocument = new LinkedHashMap<>();
             for (LoanTransaction t : all) {
                 boolean voucher = t.txnType().equals("disbursement");
-                if (t.receiptNo() == null || !(voucher || RECEIPTED.contains(t.txnType()))) {
-                    continue;
+                if (t.receiptNo() != null && (voucher || RECEIPTED.contains(t.txnType()))) {
+                    byDocument.put((voucher ? "voucher/" : "receipt/") + t.receiptNo(), t);
                 }
-                documents
-                        .findGenerated(SUBJECT, loanId, voucher ? "voucher" : "receipt", t.receiptNo())
-                        .ifPresent(d -> out.add(issued(d, t, all, false)));
+            }
+            List<Issued> out = new ArrayList<>();
+            for (Documents.GeneratedDocument g : documents.listGenerated(SUBJECT, loanId)) {
+                LoanTransaction t = byDocument.get(g.document().docType() + "/" + g.docNumber());
+                if (t != null) {
+                    out.add(issued(g.document(), t, all, false));
+                }
             }
             return out;
         });
@@ -258,7 +271,7 @@ class LoanDocuments {
         Loan loan = inScope(loanId);
         requireDisbursed(loan);
         LocalDate today = today();
-        Map<String, Object> model = common(loan, "LOAN SCHEDULE", series("SCH", loan), today);
+        Map<String, Object> model = common(loan, "LOAN SCHEDULE", series("SCH", loan, today), today);
         ServicingApi.Schedule schedule = servicing.schedule(loanId);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (ScheduleRow r : schedule.items()) {
@@ -303,16 +316,13 @@ class LoanDocuments {
         requireDisbursed(loan);
         String cur = loan.currency();
         LocalDate today = today();
-        Map<String, Object> model = common(loan, "STATEMENT", series("ST", loan), today);
+        Map<String, Object> model = common(loan, "STATEMENT", series("ST", loan, today), today);
         List<LoanTransaction> txns = repo.transactions(loanId);
         LoanBalances b = repo.balances(loanId).orElseThrow();
         List<Deduction> deductions = txns.stream()
                 .filter(t -> t.txnType().equals("disbursement"))
                 .findFirst()
-                .map(d -> products.fees(loan.productVersionId(), d.amountMinor()).stream()
-                        .filter(f -> f.timing().equals("deducted_at_disbursement"))
-                        .map(f -> new Deduction(f.name(), f.amountMinor()))
-                        .toList())
+                .map(d -> deductions(loan, d))
                 .orElse(List.of());
         LoanLedger.Statement st = LoanLedger.statement(
                 txns, repo.scheduleRows(loanId), deductions, today, b.totalOutstandingMinor(), v -> money(v, cur));
@@ -463,19 +473,22 @@ class LoanDocuments {
         List<FeeCharge> fees = products.fees(loan.productVersionId(), principal);
         List<Map<String, Object>> deductions = new ArrayList<>();
         long deducted = 0;
+        for (Deduction d : deductions(loan, t)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("name", d.name() + " (deducted)");
+            row.put("amount", "-" + money(d.amountMinor(), t.currency()));
+            deductions.add(row);
+            deducted = Math.addExact(deducted, d.amountMinor());
+        }
         long upfront = 0;
         long added = 0;
         for (FeeCharge f : fees) {
             switch (f.timing()) {
-                case "deducted_at_disbursement" -> {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("name", f.name() + " (deducted)");
-                    row.put("amount", "-" + money(f.amountMinor(), t.currency()));
-                    deductions.add(row);
-                    deducted = Math.addExact(deducted, f.amountMinor());
-                }
                 case "paid_upfront" -> upfront = Math.addExact(upfront, f.amountMinor());
-                default -> added = Math.addExact(added, f.amountMinor());
+                case "added_to_loan" -> added = Math.addExact(added, f.amountMinor());
+                default -> {
+                    // deducted fees come from the posted journal, above
+                }
             }
         }
         if (deducted >= principal) {
@@ -497,13 +510,17 @@ class LoanDocuments {
         Optional<Map<String, Object>> decided = t.approvalRequestId() == null
                 ? Optional.empty()
                 : jdbc.sql("""
-                                SELECT u.full_name, a.decided_at FROM approval_requests a
+                                SELECT u.full_name, a.decided_by, a.decided_at FROM approval_requests a
                                   LEFT JOIN users u ON u.id = a.decided_by WHERE a.id = ?
                                 """)
                         .param(t.approvalRequestId())
                         .query((rs, n) -> {
                             Map<String, Object> m = new LinkedHashMap<>();
-                            m.put("name", rs.getString("full_name"));
+                            m.put(
+                                    "name",
+                                    rs.getString("full_name") != null
+                                            ? rs.getString("full_name")
+                                            : rs.getObject("decided_by") != null ? "a former user" : null);
                             m.put("at", rs.getTimestamp("decided_at"));
                             return m;
                         })
@@ -518,6 +535,35 @@ class LoanDocuments {
             signs.put("approvedOn", date(t.valueDate()));
         }
         model.put("signs", signs);
+    }
+
+    /**
+     * The fees taken out of the proceeds, as the disbursement posted them: the total is the credit to fee
+     * income on the disbursement's own journal entry, so it is what the ledger holds whatever the product
+     * says now. The names come from the product version (immutable); when they do not add up to the
+     * posted total, one line "Fees" carries the posted amount.
+     */
+    private List<Deduction> deductions(Loan loan, LoanTransaction disbursement) {
+        List<Deduction> named = products.fees(loan.productVersionId(), disbursement.amountMinor()).stream()
+                .filter(f -> f.timing().equals("deducted_at_disbursement"))
+                .map(f -> new Deduction(f.name(), f.amountMinor()))
+                .toList();
+        if (disbursement.journalEntryId() == null) {
+            return named;
+        }
+        long posted = jdbc.sql("""
+                        SELECT coalesce(sum(l.credit), 0) FROM journal_lines l
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE l.entry_id = ? AND a.system_key = ?
+                        """)
+                .params(disbursement.journalEntryId(), LoanBooks.FEE_INCOME)
+                .query(Long.class)
+                .single();
+        long sum = named.stream().mapToLong(Deduction::amountMinor).sum();
+        if (posted == sum) {
+            return named;
+        }
+        return posted == 0 ? List.of() : List.of(new Deduction("Fees", posted));
     }
 
     private static Map<String, Object> allocation(String item, String dueDate, String component, String amount) {
@@ -550,12 +596,12 @@ class LoanDocuments {
     }
 
     /** A readable number for a document that is not stored: prefix, branch code and loan number (ADR-034, item 5). */
-    private String series(String prefix, Loan loan) {
+    private String series(String prefix, Loan loan, LocalDate on) {
         String code = jdbc.sql("SELECT code FROM branches WHERE id = ?")
                 .param(loan.branchId())
                 .query(String.class)
                 .single();
-        return prefix + "-" + code + "-" + loan.loanNo();
+        return prefix + "-" + code + "-" + loan.loanNo() + "-" + on.format(DateTimeFormatter.BASIC_ISO_DATE);
     }
 
     private String userName(UUID userId) {

@@ -70,6 +70,9 @@ public final class AmountInWords {
 
     /** British style: "one hundred and five", "two thousand and ten", "one million, two hundred thousand". */
     static String number(long n) {
+        if (n < 0 || n >= 1_000_000_000_000_000_000L) {
+            throw new IllegalArgumentException("amount is outside what the scales name (below 10^18)");
+        }
         if (n == 0) {
             return ONES[0];
         }

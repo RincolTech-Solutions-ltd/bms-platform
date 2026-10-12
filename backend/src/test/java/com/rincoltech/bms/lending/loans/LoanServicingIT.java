@@ -755,6 +755,7 @@ class LoanServicingIT extends LoanFixtures {
         try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
             String raw = new org.apache.pdfbox.text.PDFTextStripper().getText(d);
             return raw.replaceAll("\\b\\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4}\\b", "{DATE}")
+                    .replaceAll("-\\d{8}\\b", "-{YYYYMMDD}")
                     .replace("\r", "")
                     .strip();
         }
@@ -1235,11 +1236,13 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     /**
-     * A voucher whose deducted fees leave nothing is a 422, not a 500 from the amount in words. The
-     * disbursement itself refuses such a fee, so the case is arranged by changing the fee afterwards.
+     * The fees a voucher shows as deducted are the ones the disbursement posted to the ledger, not what
+     * the product says now: with the product's fee changed to 100 percent afterwards (arranged directly,
+     * since versions are never edited through the API) the voucher still shows 24,000 off and 1,176,000
+     * paid, and does not fail in the amount in words.
      */
     @Test
-    void frDoc01_aVoucherWhoseFeesLeaveNothingIsRefusedNotAnError() {
+    void frDoc01_aVouchersDeductedFeesAreTheOnesTheLedgerPosted() throws Exception {
         namedStaff();
         String product = product("DOCS8", Map.of(), List.of(fee("deducted_at_disbursement", null, 200)));
         String loan = approved(product, 1_200_000, 3, 89);
@@ -1256,7 +1259,156 @@ class LoanServicingIT extends LoanFixtures {
                 .param(t.tenantId())
                 .update();
         ResponseEntity<JsonNode> r = issue(loan, disbursement);
-        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(r.getBody().get("code").asString()).isEqualTo("fees_exceed_principal");
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        String text =
+                pageText(stored(r.getBody().get("document_id").asString()), 1).replaceAll("\\s+", " ");
+        assertThat(text).contains("Fees (deducted) -24,000").contains("Net paid to the member 1,176,000");
+    }
+
+    // ---- Documents, second review (ADR-034) -----------------------------------------------
+
+    static void assertNoStore(ResponseEntity<?> r) {
+        assertThat(r.getHeaders().getCacheControl()).as("Cache-Control").isEqualTo("no-store");
+        assertThat(r.getHeaders().getFirst(HttpHeaders.PRAGMA)).as("Pragma").isEqualTo("no-cache");
+    }
+
+    /** A signed link and a member's financial document are never kept by a browser or a proxy. */
+    @Test
+    void frDoc03_everyDocumentResponseIsNoStore() {
+        namedStaff();
+        String loan = approved(exampleB("DOCS9"), 1_200_000, 3, 90);
+        disburse(loan, today);
+        String txn = repaid(loan, 300_000, today).get("transaction").get("id").asString();
+        ResponseEntity<JsonNode> issued = issue(loan, txn);
+        assertNoStore(issued);
+        HttpHeaders staff = as(cashier, cashierPerms, "*", null);
+        assertNoStore(send(HttpMethod.GET, LOANS + "/" + loan + "/documents", staff, null));
+        assertNoStore(render(loan, "loan_statement"));
+        assertNoStore(render(loan, "schedule"));
+        String id = issued.getBody().get("document_id").asString();
+        assertNoStore(send(HttpMethod.GET, "/api/v1/documents/" + id, staff, null));
+        assertNoStore(send(HttpMethod.POST, "/api/v1/documents/" + id + "/download-url", staff, null));
+    }
+
+    /**
+     * Another branch and another tenant see nothing of a loan's documents: 404 on the loan routes (the
+     * loan is out of scope), and on the core document routes 404 across tenants (row level security)
+     * and 403 across branches (the owning module's rule, chapter 7 section 7.11.7).
+     */
+    @Test
+    void frDoc03_otherBranchAndOtherTenantAreRefused() {
+        namedStaff();
+        String loan = approved(exampleB("DOCS10"), 1_200_000, 3, 91);
+        disburse(loan, today);
+        String txn = repaid(loan, 300_000, today).get("transaction").get("id").asString();
+        String id = issue(loan, txn).getBody().get("document_id").asString();
+
+        HttpHeaders otherBranch = as(cashier, cashierPerms, t.secondBranch().toString(), null);
+        assertThat(send(HttpMethod.GET, LOANS + "/" + loan + "/documents", otherBranch, null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        for (String type : List.of("schedule", "loan_statement")) {
+            assertThat(http.exchange(
+                                    LOANS + "/" + loan + "/documents/" + type,
+                                    HttpMethod.POST,
+                                    new org.springframework.http.HttpEntity<>(otherBranch),
+                                    JsonNode.class)
+                            .getStatusCode())
+                    .as(type)
+                    .isEqualTo(HttpStatus.NOT_FOUND);
+        }
+        assertThat(send(HttpMethod.POST, LOANS + "/" + loan + "/transactions/" + txn + "/document", otherBranch, null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(send(HttpMethod.GET, "/api/v1/documents/" + id, otherBranch, null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        TestDatabase.Fixture other = TestDatabase.tenant("other", true);
+        HttpHeaders stranger = new HttpHeaders();
+        stranger.add("X-Tenant", other.slug());
+        stranger.add("X-Dev-User-Id", UUID.randomUUID().toString());
+        stranger.add("X-Dev-Permissions", cashierPerms);
+        stranger.add("X-Dev-Branch-Ids", "*");
+        assertThat(send(HttpMethod.GET, LOANS + "/" + loan + "/documents", stranger, null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(http.exchange(
+                                LOANS + "/" + loan + "/documents/loan_statement",
+                                HttpMethod.POST,
+                                new org.springframework.http.HttpEntity<>(stranger),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(send(HttpMethod.GET, "/api/v1/documents/" + id, stranger, null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    /** Characters that break markup, control characters and scripts the font lacks never break or blank a document. */
+    @Test
+    void frDoc03_awkwardTextIsPrintedAsTypedOrAsAQuestionMark() throws Exception {
+        namedStaff();
+        String awkward = "Tom & Jerry <Ltd> \"Keep\" it safe";
+        String settingsPerms = "core.settings.read,core.settings.manage";
+        int version = send(HttpMethod.GET, "/api/v1/settings", as(admin, settingsPerms, "*", null), null)
+                .getBody()
+                .get("version")
+                .asInt();
+        assertThat(send(
+                                HttpMethod.PATCH,
+                                "/api/v1/settings",
+                                as(admin, settingsPerms, "*", "\"" + version + "\""),
+                                Map.of("receipt_footer", awkward))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        TestDatabase.owner()
+                .sql("UPDATE branches SET name = 'Zoë & <Main> Branch' WHERE id = ?")
+                .param(t.headOffice())
+                .update();
+        String loan = approved(exampleB("DOCS12"), 1_200_000, 3, 93);
+        TestDatabase.owner()
+                .sql("UPDATE lending_members SET full_name = ? WHERE tenant_id = ?")
+                .params("Amélie Ωμέγα Привет & <b>Bold</b> \u0001\u0007 日本語 العربية", t.tenantId())
+                .update();
+        disburse(loan, today);
+        String txn = repaid(loan, 300_000, today).get("transaction").get("id").asString();
+        byte[] receipt = stored(issue(loan, txn).getBody().get("document_id").asString());
+        String text = pageText(receipt, 1).replaceAll("\\s+", " ");
+        assertThat(text).contains(awkward).contains("Zoë & <Main> Branch");
+        assertThat(text)
+                .contains("Amélie Ωμέγα Привет & <b>Bold</b>")
+                .doesNotContain("\u0001")
+                .doesNotContain("日")
+                .contains("???");
+        byte[] statement = render(loan, "loan_statement").getBody();
+        assertThat(pageText(statement, 1)).contains("Amélie Ωμέγα Привет & <b>Bold</b>");
+    }
+
+    /** When the checker's user record is gone the voucher says so, not "no checker needed". */
+    @Test
+    void frDoc01_aVoucherNamesAFormerUserAsTheApprover() throws Exception {
+        namedStaff();
+        String product = product("DOCS13", Map.of(), List.of(fee("deducted_at_disbursement", null, 200)));
+        String loan = approved(product, 1_200_000, 3, 94);
+        disburse(loan, today);
+        String disbursement = null;
+        for (JsonNode t : get(loan, "/transactions").get("items")) {
+            if (t.get("txn_type").asString().equals("disbursement")) {
+                disbursement = t.get("id").asString();
+            }
+        }
+        TestDatabase.owner()
+                .sql("DELETE FROM users WHERE id = ?")
+                .param(manager)
+                .update();
+        String text = pageText(
+                        stored(issue(loan, disbursement)
+                                .getBody()
+                                .get("document_id")
+                                .asString()),
+                        1)
+                .replaceAll("\\s+", " ");
+        assertThat(text).contains("Approved by a former user").doesNotContain("no checker needed");
     }
 }

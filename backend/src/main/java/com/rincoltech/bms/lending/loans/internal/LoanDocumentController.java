@@ -1,10 +1,15 @@
 package com.rincoltech.bms.lending.loans.internal;
 
 import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.NoStore;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -61,7 +66,9 @@ class LoanDocumentController {
     @Operation(
             summary = "The receipt or voucher of a loan transaction, stored on first request (FR-DOC-01)",
             operationId = "issueLoanTransactionDocument")
-    IssuedResponse issue(@PathVariable("loan_id") UUID loanId, @PathVariable("txn_id") UUID txnId) {
+    IssuedResponse issue(
+            @PathVariable("loan_id") UUID loanId, @PathVariable("txn_id") UUID txnId, HttpServletResponse response) {
+        NoStore.apply(response);
         return response(documents.issue(loanId, txnId));
     }
 
@@ -70,7 +77,8 @@ class LoanDocumentController {
     @Operation(
             summary = "The receipts and vouchers stored for a loan, each marked when its transaction was reversed",
             operationId = "listLoanDocuments")
-    ListResponse list(@PathVariable("loan_id") UUID loanId) {
+    ListResponse list(@PathVariable("loan_id") UUID loanId, HttpServletResponse response) {
+        NoStore.apply(response);
         return new ListResponse(documents.issuedDocuments(loanId).stream()
                 .map(LoanDocumentController::response)
                 .toList());
@@ -88,6 +96,25 @@ class LoanDocumentController {
     @Operation(
             summary = "The repayment schedule (schedule) or loan statement (loan_statement) as a PDF, as at today",
             operationId = "renderLoanDocument")
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                description = "The PDF",
+                content =
+                        @Content(mediaType = "application/pdf", schema = @Schema(type = "string", format = "binary"))),
+        @ApiResponse(
+                responseCode = "404",
+                description = "No such loan in the caller's branches, or no such document type",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
+        @ApiResponse(
+                responseCode = "409",
+                description = "The loan is not disbursed yet (invalid_status_transition)",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
+        @ApiResponse(
+                responseCode = "503",
+                description = "Too many documents are being produced; see Retry-After",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object")))
+    })
     ResponseEntity<byte[]> render(@PathVariable("loan_id") UUID loanId, @PathVariable("doc_type") String docType) {
         byte[] pdf = switch (docType) {
             case "schedule" -> documents.schedule(loanId);
@@ -96,6 +123,8 @@ class LoanDocumentController {
         };
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.PRAGMA, "no-cache")
                 .header(
                         HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment()

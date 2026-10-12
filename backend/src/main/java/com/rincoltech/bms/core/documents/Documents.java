@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.documents;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -87,6 +88,12 @@ public interface Documents {
 
     /** An uploaded generated PDF waiting to be recorded. */
     record GeneratedObject(UUID id, String key, String docType, String sha256, int sizeBytes) {}
+
+    /** Every generated document of the subject in one query, newest first. */
+    List<GeneratedDocument> listGenerated(String subjectType, UUID subjectId);
+
+    /** A stored generated document with the number it was issued under. */
+    record GeneratedDocument(StoredDocument document, String docNumber) {}
 
     /** The generated document of this type and number for the subject, if one was stored. */
     Optional<StoredDocument> findGenerated(String subjectType, UUID subjectId, String docType, String docNumber);

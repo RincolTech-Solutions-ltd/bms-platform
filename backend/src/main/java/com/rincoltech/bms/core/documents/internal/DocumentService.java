@@ -339,6 +339,16 @@ class DocumentService implements Documents {
 
     @Override
     @Transactional(readOnly = true)
+    public List<GeneratedDocument> listGenerated(String subjectType, UUID subjectId) {
+        return jdbc.sql("SELECT " + COLUMNS + ", doc_number FROM documents WHERE subject_type = ? AND subject_id = ?"
+                        + " AND doc_number IS NOT NULL ORDER BY created_at DESC, id")
+                .params(subjectType, subjectId)
+                .query((rs, n) -> new GeneratedDocument(map(rs, n), rs.getString("doc_number")))
+                .list();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<StoredDocument> findGenerated(
             String subjectType, UUID subjectId, String docType, String docNumber) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM documents WHERE subject_type = ? AND subject_id = ?"

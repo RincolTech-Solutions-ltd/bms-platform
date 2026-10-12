@@ -72,6 +72,25 @@ Four questions are open:
      stored document per transaction, so no unique constraint on `documents` was added (a migration
      would add nothing the only writer does not already enforce); `frDoc02_concurrentFirstRequests`
      proves it.
+   - **One snapshot.** A statement is built from several queries (transactions with their allocation
+     rows, schedule items, balances, fees). Everything one document reads runs in one read-only
+     REPEATABLE READ transaction, so a repayment that commits between two of those queries cannot make
+     the lines disagree with the balance (a false "Other adjustments" line).
+     `LoanDocumentsIsolationIT` proves it deterministically: the documents' template sees the same
+     rows at its second query although another connection committed after its first, and a
+     READ COMMITTED control sees the change.
+   - **A cap on concurrent renders.** Each render holds a document in memory, and the smallest host
+     has a heap of about 224 MB, so renders take a slot from a fair semaphore (default two,
+     `bms.documents.max-concurrent-renders`). A request that finds no slot for three seconds
+     (`bms.documents.render-wait-ms`) is answered 503 `documents_busy` with `Retry-After`; the slot is
+     released however the render ends (`PdfRendererTest`). The statement is not paged: its lines are
+     a few hundred rows of short strings, and `StatementMemoryTest` renders a five hundred line
+     statement three times in a child JVM capped at 224 MB.
+   - **Not cached.** Every response that carries a document, a list of them or a signed link is
+     `Cache-Control: no-store` with `Pragma: no-cache`.
+   - **Numbers.** A receipt or voucher has its own gap-free number. A schedule or statement is
+     numbered `SCH-` or `ST-`, the branch code, the loan number and the statement date
+     (`ST-HQ-LN000001-20261013`), so two statements of different days never share a number.
    - **The worker.** The outbox path stays for what is slow or not interactive, such as report
      exports and documents attached to SMS or email. Nothing in the MVP four needs it.
 4. **Golden files compare text, not bytes.** Tests render with a fixed creation date and document
@@ -82,6 +101,15 @@ Four questions are open:
 5. **The renderer loads only `data:` URIs.** The logo is passed as a `data:` URI; an access rule on
    the renderer (checked before any URI is resolved) refuses every other address, so a value in a
    template can never make it read a file or fetch a URL (`PdfRendererTest`).
+6. **Text is made printable first.** Every string handed to a template has the characters XML cannot
+   hold (control characters) removed, and a character Open Sans has no glyph for is printed as `?`
+   instead of an empty box. Open Sans covers Latin (with its extensions), Greek and Cyrillic, so
+   names such as Amélie, Zoë and Привет print as typed; Chinese, Japanese, Korean, Arabic, Hebrew and
+   emoji do not. A fallback font was not added: a CJK or Arabic face is 5 to 20 MB (the image would
+   grow by more than the whole renderer), and Arabic needs shaping the renderer does not do, so a
+   fallback would still misprint. A tenant whose members use those scripts needs a decision of its own
+   (a font per tenant, or Latin transliteration of names at entry). Markup characters are escaped by
+   the template engine and print as typed.
 
 ## Alternatives considered
 
@@ -127,8 +155,21 @@ request.
 
 **Watch for:** the logo must stay PNG, JPEG or WebP (FR-TEN-08); SVG is never passed to the
 renderer. A deducted fee that equals or exceeds the principal is refused (422 `fees_exceed_principal`)
-instead of failing in the amount in words. Penalties (increment 6) will change a schedule item's
-penalties due after a receipt was issued; the "loan after this payment" of the receipts issued
-before then is unaffected, but increment 6 must record the penalty charge with a date so the
-statement and `LoanLedger.after` can place it in time. A template change does not alter receipts already stored; that is intended, and the
-stored copy is the one issued.
+instead of failing in the amount in words. The fees a voucher shows as deducted are the credit to
+fee income on the disbursement's own journal entry, not a recomputation from the product.
+
+**Penalties are not dated yet, and this is a known limit.** Nothing writes
+`lending_schedule_items.penalties_due_minor` today (it is zero on every item), so the statement,
+which charges the schedule's penalties on the disbursement date, and the receipt's "loan after this
+payment", which starts from the schedule's amounts, are exact. Increment 6 will accrue penalties
+later. The data model has no dated penalty record, so neither document can place a penalty in time
+yet: a receipt for an earlier payment first opened after a penalty accrued would include it, and the
+statement would show it charged at disbursement. The honest computation (penalties as of the payment
+date) needs each penalty charge recorded with its date, as a loan transaction or a ledger row.
+Increment 6 must add that and make `LoanLedger` read it. So that this cannot ship unnoticed,
+`PenaltyDatingGuardTest` fails as soon as any source file other than the two reads in
+`ServicingRepository` mentions `penalties_due_minor`; whoever adds penalties updates `LoanLedger` and
+then that test.
+
+A template change does not alter receipts already stored; that is intended, and the stored copy is the
+one issued.

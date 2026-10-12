@@ -37,5 +37,11 @@ class AmountInWordsTest {
     void refusesWhatItCannotSay() {
         assertThatThrownBy(() -> AmountInWords.of(-1, "UGX")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> AmountInWords.of(1, "EUR")).isInstanceOf(IllegalArgumentException.class);
+        // Beyond what the scales name: a clear error, not an index error.
+        assertThatThrownBy(() -> AmountInWords.number(1_000_000_000_000_000_000L))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> AmountInWords.of(Long.MAX_VALUE, "UGX")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(AmountInWords.number(999_999_999_999_999_999L))
+                .startsWith("nine hundred and ninety-nine quadrillion");
     }
 }

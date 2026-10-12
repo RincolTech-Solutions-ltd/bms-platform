@@ -1,4 +1,4 @@
-<!-- Test only: a page whose image and background take their address from the model, to prove what the renderer will load. -->
+<!-- Test only: a page whose image, background and text come from the model, to prove what the renderer will load and print. -->
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
 <head>
   <style>
@@ -8,7 +8,8 @@
 </head>
 <body>
   <p>probe</p>
-  <img th:src="${src}" alt="" style="width: 20mm;"/>
-  <div th:style="'height: 10mm; background-image: url(' + ${src} + ');'"></div>
+  <p th:if="${text != null}" th:text="${text}"></p>
+  <img th:if="${src != null}" th:src="${src}" alt="" style="width: 20mm;"/>
+  <div th:if="${src != null}" th:style="'height: 10mm; background-image: url(' + ${src} + ');'"></div>
 </body>
 </html>
