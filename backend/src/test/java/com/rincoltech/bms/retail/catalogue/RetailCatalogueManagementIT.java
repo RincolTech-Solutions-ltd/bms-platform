@@ -464,8 +464,10 @@ class RetailCatalogueManagementIT extends IntegrationTest {
         assertThat(second.get("next_cursor") == null
                         || second.get("next_cursor").isNull())
                 .isTrue();
-        JsonNode found = api.get("/customers?query=buyer b", ADMIN).getBody();
+        // several words are an AND of terms in any order (ADR-039), not one phrase
+        JsonNode found = api.get("/customers?query=other test", ADMIN).getBody();
         assertThat(found.get("items")).hasSize(1);
+        assertThat(found.get("items").get(0).get("name").asString()).isEqualTo("Test Other");
         assertThat(api.get("/customers?cursor=!!", ADMIN).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 }

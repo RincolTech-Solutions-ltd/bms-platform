@@ -7,6 +7,7 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Category;
@@ -225,21 +226,27 @@ class CatalogueService {
                     List.of(new FieldProblem("branch_id", "unknown_branch", "No such branch in your scope.")));
         }
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
+        Search.Query search = Search.parse(query);
+        Search.After position = Search.unwrap(search != null, cursor);
         String afterCode = null;
         UUID afterId = null;
-        Cursor.Key after = Cursor.decodeKey(cursor).orElse(null);
+        Cursor.Key after = Cursor.decodeKey(position.cursor()).orElse(null);
         if (after != null) {
             afterCode = after.sortKey();
             afterId = after.id();
         }
-        String q = query == null || query.isBlank() ? null : query.trim();
-        List<Product> rows = repo.page(q, categoryId, active, branchId, afterCode, afterId, size + 1);
+        List<Search.Ranked<Product>> rows =
+                repo.page(search, categoryId, active, branchId, position.rank(), afterCode, afterId, size + 1);
         boolean more = rows.size() > size;
-        List<Product> items = more ? rows.subList(0, size) : rows;
+        List<Search.Ranked<Product>> items = more ? rows.subList(0, size) : rows;
         String next = more
-                ? Cursor.encode(items.getLast().code() + "|" + items.getLast().id())
+                ? Search.wrap(
+                        search != null,
+                        items.getLast().rank(),
+                        Cursor.encode(items.getLast().row().code() + "|"
+                                + items.getLast().row().id()))
                 : null;
-        return new ProductPage(items.stream().map(this::visible).toList(), next);
+        return new ProductPage(items.stream().map(r -> visible(r.row())).toList(), next);
     }
 
     @Transactional(readOnly = true)
