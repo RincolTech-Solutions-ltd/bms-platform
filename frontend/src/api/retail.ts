@@ -20,6 +20,9 @@ export type StockBranch = S['RetailStockBranch'];
 export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[] };
 export type BranchRole = S['RetailBranchRole'];
 export type RetailCapabilities = S['RetailCapabilities'];
+export type CapabilityChange = S['UpdateRetailCapabilitiesRequest'];
+/** The capabilities with the settings version they were read at, the If-Match of the next change. */
+export interface CapabilitiesRead { capabilities: RetailCapabilities; version: number }
 export type Category = S['RetailCategory'];
 export type Unit = S['RetailUnit'];
 export type ProductPage = S['RetailProductPage'];
@@ -54,6 +57,14 @@ export type TransferRequest = S['RetailTransferRequest'];
 export type Transfer = S['RetailTransfer'];
 export type TransferLine = S['RetailTransferLine'];
 export type TransferPage = S['RetailTransferPage'];
+export type TransferStatus = 'completed' | 'in_transit' | 'received' | 'cancelled' | 'voided';
+export type ReceiveLine = S['RetailTransferReceiveLine'];
+export type StockByLocation = S['RetailStockByLocation'];
+export type LocationRow = S['RetailLocationRow'];
+export type LocationBranch = S['RetailLocationBranch'];
+export type LocationBalance = S['RetailLocationBalance'];
+export type InFlightReport = S['RetailTransfersInFlight'];
+export type InFlightTransfer = S['RetailInFlightTransfer'];
 export type Savings = S['RetailSavings'];
 export type SavingsRequest = S['RetailSavingsRequest'];
 export type SavingsSuggestion = S['RetailSavingsSuggestion'];
@@ -194,11 +205,23 @@ export interface RetailApi {
   /** The branches in the caller's stock scope with their roles (ADR-033); 404 capability_not_enabled while branch_roles is off. */
   branchRoles(): Promise<BranchRole[]>;
   setBranchRole(branchId: string, role: 'store' | 'shop' | 'both'): Promise<BranchRole>;
+  /** The tenant's capabilities and profile (administrators only, ADR-033 section 1). */
+  capabilities(): Promise<CapabilitiesRead>;
+  /** Switches the profile or flags under If-Match; the server audits the old and new values. */
+  changeCapabilities(body: CapabilityChange, version: number): Promise<CapabilitiesRead>;
   dailyProfit(q: { branchId?: string; from: string; to: string }): Promise<DailyProfit>;
   createTransfer(body: TransferRequest, idempotencyKey: string): Promise<Transfer>;
-  listTransfers(q: { branchId?: string; cursor?: string }): Promise<TransferPage>;
+  listTransfers(q: { branchId?: string; status?: TransferStatus; cursor?: string }): Promise<TransferPage>;
   getTransfer(id: string): Promise<Transfer>;
   voidTransfer(id: string, reason: string): Promise<Transfer>;
+  /** The destination receives a dispatched transfer: what arrived per line, or every line in full when `lines` is absent (ADR-033; capability transfer_receipt). */
+  receiveTransfer(id: string, lines: ReceiveLine[] | undefined, idempotencyKey: string): Promise<Transfer>;
+  /** The source takes a dispatched transfer back before it is received. */
+  cancelTransfer(id: string, reason: string, idempotencyKey: string): Promise<Transfer>;
+  /** Every product with its balance in each store and shop, by role, with stock on the way and a combined total (ADR-033). */
+  stockByLocation(q: { query?: string; categoryId?: string; negativeOnly?: boolean }): Promise<StockByLocation>;
+  /** Dispatched and not yet received transfers (capability transfer_receipt), the longest wait first. */
+  transfersInFlight(): Promise<InFlightReport>;
 
   // The cash book (FR-RET-17 to FR-RET-29, ADR-022). Every write takes the Idempotency-Key of its draft;
   // a void takes one too. Figures the schema marks "present only with retail.profit.read" are absent
@@ -257,6 +280,11 @@ export function unwrap<T>(result: { data?: T; error?: unknown; response: Respons
     throw new RetailError(retailMessage(problem, result.response.status), result.response.status, problem.code, problem as Record<string, unknown>);
   }
   return result.data;
+}
+
+/** The settings version in an ETag (`"3"`), or 0 when the response carries none. */
+function versionOf(response: Response): number {
+  return Number.parseInt((response.headers.get('ETag') ?? '').replace(/\D/g, ''), 10) || 0;
 }
 
 const PAGE = 500;
@@ -467,6 +495,16 @@ const realRetail: RetailApi = {
     return unwrap(await api.PUT('/api/v1/retail/branch-roles/{branch_id}', { params: { path: { branch_id: branchId } }, body: { role } }));
   },
 
+  async capabilities() {
+    const result = await api.GET('/api/v1/retail/settings/capabilities');
+    return { capabilities: unwrap(result), version: versionOf(result.response) };
+  },
+
+  async changeCapabilities(body, version) {
+    const result = await api.PUT('/api/v1/retail/settings/capabilities', { params: { header: { 'If-Match': `"${version}"` } }, body });
+    return { capabilities: unwrap(result), version: versionOf(result.response) };
+  },
+
   async dailyProfit({ branchId, from, to }) {
     return unwrap(await api.GET('/api/v1/retail/reports/profit/daily', { params: { query: { branch_id: branchId ? [branchId] : undefined, from, to } } }));
   },
@@ -475,9 +513,9 @@ const realRetail: RetailApi = {
     return unwrap(await api.POST('/api/v1/retail/transfers', { body, params: { header: { 'Idempotency-Key': key } } }));
   },
 
-  async listTransfers({ branchId, cursor }) {
+  async listTransfers({ branchId, status, cursor }) {
     return unwrap(
-      await api.GET('/api/v1/retail/transfers', { params: { query: { branch_id: branchId ? [branchId] : undefined, limit: 50, cursor } } }),
+      await api.GET('/api/v1/retail/transfers', { params: { query: { branch_id: branchId ? [branchId] : undefined, status, limit: 50, cursor } } }),
     );
   },
 
@@ -487,6 +525,45 @@ const realRetail: RetailApi = {
 
   async voidTransfer(id, reason) {
     return unwrap(await api.POST('/api/v1/retail/transfers/{transfer_id}/void', { params: { path: { transfer_id: id } }, body: { reason } }));
+  },
+
+  async receiveTransfer(id, lines, key) {
+    return unwrap(
+      await api.POST('/api/v1/retail/transfers/{transfer_id}/receive', {
+        params: { path: { transfer_id: id }, header: { 'Idempotency-Key': key } },
+        body: lines ? { lines } : {},
+      }),
+    );
+  },
+
+  async cancelTransfer(id, reason, key) {
+    return unwrap(
+      await api.POST('/api/v1/retail/transfers/{transfer_id}/cancel', {
+        params: { path: { transfer_id: id }, header: { 'Idempotency-Key': key } },
+        body: { reason },
+      }),
+    );
+  },
+
+  async stockByLocation({ query, categoryId, negativeOnly }) {
+    const items: LocationRow[] = [];
+    let report: StockByLocation = { branches: [], items: [] };
+    let cursor: string | undefined;
+    do {
+      const page = unwrap(
+        await api.GET('/api/v1/retail/reports/stock-by-location', {
+          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, limit: PAGE, cursor } },
+        }),
+      );
+      report = page;
+      items.push(...(page.items ?? []));
+      cursor = page.next_cursor;
+    } while (cursor);
+    return { ...report, items };
+  },
+
+  async transfersInFlight() {
+    return unwrap(await api.GET('/api/v1/retail/reports/transfers-in-flight'));
   },
 
   // The cash book. Lists read every page of the window asked for (200 a page, the most the server allows).

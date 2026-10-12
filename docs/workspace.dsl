@@ -37,7 +37,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
 
             proxy = container "Reverse Proxy" "Routes /api to the API and everything else to the PWA for the single-label hosts under rincoltech.com: bms, <slug>-bms and bms-callbacks (ADR-018); security headers; request size limits. Production: terminates TLS with a DNS-01 wildcard certificate. Staging: the internal origin behind the Cloudflare Tunnel, plain HTTP." "Caddy with the Cloudflare DNS module (SDD chapter 9)" "edge"
 
-            web = container "Web App" "One installable PWA with a staff area, a member area and the platform console, split by route and lazily loaded (ADR-009). A step by step first run after an invitation, and role aware guided tours kept as data, replayable from Help (ADR-025). Static files served by Caddy." "React 18, TypeScript, Vite, vite-plugin-pwa" "client"
+            web = container "Web App" "One installable PWA with a staff area, a member area and the platform console, split by route and lazily loaded (ADR-009). A step by step first run after an invitation, and role aware guided tours kept as data, replayable from Help (ADR-025). Menus, tiles, routes and a tour per capability follow the modules and capabilities `/me` lists, with the administrator's Retail settings screen for the shop or trade profile (ADR-033). Static files served by Caddy." "React 18, TypeScript, Vite, vite-plugin-pwa" "client"
 
             api = container "API" "Modular monolith (ADR-002). REST under /api/v1; one database transaction per request, bound to the tenant (ADR-003). Also runs the worker role: db-scheduler jobs on PostgreSQL (ADR-008)." "Java 25, Spring Boot 4.1, Spring Modulith 2.1 (ADR-010)" "app" {
 
@@ -73,7 +73,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
 
                 # ---------------- retail vertical (ADR-020) ----------------
                 retailCatalogue = component "Retail: Catalogue" "Categories, units, products with current cost and sell price; append-only price history written with every price change; pack sizes of a product (a unit and its factor in base units) behind the units capability." "retail" "retail"
-                retailStock     = component "Retail: Stock" "Append-only stock movements and per-branch balances kept in the same transaction under a row lock; stock-takes; stock transfers between branches at cost, one entry per branch through inter-branch clearing; nightly reconciliation of balances against movements; retail posting rules; branch roles (store, shop, both) and the capability reads (ADR-033)." "retail" "retail"
+                retailStock     = component "Retail: Stock" "Append-only stock movements and per-branch balances kept in the same transaction under a row lock; stock-takes; stock transfers between branches at cost, one entry per branch through inter-branch clearing, optionally two-step (dispatched, then received or cancelled, a shortage valued at the source cost) behind the transfer_receipt capability; the stock-by-location and transfers-in-flight reports; nightly reconciliation of balances against movements; retail posting rules; branch roles (store, shop, both) and the capability reads (ADR-033)." "retail" "retail"
                 retailManifest  = component "Retail: Manifest" "The retail registration with the core: the module key and the retail.capabilities settings group (eight capability flags, shop or trade profile preset), validated here and stored by the core (ADR-033)." "retail" "retail"
                 retailSales     = component "Retail: Sales" "Sales with unit cost and price snapshots, credit buyers, payments against credit sales, voids by reversal; revenue and cost of goods sold posted per branch; a line may be entered in a pack unit and is converted to base units exactly." "retail" "retail"
                 retailReports    = component "Retail: Reports" "Stock valuation at cost and expected sales at price per branch, the revaluation difference against the inventory account, daily profit per branch from the sale snapshots; the analytics reports (sales analysis, margins, stock health, credit control, business evaluation, owner dashboard); cost and profit only with retail.profit.read." "retail" "retail"
@@ -227,12 +227,12 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.retailCatalogue -> bms.api.audit "Writes audit rows"
         bms.api.retailCatalogue -> bms.api.tenancy "Reads the tenant currency and the units capability"
         bms.api.retailCatalogue -> bms.db "Products, the append-only price history and pack sizes"
-        bms.web -> bms.api.retailStock "Stock by branch, movements, stock-takes, usage and damage reports, stock transfers"
+        bms.web -> bms.api.retailStock "Stock by branch, stock by store and shop, movements, stock-takes, usage and damage reports, stock transfers with receive and cancel, transfers in flight"
         bms.web -> bms.api.retailSales "POST /retail/sales with Idempotency-Key; voids; credit buyers"
         bms.api.retailSales -> bms.api.retailCatalogue "Reads the current cost and sell price to snapshot, and the pack size of a product"
         bms.api.retailSales -> bms.api.retailStock "Moves stock; posts through the retail books"
         bms.api.retailStock -> bms.api.retailCatalogue "Reads the product cost for stock-take valuation"
-        bms.api.retailStock -> bms.api.ledger "Posts and reverses entries by system key, one per branch, in the same transaction"
+        bms.api.retailStock -> bms.api.ledger "Posts and reverses entries by system key, one per branch, in the same transaction; reads the inventory balance per branch and the inter-branch clearing balance of retail transfer entries only"
         bms.api.retailStock -> bms.api.tenancy "Resolves the branch; reads and writes the retail capability settings group; owns branch roles (store, shop, both) and the capability reads"
         bms.api.retailManifest -> bms.api.tenancy "Registers the module and supplies the retail.capabilities settings group the core validates through"
         bms.api.retailSales -> bms.api.tenancy "Reads the tenant profile and takes receipt and sale numbers from the tenant sequences"
