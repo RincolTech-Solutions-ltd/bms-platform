@@ -114,7 +114,7 @@ core.notifications    -> core.audit (the operator's "send again" is audited)
 core.imports          -> core.ledger, core.documents   (templates register into it)
 core.payments         -> core.ledger, core.notifications (booking is delegated through a registry)
 core.reporting        -> core.documents (runs, snapshot transaction, Excel and PDF builders; ADR-038)
-core.ai               -> core.tenancy, core.audit, core.jobs (no vertical)
+core.ai               -> core.tenancy (the settings group ai), core.jobs (retention), the kernel (no vertical; ADR-037, built in #220)
 lending               -> any core module
 lending.loans         -> lending.members, lending.products, lending.collateral, lending.savings (transfer)
 lending.seed          -> lending.loans (LoanServicing), lending.savings (SavingsServicing),

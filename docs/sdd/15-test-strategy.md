@@ -337,7 +337,13 @@ output changed.
   answers with the metrics dictionary, with a planted-name leak test at the client boundary; report PDFs are compared by
   extracted text and Excel files by cell values on fabricated datasets with hand-computed output, and the pack is cross
   checked against the insights values. Real adapters have sandbox contract tests in a manually triggered CI job. Staging
-  refusal tests (SMS `live`, live Pesapal URL) run in `mvn verify`.
+  refusal tests (SMS `live`, live Pesapal URL) run in `mvn verify`. The `core.ai` gateway (#220) is covered by
+  `OpenAiCompatibleClientTest` (a local server: the request, retries and pauses on a fake clock, the 30 second budget, no
+  redirect, no provider text in an exception), `CircuitBreakerTest`, `AiConfigurationTest` (which client a configuration
+  yields; the stub refused outside dev and test) and `AiGatewayIT` (the allow-list, the acknowledgement, every cap refused
+  before any network call, a call in flight counting, the midnight roll-over, the breaker through the gateway, the log
+  column list and a planted canary absent from every row, the update and delete guards and the retention job); the
+  isolation suite covers `ai_calls` through its factory row.
 
 ## 15.8 Test data policy
 
