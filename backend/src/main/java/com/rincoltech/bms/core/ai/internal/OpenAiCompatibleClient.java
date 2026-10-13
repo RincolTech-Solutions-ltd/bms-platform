@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.DoubleSupplier;
 import java.util.function.LongSupplier;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -40,6 +41,11 @@ final class OpenAiCompatibleClient implements LlmClient {
     static final int MAX_ATTEMPTS = 3;
     static final Duration FIRST_BACKOFF = Duration.ofMillis(500);
     static final Duration MAX_RETRY_AFTER = Duration.ofSeconds(10);
+    /** No pause is shorter than this, so a {@code Retry-After: 0} cannot turn the retries into a hot loop. */
+    static final Duration MIN_PAUSE = Duration.ofMillis(250);
+    /** Random extra on every pause, up to a quarter of it, so tenants retrying together do not move in step. */
+    static final double JITTER_SHARE = 0.25;
+
     static final int MAX_BODY_BYTES = 1_048_576;
 
     /** Pauses between attempts; replaced in tests so no test sleeps. */
@@ -55,6 +61,7 @@ final class OpenAiCompatibleClient implements LlmClient {
     private final ObjectMapper mapper;
     private final LongSupplier nanoClock;
     private final Sleeper sleeper;
+    private final DoubleSupplier jitter;
 
     OpenAiCompatibleClient(
             URI endpoint,
@@ -63,7 +70,8 @@ final class OpenAiCompatibleClient implements LlmClient {
             Duration budget,
             ObjectMapper mapper,
             LongSupplier nanoClock,
-            Sleeper sleeper) {
+            Sleeper sleeper,
+            DoubleSupplier jitter) {
         this.endpoint = endpoint;
         this.apiKey = apiKey;
         this.model = model;
@@ -71,6 +79,7 @@ final class OpenAiCompatibleClient implements LlmClient {
         this.mapper = mapper;
         this.nanoClock = nanoClock;
         this.sleeper = sleeper;
+        this.jitter = jitter;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -115,10 +124,7 @@ final class OpenAiCompatibleClient implements LlmClient {
             if (!attempt.retryable() || attempts >= MAX_ATTEMPTS) {
                 throw failure;
             }
-            Duration pause =
-                    attempt.retryAfter() != null && attempt.retryAfter().compareTo(MAX_RETRY_AFTER) <= 0
-                            ? attempt.retryAfter()
-                            : FIRST_BACKOFF.multipliedBy(1L << (attempts - 1));
+            Duration pause = pauseBefore(attempts, attempt.retryAfter());
             Duration left = Duration.ofNanos(deadline - nanoClock.getAsLong());
             if (pause.compareTo(left) >= 0) {
                 // The pause would use the rest of the budget: give up now with what the provider said.
@@ -131,6 +137,21 @@ final class OpenAiCompatibleClient implements LlmClient {
                 throw new LlmException(Kind.TIMEOUT, 0, attempts);
             }
         }
+    }
+
+    /**
+     * The pause before the next attempt: the provider's {@code Retry-After} capped at ten seconds, else the doubling
+     * backoff; never under the minimum; plus up to a quarter of itself at random.
+     */
+    Duration pauseBefore(int attemptsMade, Duration retryAfter) {
+        Duration base = retryAfter != null
+                ? (retryAfter.compareTo(MAX_RETRY_AFTER) > 0 ? MAX_RETRY_AFTER : retryAfter)
+                : FIRST_BACKOFF.multipliedBy(1L << (attemptsMade - 1));
+        if (base.compareTo(MIN_PAUSE) < 0) {
+            base = MIN_PAUSE;
+        }
+        double share = Math.clamp(jitter.getAsDouble(), 0.0, 1.0) * JITTER_SHARE;
+        return base.plusMillis(Math.round(base.toMillis() * share));
     }
 
     private record Attempt(Result result, LlmException failure, boolean retryable, Duration retryAfter) {
@@ -181,7 +202,10 @@ final class OpenAiCompatibleClient implements LlmClient {
             try {
                 return Attempt.ok(parse(response.body(), asked, attempts));
             } catch (LlmException e) {
-                return Attempt.fail(new LlmException(e.kind(), status, attempts), false, null);
+                return Attempt.fail(
+                        new LlmException(e.kind(), status, attempts, e.reportedInputTokens(), e.reportedOutputTokens()),
+                        false,
+                        null);
             }
         }
         if (status == 429) {
@@ -230,12 +254,13 @@ final class OpenAiCompatibleClient implements LlmClient {
             JsonNode root = mapper.readTree(bytes);
             JsonNode choice = root.path("choices").path(0);
             JsonNode content = choice.path("message").path("content");
-            if (!content.isString()) {
-                throw new LlmException(Kind.BAD_RESPONSE, 0, 0);
-            }
             JsonNode usage = root.path("usage");
             int in = usage.path("prompt_tokens").asInt(-1);
             int out = usage.path("completion_tokens").asInt(-1);
+            if (!content.isString()) {
+                // Billed all the same: hand the usage back so the caps count it.
+                throw new LlmException(Kind.BAD_RESPONSE, 0, 0, in, out);
+            }
             String text = content.asString();
             if (in < 0 || out < 0) {
                 // No usage block: count by the same rough size estimate the reservation used, so the caps still bite.

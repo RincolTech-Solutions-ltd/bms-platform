@@ -154,7 +154,8 @@ class AiConfigurationTest {
     }
 
     @Test
-    void theAllowListIsCommaSeparatedLowerCasedAndTrimmed() {
+    void theAllowListIsTenantIdsOnlyAndNeverSlugs() {
+        String id = "11111111-2222-4333-8444-555555555555";
         AiProperties p = new AiProperties(
                 null,
                 null,
@@ -170,9 +171,87 @@ class AiConfigurationTest {
                 null,
                 null,
                 null,
-                " Alpha-Co , 11111111-2222-4333-8444-555555555555,,  ");
-        assertThat(p.allowedTenants()).containsExactlyInAnyOrder("alpha-co", "11111111-2222-4333-8444-555555555555");
+                " " + id.toUpperCase() + " , alpha-co,,  not-a-uuid, 11111111-2222-4333-8444-55555555555");
+        // A slug, a malformed id and a short id name nobody; a typo can only make the list shorter.
+        assertThat(p.allowedTenants()).containsExactly(java.util.UUID.fromString(id));
         assertThat(props(null, null, null, null).allowedTenants()).isEmpty();
+    }
+
+    @Test
+    void aCapOfZeroMeansStopAndANegativeOneFailsStartup() {
+        AiProperties stop =
+                new AiProperties(null, null, null, null, null, null, null, 0L, 0L, 0L, 0L, null, null, null, null);
+        assertThat(stop.platformDailyTokens()).isZero();
+        assertThat(stop.platformDailyCostMicro()).isZero();
+        assertThat(stop.tenantDailyTokens()).isZero();
+        assertThat(stop.tenantDailyCostMicro()).isZero();
+        for (int field : new int[] {7, 8, 9, 10}) {
+            Object[] args = new Object[15];
+            args[field] = -1L;
+            assertThatThrownBy(() -> construct(args))
+                    .as("field %s", field)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void aPerCallLimitOfZeroOrLessFailsStartupInsteadOfBecomingTheDefault() {
+        for (int field : new int[] {4, 5, 6}) {
+            Object[] args = new Object[15];
+            args[field] = 0;
+            assertThatThrownBy(() -> construct(args))
+                    .as("field %s", field)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    private static AiProperties construct(Object[] a) {
+        return new AiProperties(
+                (String) a[0],
+                (String) a[1],
+                (String) a[2],
+                (String) a[3],
+                (Integer) a[4],
+                (Integer) a[5],
+                (Integer) a[6],
+                (Long) a[7],
+                (Long) a[8],
+                (Long) a[9],
+                (Long) a[10],
+                (Long) a[11],
+                (Long) a[12],
+                (String) a[13],
+                (String) a[14]);
+    }
+
+    @Test
+    void valuesLeftEmptyInTheEnvironmentTakeTheDefaultsAndDoNotBecomeZero() {
+        // What the compose files pass when the operator sets nothing: set, but empty.
+        java.util.Map<String, String> env = new java.util.HashMap<>();
+        for (String key : new String[] {
+            "budget-seconds",
+            "max-tokens-per-call",
+            "max-input-tokens-per-call",
+            "platform-daily-tokens",
+            "platform-daily-cost-micro",
+            "tenant-daily-tokens",
+            "tenant-daily-cost-micro",
+            "price-input-micro-per-million",
+            "price-output-micro-per-million"
+        }) {
+            env.put("bms.ai." + key, "");
+        }
+        env.put("bms.ai.provider", "off");
+        AiProperties p = new org.springframework.boot.context.properties.bind.Binder(
+                        new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(env))
+                .bind("bms.ai", AiProperties.class)
+                .get();
+        assertThat(p.budgetSeconds()).isEqualTo(30);
+        assertThat(p.maxTokensPerCall()).isEqualTo(800);
+        assertThat(p.maxInputTokensPerCall()).isEqualTo(8000);
+        assertThat(p.platformDailyTokens()).isEqualTo(200_000);
+        assertThat(p.tenantDailyTokens()).isEqualTo(20_000);
+        assertThat(p.tenantDailyCostMicro()).isEqualTo(500_000);
     }
 
     @Test

@@ -143,8 +143,11 @@ provider is configuration (the first is DeepSeek, `https://api.deepseek.com`, it
 attempts (pauses 0.5 s and 1 s, or a `Retry-After` of up to 10 s), a read timeout, another 4xx and a redirect are not;
 five failures in a row open the process-wide breaker for 60 seconds and one probe closes it; a provider error body is
 never read into an exception, a log line or the call log. Callers use `AiGateway`, never the port: it checks the tenant
-switch, the platform allow-list and the daily token and cost caps of the tenant and of the platform before any network
-call, and answers with the text or a fallback and a closed reason. `BMS_AI_PROVIDER` is `off` by default; a provider with a
+switch, the platform allow-list, an input screen (six or more digits, an email address, a phone number in any spacing, a
+national ID shape: refused with no call) and the daily token and cost caps of the tenant and of the platform before any
+network call, and answers with the text or a fallback and a closed reason; it refuses to run inside a transaction. A call that
+fails after its request was sent keeps its reservation against the day, and the breaker settles every call with a permit of
+its generation, so a late result cannot close it or free the probe slot. `BMS_AI_PROVIDER` is `off` by default; a provider with a
 missing URL, key or model, a key with whitespace, or a non-https URL is off with a warning; the recording stub is refused
 outside the dev and test profiles. Only the advisor module calls it, and only with the typed fact list and aliases (spec
 section 5.4).

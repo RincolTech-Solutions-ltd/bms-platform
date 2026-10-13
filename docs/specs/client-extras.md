@@ -660,8 +660,8 @@ ceiling bounds the worst case. The first test measures cost per brief (5.8).
 
 `ai_calls` (row-level security): tenant, purpose (`brief`, `question`, `evaluation`), asking user (staff;
 never sent), model, the SHA-256 of the request, token counts, estimated cost, latency, outcome, the HTTP
-status and a closed fallback reason. **As built in slice C1 (#220, migration V51) it stores no request text
-and no response text**, so the log cannot leak what it never held; a test pins the column list, so a new
+status and a closed fallback reason. **It stores no request text, no response text and no provider error text** (settled
+in slice C1, #220, migration V51; ADR-037 decision 9 and its amendment say the same), so the log cannot leak what it never held; a test pins the column list, so a new
 column is a review decision. The slice that builds the prompts may add aliased text and the validation
 outcome by its own expand migration and an amendment of ADR-037, if the evaluation needs them. Retention
 90 days (a nightly job deletes older rows and closes a call left pending for an hour). A row is finished
@@ -868,7 +868,7 @@ thread or inside a money transaction (chapter 12 section 12.1).
 |---|---|
 | Pesapal | `BMS_PESAPAL_BASE_URL`, `BMS_PESAPAL_CONSUMER_KEY`, `BMS_PESAPAL_CONSUMER_SECRET`, `BMS_PESAPAL_IPN_ID`, `BMS_PESAPAL_IPN_TOKEN`, `BMS_PESAPAL_TENANT_ID`, `BMS_PESAPAL_PLATFORM_CONSUMER_KEY`, `BMS_PESAPAL_PLATFORM_CONSUMER_SECRET`, `BMS_PESAPAL_PLATFORM_IPN_ID`, `BMS_PESAPAL_PLATFORM_IPN_TOKEN` |
 | SMS | `BMS_SMS_PROVIDER`, `BMS_SMS_MODE`, `BMS_SMS_ALLOWLIST`, `BMS_SMS_AT_BASE_URL`, `BMS_SMS_AT_USERNAME`, `BMS_SMS_AT_API_KEY`, `BMS_SMS_CALLBACK_TOKEN`, `BMS_SMS_PLATFORM_DAILY_CAP` |
-| AI | `BMS_AI_PROVIDER` (`off`, `openai_compatible`, or `recording` in dev and test only), `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_ENABLED_TENANTS`, `BMS_AI_PLATFORM_DAILY_TOKENS`, `BMS_AI_PLATFORM_DAILY_COST_MICRO`, `BMS_AI_PRICE_INPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_CURRENCY`; optional tuning (not secrets, defaults in `application.yml`): `BMS_AI_BUDGET_SECONDS` (30, never more), `BMS_AI_MAX_TOKENS_PER_CALL`, `BMS_AI_MAX_INPUT_TOKENS_PER_CALL`, `BMS_AI_TENANT_DAILY_TOKENS`, `BMS_AI_TENANT_DAILY_COST_MICRO` |
+| AI | `BMS_AI_PROVIDER` (`off`, `openai_compatible`, or `recording` in dev and test only), `BMS_AI_BASE_URL`, `BMS_AI_API_KEY`, `BMS_AI_MODEL`, `BMS_AI_ENABLED_TENANTS`, `BMS_AI_PLATFORM_DAILY_TOKENS`, `BMS_AI_PLATFORM_DAILY_COST_MICRO`, `BMS_AI_PRICE_INPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION`, `BMS_AI_PRICE_CURRENCY`; optional tuning (not secrets, defaults in `application.yml`): `BMS_AI_BUDGET_SECONDS` (30, never more), `BMS_AI_MAX_TOKENS_PER_CALL`, `BMS_AI_MAX_INPUT_TOKENS_PER_CALL`, `BMS_AI_TENANT_DAILY_TOKENS`, `BMS_AI_TENANT_DAILY_COST_MICRO`; a daily cap of 0 means stop, a negative one or a per call limit of 0 fails startup; `BMS_AI_ENABLED_TENANTS` holds tenant ids only |
 | Reports | `BMS_REPORTS_MAX_CONCURRENT_RUNS`, `BMS_REPORTS_PDF_ROW_CAP`, `BMS_REPORTS_XLSX_ROW_CAP` (not secrets; staging values 1, 500, 20,000) |
 
 `.env.example` lists each with a placeholder. Rotation: Pesapal secret and SMS key on staff change and

@@ -338,11 +338,15 @@ output changed.
   extracted text and Excel files by cell values on fabricated datasets with hand-computed output, and the pack is cross
   checked against the insights values. Real adapters have sandbox contract tests in a manually triggered CI job. Staging
   refusal tests (SMS `live`, live Pesapal URL) run in `mvn verify`. The `core.ai` gateway (#220) is covered by
-  `OpenAiCompatibleClientTest` (a local server: the request, retries and pauses on a fake clock, the 30 second budget, no
-  redirect, no provider text in an exception), `CircuitBreakerTest`, `AiConfigurationTest` (which client a configuration
-  yields; the stub refused outside dev and test) and `AiGatewayIT` (the allow-list, the acknowledgement, every cap refused
-  before any network call, a call in flight counting, the midnight roll-over, the breaker through the gateway, the log
-  column list and a planted canary absent from every row, the update and delete guards and the retention job); the
+  `OpenAiCompatibleClientTest` (a local server: the request, retries and pauses with jitter and a minimum on a fake clock, the
+  30 second budget, no redirect, no provider text in an exception, the usage of a bad 200), `CircuitBreakerTest` (states,
+  permits and generations, a probe killed by an Error), `AiConfigurationTest` (which client a configuration yields; the stub
+  refused outside dev and test; ids-only allow-list; a cap of zero stops; a bad value fails startup), `PromptScreenTest`,
+  `AiDayWindowsTest` (the UTC against Kampala edge) and `AiGatewayIT` (the allow-list, the acknowledgement and its audit,
+  every cap refused before any network call, six calls at once never passing a tenant or platform cap, failures that were
+  billed keeping their reservation, personal data refused and absent from the log, our errors as fallbacks, the breaker
+  through the gateway, the log column list and a planted canary absent from every row, the update and delete guards and the
+  housekeeping for suspended tenants); the
   isolation suite covers `ai_calls` through its factory row.
 
 ## 15.8 Test data policy

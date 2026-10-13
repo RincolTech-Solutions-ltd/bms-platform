@@ -199,7 +199,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
 - **Built (client extras C1, issue #220, ADR-037):** migration `V51` (`ai_calls`, `ai_platform_usage`); `core.ai`, the
   language model gateway: nothing is sent unless `BMS_AI_PROVIDER=openai_compatible` with a base URL, key and model, the tenant
   has switched the assistant on (settings group `ai`, with the acknowledgement) and is named in `BMS_AI_ENABLED_TENANTS`; per
-  call, daily tenant and platform token and cost caps are checked before any network call; no route, no permission, no screen
+  call, daily tenant and platform token and cost caps are checked before any network call, an input screen refuses personal-data shapes, and a failed call keeps its reservation; no route, no permission, no screen
   (those are C2 to C5). Runbook: `docs/runbooks/ai-assistant.md`.
 - **Client extras, design only (issue #210):** `docs/specs/client-extras.md` specifies mobile money through Pesapal
   (ADR-035), SMS through Africa's Talking on the outbox (ADR-036), the advisory AI brief (ADR-037) and the formal

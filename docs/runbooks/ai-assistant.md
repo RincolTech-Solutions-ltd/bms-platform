@@ -13,7 +13,7 @@ A call reaches a provider only when all four are true. Any one of them stops it,
 | Switch | Where | Off means |
 |---|---|---|
 | The provider is configured | `BMS_AI_PROVIDER=openai_compatible` with `BMS_AI_BASE_URL`, `BMS_AI_API_KEY` and `BMS_AI_MODEL` in the host environment | Every call is answered with a fallback `provider_off`; nothing fails and nothing is sent. A half-set provider, a key with a stray space or line break, or a base URL that is not `https` logs one warning at start and is treated as off |
-| The tenant is on the platform allow-list | `BMS_AI_ENABLED_TENANTS`: tenant ids or slugs, comma separated | The tenant cannot switch the assistant on (403 `advisor_not_available`), and a tenant removed from the list stops at once (fallback `not_allowed`) |
+| The tenant is on the platform allow-list | `BMS_AI_ENABLED_TENANTS`: tenant **ids** (UUIDs, never slugs: a slug is a name an administrator can choose), comma separated; an entry that is not a UUID names nobody | The tenant cannot switch the assistant on (403 `advisor_not_available`), and a tenant removed from the list stops at once (fallback `not_allowed`) |
 | The tenant has switched it on | Tenant settings group `ai`, `enabled`, after the administrator acknowledges what is sent and where | Fallback `not_enabled`; no row is logged |
 | The caps are not spent | Tenant and platform daily token and cost caps | Fallback `tenant_token_cap`, `tenant_cost_cap`, `platform_token_cap` or `platform_cost_cap`, refused before any network call |
 
@@ -32,6 +32,9 @@ stub: the application refuses to start with it outside the dev and test profiles
   the call log and, after five in a row, as an open breaker.
 - Set a spend limit at the provider if it offers one; the gateway's own caps are the second line, not the first.
 - The call log holds no prompt, no response and no provider error text, so reading it is safe; it still lives behind row-level security.
+- The gateway must be called outside a database transaction (it refuses with an error otherwise): a caller inside one would hold
+  that connection and its locks through up to 30 seconds of network, and take a second connection for the log. Jobs use
+  `TenantJobs.callAsTenant`, never `forEachActiveTenant`.
 
 ## 3. First setup (staging, with the provider's sandbox or a cheap model)
 
@@ -58,12 +61,14 @@ stub: the application refuses to start with it outside the dev and test profiles
 
 ## 4. Switching a tenant on
 
-1. Name the tenant in `BMS_AI_ENABLED_TENANTS` (its id or its slug), restart the API, and tell the tenant's administrator.
+1. Name the tenant in `BMS_AI_ENABLED_TENANTS` by its id (the `id` of its row in `tenants`), restart the API, and tell the tenant's administrator.
 2. The administrator switches the assistant on in the settings. There is no route or screen for it yet: they arrive with slice C3
    (`GET` and `PUT /lending/advisor/settings`), so until then nothing can switch a tenant on from outside the code. The switch
    records who, when and which text version they acknowledged, and is audited as `core.ai.settings.changed`.
 3. To change a tenant's caps: the tenant administrator or the operator sets `daily_token_cap` and `daily_cost_cap_micro`; both
-   must be at most the platform ceiling, and the lower of the two always applies.
+   must be at most the platform ceiling, and the lower of the two always applies. A cap of **0 means stop**: every call is refused
+   before the network. A negative cap, or a zero or negative per call limit or budget in the environment, fails startup instead of
+   quietly becoming a default.
 
 ## 5. Watching it
 
@@ -76,9 +81,25 @@ SELECT tenant_id, outcome, reason, count(*) AS calls, sum(tokens_counted) AS tok
  GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
 ```
 
+A call that failed **after its request was sent** keeps its reservation against the day (or the usage the provider reported),
+because a timeout or an unusable answer is still billed; only a call that never left (a refusal) holds nothing. So a flapping
+provider spends the cap and then stops, instead of probing round it every minute.
+
 Alert on: any `auth_error` (the key is wrong or revoked); five `provider_error` or `timeout` rows in a row (the breaker is open for
 60 seconds, then probes once); `refused` rows with a cap reason (a cap is too low, or a loop calls too often); tokens or cost near
 the platform ceiling; and a pending row older than a few minutes (the nightly job closes it as `abandoned` after an hour).
+
+## 5a. Incident steps
+
+| Sign | Likely cause | Do |
+|---|---|---|
+| `auth_error` rows, breaker opening every minute | Key wrong, expired or revoked | Put the new key in `.env`, restart; revoke the old one at the provider; confirm the next call logs `ok` |
+| `provider_error` or `timeout` rows, then `breaker_open` refusals | Provider outage or slowness | Nothing to do: pages show the automatic summary. If it lasts, stop it (section 7, step 3) so the probes stop; check the provider's status page; start it again afterwards |
+| `rate_limited` rows | Over the provider's rate limit | Lower the per call or platform caps, or raise the limit with the provider |
+| `input_refused` rows | A caller built a prompt with digits, an email, a phone or an ID shape | A bug in the slice that builds prompts: nothing was sent; report it to the dev lead with the purpose and time (never the text, which is not stored) |
+| `tenant_*_cap` or `platform_*_cap` refusals | A cap is spent | Expected at the end of a busy day; raise the cap only after reading the day's calls above |
+| `internal_error` (a fallback with no row) | Our database or a bug, not the provider's | Check the API log for `ai call failed internally` (the error type is logged, never a message); it never feeds the breaker |
+| A suspected leak | Anything about what was sent | Stop it at once (section 7, step 3), then ask the dev lead for the leak test of spec 5.8; the call log cannot show what was sent, only that the request hash differs |
 
 ## 6. Swapping the model or the provider
 

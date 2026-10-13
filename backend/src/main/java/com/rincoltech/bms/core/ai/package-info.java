@@ -14,7 +14,7 @@
 @ApplicationModule(
         id = "core.ai",
         displayName = "Core: AI gateway",
-        allowedDependencies = {"kernel", "core.tenancy", "core.jobs"})
+        allowedDependencies = {"kernel", "core.tenancy"})
 package com.rincoltech.bms.core.ai;
 
 import org.springframework.modulith.ApplicationModule;

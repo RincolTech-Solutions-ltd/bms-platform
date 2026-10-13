@@ -18,6 +18,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
@@ -44,11 +46,14 @@ class OpenAiCompatibleClientTest {
                     + "\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":30}}";
 
     HttpServer server;
+    final ExecutorService handlers = Executors.newCachedThreadPool();
     final List<Seen> seen = new CopyOnWriteArrayList<>();
     final List<Reply> script = new CopyOnWriteArrayList<>();
     final AtomicInteger next = new AtomicInteger();
     final AtomicLong fakeNanos = new AtomicLong();
     final List<Duration> pauses = new ArrayList<>();
+    /** The random share (0 to 1) the next pause adds; zero keeps the pauses exact. */
+    double jitter = 0.0;
 
     record Seen(String authorization, String contentType, String body) {}
 
@@ -62,12 +67,15 @@ class OpenAiCompatibleClientTest {
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/v1/chat/completions", this::handle);
+        // Handlers run on their own threads, so one that sleeps never holds up the server's own stop.
+        server.setExecutor(handlers);
         server.start();
     }
 
     @AfterEach
     void stop() {
         server.stop(0);
+        handlers.shutdownNow();
     }
 
     void handle(HttpExchange ex) throws IOException {
@@ -109,10 +117,17 @@ class OpenAiCompatibleClientTest {
 
     OpenAiCompatibleClient client(String model, Duration budget, LongSupplier clock) {
         return new OpenAiCompatibleClient(
-                OpenAiCompatibleClient.endpointOf(baseUrl()), KEY, model, budget, MAPPER, clock, pause -> {
+                OpenAiCompatibleClient.endpointOf(baseUrl()),
+                KEY,
+                model,
+                budget,
+                MAPPER,
+                clock,
+                pause -> {
                     pauses.add(pause);
                     fakeNanos.addAndGet(pause.toNanos());
-                });
+                },
+                () -> jitter);
     }
 
     static LlmClient.Request request() {
@@ -199,11 +214,37 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
-    void aLongRetryAfterIsNotObeyedItFallsBackToTheBackoff() throws Exception {
+    void aLongRetryAfterIsCappedAtTenSeconds() throws Exception {
         script.add(new Reply(429, "{}", "3600", 0));
         script.add(new Reply(200, OK_BODY));
         client("m", Duration.ofSeconds(30)).complete(request());
-        assertThat(pauses).containsExactly(Duration.ofMillis(500));
+        assertThat(pauses).containsExactly(Duration.ofSeconds(10));
+    }
+
+    @Test
+    void aRetryAfterOfZeroStillPausesForTheMinimum() throws Exception {
+        script.add(new Reply(429, "{}", "0", 0));
+        script.add(new Reply(429, "{}", "0", 0));
+        script.add(new Reply(200, OK_BODY));
+        client("m", Duration.ofSeconds(30)).complete(request());
+        assertThat(pauses).containsExactly(Duration.ofMillis(250), Duration.ofMillis(250));
+    }
+
+    @Test
+    void everyPauseCarriesUpToAQuarterOfRandomJitter() throws Exception {
+        jitter = 1.0;
+        script.add(new Reply(503, "{}"));
+        script.add(new Reply(503, "{}"));
+        script.add(new Reply(200, OK_BODY));
+        client("m", Duration.ofSeconds(30)).complete(request());
+        // 500 ms and 1000 ms, each plus the full quarter.
+        assertThat(pauses).containsExactly(Duration.ofMillis(625), Duration.ofMillis(1250));
+        // The share is clamped: a source that misbehaves cannot lengthen a pause beyond a quarter.
+        pauses.clear();
+        jitter = 7.5;
+        assertThat(client("m", Duration.ofSeconds(30)).pauseBefore(1, null)).isEqualTo(Duration.ofMillis(625));
+        jitter = -3.0;
+        assertThat(client("m", Duration.ofSeconds(30)).pauseBefore(1, null)).isEqualTo(Duration.ofMillis(500));
     }
 
     @Test
@@ -282,6 +323,27 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    void aBadAnswerStillHandsBackTheUsageTheProviderBilled() {
+        script.add(new Reply(
+                200, "{\"choices\":[{\"message\":{}}],\"usage\":{\"prompt_tokens\":70,\"completion_tokens\":30}}"));
+        assertThatThrownBy(() -> client("m", Duration.ofSeconds(30)).complete(request()))
+                .isInstanceOfSatisfying(LlmException.class, e -> {
+                    assertThat(e.kind()).isEqualTo(Kind.BAD_RESPONSE);
+                    assertThat(e.reportedInputTokens()).isEqualTo(70);
+                    assertThat(e.reportedOutputTokens()).isEqualTo(30);
+                });
+        // Without a usage block there is nothing to hand back, and the caller keeps the reservation.
+        script.clear();
+        next.set(0);
+        script.add(new Reply(200, "{\"choices\":[]}"));
+        assertThatThrownBy(() -> client("m", Duration.ofSeconds(30)).complete(request()))
+                .isInstanceOfSatisfying(LlmException.class, e -> {
+                    assertThat(e.reportedInputTokens()).isEqualTo(-1);
+                    assertThat(e.reportedOutputTokens()).isEqualTo(-1);
+                });
+    }
+
+    @Test
     void aRedirectIsNeverFollowedSoTheKeyCannotBeForwarded() throws Exception {
         HttpServer elsewhere = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         AtomicInteger hits = new AtomicInteger();
@@ -326,7 +388,8 @@ class OpenAiCompatibleClientTest {
 
     @Test
     void aSlowAnswerEndsInATimeoutWithinTheBudgetAndIsNotRetried() {
-        script.add(new Reply(200, OK_BODY, null, 2500));
+        // The server holds the answer far longer than any bound below, so the test cannot pass by being fast.
+        script.add(new Reply(200, OK_BODY, null, 20_000));
         long started = System.nanoTime();
         assertThatThrownBy(() ->
                         client("m", Duration.ofMillis(300), System::nanoTime).complete(request()))
@@ -334,7 +397,8 @@ class OpenAiCompatibleClientTest {
                     assertThat(e.kind()).isEqualTo(Kind.TIMEOUT);
                     assertThat(e.attempts()).isEqualTo(1);
                 });
-        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+        // Generous: the budget is 300 ms; a slow machine still comes in far under the server's 20 seconds.
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(15));
         assertThat(pauses).isEmpty();
     }
 
@@ -354,7 +418,8 @@ class OpenAiCompatibleClientTest {
                 pause -> {
                     pauses.add(pause);
                     fakeNanos.addAndGet(pause.toNanos());
-                });
+                },
+                () -> 0.0);
         assertThatThrownBy(() -> dead.complete(request())).isInstanceOfSatisfying(LlmException.class, e -> {
             assertThat(e.kind()).isEqualTo(Kind.NETWORK);
             assertThat(e.attempts()).isEqualTo(3);
@@ -368,9 +433,24 @@ class OpenAiCompatibleClientTest {
         AiProperties huge = new AiProperties(
                 "openai_compatible", null, null, null, 600, null, null, null, null, null, null, null, null, null, null);
         assertThat(huge.budgetSeconds()).isEqualTo(30);
-        AiProperties tiny = new AiProperties(
-                "openai_compatible", null, null, null, 0, null, null, null, null, null, null, null, null, null, null);
-        assertThat(tiny.budgetSeconds()).isEqualTo(1);
+        // Zero or less is a mistake and fails startup; it never becomes the default.
+        assertThatThrownBy(() -> new AiProperties(
+                        "openai_compatible",
+                        null,
+                        null,
+                        null,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

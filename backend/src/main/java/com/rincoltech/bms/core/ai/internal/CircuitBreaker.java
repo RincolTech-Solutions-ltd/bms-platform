@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.ai.internal;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -10,6 +11,13 @@ import java.util.function.Supplier;
  * network call; then it lets exactly one probe call through (half open) and closes on its success
  * or opens again on its failure. One breaker serves the whole process, since the provider's health
  * is not a tenant's. Time comes from the kernel clock so tests move it by hand.
+ *
+ * <p>Every call that is let through holds a {@link Permit}, and reports back with it. A permit
+ * carries the breaker's generation (it changes each time the breaker opens or closes), so the late
+ * result of a call that began before the breaker opened is ignored: it cannot close the breaker, add
+ * to its failures or free the probe's slot while the real probe runs. The caller must settle every
+ * permit exactly once, in a {@code finally}: {@link #recordSuccess}, {@link #recordFailure} or
+ * {@link #release}.
  */
 final class CircuitBreaker {
 
@@ -19,10 +27,14 @@ final class CircuitBreaker {
         HALF_OPEN
     }
 
+    /** A call let through; {@code probe} marks the single call that decides a half open breaker. */
+    record Permit(long generation, boolean probe) {}
+
     private final int threshold;
     private final Duration openFor;
     private final Supplier<Instant> now;
     private State state = State.CLOSED;
+    private long generation;
     private int consecutiveFailures;
     private Instant openedAt;
     private boolean probeInFlight;
@@ -33,59 +45,61 @@ final class CircuitBreaker {
         this.now = now;
     }
 
-    /** True when a call may go to the provider. A true answer must be followed by a record call. */
-    synchronized boolean tryAcquire() {
+    /** A permit when a call may go to the provider, empty when it must be refused without a call. */
+    synchronized Optional<Permit> tryAcquire() {
         switch (state) {
             case CLOSED:
-                return true;
+                return Optional.of(new Permit(generation, false));
             case OPEN:
                 if (now.get().isBefore(openedAt.plus(openFor))) {
-                    return false;
+                    return Optional.empty();
                 }
                 state = State.HALF_OPEN;
                 probeInFlight = true;
-                return true;
+                return Optional.of(new Permit(generation, true));
             case HALF_OPEN:
                 if (probeInFlight) {
-                    return false;
+                    return Optional.empty();
                 }
                 probeInFlight = true;
-                return true;
+                return Optional.of(new Permit(generation, true));
             default:
-                return false;
+                return Optional.empty();
         }
     }
 
-    synchronized void recordSuccess() {
-        if (state == State.OPEN) {
-            // A call that began before the breaker opened: it says nothing about the probe to come.
+    synchronized void recordSuccess(Permit permit) {
+        if (permit.generation() != generation) {
             return;
         }
-        state = State.CLOSED;
-        consecutiveFailures = 0;
-        probeInFlight = false;
+        if (state == State.HALF_OPEN && permit.probe()) {
+            close();
+        } else if (state == State.CLOSED) {
+            consecutiveFailures = 0;
+        }
     }
 
-    synchronized void recordFailure() {
-        if (state == State.HALF_OPEN) {
-            open();
+    synchronized void recordFailure(Permit permit) {
+        if (permit.generation() != generation) {
             return;
         }
-        if (state == State.OPEN) {
-            return;
-        }
-        consecutiveFailures++;
-        if (consecutiveFailures >= threshold) {
+        if (state == State.HALF_OPEN && permit.probe()) {
             open();
+        } else if (state == State.CLOSED) {
+            consecutiveFailures++;
+            if (consecutiveFailures >= threshold) {
+                open();
+            }
         }
     }
 
     /**
-     * A call that gave no verdict on the provider's health (a request the provider found fault with):
-     * frees the probe slot of a half open breaker and changes nothing else.
+     * A call that gave no verdict on the provider's health (a request the provider found fault with,
+     * or one that died on an error of ours): frees a probe's slot and changes nothing else. Safe to
+     * call on a permit already settled or gone stale.
      */
-    synchronized void recordNeutral() {
-        if (state == State.HALF_OPEN) {
+    synchronized void release(Permit permit) {
+        if (permit.probe() && permit.generation() == generation && state == State.HALF_OPEN) {
             probeInFlight = false;
         }
     }
@@ -96,7 +110,15 @@ final class CircuitBreaker {
 
     private void open() {
         state = State.OPEN;
+        generation++;
         openedAt = now.get();
+        consecutiveFailures = 0;
+        probeInFlight = false;
+    }
+
+    private void close() {
+        state = State.CLOSED;
+        generation++;
         consecutiveFailures = 0;
         probeInFlight = false;
     }

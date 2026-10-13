@@ -7,6 +7,7 @@ import com.rincoltech.bms.core.ai.RecordingLlmClient;
 import com.rincoltech.bms.kernel.BusinessClock;
 import java.net.URI;
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -71,7 +72,8 @@ class AiConfiguration {
                 Duration.ofSeconds(p.budgetSeconds()),
                 mapper,
                 System::nanoTime,
-                pause -> Thread.sleep(pause));
+                pause -> Thread.sleep(pause),
+                () -> ThreadLocalRandom.current().nextDouble());
     }
 
     /** One breaker for the process: five failures in a row open it for 60 seconds (spec 5.7). */

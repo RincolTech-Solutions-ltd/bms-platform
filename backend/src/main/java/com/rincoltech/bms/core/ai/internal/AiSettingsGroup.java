@@ -139,8 +139,8 @@ class AiSettingsGroup implements ModuleSettingsGroup {
             return java.util.Optional.empty();
         }
         Object v = proposed.get(key);
-        if (!(v instanceof Number n) || n.doubleValue() != Math.rint(n.doubleValue()) || n.longValue() < 1) {
-            problems.add(new FieldProblem(key, "invalid", "Use a whole number of 1 or more."));
+        if (!(v instanceof Number n) || n.doubleValue() != Math.rint(n.doubleValue()) || n.longValue() < 0) {
+            problems.add(new FieldProblem(key, "invalid", "Use a whole number of 0 (stop) or more."));
             return java.util.Optional.empty();
         }
         if (n.longValue() > platformCeiling) {

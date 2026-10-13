@@ -2,6 +2,7 @@ package com.rincoltech.bms.core.ai.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.rincoltech.bms.core.ai.internal.CircuitBreaker.Permit;
 import com.rincoltech.bms.core.ai.internal.CircuitBreaker.State;
 import java.time.Duration;
 import java.time.Instant;
@@ -9,17 +10,21 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The breaker's states (spec 5.7): five failures in a row open it for 60 seconds, then one probe
- * decides. The clock is a field the test moves, so nothing here waits.
+ * decides; and a permit per call so a late result from a call that began before the breaker opened
+ * cannot close it, count against it, or free the probe's slot. The clock is a field the test moves.
  */
 class CircuitBreakerTest {
 
     Instant now = Instant.parse("2026-03-02T08:00:00Z");
     final CircuitBreaker breaker = new CircuitBreaker(5, Duration.ofSeconds(60), () -> now);
 
+    Permit acquire() {
+        return breaker.tryAcquire().orElseThrow();
+    }
+
     void fail(int times) {
         for (int i = 0; i < times; i++) {
-            assertThat(breaker.tryAcquire()).isTrue();
-            breaker.recordFailure();
+            breaker.recordFailure(acquire());
         }
     }
 
@@ -27,14 +32,13 @@ class CircuitBreakerTest {
     void staysClosedBelowTheThreshold() {
         fail(4);
         assertThat(breaker.state()).isEqualTo(State.CLOSED);
-        assertThat(breaker.tryAcquire()).isTrue();
+        assertThat(breaker.tryAcquire()).isPresent();
     }
 
     @Test
     void aSuccessResetsTheCountOfConsecutiveFailures() {
         fail(4);
-        breaker.tryAcquire();
-        breaker.recordSuccess();
+        breaker.recordSuccess(acquire());
         fail(4);
         assertThat(breaker.state()).isEqualTo(State.CLOSED);
     }
@@ -43,60 +47,118 @@ class CircuitBreakerTest {
     void fiveFailuresInARowOpenItAndRefuseWithoutACall() {
         fail(5);
         assertThat(breaker.state()).isEqualTo(State.OPEN);
-        assertThat(breaker.tryAcquire()).isFalse();
+        assertThat(breaker.tryAcquire()).isEmpty();
         now = now.plusSeconds(59);
-        assertThat(breaker.tryAcquire()).isFalse();
+        assertThat(breaker.tryAcquire()).isEmpty();
     }
 
     @Test
     void afterSixtySecondsExactlyOneProbeGoesThrough() {
         fail(5);
         now = now.plusSeconds(60);
-        assertThat(breaker.tryAcquire()).isTrue();
+        Permit probe = acquire();
+        assertThat(probe.probe()).isTrue();
         assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
-        assertThat(breaker.tryAcquire()).isFalse();
-        assertThat(breaker.tryAcquire()).isFalse();
+        assertThat(breaker.tryAcquire()).isEmpty();
+        assertThat(breaker.tryAcquire()).isEmpty();
     }
 
     @Test
     void aSuccessfulProbeClosesIt() {
         fail(5);
         now = now.plusSeconds(61);
-        assertThat(breaker.tryAcquire()).isTrue();
-        breaker.recordSuccess();
+        breaker.recordSuccess(acquire());
         assertThat(breaker.state()).isEqualTo(State.CLOSED);
-        assertThat(breaker.tryAcquire()).isTrue();
-        assertThat(breaker.tryAcquire()).isTrue();
+        assertThat(breaker.tryAcquire()).isPresent();
+        assertThat(breaker.tryAcquire()).isPresent();
     }
 
     @Test
     void aFailedProbeOpensItAgainForAFullPeriod() {
         fail(5);
         now = now.plusSeconds(61);
-        assertThat(breaker.tryAcquire()).isTrue();
-        breaker.recordFailure();
+        breaker.recordFailure(acquire());
         assertThat(breaker.state()).isEqualTo(State.OPEN);
         now = now.plusSeconds(59);
-        assertThat(breaker.tryAcquire()).isFalse();
+        assertThat(breaker.tryAcquire()).isEmpty();
         now = now.plusSeconds(2);
-        assertThat(breaker.tryAcquire()).isTrue();
+        assertThat(breaker.tryAcquire()).isPresent();
     }
 
     @Test
-    void aNeutralProbeFreesTheSlotWithoutClosingOrOpening() {
+    void releasingAProbeWithoutAVerdictFreesTheSlotAndNothingElse() {
         fail(5);
         now = now.plusSeconds(61);
-        assertThat(breaker.tryAcquire()).isTrue();
-        breaker.recordNeutral();
+        Permit probe = acquire();
+        breaker.release(probe);
         assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
-        assertThat(breaker.tryAcquire()).isTrue();
+        assertThat(breaker.tryAcquire()).isPresent();
     }
+
+    @Test
+    void aProbeThatDiesOnAnErrorIsReleasedInAFinallyAndNeverStrandsTheSlot() {
+        fail(5);
+        now = now.plusSeconds(61);
+        Permit probe = acquire();
+        try {
+            throw new AssertionError("an Error in the middle of the probe");
+        } catch (AssertionError e) {
+            // The gateway releases in a finally; releasing twice, or after a verdict, is harmless.
+        } finally {
+            breaker.release(probe);
+            breaker.release(probe);
+        }
+        assertThat(breaker.tryAcquire()).isPresent();
+    }
+
+    // ---- a late result from a call that began before the breaker opened ---------------------------------
 
     @Test
     void aLateSuccessWhileOpenDoesNotCloseIt() {
-        assertThat(breaker.tryAcquire()).isTrue();
+        Permit early = acquire();
         fail(5);
-        breaker.recordSuccess();
+        breaker.recordSuccess(early);
         assertThat(breaker.state()).isEqualTo(State.OPEN);
+    }
+
+    @Test
+    void aLateSuccessWhileTheProbeRunsDoesNotCloseItNorFreeTheSlot() {
+        Permit early = acquire();
+        fail(5);
+        now = now.plusSeconds(61);
+        Permit probe = acquire();
+        breaker.recordSuccess(early);
+        breaker.release(early);
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        // The slot is still the probe's.
+        assertThat(breaker.tryAcquire()).isEmpty();
+        breaker.recordSuccess(probe);
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+    }
+
+    @Test
+    void aLateFailureWhileTheProbeRunsDoesNotReopenIt() {
+        Permit early = acquire();
+        fail(5);
+        now = now.plusSeconds(61);
+        Permit probe = acquire();
+        breaker.recordFailure(early);
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        breaker.recordSuccess(probe);
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+    }
+
+    @Test
+    void aLateFailureAfterTheBreakerClosedAgainIsNotCounted() {
+        Permit early = acquire();
+        fail(5);
+        now = now.plusSeconds(61);
+        breaker.recordSuccess(acquire());
+        // Four late failures from the old generation, then one real one: still closed, count is 1.
+        for (int i = 0; i < 4; i++) {
+            breaker.recordFailure(early);
+        }
+        breaker.recordFailure(acquire());
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
     }
 }

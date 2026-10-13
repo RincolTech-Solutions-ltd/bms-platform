@@ -4,6 +4,7 @@ import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -29,7 +30,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param tenantDailyCostMicro the default tenant daily cost cap
  * @param priceInputMicroPerMillion micro-units of {@code priceCurrency} per million input tokens
  * @param priceOutputMicroPerMillion the same for output tokens
- * @param enabledTenants {@code BMS_AI_ENABLED_TENANTS}: comma separated tenant ids or slugs allowed to
+ * @param enabledTenants {@code BMS_AI_ENABLED_TENANTS}: comma separated tenant ids (UUIDs, never slugs) allowed to
  *     switch the assistant on (the operator fills it once the provider's written terms are on file)
  */
 @ConfigurationProperties("bms.ai")
@@ -58,16 +59,27 @@ record AiProperties(
     AiProperties {
         provider =
                 provider == null || provider.isBlank() ? OFF : provider.strip().toLowerCase(Locale.ROOT);
-        budgetSeconds = budgetSeconds == null ? MAX_BUDGET_SECONDS : Math.clamp(budgetSeconds, 1, MAX_BUDGET_SECONDS);
-        maxTokensPerCall = maxTokensPerCall == null || maxTokensPerCall < 1 ? 800 : maxTokensPerCall;
-        maxInputTokensPerCall =
-                maxInputTokensPerCall == null || maxInputTokensPerCall < 1 ? 8000 : maxInputTokensPerCall;
-        platformDailyTokens = platformDailyTokens == null || platformDailyTokens < 1 ? 200_000L : platformDailyTokens;
-        platformDailyCostMicro =
-                platformDailyCostMicro == null || platformDailyCostMicro < 1 ? 2_000_000L : platformDailyCostMicro;
-        tenantDailyTokens = tenantDailyTokens == null || tenantDailyTokens < 1 ? 20_000L : tenantDailyTokens;
-        tenantDailyCostMicro =
-                tenantDailyCostMicro == null || tenantDailyCostMicro < 1 ? 500_000L : tenantDailyCostMicro;
+        // An unset value takes the default; a value that cannot be meant (zero or less for a per call limit or the
+        // budget, below zero for a daily cap) fails startup, because a typo must not turn a limit into the default.
+        // A daily cap of exactly zero is valid and means stop: every call is refused.
+        budgetSeconds = budgetSeconds == null
+                ? MAX_BUDGET_SECONDS
+                : Math.min(positive("BMS_AI_BUDGET_SECONDS", budgetSeconds), MAX_BUDGET_SECONDS);
+        maxTokensPerCall = maxTokensPerCall == null ? 800 : positive("BMS_AI_MAX_TOKENS_PER_CALL", maxTokensPerCall);
+        maxInputTokensPerCall = maxInputTokensPerCall == null
+                ? 8000
+                : positive("BMS_AI_MAX_INPUT_TOKENS_PER_CALL", maxInputTokensPerCall);
+        platformDailyTokens = platformDailyTokens == null
+                ? 200_000L
+                : notNegative("BMS_AI_PLATFORM_DAILY_TOKENS", platformDailyTokens);
+        platformDailyCostMicro = platformDailyCostMicro == null
+                ? 2_000_000L
+                : notNegative("BMS_AI_PLATFORM_DAILY_COST_MICRO", platformDailyCostMicro);
+        tenantDailyTokens =
+                tenantDailyTokens == null ? 20_000L : notNegative("BMS_AI_TENANT_DAILY_TOKENS", tenantDailyTokens);
+        tenantDailyCostMicro = tenantDailyCostMicro == null
+                ? 500_000L
+                : notNegative("BMS_AI_TENANT_DAILY_COST_MICRO", tenantDailyCostMicro);
         priceInputMicroPerMillion = priceInputMicroPerMillion == null ? 0L : Math.max(0L, priceInputMicroPerMillion);
         priceOutputMicroPerMillion = priceOutputMicroPerMillion == null ? 0L : Math.max(0L, priceOutputMicroPerMillion);
         priceCurrency = priceCurrency == null || !priceCurrency.matches("^[A-Za-z]{3}$")
@@ -76,11 +88,30 @@ record AiProperties(
         enabledTenants = enabledTenants == null ? "" : enabledTenants;
     }
 
-    /** The tenant ids and slugs on the platform allow-list, lower case. */
-    Set<String> allowedTenants() {
+    private static int positive(String name, int value) {
+        if (value < 1) {
+            throw new IllegalArgumentException(name + " must be 1 or more");
+        }
+        return value;
+    }
+
+    private static long notNegative(String name, long value) {
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be 0 (stop) or more");
+        }
+        return value;
+    }
+
+    /**
+     * The tenant ids on the platform allow-list. Ids only, never slugs: a slug is a name an administrator
+     * can choose and an id is not. An entry that is not a UUID is ignored (it names nobody), so a typo
+     * can only make the list shorter.
+     */
+    Set<UUID> allowedTenants() {
         return Arrays.stream(enabledTenants.split(","))
-                .map(s -> s.strip().toLowerCase(Locale.ROOT))
-                .filter(s -> !s.isEmpty())
+                .map(String::strip)
+                .filter(e -> e.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+                .map(UUID::fromString)
                 .collect(Collectors.toUnmodifiableSet());
     }
 

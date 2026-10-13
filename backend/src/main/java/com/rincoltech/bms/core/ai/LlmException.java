@@ -48,12 +48,34 @@ public class LlmException extends Exception {
     private final Kind kind;
     private final int httpStatus;
     private final int attempts;
+    private final int reportedInputTokens;
+    private final int reportedOutputTokens;
 
     public LlmException(Kind kind, int httpStatus, int attempts) {
+        this(kind, httpStatus, attempts, -1, -1);
+    }
+
+    /**
+     * As above, for an answer that came back 200 with a usage block but no usable text: the provider billed
+     * those tokens, so the caller counts them instead of the reservation.
+     */
+    public LlmException(Kind kind, int httpStatus, int attempts, int reportedInputTokens, int reportedOutputTokens) {
         super(kind.reason() + (httpStatus > 0 ? " (HTTP " + httpStatus + ")" : ""));
         this.kind = kind;
         this.httpStatus = httpStatus;
         this.attempts = attempts;
+        this.reportedInputTokens = reportedInputTokens;
+        this.reportedOutputTokens = reportedOutputTokens;
+    }
+
+    /** The input tokens the provider reported even though the answer was unusable, or -1 when it did not. */
+    public int reportedInputTokens() {
+        return reportedInputTokens;
+    }
+
+    /** The output tokens the provider reported even though the answer was unusable, or -1 when it did not. */
+    public int reportedOutputTokens() {
+        return reportedOutputTokens;
     }
 
     public Kind kind() {

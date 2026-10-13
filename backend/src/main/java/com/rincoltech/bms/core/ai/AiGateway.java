@@ -8,7 +8,7 @@ import java.util.UUID;
  * {@link Reason} so the caller can show its deterministic text (spec 5.7); a provider problem never
  * reaches the caller as an exception. Everything that can
  * refuse a call does so before any network call: the tenant switch, the platform allow-list, an
- * unconfigured provider, a request over the per call cap, the daily token and cost caps of the
+ * unconfigured provider, a request over the per call cap, a request that looks like it carries personal data, the daily token and cost caps of the
  * tenant and of the platform, and an open circuit breaker.
  *
  * <p>Call it outside a transaction: it opens its own short transactions to reserve the call
@@ -30,6 +30,10 @@ public interface AiGateway {
         NOT_ALLOWED("not_allowed"),
         PROVIDER_OFF("provider_off"),
         INPUT_TOO_LARGE("input_too_large"),
+        /** The text held something that looks like personal data (digits, an email, a phone, an ID number). */
+        INPUT_REFUSED("input_refused"),
+        /** Our own failure, not the provider's (for example the database): nothing was sent. */
+        INTERNAL_ERROR("internal_error"),
         TENANT_TOKEN_CAP("tenant_token_cap"),
         TENANT_COST_CAP("tenant_cost_cap"),
         PLATFORM_TOKEN_CAP("platform_token_cap"),

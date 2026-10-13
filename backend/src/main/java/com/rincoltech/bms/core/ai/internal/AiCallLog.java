@@ -17,8 +17,15 @@ import org.springframework.transaction.support.TransactionTemplate;
  * read are over {@code tokens_counted} and {@code cost_counted_micro}, so a call in flight counts the
  * moment it starts and two calls at once cannot both fit into the last of the cap. The reserve step
  * takes one transaction-level advisory lock, because the platform ceiling is a sum across tenants that
- * no row lock covers; it holds it for two short queries and an insert. Rows hold counts, a model
- * name, a closed reason and a request hash, never text.
+ * no row lock covers; it holds it for two short queries and an insert. A call that fails after its
+ * request was sent keeps its reservation (or the usage the provider reported): a read timeout or an
+ * unusable 200 is still billed, and a breaker probing every minute must not walk round the daily cap.
+ * Only a call that never left (a refusal) holds nothing. Rows hold counts, a model name, a closed
+ * reason and a request hash, never text.
+ *
+ * <p>The write methods use {@code REQUIRES_NEW} on purpose, so the log commits whatever the caller's own
+ * transaction does; the gateway refuses to run inside a transaction, so that never costs a second
+ * connection from the pool.
  */
 @Component
 class AiCallLog {
@@ -29,7 +36,6 @@ class AiCallLog {
     private final JdbcClient jdbc;
     private final TransactionTemplate writes;
     private final TransactionTemplate reads;
-    private final TransactionTemplate joined;
 
     AiCallLog(JdbcClient jdbc, PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
@@ -37,13 +43,15 @@ class AiCallLog {
         this.writes.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.reads = new TransactionTemplate(transactions);
         this.reads.setReadOnly(true);
-        this.joined = new TransactionTemplate(transactions);
     }
 
     /** What the caps count, in tokens and in micro-units of the price currency. */
     record Usage(long tokens, long costMicro) {}
 
-    /** The daily limits one reservation is checked against, already the lower of tenant and platform. */
+    /**
+     * The daily limits one reservation is checked against. A limit of zero means stop: every call is
+     * refused, whatever it would cost.
+     */
     record Limits(
             long tenantTokens, long tenantCostMicro, long platformTokens, long platformCostMicro, int maxInputTokens) {}
 
@@ -72,6 +80,10 @@ class AiCallLog {
     /** @param refused null when the call is reserved and may go ahead */
     record Reservation(UUID id, Reason refused) {}
 
+    private static boolean over(long used, long reserve, long limit) {
+        return limit <= 0 || used + reserve > limit;
+    }
+
     Reservation reserve(Request r) {
         return writes.execute(status -> {
             jdbc.sql("SELECT pg_advisory_xact_lock(?)")
@@ -87,13 +99,13 @@ class AiCallLog {
                 Usage tenant = tenantUsage(r.windows().tenantFrom(), r.windows().tenantTo());
                 Usage platform =
                         platformUsage(r.windows().platformFrom(), r.windows().platformTo());
-                if (tenant.tokens() + reserveTokens > r.limits().tenantTokens()) {
+                if (over(tenant.tokens(), reserveTokens, r.limits().tenantTokens())) {
                     refusal = Reason.TENANT_TOKEN_CAP;
-                } else if (tenant.costMicro() + reserveCost > r.limits().tenantCostMicro()) {
+                } else if (over(tenant.costMicro(), reserveCost, r.limits().tenantCostMicro())) {
                     refusal = Reason.TENANT_COST_CAP;
-                } else if (platform.tokens() + reserveTokens > r.limits().platformTokens()) {
+                } else if (over(platform.tokens(), reserveTokens, r.limits().platformTokens())) {
                     refusal = Reason.PLATFORM_TOKEN_CAP;
-                } else if (platform.costMicro() + reserveCost > r.limits().platformCostMicro()) {
+                } else if (over(platform.costMicro(), reserveCost, r.limits().platformCostMicro())) {
                     refusal = Reason.PLATFORM_COST_CAP;
                 }
             }
@@ -125,9 +137,14 @@ class AiCallLog {
         });
     }
 
+    /** Logs a request refused before it was reserved (the input screen): a finished row holding nothing. */
+    void logRefusal(Request r, Reason reason) {
+        writes.executeWithoutResult(status -> insertRefused(r, reason));
+    }
+
     /** Records a refusal that came after the reservation (the breaker): the row holds nothing against the caps. */
     void refuse(UUID id, Instant now, Reason reason) {
-        finish(id, now, new Finish("refused", reason, 0, 0, null, null, 0, null, 0, null));
+        finish(id, now, new Finish("refused", reason, 0, 0, null, null, false, 0L, 0L, null, null));
     }
 
     void succeed(
@@ -142,16 +159,49 @@ class AiCallLog {
                         attempts,
                         inputTokens,
                         outputTokens,
+                        false,
                         (long) inputTokens + outputTokens,
                         costMicro,
                         costMicro,
                         latencyMs));
     }
 
-    void fail(UUID id, Instant now, Reason reason, int httpStatus, int attempts, long latencyMs) {
-        finish(id, now, new Finish("failed", reason, httpStatus, attempts, null, null, 0, null, 0, latencyMs));
+    /**
+     * Finishes a call that failed after its request was sent. With a usage block the provider reported,
+     * those tokens (and their cost) are counted; without one the reservation stays counted.
+     *
+     * @param reportedInput the input tokens the provider reported, or -1
+     * @param reportedOutput the output tokens the provider reported, or -1
+     */
+    void fail(
+            UUID id,
+            Instant now,
+            Reason reason,
+            int httpStatus,
+            int attempts,
+            long latencyMs,
+            int reportedInput,
+            int reportedOutput,
+            Pricing pricing) {
+        boolean reported = reportedInput >= 0 && reportedOutput >= 0;
+        finish(
+                id,
+                now,
+                new Finish(
+                        "failed",
+                        reason,
+                        httpStatus,
+                        attempts,
+                        reported ? reportedInput : null,
+                        reported ? reportedOutput : null,
+                        !reported,
+                        reported ? (long) reportedInput + reportedOutput : 0L,
+                        reported ? pricing.costMicro(reportedInput, reportedOutput) : 0L,
+                        reported ? pricing.costMicro(reportedInput, reportedOutput) : null,
+                        latencyMs));
     }
 
+    /** @param keepReservation leave tokens_counted, cost_counted_micro and the estimate as the reservation set them */
     private record Finish(
             String outcome,
             Reason reason,
@@ -159,17 +209,21 @@ class AiCallLog {
             int attempts,
             Integer inputTokens,
             Integer outputTokens,
+            boolean keepReservation,
             long tokensCounted,
-            Long estimatedCostMicro,
             long costCountedMicro,
+            Long estimatedCostMicro,
             Long latencyMs) {}
 
     private void finish(UUID id, Instant now, Finish f) {
         Integer rows = writes.execute(status -> jdbc.sql("""
                                 UPDATE ai_calls
                                    SET finished_at = ?, outcome = ?, reason = ?, http_status = ?, attempts = ?,
-                                       input_tokens = ?, output_tokens = ?, tokens_counted = ?,
-                                       estimated_cost_micro = ?, cost_counted_micro = ?, latency_ms = ?
+                                       input_tokens = ?, output_tokens = ?,
+                                       tokens_counted = CASE WHEN CAST(? AS boolean) THEN tokens_counted ELSE CAST(? AS integer) END,
+                                       cost_counted_micro = CASE WHEN CAST(? AS boolean) THEN cost_counted_micro ELSE CAST(? AS bigint) END,
+                                       estimated_cost_micro = CASE WHEN CAST(? AS boolean) THEN estimated_cost_micro ELSE CAST(? AS bigint) END,
+                                       latency_ms = ?
                                  WHERE id = ? AND outcome = 'pending'
                                 """)
                 .params(
@@ -180,9 +234,12 @@ class AiCallLog {
                         (short) f.attempts(),
                         f.inputTokens(),
                         f.outputTokens(),
+                        f.keepReservation(),
                         (int) f.tokensCounted(),
-                        f.estimatedCostMicro(),
+                        f.keepReservation(),
                         f.costCountedMicro(),
+                        f.keepReservation(),
+                        f.estimatedCostMicro(),
                         f.latencyMs() == null ? null : (int) Math.min(Integer.MAX_VALUE, f.latencyMs()),
                         id)
                 .update());
@@ -235,19 +292,13 @@ class AiCallLog {
     }
 
     /**
-     * The nightly housekeeping for the bound tenant: a call left pending for an hour (the process died
-     * between reserving and finishing) is closed as failed, keeping its reservation against that day,
-     * and rows past the 90 day retention are deleted (spec 5.10). Returns the rows deleted.
+     * The nightly housekeeping for every tenant at once, suspended and closed ones included (migration V51,
+     * {@code ai_calls_housekeeping}): rows past the 90 day retention are deleted (spec 5.10), and a call left
+     * pending for an hour is closed as failed keeping its reservation. Returns the rows deleted.
      */
-    int purge() {
-        Integer deleted = joined.execute(status -> {
-            jdbc.sql("""
-                            UPDATE ai_calls SET outcome = 'failed', reason = 'abandoned', finished_at = now()
-                             WHERE outcome = 'pending' AND created_at < now() - interval '1 hour'
-                            """).update();
-            return jdbc.sql("DELETE FROM ai_calls WHERE created_at < now() - interval '90 days'")
-                    .update();
-        });
+    int housekeeping() {
+        Integer deleted =
+                jdbc.sql("SELECT ai_calls_housekeeping()").query(Integer.class).single();
         return deleted == null ? 0 : deleted;
     }
 }

@@ -220,7 +220,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.ai -> llmProvider "Chat completions with a 30 second budget and a circuit breaker" "HTTPS"
         bms.api.ai -> bms.db "Call log (counts, a request hash, a closed reason; no prompt, no response, no provider error text) and the daily cap sums"
         bms.api.ai -> bms.api.tenancy "Keeps the tenant's switch, caps and acknowledgement as the settings group ai; refuses the switch for a tenant outside BMS_AI_ENABLED_TENANTS"
-        bms.api.ai -> bms.api.jobs "Runs the nightly call log retention and abandoned call cleanup per tenant"
+        bms.api.ai -> bms.db "Nightly housekeeping function for every tenant, suspended included: deletes call rows past 90 days and closes calls left pending"
         bms.api.lendingReports -> bms.api.insights "Reads figures through the public InsightsFigures port with a public PortfolioScope (cross checked by test)"
         bms.api.lendingReports -> bms.api.reporting "Registers the seven reports and the pack"
         bms.api.lendingReports -> bms.db "Reads loans, schedules, transactions, collateral and snapshots under RLS"

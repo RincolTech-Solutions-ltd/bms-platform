@@ -208,8 +208,7 @@ class AiGatewayIT extends IntegrationTest {
             CLOCK.advance(Duration.ofSeconds(61));
         }
         // A success from any state but open also clears the count of consecutive failures.
-        breaker.tryAcquire();
-        breaker.recordSuccess();
+        breaker.tryAcquire().ifPresent(breaker::recordSuccess);
     }
 
     static Map<String, Object> row(UUID id) {
@@ -375,11 +374,11 @@ class AiGatewayIT extends IntegrationTest {
     }
 
     @Test
-    void capsMustBeWholeNumbersAboveZeroAndAtMostThePlatformCeiling() {
+    void capsAreNotNegativeAndAtMostThePlatformCeilingAndZeroIsValid() {
         TestDatabase.Fixture t = allowed();
         staff(t);
         int version = as(t, ai::status).version();
-        for (Long bad : new Long[] {0L, -5L, 100_001L}) {
+        for (Long bad : new Long[] {-5L, 100_001L}) {
             assertThatThrownBy(() -> as(t, () -> ai.setCaps(bad, null, version)))
                     .as("token cap %s", bad)
                     .isInstanceOf(ApiException.class);
@@ -602,9 +601,10 @@ class AiGatewayIT extends IntegrationTest {
                         second, "brief", null, "m", "b".repeat(64), 100, 800, "USD", now, windows, limits, pricing)));
         assertThat(b.refused()).isEqualTo(Reason.TENANT_TOKEN_CAP);
 
-        // Finishing the first with a failure releases its reservation, and the next one fits.
+        // A call that never left (the breaker refused it after the reservation) releases its reservation, so the next
+        // one fits. A call that failed after its request was sent would not: see the test on billed failures.
         as(t, () -> {
-            callLog.fail(first, now, Reason.TIMEOUT, 0, 1, 10);
+            callLog.refuse(first, now, Reason.BREAKER_OPEN);
             return null;
         });
         AiCallLog.Reservation c = as(
@@ -663,7 +663,8 @@ class AiGatewayIT extends IntegrationTest {
         assertThat(row(failed.get(0)))
                 .containsEntry("outcome", "failed")
                 .containsEntry("reason", "provider_error")
-                .containsEntry("tokens_counted", 0);
+                // A failure after the request was sent keeps its reservation: 100 estimated input + 100 output.
+                .containsEntry("tokens_counted", 200);
         assertThat(((Number) row(failed.get(0)).get("http_status")).intValue()).isEqualTo(503);
         assertThat(((Number) row(failed.get(0)).get("attempts")).intValue()).isEqualTo(3);
         assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.OPEN);
@@ -672,8 +673,9 @@ class AiGatewayIT extends IntegrationTest {
         assertThat(refused.reason()).isEqualTo(Reason.BREAKER_OPEN);
         assertThat(recording.requests()).hasSize(5);
         assertThat(row(refused.callId())).containsEntry("outcome", "refused").containsEntry("reason", "breaker_open");
-        // A refusal by the breaker held nothing against the caps.
-        assertThat(as(t, ai::status).tokensUsedToday()).isZero();
+        // The five failures hold their reservations (5 x 200); the breaker's own refusal held nothing.
+        assertThat(as(t, ai::status).tokensUsedToday()).isEqualTo(1_000);
+        assertThat(row(refused.callId())).containsEntry("tokens_counted", 0);
 
         // After 60 seconds one probe goes through; its success closes the breaker.
         CLOCK.advance(Duration.ofSeconds(61));
@@ -792,38 +794,55 @@ class AiGatewayIT extends IntegrationTest {
     }
 
     @Test
-    void theNightlyJobDeletesRowsPastRetentionAndClosesAbandonedCallsOnly() {
-        TestDatabase.Fixture t = allowed();
-        UUID old = UUID.randomUUID();
+    void housekeepingRunsForEveryTenantSuspendedOnesIncluded() {
+        TestDatabase.Fixture active = allowed();
+        TestDatabase.Fixture suspended = allowed();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(suspended.tenantId())
+                .update();
+        UUID oldActive = UUID.randomUUID();
+        UUID oldSuspended = UUID.randomUUID();
         UUID fresh = UUID.randomUUID();
         UUID stuck = UUID.randomUUID();
+        UUID stuckSuspended = UUID.randomUUID();
         TestDatabase.owner()
                 .sql("""
                         INSERT INTO ai_calls (id, tenant_id, created_at, finished_at, purpose, model, request_hash, outcome)
                         VALUES (?, ?, now() - interval '100 days', now() - interval '100 days', 'brief', 'm',
                                 repeat('c', 64), 'ok'),
+                               (?, ?, now() - interval '100 days', now() - interval '100 days', 'brief', 'm',
+                                repeat('c', 64), 'ok'),
                                (?, ?, now() - interval '10 days', now() - interval '10 days', 'brief', 'm',
                                 repeat('d', 64), 'ok')
                         """)
-                .params(old, t.tenantId(), fresh, t.tenantId())
+                .params(oldActive, active.tenantId(), oldSuspended, suspended.tenantId(), fresh, active.tenantId())
                 .update();
-        TestDatabase.owner().sql("""
+        TestDatabase.owner()
+                .sql("""
                         INSERT INTO ai_calls (id, tenant_id, created_at, purpose, model, request_hash, outcome,
                                               reserved_tokens, tokens_counted)
-                        VALUES (?, ?, now() - interval '2 hours', 'brief', 'm', repeat('e', 64), 'pending', 900, 900)
-                        """).params(stuck, t.tenantId()).update();
+                        VALUES (?, ?, now() - interval '2 hours', 'brief', 'm', repeat('e', 64), 'pending', 900, 900),
+                               (?, ?, now() - interval '2 hours', 'brief', 'm', repeat('e', 64), 'pending', 900, 900)
+                        """)
+                .params(stuck, active.tenantId(), stuckSuspended, suspended.tenantId())
+                .update();
 
-        int deleted = as(t, callLog::purge);
+        // The job's own entry point: no tenant is bound and none is looked up.
+        assertThat(callLog.housekeeping()).isGreaterThanOrEqualTo(2);
 
-        assertThat(deleted).isEqualTo(1);
-        assertThat(rows(t)).isEqualTo(2);
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM ai_calls WHERE id = ?")
-                        .param(old)
-                        .query(Long.class)
-                        .single())
-                .isZero();
+        for (UUID gone : List.of(oldActive, oldSuspended)) {
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM ai_calls WHERE id = ?")
+                            .param(gone)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+        }
         assertThat(row(stuck)).containsEntry("outcome", "failed").containsEntry("reason", "abandoned");
+        assertThat(row(stuckSuspended)).containsEntry("outcome", "failed").containsEntry("reason", "abandoned");
+        // The abandoned call keeps its reservation against its day, and a fresh row is left alone.
+        assertThat(row(stuck)).containsEntry("tokens_counted", 900);
         assertThat(row(fresh)).containsEntry("outcome", "ok");
     }
 
@@ -840,5 +859,279 @@ class AiGatewayIT extends IntegrationTest {
         LlmClient.Request moved2 = new LlmClient.Request(
                 List.of(new LlmClient.Message("user", "a"), new LlmClient.Message("user", "bc")), 10, false);
         assertThat(AiGatewayService.hash(moved)).isNotEqualTo(AiGatewayService.hash(moved2));
+    }
+
+    // ---- the review round: in flight, failures that were billed, the screen, errors, the probe -----------
+
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager transactions;
+
+    /** Starts {@code n} calls at once, each held inside the provider until the test lets them go. */
+    List<AiResult> concurrently(List<TestDatabase.Fixture> tenants, int n, int maxTokens, int perCallPending)
+            throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        recording.onEachCall(() -> {
+            try {
+                if (!release.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("never released");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        try {
+            List<java.util.concurrent.Future<AiResult>> futures = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                TestDatabase.Fixture t = tenants.get(i % tenants.size());
+                futures.add(pool.submit(() -> as(t, () -> gateway.complete("question", null, small(maxTokens)))));
+            }
+            // Wait until every call is either in the provider (a pending row) or already refused.
+            long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+            while (true) {
+                long settled = TestDatabase.owner()
+                        .sql("SELECT count(*) FROM ai_calls WHERE tenant_id = ANY (?) AND created_at = ?"
+                                + " AND outcome IN ('pending', 'refused')")
+                        .params(
+                                tenants.stream()
+                                        .map(TestDatabase.Fixture::tenantId)
+                                        .toArray(UUID[]::new),
+                                java.sql.Timestamp.from(CLOCK.instant()))
+                        .query(Long.class)
+                        .single();
+                if (settled >= n) {
+                    break;
+                }
+                assertThat(System.nanoTime()).as("every call settled").isLessThan(deadline);
+                Thread.sleep(20);
+            }
+            long pending = TestDatabase.owner()
+                    .sql("SELECT count(*) FROM ai_calls WHERE tenant_id = ANY (?) AND outcome = 'pending'")
+                    .param(tenants.stream().map(TestDatabase.Fixture::tenantId).toArray(UUID[]::new))
+                    .query(Long.class)
+                    .single();
+            assertThat(pending).as("calls in flight when the rest were refused").isEqualTo(perCallPending);
+            release.countDown();
+            List<AiResult> results = new ArrayList<>();
+            for (java.util.concurrent.Future<AiResult> f : futures) {
+                results.add(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void sixCallsAtOnceNeverExceedTheTenantsCapExactlyTwoAreReserved() throws Exception {
+        TestDatabase.Fixture t = enabledTenant();
+        int version = as(t, ai::status).version();
+        // Room for two reservations of 100 + 800 = 900, not three.
+        as(t, () -> ai.setCaps(2_000L, null, version));
+        List<AiResult> results = concurrently(List.of(t), 6, 800, 2);
+        assertThat(results.stream().filter(AiResult::answered)).hasSize(2);
+        assertThat(results.stream().filter(r -> r.reason() == Reason.TENANT_TOKEN_CAP))
+                .hasSize(4);
+        assertThat(recording.requests()).hasSize(2);
+        // The invariant, from the rows: what the day holds never passed the cap.
+        assertThat(as(t, ai::status).tokensUsedToday()).isLessThanOrEqualTo(2_000);
+    }
+
+    @Test
+    void callsAtOnceFromTwoTenantsNeverExceedThePlatformCeiling() throws Exception {
+        // 100,000 ceiling, 98,200 already used by a third tenant: room for two reservations of 900, not three.
+        insertCall(allowed(), CLOCK.instant(), "ok", 98_200, 0);
+        TestDatabase.Fixture a = enabledTenant();
+        TestDatabase.Fixture b = enabledTenant();
+        List<AiResult> results = concurrently(List.of(a, b), 6, 800, 2);
+        assertThat(results.stream().filter(AiResult::answered)).hasSize(2);
+        assertThat(results.stream().filter(r -> r.reason() == Reason.PLATFORM_TOKEN_CAP))
+                .hasSize(4);
+        AiCallLog.Windows w = AiGatewayService.windows(CLOCK.instant(), ZoneId.of("Africa/Kampala"));
+        assertThat(as(a, () -> callLog.platformUsage(w.platformFrom(), w.platformTo()))
+                        .tokens())
+                .isLessThanOrEqualTo(100_000);
+    }
+
+    @Test
+    void aFailureAfterTheRequestWasSentKeepsItsReservationSoRetriesCannotWalkRoundTheCap() {
+        TestDatabase.Fixture t = enabledTenant();
+        int version = as(t, ai::status).version();
+        // Each call reserves 100 + 100 = 200; the cap holds two of them.
+        as(t, () -> ai.setCaps(450L, null, version));
+        recording.thenFail(new LlmException(Kind.TIMEOUT, 0, 1));
+        recording.thenFail(new LlmException(Kind.PROVIDER_ERROR, 503, 3));
+        AiResult first = as(t, () -> gateway.complete("brief", null, small(100)));
+        AiResult second = as(t, () -> gateway.complete("brief", null, small(100)));
+        assertThat(first.reason()).isEqualTo(Reason.TIMEOUT);
+        assertThat(second.reason()).isEqualTo(Reason.PROVIDER_ERROR);
+        assertThat(row(first.callId())).containsEntry("outcome", "failed").containsEntry("tokens_counted", 200);
+        assertThat(row(first.callId())).containsEntry("cost_counted_micro", 300L);
+        assertThat(as(t, ai::status).tokensUsedToday()).isEqualTo(400);
+        // The third would have gone to the provider again; the cap, spent by the two failures, refuses it first.
+        AiResult third = as(t, () -> gateway.complete("brief", null, small(100)));
+        assertThat(third.reason()).isEqualTo(Reason.TENANT_TOKEN_CAP);
+        assertThat(recording.requests()).hasSize(2);
+    }
+
+    @Test
+    void anUnusableAnswerCountsTheUsageTheProviderReportedNotTheReservation() {
+        TestDatabase.Fixture t = enabledTenant();
+        recording.thenFail(new LlmException(Kind.BAD_RESPONSE, 200, 1, 70, 30));
+        AiResult r = as(t, () -> gateway.complete("brief", null, small(100)));
+        assertThat(r.reason()).isEqualTo(Reason.BAD_RESPONSE);
+        // 70 + 30 tokens; cost 70 x 1 + 30 x 2 = 130 micro-units at the test prices.
+        assertThat(row(r.callId()))
+                .containsEntry("outcome", "failed")
+                .containsEntry("input_tokens", 70)
+                .containsEntry("output_tokens", 30)
+                .containsEntry("tokens_counted", 100)
+                .containsEntry("cost_counted_micro", 130L);
+        assertThat(as(t, ai::status).tokensUsedToday()).isEqualTo(100);
+    }
+
+    @Test
+    void aCapOfZeroStopsEveryCallBeforeTheNetwork() {
+        TestDatabase.Fixture t = enabledTenant();
+        int version = as(t, ai::status).version();
+        as(t, () -> ai.setCaps(0L, 0L, version));
+        AiResult r = as(t, () -> gateway.complete("brief", null, small(100)));
+        assertThat(r.reason()).isEqualTo(Reason.TENANT_TOKEN_CAP);
+        assertThat(recording.requests()).isEmpty();
+        // The cost cap alone stops it too, even when the tokens would fit.
+        int next = as(t, ai::status).version();
+        as(t, () -> ai.setCaps(5_000L, 0L, next));
+        assertThat(as(t, () -> gateway.complete("brief", null, small(100))).reason())
+                .isEqualTo(Reason.TENANT_COST_CAP);
+        assertThat(recording.requests()).isEmpty();
+    }
+
+    // ---- the second line of defence: personal data is refused and never logged -----------------------------
+
+    @Test
+    void textThatLooksLikePersonalDataIsRefusedBeforeAnyCallAndNeverReachesTheLog() {
+        TestDatabase.Fixture t = enabledTenant();
+        List<String> planted = List.of(
+                "Test Borrower 01 can be reached on +256 700 000 001",
+                "Call 0700-000-001 about the arrears",
+                "Phone 0700 000 001",
+                "mail test.borrower01@example.test",
+                "NIN CM00000000ABCD",
+                "loan number 1234567");
+        for (String text : planted) {
+            LlmClient.Request request = new LlmClient.Request(
+                    List.of(new LlmClient.Message("system", "Answer in JSON."), new LlmClient.Message("user", text)),
+                    100,
+                    true);
+            AiResult r = as(t, () -> gateway.complete("question", null, request));
+            assertThat(r.reason()).as(text).isEqualTo(Reason.INPUT_REFUSED);
+            assertThat(r.text()).isNull();
+            Map<String, Object> row = row(r.callId());
+            assertThat(row).containsEntry("outcome", "refused").containsEntry("reason", "input_refused");
+            assertThat(row).containsEntry("tokens_counted", 0);
+            String whole = TestDatabase.owner()
+                    .sql("SELECT ai_calls::text FROM ai_calls WHERE id = ?")
+                    .param(r.callId())
+                    .query(String.class)
+                    .single();
+            for (String piece : List.of("Borrower", "+256", "example.test", "ABCD", "1234567")) {
+                assertThat(whole).as("%s in the row for %s", piece, text).doesNotContain(piece);
+            }
+        }
+        assertThat(recording.requests()).isEmpty();
+    }
+
+    @Test
+    void aNameTheScreenCannotRecogniseIsStillNeverStoredInTheLog() {
+        // The gateway has no member list (the question box checks names in the database, slice C4), so a bare name
+        // passes the screen. What this proves is the other half: even then the call log holds no text.
+        TestDatabase.Fixture t = enabledTenant();
+        AiResult r = as(
+                t,
+                () -> gateway.complete(
+                        "question",
+                        null,
+                        new LlmClient.Request(
+                                List.of(new LlmClient.Message("user", "Why is Test Borrower Zero Zero One late")),
+                                100,
+                                true)));
+        assertThat(r.answered()).isTrue();
+        String all = TestDatabase.owner()
+                .sql("SELECT string_agg(c::text, ' ') FROM ai_calls c WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(String.class)
+                .single();
+        assertThat(all).doesNotContain("Borrower").doesNotContain("late");
+    }
+
+    // ---- our errors are not the provider's; the contract holds ------------------------------------------------
+
+    @Test
+    void aFailureOfOursBeforeTheCallIsAFallbackNotAnExceptionAndNeverFeedsTheBreaker() {
+        TestDatabase.Fixture t = enabledTenant();
+        // A user id that does not exist breaks the log's foreign key: the database refuses, not the provider.
+        for (int i = 0; i < 7; i++) {
+            AiResult r = as(t, () -> gateway.complete("brief", UUID.randomUUID(), small(100)));
+            assertThat(r.reason()).isEqualTo(Reason.INTERNAL_ERROR);
+            assertThat(r.callId()).isNull();
+        }
+        assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(recording.requests()).isEmpty();
+        // And the next honest call is served.
+        assertThat(as(t, () -> gateway.complete("brief", null, small(100))).answered())
+                .isTrue();
+    }
+
+    @Test
+    void aRuntimeFailureInsideTheAdapterIsAFallbackAndCountsAgainstTheBreaker() {
+        TestDatabase.Fixture t = enabledTenant();
+        recording.onEachCall(() -> {
+            throw new IllegalStateException("adapter bug with a name in it: Test Borrower 01");
+        });
+        AiResult r = as(t, () -> gateway.complete("brief", null, small(100)));
+        assertThat(r.reason()).isEqualTo(Reason.BAD_RESPONSE);
+        assertThat(row(r.callId())).containsEntry("outcome", "failed").containsEntry("tokens_counted", 200);
+        String whole = TestDatabase.owner()
+                .sql("SELECT ai_calls::text FROM ai_calls WHERE id = ?")
+                .param(r.callId())
+                .query(String.class)
+                .single();
+        assertThat(whole).doesNotContain("Borrower");
+    }
+
+    @Test
+    void anErrorDuringTheProbeIsRethrownYetNeverLeavesTheProbeSlotTaken() {
+        TestDatabase.Fixture t = enabledTenant();
+        for (int i = 0; i < 5; i++) {
+            recording.thenFail(new LlmException(Kind.PROVIDER_ERROR, 503, 3));
+        }
+        for (int i = 0; i < 5; i++) {
+            as(t, () -> gateway.complete("brief", null, small(100)));
+        }
+        assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.OPEN);
+        CLOCK.advance(Duration.ofSeconds(61));
+        recording.onEachCall(() -> {
+            throw new AssertionError("an Error in the middle of the probe");
+        });
+        assertThatThrownBy(() -> as(t, () -> gateway.complete("brief", null, small(100))))
+                .isInstanceOf(AssertionError.class);
+        // The slot was released in a finally: the next call is allowed to probe, and its success closes the breaker.
+        recording.onEachCall(() -> {});
+        assertThat(as(t, () -> gateway.complete("brief", null, small(100))).answered())
+                .isTrue();
+        assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    void theGatewayRefusesToRunInsideATransaction() {
+        TestDatabase.Fixture t = enabledTenant();
+        assertThatThrownBy(() -> as(
+                        t,
+                        () -> new org.springframework.transaction.support.TransactionTemplate(transactions)
+                                .execute(status -> gateway.complete("brief", null, small(100)))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("outside a transaction");
+        assertThat(recording.requests()).isEmpty();
     }
 }

@@ -20,6 +20,7 @@ public final class RecordingLlmClient implements LlmClient {
     private final String model;
     private final Deque<Object> script = new ArrayDeque<>();
     private final List<Request> requests = new ArrayList<>();
+    private volatile Runnable gate = () -> {};
 
     public RecordingLlmClient(String model) {
         this.model = model;
@@ -36,7 +37,13 @@ public final class RecordingLlmClient implements LlmClient {
     }
 
     @Override
-    public synchronized Result complete(Request request) throws LlmException {
+    public Result complete(Request request) throws LlmException {
+        // Outside the lock, so a test can hold several calls in flight at once.
+        gate.run();
+        return answer(request);
+    }
+
+    private synchronized Result answer(Request request) throws LlmException {
         requests.add(request);
         if (requests.size() > KEPT) {
             requests.removeFirst();
@@ -49,6 +56,12 @@ public final class RecordingLlmClient implements LlmClient {
             return result;
         }
         return new Result(DEFAULT_TEXT, Math.max(1, request.characters() / 4), 20, "stop");
+    }
+
+    /** Runs before every call answers, in the caller's thread; a test blocks in it to keep calls in flight. */
+    public RecordingLlmClient onEachCall(Runnable gate) {
+        this.gate = gate;
+        return this;
     }
 
     /** The next call is answered with this. */
@@ -69,6 +82,7 @@ public final class RecordingLlmClient implements LlmClient {
     }
 
     public synchronized void reset() {
+        gate = () -> {};
         script.clear();
         requests.clear();
     }

@@ -1,22 +1,27 @@
 -- V51: core.ai call log: one row per call to the language model gateway, with token and cost accounting
--- (ADR-037, issue #220; docs/specs/client-extras.md sections 5.7, 5.9 and 5.10).
+-- (ADR-037 and its amendment of 2026-10-14, issue #220; docs/specs/client-extras.md sections 5.7, 5.9 and 5.10).
 --
--- Expand only, safe on a populated database. One new tenant table, one new SECURITY DEFINER function and nothing
--- else. No existing table, column, constraint or function is touched. No permission is added (the two advisor
--- permissions arrive with the slice that has routes to protect, #226) and no tenant is switched on: the tenant switch
--- `ai.enabled` is a key of the tenant settings group `ai` in the existing jsonb column, absent meaning off, and the
--- platform allow-list is an environment value, so nothing here changes what any tenant can do.
+-- Expand only, safe on a populated database. It adds: one tenant table (`ai_calls`, with three indexes and the
+-- standard row-level security), one trigger function `ai_calls_guard` used by two triggers on that table (one on
+-- UPDATE, one on DELETE), and two SECURITY DEFINER functions (`ai_platform_usage`, the platform-wide sum, and
+-- `ai_calls_housekeeping`, the nightly retention and cleanup across every tenant). Nothing else. No existing table,
+-- column, constraint or function is touched. No permission is added (the two advisor permissions arrive with the slice
+-- that has routes to protect, #226) and no tenant is switched on: the tenant switch is a key of the tenant settings
+-- group `ai` in the existing jsonb column, absent meaning off, and the platform allow-list is an environment value, so
+-- nothing here changes what any tenant can do.
 --
 -- Locks, said plainly. The table is created empty, so the only lock cost is SHARE ROW EXCLUSIVE on `tenants` and
 -- `users` (the foreign keys) until the commit, which blocks writes to those two tables for the milliseconds the file
 -- runs and does not block reads; no row is scanned and no index is built on existing data. Flyway runs the file in one
 -- transaction. Flyway runs with outOfOrder off, so the number is assigned at merge time above the highest one on main.
 --
--- No prompt and no response text is stored (this is stricter than spec section 5.10, which lets the slice that builds
--- the prompts store aliased text: that slice adds its own columns and its own ADR amendment if it still wants them).
--- The row holds counts, a model name, a fixed-vocabulary reason, an HTTP status number and the SHA-256 of the request
--- text, which is enough to see that two calls were the same request and nothing more. A provider error body is never
--- read into this table (spec 5.10: "Provider error bodies are not stored"); the `reason` column is a closed vocabulary.
+-- PRIVACY, stated once and the same in ADR-037, spec 5.10 and chapter 6: the table stores NO prompt text, NO response
+-- text and NO provider error text, in any column. A row holds counts, a model name, a closed-vocabulary reason, an HTTP
+-- status number, a latency and the SHA-256 of the request, which shows that two calls were the same request and nothing
+-- more. The reason is that a lender's figures and any name that slips into a question are personal or confidential data
+-- in a table nobody needs to read; what a call said is reproducible from the hash and the code that built it. If the
+-- slice that builds the prompts later wants aliased text, it adds the columns by its own expand migration and an
+-- amendment of ADR-037, after review.
 
 CREATE TABLE ai_calls (
     id                   uuid         NOT NULL PRIMARY KEY,
@@ -110,3 +115,26 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION ai_platform_usage(timestamptz, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION ai_platform_usage(timestamptz, timestamptz) TO bms_app;
+
+-- ---------------------------------------------------------------------------------------------
+-- Nightly housekeeping for every tenant, suspended and closed ones included (retention is a duty, not a service): rows
+-- past 90 days are deleted (the guard trigger allows exactly that), and a call left pending for an hour, whose process
+-- died between reserving and finishing, is closed as failed/abandoned keeping its reservation against that day. It runs
+-- as bms_owner (SECURITY DEFINER), which is why no per-tenant loop is needed; the guard trigger still applies, since
+-- the session user is the application role. Returns the rows deleted.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE FUNCTION ai_calls_housekeeping() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    deleted integer;
+BEGIN
+    UPDATE ai_calls SET outcome = 'failed', reason = 'abandoned', finished_at = now()
+     WHERE outcome = 'pending' AND created_at < now() - interval '1 hour';
+    DELETE FROM ai_calls WHERE created_at < now() - interval '90 days';
+    GET DIAGNOSTICS deleted = ROW_COUNT;
+    RETURN deleted;
+END
+$$;
+REVOKE ALL ON FUNCTION ai_calls_housekeeping() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION ai_calls_housekeeping() TO bms_app;
