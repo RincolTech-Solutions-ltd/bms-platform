@@ -38,7 +38,8 @@ import tools.jackson.databind.ObjectMapper;
             "bms.reports.timeout=PT2S",
             "bms.reports.xlsx-row-cap=500",
             "bms.reports.max-file-bytes=1048576",
-            "bms.reports.cancel-poll=PT0.2S"
+            "bms.reports.cancel-poll=PT0.2S",
+            "bms.reports.heartbeat=PT0.1S"
         })
 class ReportRunsIT extends ReportsItSupport {
 
@@ -55,10 +56,21 @@ class ReportRunsIT extends ReportsItSupport {
         TestDatabase.Fixture t = tenant(false);
         UUID user = UUID.randomUUID();
 
-        JsonNode catalogue =
-                call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO).getBody();
-        assertThat(catalogue.get("enabled").asBoolean()).isFalse();
-        assertThat(catalogue.get("reports")).isEmpty();
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO users (id, tenant_id, kind, full_name, phone_e164, status) VALUES (?, ?, 'staff', 'Test Staff 55', '+256700000055', 'active')")
+                .params(user, t.tenantId())
+                .update();
+        // Off means off everywhere: the catalogue answers like every other report route (spec principle 1).
+        ResponseEntity<JsonNode> catalogue = call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO);
+        assertThat(catalogue.getStatusCode().value()).isEqualTo(404);
+        assertThat(catalogue.getBody().get("code").asString()).isEqualTo("reports_not_enabled");
+        // /me tells the PWA, so the Reports tab is not offered.
+        assertThat(call(HttpMethod.GET, "/api/v1/me", t, user, PORTFOLIO)
+                        .getBody()
+                        .get("reports_enabled")
+                        .asBoolean())
+                .isFalse();
         assertThat(post(t, user, PORTFOLIO, "test.rows", Map.of(), "json")
                         .getStatusCode()
                         .value())
@@ -86,8 +98,12 @@ class ReportRunsIT extends ReportsItSupport {
         assertThat(changed.getBody().get("reports_enabled").asBoolean()).isTrue();
 
         assertThat(call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        assertThat(call(HttpMethod.GET, "/api/v1/me", t, user, PORTFOLIO)
                         .getBody()
-                        .get("enabled")
+                        .get("reports_enabled")
                         .asBoolean())
                 .isTrue();
         assertThat(post(t, user, PORTFOLIO, "test.rows", Map.of(), "json")
@@ -113,14 +129,12 @@ class ReportRunsIT extends ReportsItSupport {
         List<String> keys = new ArrayList<>();
         call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO)
                 .getBody()
-                .get("reports")
                 .forEach(r -> keys.add(r.get("key").asString()));
         assertThat(keys).contains("lending.par", "test.rows").doesNotContain("test.retail");
 
         JsonNode par = null;
-        for (JsonNode r : call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO)
-                .getBody()
-                .get("reports")) {
+        for (JsonNode r :
+                call(HttpMethod.GET, "/api/v1/reports", t, user, PORTFOLIO).getBody()) {
             if (r.get("key").asString().equals("lending.par")) {
                 par = r;
             }
@@ -134,8 +148,7 @@ class ReportRunsIT extends ReportsItSupport {
         // Without the report permission the report is not listed, and not runnable.
         JsonNode none = call(HttpMethod.GET, "/api/v1/reports", t, user, "lending.members.read")
                 .getBody();
-        assertThat(none.get("enabled").asBoolean()).isTrue();
-        assertThat(none.get("reports")).isEmpty();
+        assertThat(none).isEmpty();
         assertThat(post(t, user, "lending.members.read", "test.rows", Map.of(), "json")
                         .getStatusCode()
                         .value())
@@ -396,6 +409,73 @@ class ReportRunsIT extends ReportsItSupport {
                 .isEqualTo(202);
     }
 
+    // JUSTIFICATION-A3: new cases for the order of the repeat check and the limit, and for the limit under concurrent
+    // requests.
+    @Test
+    void anIdenticalRepeatPastTheLimitGetsTheExistingRunNotA429() {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        String first = null;
+        for (int i = 1; i <= 10; i++) {
+            ResponseEntity<JsonNode> r = post(t, user, PORTFOLIO, "test.rows", Map.of("n", i), "json");
+            assertThat(r.getStatusCode().value()).isEqualTo(202);
+            if (i == 1) {
+                first = r.getBody().get("id").asString();
+            }
+        }
+        // The eleventh distinct request is refused; a repeat of the first is answered with the first.
+        assertThat(post(t, user, PORTFOLIO, "test.rows", Map.of("n", 11), "json")
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(429);
+        ResponseEntity<JsonNode> again = post(t, user, PORTFOLIO, "test.rows", Map.of("n", 1), "json");
+        assertThat(again.getStatusCode().value()).isEqualTo(200);
+        assertThat(again.getBody().get("id").asString()).isEqualTo(first);
+    }
+
+    @Test
+    void theLimitHoldsWhenRequestsArriveTogether() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        int asked = 16;
+        ExecutorService pool = Executors.newFixedThreadPool(asked);
+        CountDownLatch go = new CountDownLatch(1);
+        try {
+            List<Future<Integer>> codes = new ArrayList<>();
+            for (int i = 1; i <= asked; i++) {
+                int n = i;
+                Callable<Integer> call = () -> {
+                    go.await();
+                    return post(t, user, PORTFOLIO, "test.rows", Map.of("n", n), "json")
+                            .getStatusCode()
+                            .value();
+                };
+                codes.add(pool.submit(call));
+            }
+            go.countDown();
+            int accepted = 0;
+            int refused = 0;
+            for (Future<Integer> f : codes) {
+                int code = f.get();
+                if (code == 202) {
+                    accepted++;
+                } else if (code == 429) {
+                    refused++;
+                }
+            }
+            assertThat(accepted).as("exactly ten runs, not about ten").isEqualTo(10);
+            assertThat(refused).isEqualTo(asked - 10);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*)::int FROM report_runs WHERE tenant_id = ?")
+                            .param(t.tenantId())
+                            .query(Integer.class)
+                            .single())
+                    .isEqualTo(10);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     // ---- who may see a run and its file ---------------------------------------------------------
 
     @Test
@@ -434,7 +514,7 @@ class ReportRunsIT extends ReportsItSupport {
         assertThat(call(HttpMethod.POST, "/api/v1/documents/" + documentId + "/download-url", a, colleague, PORTFOLIO)
                         .getStatusCode()
                         .value())
-                .isEqualTo(403);
+                .isEqualTo(404);
         // An auditor may read the status, not the file.
         assertThat(call(HttpMethod.GET, "/api/v1/report-runs/" + runId, a, auditor, "core.audit.read")
                         .getStatusCode()
@@ -448,7 +528,7 @@ class ReportRunsIT extends ReportsItSupport {
                                 "core.audit.read," + PORTFOLIO)
                         .getStatusCode()
                         .value())
-                .isEqualTo(403);
+                .isEqualTo(404);
         // The requester who has lost the report's permission loses the file with it.
         assertThat(call(
                                 HttpMethod.POST,
@@ -458,7 +538,7 @@ class ReportRunsIT extends ReportsItSupport {
                                 "lending.members.read")
                         .getStatusCode()
                         .value())
-                .isEqualTo(403);
+                .isEqualTo(404);
         assertThat(call(HttpMethod.POST, "/api/v1/documents/" + documentId + "/download-url", a, owner, PORTFOLIO)
                         .getStatusCode()
                         .value())
@@ -619,7 +699,7 @@ class ReportRunsIT extends ReportsItSupport {
                                 PORTFOLIO)
                         .getStatusCode()
                         .value())
-                .isEqualTo(403);
+                .isEqualTo(404);
         assertThat(TestDatabase.owner()
                         .sql(
                                 "SELECT count(*)::int FROM audit_log WHERE tenant_id = ? AND action = 'core.reports.files_expired'")

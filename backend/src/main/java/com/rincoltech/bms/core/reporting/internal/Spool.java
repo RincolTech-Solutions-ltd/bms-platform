@@ -147,6 +147,11 @@ final class Spool {
             return total;
         }
 
+        @Override
+        public void checkpoint() {
+            guard.checkpoint();
+        }
+
         private void row(Object... cells) {
             if (current == null) {
                 throw new IllegalStateException("No table is open.");
@@ -166,7 +171,8 @@ final class Spool {
                 out.add(cell(currentColumns.get(i), cells[i]));
             }
             String line = mapper.writeValueAsString(out);
-            bytes += line.length() + 1L;
+            // Bytes as written (UTF-8), not characters: a name in another script is two or three bytes a character.
+            bytes += line.getBytes(StandardCharsets.UTF_8).length + 1L;
             if (bytes > 2 * maxBytes) {
                 throw new ReportFailure("report_too_large", "The report is larger than the size limit.");
             }

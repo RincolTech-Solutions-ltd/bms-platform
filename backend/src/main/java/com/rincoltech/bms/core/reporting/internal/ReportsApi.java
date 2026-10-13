@@ -12,13 +12,6 @@ final class ReportsApi {
 
     private ReportsApi() {}
 
-    @Schema(name = "ReportCatalogue")
-    record Catalogue(
-            @Schema(description = "False while the tenant has not switched report runs on; the list is then empty")
-            boolean enabled,
-
-            List<CatalogueEntry> reports) {}
-
     @Schema(name = "ReportCatalogueEntry")
     record CatalogueEntry(
             String key,

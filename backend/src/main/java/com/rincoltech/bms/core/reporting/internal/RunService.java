@@ -22,6 +22,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.http.HttpStatus;
@@ -93,11 +94,9 @@ class RunService {
     }
 
     @Transactional(readOnly = true)
-    ReportsApi.Catalogue catalogue() {
-        if (!enabled()) {
-            return new ReportsApi.Catalogue(false, List.of());
-        }
-        List<ReportsApi.CatalogueEntry> entries = registry.available(CurrentPrincipal.require()).stream()
+    List<ReportsApi.CatalogueEntry> catalogue() {
+        requireEnabled();
+        return registry.available(CurrentPrincipal.require()).stream()
                 .map(d -> new ReportsApi.CatalogueEntry(
                         d.key(),
                         d.title(),
@@ -109,7 +108,6 @@ class RunService {
                                         p.name(), p.type(), p.required(), p.description(), p.values()))
                                 .toList()))
                 .toList();
-        return new ReportsApi.Catalogue(true, entries);
     }
 
     // ---- queue --------------------------------------------------------------------------------
@@ -158,14 +156,6 @@ class RunService {
         if (!unknown.isEmpty()) {
             throw ApiException.validation(unknown);
         }
-        Instant now = clock.now();
-        if (store.countCreatedSince(principal.userId(), now.minus(Duration.ofMinutes(1))) >= RATE_PER_MINUTE) {
-            throw new ApiException(
-                    HttpStatus.TOO_MANY_REQUESTS,
-                    "rate_limited",
-                    "Too many report requests",
-                    "Wait a minute before asking for more reports.");
-        }
         Prepared prepared = def.prepare(asked);
         for (Param required : def.params()) {
             if (required.required() && !prepared.params().containsKey(required.name())) {
@@ -174,6 +164,22 @@ class RunService {
             }
         }
         String hash = hash(def.key(), format, prepared);
+        // One request at a time per requester from here: the repeat check, the rate count and the insert below see each
+        // other, so ten runs a minute is ten and not "about ten" when requests arrive together.
+        store.lockRequester(principal.userId());
+        Optional<Run> open = store.findOpenByHash(principal.userId(), hash);
+        if (open.isPresent()) {
+            // An identical request is answered with the run that exists, however many were asked this minute.
+            return new Requested(view(open.get()), false);
+        }
+        Instant now = clock.now();
+        if (store.countCreatedSince(principal.userId(), now.minus(Duration.ofMinutes(1))) >= RATE_PER_MINUTE) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "rate_limited",
+                    "Too many report requests",
+                    "Wait a minute before asking for more reports.");
+        }
         UUID id = UUID.randomUUID();
         boolean created = store.insert(
                 id,

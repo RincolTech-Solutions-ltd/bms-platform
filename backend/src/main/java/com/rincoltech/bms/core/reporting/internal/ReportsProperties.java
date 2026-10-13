@@ -38,8 +38,11 @@ class ReportsProperties {
     /** How often a running query asks whether the run was cancelled (2 seconds). */
     final Duration cancelPoll;
 
-    /** How long the runner may go without seeing a run's heartbeat before it calls the run abandoned. */
-    final Duration abandonedAfter;
+    /** How often this process tells the database that the runs it executes are alive (10 seconds). */
+    final Duration heartbeat;
+
+    /** A running run with no heartbeat for this long has lost its process and is failed as interrupted (1 minute). */
+    final Duration heartbeatStale;
 
     ReportsProperties(
             @Value("${bms.reports.max-concurrent-runs:2}") int maxConcurrentRuns,
@@ -48,7 +51,9 @@ class ReportsProperties {
             @Value("${bms.reports.timeout:PT10M}") Duration timeout,
             @Value("${bms.reports.spool-dir:}") String spoolDir,
             @Value("${bms.reports.retention-days:30}") int retentionDays,
-            @Value("${bms.reports.cancel-poll:PT2S}") Duration cancelPoll) {
+            @Value("${bms.reports.cancel-poll:PT2S}") Duration cancelPoll,
+            @Value("${bms.reports.heartbeat:PT10S}") Duration heartbeat,
+            @Value("${bms.reports.heartbeat-stale:PT1M}") Duration heartbeatStale) {
         this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
         this.tableRowCap = Math.max(1, tableRowCap);
         this.maxFileBytes = Math.max(1024, maxFileBytes);
@@ -58,6 +63,7 @@ class ReportsProperties {
                 : Path.of(spoolDir);
         this.retentionDays = Math.max(1, retentionDays);
         this.cancelPoll = cancelPoll;
-        this.abandonedAfter = timeout.plusMinutes(2);
+        this.heartbeat = heartbeat;
+        this.heartbeatStale = heartbeatStale;
     }
 }

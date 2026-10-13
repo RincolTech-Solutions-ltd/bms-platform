@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api, fetchSettings, problemOf } from '../../../api/client';
 import {
   OPEN_STATUSES,
+  ReportsError,
   reports,
   runErrorText,
   type ReportCatalogueEntry,
@@ -12,7 +12,7 @@ import {
 import { branchFilter } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
-import { canSwitchReportsOn, showReports } from './permissions';
+import { showReports } from './permissions';
 
 // Reports (extras slice D1, issue #214; ADR-038): the catalogue of the reports this user may run, a run per click,
 // and the user's own runs with their status. A run is queued and executed by a job, so the list refreshes every
@@ -67,10 +67,12 @@ function Reports() {
 }
 
 function ReportsPage() {
-  const { me, branch } = useStaff();
+  const { branch } = useStaff();
   const queryClient = useQueryClient();
-  const catalogue = useQuery({ queryKey: ['reports', 'catalogue'], queryFn: reports.catalogue });
-  const enabled = catalogue.data?.enabled === true;
+  const catalogue = useQuery({ queryKey: ['reports', 'catalogue'], queryFn: reports.catalogue, retry: false });
+  // Off is a 404 from the server, like every report route: the tab is hidden by /me, and a stale page says so.
+  const off = catalogue.error instanceof ReportsError && catalogue.error.code === 'reports_not_enabled';
+  const enabled = catalogue.data !== undefined;
   const runs = useQuery({
     queryKey: ['reports', 'runs'],
     queryFn: reports.runs,
@@ -92,18 +94,6 @@ function ReportsPage() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['reports'] });
 
-  const switchOn = useMutation({
-    mutationFn: async () => {
-      const current = await fetchSettings();
-      const { error } = await api.PATCH('/api/v1/settings', {
-        params: { header: { 'If-Match': `"${current.version}"` } },
-        body: { reports_enabled: true },
-      });
-      if (error) throw new Error(problemOf(error).detail ?? 'Could not switch reports on.');
-    },
-    onSuccess: refresh,
-  });
-
   if (catalogue.isLoading) {
     return (
       <main className="rt ln">
@@ -120,25 +110,15 @@ function ReportsPage() {
       </main>
     );
   }
-  if (!enabled) {
+  if (off) {
     return (
       <main className="rt ln">
         <h1>Reports</h1>
         <p className="alert alert-info">Reports are switched off for this business.</p>
-        {canSwitchReportsOn(me) ? (
-          <p>
-            <button type="button" className="btn-primary" disabled={switchOn.isPending} onClick={() => switchOn.mutate()}>
-              Switch reports on
-            </button>
-          </p>
-        ) : (
-          <p className="ln-muted">A business administrator can switch them on in Business set-up.</p>
-        )}
-        <Problem error={switchOn.error} />
+        <p className="ln-muted">A business administrator can switch them on in Business set-up.</p>
       </main>
     );
   }
-
   return (
     <main className="rt ln">
       <h1>Reports</h1>
@@ -147,7 +127,7 @@ function ReportsPage() {
         Branch: the one chosen at the top of the page.
       </p>
       <p role="status" aria-live="polite" className={notice ? 'alert alert-success' : 'sr-only'}>{notice}</p>
-      <CatalogueList entries={catalogue.data.reports} branchIds={branchFilter(branch)} onQueued={refresh} />
+      <CatalogueList entries={catalogue.data ?? []} branchIds={branchFilter(branch)} onQueued={refresh} />
       <RunsTable runs={runs.data ?? []} loading={runs.isLoading} error={runs.error} onChange={refresh} />
     </main>
   );

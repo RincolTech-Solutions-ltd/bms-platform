@@ -1,6 +1,6 @@
 package com.rincoltech.bms.core.reporting.internal;
 
-import com.rincoltech.bms.core.reporting.internal.ReportsApi.Catalogue;
+import com.rincoltech.bms.core.reporting.internal.ReportsApi.CatalogueEntry;
 import com.rincoltech.bms.core.reporting.internal.ReportsApi.RunRequest;
 import com.rincoltech.bms.core.reporting.internal.ReportsApi.RunView;
 import com.rincoltech.bms.core.reporting.internal.RunService.Requested;
@@ -46,7 +46,7 @@ class ReportRunsController {
             summary =
                     "The reports this user may run: those of the modules the tenant has on, under a permission the user holds (FR-RPT-01)",
             operationId = "listReports")
-    Catalogue catalogue(HttpServletResponse response) {
+    List<CatalogueEntry> catalogue(HttpServletResponse response) {
         NoStore.apply(response);
         return runs.catalogue();
     }

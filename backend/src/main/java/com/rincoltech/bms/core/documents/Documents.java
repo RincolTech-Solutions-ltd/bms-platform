@@ -83,6 +83,13 @@ public interface Documents {
     GeneratedObject putFile(byte[] bytes, String docType, String contentType, String extension);
 
     /**
+     * As {@link #putFile(byte[], String, String, String)} for a file on disk: the checksum is taken by reading it once
+     * in blocks and the object is uploaded from the file, so the output of a report is never held in memory. Refuses a
+     * file over 2 GiB. No transaction and no database.
+     */
+    GeneratedObject putFile(java.nio.file.Path file, String docType, String contentType, String extension);
+
+    /**
      * Second half: records the object as {@code docType} with its {@code docNumber} (FR-DOC-02), in
      * the caller's transaction, which serialises concurrent issues of the same document (for example
      * under its subject's row lock) and has looked for it with {@link #findGenerated} first. A

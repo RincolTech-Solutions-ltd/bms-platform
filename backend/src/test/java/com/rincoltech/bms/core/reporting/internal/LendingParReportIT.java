@@ -39,7 +39,8 @@ import tools.jackson.databind.ObjectMapper;
             "bms.reports.timeout=PT2S",
             "bms.reports.xlsx-row-cap=500",
             "bms.reports.max-file-bytes=1048576",
-            "bms.reports.cancel-poll=PT0.2S"
+            "bms.reports.cancel-poll=PT0.2S",
+            "bms.reports.heartbeat=PT0.1S"
         })
 class LendingParReportIT extends ReportsItSupport {
 
@@ -327,6 +328,103 @@ class LendingParReportIT extends ReportsItSupport {
                 post(book.t(), UUID.randomUUID(), PORTFOLIO, "lending.par", Map.of(), "json");
         assertThat(refused.getStatusCode().value()).isEqualTo(403);
         assertThat(refused.getBody().get("code").asString()).isEqualTo("permission_denied");
+    }
+
+    // JUSTIFICATION-A3: new cases for a run that crosses midnight and for who may download after their access narrowed.
+    @Test
+    void aRunQueuedJustBeforeMidnightAndExecutedAfterItStillReadsTheLoanTablesOfTheDayItWasAskedOn() throws Exception {
+        Book book = goldenBook();
+        UUID user = UUID.randomUUID();
+        // 23:59:30 in Kampala on 2026-10-08 (20:59:30 UTC): the default date is that day.
+        clock.set(java.time.Instant.parse("2026-10-08T20:59:30Z"));
+        ResponseEntity<JsonNode> posted = post(book.t(), user, PAR_PERMS, "lending.par", Map.of(), "json");
+        assertThat(posted.getStatusCode().value()).as("%s", posted.getBody()).isEqualTo(202);
+        assertThat(posted.getBody().get("as_of").asString()).isEqualTo("2026-10-08");
+        // The runner gets to it after midnight (00:00:30 on 2026-10-09), before tonight's snapshot job has written
+        // 2026-10-08.
+        clock.set(java.time.Instant.parse("2026-10-08T21:00:30Z"));
+        drain();
+
+        JsonNode run = run(book.t(), user, PAR_PERMS, posted.getBody().get("id").asString());
+        assertThat(run.get("status").asString())
+                .as("not snapshot_unavailable: %s", run)
+                .isEqualTo("ready");
+        JsonNode file = mapper.readTree(
+                download(book.t(), user, PAR_PERMS, run.get("document_id").asString()));
+        assertThat(file.get("parameters").get("as_at").asString()).isEqualTo("2026-10-08");
+        assertThat(file.get("notes").toString()).contains("loan tables");
+        assertThat(rows(table(file, "par"))).containsExactly("[\"All loans\",6,10000000,1860000,1800,800,300,300]");
+    }
+
+    private ResponseEntity<JsonNode> downloadUrl(
+            Book book, UUID user, String permissions, String branches, String documentId) {
+        var h = headers(book.t(), user, permissions);
+        h.set("X-Dev-Branch-Ids", branches);
+        return http.exchange(
+                "/api/v1/documents/" + documentId + "/download-url",
+                HttpMethod.POST,
+                new HttpEntity<>(h),
+                JsonNode.class);
+    }
+
+    @Test
+    void aFileIsNotDownloadedByARequesterWhoseAccessHasNarrowedBelowTheScopeItWasMadeUnder() throws Exception {
+        Book book = goldenBook();
+        UUID user = UUID.randomUUID();
+        JsonNode wide = par(book, user, PAR_PERMS, Map.of(), "json");
+        String wideDoc = wide.get("document_id").asString();
+        String head = book.t().headOffice().toString();
+
+        assertThat(downloadUrl(book, user, PAR_PERMS, "*", wideDoc)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        // Moved from every branch to one: the tenant-wide file is no longer theirs, and it looks like no file at all.
+        ResponseEntity<JsonNode> narrowed = downloadUrl(book, user, PAR_PERMS, head, wideDoc);
+        assertThat(narrowed.getStatusCode().value()).isEqualTo(404);
+        // Who now sees only their own loans cannot keep a file made for everyone's.
+        assertThat(downloadUrl(book, user, PORTFOLIO + ",lending.insights.read", "*", wideDoc)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(404);
+
+        // A file made under one branch is still theirs when they have all of them, and when they still have that one.
+        var h = headers(book.t(), user, PAR_PERMS);
+        h.set("X-Dev-Branch-Ids", head);
+        ResponseEntity<JsonNode> posted = http.exchange(
+                "/api/v1/report-runs",
+                HttpMethod.POST,
+                new HttpEntity<>(body("lending.par", Map.of(), "json"), h),
+                JsonNode.class);
+        drain();
+        String narrowDoc = run(
+                        book.t(), user, PAR_PERMS, posted.getBody().get("id").asString())
+                .get("document_id")
+                .asString();
+        assertThat(downloadUrl(book, user, PAR_PERMS, "*", narrowDoc)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        assertThat(downloadUrl(book, user, PAR_PERMS, head, narrowDoc)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        assertThat(downloadUrl(book, user, PAR_PERMS, book.t().secondBranch().toString(), narrowDoc)
+                        .getStatusCode()
+                        .value())
+                .as("a different branch now")
+                .isEqualTo(404);
+
+        // And while reports are switched off for the tenant nothing is downloaded.
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE tenant_settings SET settings = settings || '{\"reports_enabled\": false}' WHERE tenant_id = ?")
+                .param(book.t().tenantId())
+                .update();
+        assertThat(downloadUrl(book, user, PAR_PERMS, "*", wideDoc)
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(404);
     }
 
     @Test

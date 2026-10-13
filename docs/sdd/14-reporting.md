@@ -376,8 +376,10 @@ of the group's principal) and `ageing` (per group and bucket: loans, principal o
 arrears). The figures come from the public `InsightsFigures` port (`lending.insights`), which holds only the PAR figures so far;
 slice D2 (issue #217) adds the others to it. A test asserts the report's principal outstanding, arrears, active loans and PAR 1,
 30, 60 and 90 equal the insights portfolio metrics for the same date. The restructured loan's separate line (FR-LCL-04) is not
-printed, because loans cannot be restructured yet. The tenant switch is the setting `reports_enabled` (chapter 6
-`tenant_settings`).
+printed, because loans cannot be restructured yet. The business date is the one of the request: a run asked for at 23:59 and executed after midnight still reads the loan tables as
+of the day it was asked for, not a snapshot that tonight's job has not written. The figures are totalled as the loans are read, in
+blocks, so memory grows with the number of groups, not of loans; a cancelled or timed out run stops within 1,000 loans. The tenant
+switch is the setting `reports_enabled` (chapter 6 `tenant_settings`), also in `GET /me`.
 
 ## 14.8 Test datasets
 

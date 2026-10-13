@@ -25,11 +25,6 @@ export interface ReportCatalogueEntry {
   params: ReportCatalogueParam[];
 }
 
-export interface ReportCatalogue {
-  enabled: boolean;
-  reports: ReportCatalogueEntry[];
-}
-
 export interface ReportRun {
   id: string;
   report_key: string;
@@ -111,8 +106,8 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }, fa
 export const OPEN_STATUSES = ['queued', 'running'];
 
 export const reports = {
-  async catalogue(): Promise<ReportCatalogue> {
-    return unwrap(await api.GET('/api/v1/reports'), 'Could not load the reports.') as ReportCatalogue;
+  async catalogue(): Promise<ReportCatalogueEntry[]> {
+    return unwrap(await api.GET('/api/v1/reports'), 'Could not load the reports.') as ReportCatalogueEntry[];
   },
 
   async runs(): Promise<ReportRun[]> {

@@ -301,6 +301,37 @@ class DocumentService implements Documents {
     }
 
     @Override
+    public GeneratedObject putFile(java.nio.file.Path file, String docType, String contentType, String extension) {
+        long size;
+        String digest;
+        try {
+            size = java.nio.file.Files.size(file);
+            if (size > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("A generated file is at most 2 GiB.");
+            }
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
+                byte[] block = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(block)) > 0) {
+                    md.update(block, 0, n);
+                }
+            }
+            digest = java.util.HexFormat.of().formatHex(md.digest());
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+        UUID id = UUID.randomUUID();
+        ZonedDateTime at = clock.now().atZone(ZoneOffset.UTC);
+        String key = "tenants/%s/%s/%04d/%02d/%s.%s"
+                .formatted(TenantContext.require(), docType, at.getYear(), at.getMonthValue(), id, extension);
+        storage.putFile(key, file, contentType);
+        return new GeneratedObject(id, key, docType, contentType, digest, (int) size);
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredDocument recordGenerated(
             GeneratedObject object, String docNumber, String subjectType, UUID subjectId, UUID branchId) {
@@ -353,12 +384,14 @@ class DocumentService implements Documents {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public void deleteReportObject(UUID documentId) {
-        var row = jdbc.sql("SELECT object_key, doc_type FROM documents WHERE id = ?")
+        // The lookup is its own short transaction and the storage call runs with none open, so a slow object store
+        // never
+        // holds a connection (the caller, the nightly expiry, calls this outside any transaction).
+        var row = ownTransaction.execute(s -> jdbc.sql("SELECT object_key, doc_type FROM documents WHERE id = ?")
                 .param(documentId)
                 .query((rs, n) -> new String[] {rs.getString("object_key"), rs.getString("doc_type")})
-                .optional();
+                .optional());
         if (row.isEmpty()) {
             return;
         }
@@ -450,6 +483,9 @@ class DocumentService implements Documents {
                     d.id(),
                     d.branchId(),
                     Map.of("subject_type", d.subjectType(), "subject_id", d.subjectId()))));
+            if (access.stream().anyMatch(a -> a.subjectType().equals(d.subjectType()) && a.hideDenial())) {
+                throw ApiException.notFound();
+            }
             throw new ApiException(
                     HttpStatus.FORBIDDEN,
                     "permission_denied",

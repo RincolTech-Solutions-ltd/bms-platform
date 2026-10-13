@@ -4,7 +4,7 @@ import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { runErrorText, type ReportCatalogueEntry, type ReportRun } from '../../../api/reports';
 import { CatalogueList, RunsTable, paramLabel, sizeText } from './page';
-import { canSwitchReportsOn, showReports } from './permissions';
+import { showReports } from './permissions';
 
 const renderToString = (node: ReactElement) =>
   render(<QueryClientProvider client={new QueryClient()}>{node}</QueryClientProvider>).replaceAll('<!-- -->', '');
@@ -49,16 +49,17 @@ const run = (over: Partial<ReportRun>): ReportRun => ({
 });
 
 describe('who sees the Reports tab', () => {
-  it('needs lending and a report permission', () => {
-    expect(showReports({ permissions: ['lending.reports.portfolio'], modules: ['lending'] })).toBe(true);
-    expect(showReports({ permissions: ['lending.reports.compliance'] })).toBe(true);
-    expect(showReports({ permissions: ['lending.members.read'], modules: ['lending'] })).toBe(false);
-    expect(showReports({ permissions: ['lending.reports.portfolio'], modules: ['retail'] })).toBe(false);
+  it('needs lending, the tenant switch and a report permission', () => {
+    const on = { reports_enabled: true, modules: ['lending'] };
+    expect(showReports({ permissions: ['lending.reports.portfolio'], ...on })).toBe(true);
+    expect(showReports({ permissions: ['lending.reports.compliance'], reports_enabled: true })).toBe(true);
+    expect(showReports({ permissions: ['lending.members.read'], ...on })).toBe(false);
+    expect(showReports({ permissions: ['lending.reports.portfolio'], reports_enabled: true, modules: ['retail'] })).toBe(false);
   });
 
-  it('offers the switch only to a user who manages the settings', () => {
-    expect(canSwitchReportsOn({ permissions: ['core.settings.manage'] })).toBe(true);
-    expect(canSwitchReportsOn({ permissions: ['lending.reports.portfolio'] })).toBe(false);
+  it('hides the tab while the tenant has not switched reports on, whatever the user holds', () => {
+    expect(showReports({ permissions: ['lending.reports.portfolio'], reports_enabled: false, modules: ['lending'] })).toBe(false);
+    expect(showReports({ permissions: ['lending.reports.portfolio'], modules: ['lending'] })).toBe(false);
   });
 });
 

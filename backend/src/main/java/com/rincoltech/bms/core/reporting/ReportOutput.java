@@ -22,6 +22,13 @@ public interface ReportOutput {
     /** Rows written so far, over every table. */
     long rows();
 
+    /**
+     * Throws when the run has been cancelled or is over time. A report that reads for a long time before it writes its
+     * first row (a total over a whole book) calls it between blocks of its reading, so a stop is not delayed until the
+     * first row.
+     */
+    void checkpoint();
+
     interface Table {
 
         /**

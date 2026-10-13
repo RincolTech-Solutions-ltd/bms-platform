@@ -62,7 +62,12 @@ public final class ReportMemoryMain {
                     new Ask("lending.par", Map.of("group_by", "branch"), "json"),
                     // The largest table the staging cap allows, in both formats.
                     new Ask("test.rows", Map.of("n", 20_000), "json"),
-                    new Ask("test.rows", Map.of("n", 20_000), "csv"));
+                    new Ask("test.rows", Map.of("n", 20_000), "csv"),
+                    // Files at the staging size cap (8 MiB): 20,000 rows of 360 characters make about 7.4 MB, uploaded
+                    // from
+                    // the file and never held in memory.
+                    new Ask("test.fat", Map.of("n", 20_000), "json"),
+                    new Ask("test.fat", Map.of("n", 20_000), "csv"));
             List<UUID> ids = new ArrayList<>();
             for (Ask ask : asks) {
                 ids.add(jobs.callAs(

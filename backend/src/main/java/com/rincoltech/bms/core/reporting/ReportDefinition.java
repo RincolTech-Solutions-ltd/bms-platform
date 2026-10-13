@@ -57,6 +57,15 @@ public interface ReportDefinition {
     Prepared prepare(Map<String, Object> params);
 
     /**
+     * Download time, with the downloader signed in: may they still have a file made under {@code run}'s frozen scope?
+     * A report whose scope depends on the requester's branches or officers answers false when their access is now
+     * narrower than the scope the file was made under. The default is true (a report with no such scope).
+     */
+    default boolean stillAllowed(Prepared run) {
+        return true;
+    }
+
+    /**
      * Job time, in the snapshot transaction. Reads the data and writes it to the output. Throws a
      * {@link ReportFailure} or an {@code ApiException} with a stable code for a failure the user should
      * understand; any other exception is reported as {@code run_failed} and logged without its message.

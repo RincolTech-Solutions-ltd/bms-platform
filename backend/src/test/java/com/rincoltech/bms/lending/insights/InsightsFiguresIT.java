@@ -97,7 +97,7 @@ class InsightsFiguresIT extends IntegrationTest {
         PortfolioScope scope =
                 tenantJobs.callAs(a.tenantId(), () -> inTx(() -> figures.scope(asAt, asAt, branches, null, null)));
         CurrentPrincipal.clear();
-        return tenantJobs.callAs(a.tenantId(), () -> figures.par(scope, by));
+        return tenantJobs.callAs(a.tenantId(), () -> figures.par(scope, by, () -> {}));
     }
 
     private <T> T inTx(java.util.function.Supplier<T> work) {
@@ -242,13 +242,15 @@ class InsightsFiguresIT extends IntegrationTest {
                 empty.tenantId(),
                 () -> inTx(() -> figures.scope(TODAY.minusDays(3), TODAY.minusDays(3), List.of(), null, null)));
         CurrentPrincipal.clear();
-        assertThatThrownBy(() -> tenantJobs.callAs(empty.tenantId(), () -> figures.par(scope, ParGroupBy.NONE)))
+        assertThatThrownBy(
+                        () -> tenantJobs.callAs(empty.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {})))
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
         // Today is always live, even with no loans: zeros and no ratios.
         ParFigures today = tenantJobs.callAs(
                 empty.tenantId(),
-                () -> figures.par(new PortfolioScope(TODAY, TODAY, null, null, null), ParGroupBy.NONE));
+                () -> figures.par(
+                        new PortfolioScope(TODAY, TODAY, TODAY, null, null, null), ParGroupBy.NONE, () -> {}));
         assertThat(today.source()).isEqualTo("live");
         assertThat(today.total().loans()).isZero();
         assertThat(today.total().par1Bp()).isNull();
@@ -279,8 +281,79 @@ class InsightsFiguresIT extends IntegrationTest {
         // The result is a plain value: reading with it needs no principal.
         CurrentPrincipal.clear();
         assertThat(tenantJobs
-                        .callAs(a.tenantId(), () -> figures.par(own, ParGroupBy.NONE))
+                        .callAs(a.tenantId(), () -> figures.par(own, ParGroupBy.NONE, () -> {}))
                         .total())
                 .isNotNull();
+    }
+
+    // JUSTIFICATION-A3: new test cases for the checkpoint, the frozen business date and covers(), no existing case
+    // does.
+    @Test
+    void theCheckpointIsCalledWhileTheLoansAreReadAndCanStopTheRead() {
+        // The seeded book has far fewer than 1,000 loans, so the checkpoint runs at the start and the end of the read.
+        int[] calls = {0};
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
+        PortfolioScope scope =
+                tenantJobs.callAs(a.tenantId(), () -> inTx(() -> figures.scope(TODAY, TODAY, List.of(), null, null)));
+        CurrentPrincipal.clear();
+        tenantJobs.callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> calls[0]++));
+        assertThat(calls[0]).isGreaterThanOrEqualTo(2);
+        // A checkpoint that throws ends the read at once: that is how a cancelled run stops.
+        assertThatThrownBy(() -> tenantJobs.callAs(
+                        a.tenantId(),
+                        () -> figures.par(scope, ParGroupBy.NONE, () -> {
+                            throw new IllegalStateException("stop");
+                        })))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("stop");
+    }
+
+    @Test
+    void aScopeIsReadOnTheBusinessDateItWasResolvedOn() {
+        // Resolved on 2026-10-08 and read much later: still "today" for that scope, so the live tables, not a snapshot.
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
+        PortfolioScope scope =
+                tenantJobs.callAs(a.tenantId(), () -> inTx(() -> figures.scope(null, null, List.of(), null, null)));
+        CurrentPrincipal.clear();
+        assertThat(scope.today()).isEqualTo(TODAY);
+        assertThat(scope.to()).isEqualTo(TODAY);
+        assertThat(tenantJobs
+                        .callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {}))
+                        .source())
+                .isEqualTo("live");
+    }
+
+    @Test
+    void aCallerCoversTheScopeOnlyWhileTheirAccessIsAsWideAsTheScope() {
+        UUID north = model.loans.values().stream()
+                .map(Loan::branch)
+                .distinct()
+                .filter(b -> !b.equals(a.headOffice()))
+                .findFirst()
+                .orElseThrow();
+        PortfolioScope everyBranch = new PortfolioScope(TODAY, TODAY, TODAY, null, null, null);
+        PortfolioScope northOnly = new PortfolioScope(TODAY, TODAY, TODAY, List.of(north), null, null);
+        PortfolioScope nobody = new PortfolioScope(TODAY, TODAY, TODAY, List.of(), null, null);
+        UUID me = UUID.randomUUID();
+
+        CurrentPrincipal.set(user(me, ALL, null));
+        assertThat(figures.covers(everyBranch)).isTrue();
+        assertThat(figures.covers(northOnly)).isTrue();
+        CurrentPrincipal.set(user(me, ALL, Set.of(north)));
+        assertThat(figures.covers(everyBranch)).as("narrower now than the file").isFalse();
+        assertThat(figures.covers(northOnly)).isTrue();
+        assertThat(figures.covers(nobody)).isTrue();
+        CurrentPrincipal.set(user(me, ALL, Set.of(a.headOffice())));
+        assertThat(figures.covers(northOnly)).as("a different branch now").isFalse();
+        // The officer: a file made for everyone's loans is not for a caller who now sees only their own.
+        CurrentPrincipal.set(user(me, Set.of("lending.insights.read"), null));
+        assertThat(figures.covers(everyBranch)).isFalse();
+        assertThat(figures.covers(new PortfolioScope(TODAY, TODAY, TODAY, null, me, null)))
+                .isTrue();
+        assertThat(figures.covers(new PortfolioScope(TODAY, TODAY, TODAY, null, UUID.randomUUID(), null)))
+                .isFalse();
+        // No insights access at all.
+        CurrentPrincipal.set(user(me, Set.of("lending.reports.portfolio"), null));
+        assertThat(figures.covers(everyBranch)).isFalse();
     }
 }

@@ -6450,6 +6450,8 @@ export interface components {
             };
             permissions?: string[];
             phone_e164?: string;
+            /** @description True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then */
+            reports_enabled?: boolean;
             roles?: components["schemas"]["RoleAssignment"][];
             /** @description Guided tours the user finished or dismissed, by tour id (issue #19) */
             tours?: {
@@ -6777,11 +6779,6 @@ export interface components {
             balances?: components["schemas"]["LoanBalances"];
             loan_status?: string;
             transaction?: components["schemas"]["LoanTransaction"];
-        };
-        ReportCatalogue: {
-            /** @description False while the tenant has not switched report runs on; the list is then empty */
-            enabled?: boolean;
-            reports?: components["schemas"]["ReportCatalogueEntry"][];
         };
         ReportCatalogueEntry: {
             description?: string;
@@ -15827,7 +15824,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReportCatalogue"];
+                    "application/json": components["schemas"]["ReportCatalogueEntry"][];
                 };
             };
         };

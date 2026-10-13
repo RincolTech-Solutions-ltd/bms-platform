@@ -4380,6 +4380,10 @@
           "phone_e164" : {
             "type" : "string"
           },
+          "reports_enabled" : {
+            "description" : "True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then",
+            "type" : "boolean"
+          },
           "roles" : {
             "items" : {
               "$ref" : "#/components/schemas/RoleAssignment"
@@ -5186,20 +5190,6 @@
           },
           "transaction" : {
             "$ref" : "#/components/schemas/LoanTransaction"
-          }
-        }
-      },
-      "ReportCatalogue" : {
-        "properties" : {
-          "enabled" : {
-            "description" : "False while the tenant has not switched report runs on; the list is then empty",
-            "type" : "boolean"
-          },
-          "reports" : {
-            "items" : {
-              "$ref" : "#/components/schemas/ReportCatalogueEntry"
-            },
-            "type" : "array"
           }
         }
       },
@@ -21234,7 +21224,10 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ReportCatalogue"
+                  "items" : {
+                    "$ref" : "#/components/schemas/ReportCatalogueEntry"
+                  },
+                  "type" : "array"
                 }
               }
             },

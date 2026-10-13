@@ -37,18 +37,33 @@ public interface InsightsFigures {
     PortfolioScope scope(LocalDate from, LocalDate to, List<UUID> branchIds, UUID officerId, UUID productId);
 
     /**
-     * Portfolio at risk and ageing as at {@code scope.to()} (chapter 14 section 14.3, {@code lending.par}):
-     * live loan tables for the business date, the nightly snapshot for a past one. Runs in the caller's
-     * transaction, which should be read only. Refuses with 422 {@code snapshot_unavailable} when a past date
-     * has no snapshot.
+     * Portfolio at risk and ageing as at {@code scope.to()} (chapter 14 section 14.3, {@code lending.par}): the live loan
+     * tables when {@code to} is the scope's business date, the nightly snapshot for an earlier one. Runs in the caller's
+     * transaction, which should be read only. Refuses with 422 {@code snapshot_unavailable} when a past date has no
+     * snapshot.
+     *
+     * <p>The loans are read in blocks and totalled as they arrive, so memory grows with the number of groups and never
+     * with the number of loans; {@code checkpoint} is called every 1,000 loans, so a caller can stop a long read (a
+     * cancelled or timed out run) by throwing from it.
      */
-    ParFigures par(PortfolioScope scope, ParGroupBy groupBy);
+    ParFigures par(PortfolioScope scope, ParGroupBy groupBy, Runnable checkpoint);
 
     /**
-     * A resolved filter: a date range (inclusive; the figures that are as-at read {@code to}), the branches
-     * (null for every branch, an empty list for none), the responsible officer and the product.
+     * True when the signed-in caller could still ask for everything {@code scope} covers: they still hold
+     * {@code lending.insights.read}, every branch the scope names is still in their branches (all branches when the
+     * scope names none), and the loans of every officer the scope covers are still theirs to see. A report file made
+     * under a wider scope than the caller has now is not theirs to download.
      */
-    record PortfolioScope(LocalDate from, LocalDate to, List<UUID> branchIds, UUID officerId, UUID productId) {
+    boolean covers(PortfolioScope scope);
+
+    /**
+     * A resolved filter: a date range (inclusive; the figures that are as-at read {@code to}), the business date it was
+     * resolved on ({@code today}: a run queued at 23:59 and executed after midnight still reads the loan tables as
+     * "today", not a snapshot that tonight's job has not written), the branches (null for every branch, an empty list for
+     * none), the responsible officer and the product.
+     */
+    record PortfolioScope(
+            LocalDate from, LocalDate to, LocalDate today, List<UUID> branchIds, UUID officerId, UUID productId) {
 
         public PortfolioScope {
             branchIds = branchIds == null ? null : List.copyOf(branchIds);

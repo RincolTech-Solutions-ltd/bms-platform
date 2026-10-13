@@ -257,7 +257,9 @@ Notes:
   Built (extras slice D1, issue #214): report runs add no permission and no seeded row (the matrix and the seeds are unchanged;
   `PermissionMatrixIT` still compares them). `POST /report-runs` is open to signed-in staff and the service checks the report's own
   permission, because the permission belongs to the report, not to the route; a run is read by its requester or a holder of
-  `core.audit.read`, and its file by its requester alone, only while they still hold the report's permission. The branch and
+  `core.audit.read`, and its file by its requester alone, judged when it is asked for: while reports are on, while they still hold the
+  report's permission, and while their branches and officers still cover the frozen scope (a user moved from all branches to one
+  cannot keep downloading the tenant-wide file); every refusal is 404. The branch and
   officer scope is resolved from the requester's permissions when the run is queued and stored on the run, so the job that executes
   it (no signed-in user) can neither widen nor lose it; `lending.par` takes it from the insights module, the same code as the
   insights endpoints, and needs `lending.insights.read` as well. Report runs are off until a tenant administrator sets

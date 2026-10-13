@@ -40,6 +40,8 @@ class RunStore {
             Instant startedAt,
             Instant finishedAt,
             Instant cancelRequestedAt,
+            String owner,
+            Instant heartbeatAt,
             UUID documentId,
             Integer rowCount,
             Long sizeBytes,
@@ -54,7 +56,8 @@ class RunStore {
 
     private static final String COLUMNS = """
             id, report_key, params::text AS params, scope::text AS scope, format, status, requested_by, as_of,
-            snapshot_at, created_at, started_at, finished_at, cancel_requested_at, document_id, row_count, size_bytes,
+            snapshot_at, created_at, started_at, finished_at, cancel_requested_at, owner, heartbeat_at, document_id,
+            row_count, size_bytes,
             row_cap, size_cap_bytes, error, expires_at, files_deleted_at
             """;
 
@@ -83,6 +86,8 @@ class RunStore {
                 instant(rs, "started_at"),
                 instant(rs, "finished_at"),
                 instant(rs, "cancel_requested_at"),
+                rs.getString("owner"),
+                instant(rs, "heartbeat_at"),
                 rs.getObject("document_id", UUID.class),
                 rs.getObject("row_count", Integer.class),
                 rs.getObject("size_bytes", Long.class),
@@ -144,6 +149,14 @@ class RunStore {
                 == 1;
     }
 
+    /** Serialises the requests of one requester until the transaction ends (the tenant is part of the key). */
+    void lockRequester(UUID requestedBy) {
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ?, 0))")
+                .param(requestedBy.toString())
+                .query((rs, n) -> 1)
+                .single();
+    }
+
     Optional<Run> findOpenByHash(UUID requestedBy, String paramsHash) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM report_runs WHERE requested_by = ? AND params_hash = ?"
                         + " AND status IN ('queued', 'running')")
@@ -190,7 +203,7 @@ class RunStore {
      * {@code report_runs_one_running} backs it, and a lost race surfaces as a duplicate key for the caller to
      * treat as "nothing claimed".
      */
-    Optional<Run> claimNext(Instant now) {
+    Optional<Run> claimNext(Instant now, String owner) {
         Optional<UUID> id = jdbc.sql("""
                         SELECT r.id FROM report_runs r
                          WHERE r.status = 'queued'
@@ -201,9 +214,10 @@ class RunStore {
         if (id.isEmpty()) {
             return Optional.empty();
         }
-        jdbc.sql("UPDATE report_runs SET status = 'running', started_at = ?, updated_at = ? WHERE id = ?")
-                .params(ts(now), ts(now), id.get())
-                .update();
+        jdbc.sql("""
+                        UPDATE report_runs SET status = 'running', started_at = ?, heartbeat_at = ?, owner = ?,
+                                               updated_at = ? WHERE id = ?
+                        """).params(ts(now), ts(now), owner, ts(now), id.get()).update();
         return find(id.get());
     }
 
@@ -258,16 +272,34 @@ class RunStore {
                 .orElse(true);
     }
 
-    /** Fails every run of this tenant that started before the cutoff and is still running; returns their ids. */
-    List<UUID> failStale(Instant cutoff, Instant now) {
+    /** Says a run is still alive; false when it is no longer running (cancelled or failed from outside). */
+    boolean heartbeat(UUID id, Instant now) {
+        return jdbc.sql("UPDATE report_runs SET heartbeat_at = ? WHERE id = ? AND status = 'running'")
+                        .params(ts(now), id)
+                        .update()
+                == 1;
+    }
+
+    /**
+     * Fails every run of this tenant whose process is gone: no heartbeat since the cutoff, or claimed by an earlier
+     * process of this host (see {@code app_tenants_with_stale_report_runs}); returns their ids.
+     */
+    List<UUID> failStale(Instant cutoff, String hostPrefix, String owner, Instant now) {
         return jdbc.sql("""
                         UPDATE report_runs SET status = 'failed', error = 'interrupted', finished_at = ?, updated_at = ?
-                         WHERE status = 'running' AND started_at < ?
+                         WHERE status = 'running'
+                           AND (coalesce(heartbeat_at, started_at) < ?
+                                OR (CAST(? AS text) IS NOT NULL AND owner LIKE CAST(? AS text) || '/%' AND owner <> ?))
                         RETURNING id
                         """)
-                .params(ts(now), ts(now), ts(cutoff))
+                .params(ts(now), ts(now), ts(cutoff), hostPrefix, hostPrefix, owner)
                 .query(UUID.class)
                 .list();
+    }
+
+    /** Fails one run this process was executing when it was told to stop; false when it had already ended. */
+    boolean failInterrupted(UUID id, Instant now) {
+        return markFailed(id, "interrupted", now);
     }
 
     // ---- expiry -------------------------------------------------------------------------------

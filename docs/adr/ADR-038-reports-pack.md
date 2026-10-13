@@ -127,8 +127,9 @@ Building the framework settled five things the first text left open. None revers
 
 1. **The scope is frozen when the run is queued.** A run executes in a job, where no user is signed in, so the branches and the
    officer a report may read cannot be resolved there. They are resolved in the request, by the code that already resolves them
-   for the insights page, and stored on the run (`report_runs.scope`); the job reads only from the stored scope and never holds
-   a principal, so it can neither widen nor lose what the requester could see. Decision 3 becomes a two step port:
+   for the insights page, and stored on the run (`report_runs.scope`) with the business date of the request (`PortfolioScope.today`, so a run asked for at 23:59 and executed after midnight
+   still reads the loan tables of the day it was asked for and does not fail for a snapshot that tonight's job has not written); the job reads only from
+   the stored scope and never holds a principal, so it can neither widen nor lose what the requester could see. Decision 3 becomes a two step port:
    `InsightsFigures.scope(...)` runs in the request, with the principal, and returns a plain `PortfolioScope`; `InsightsFigures.par(...)`
    (and, with slice D2, the other figures) runs in the run's transaction from that value alone. A caller without
    `lending.insights.read` is refused at the first step. The requester's deactivation between queuing and running ends the run
@@ -147,9 +148,17 @@ Building the framework settled five things the first text left open. None revers
    query transaction lifts the connection's 60 second statement and idle-in-transaction limits to the run's remaining time (with a
    margin, so the application's own deadline fires first and the run ends with `timeout`); every timestamp is written from the
    business clock so a test can pin it. Concurrency is counted in the database (a read-only definer function), so the limit holds
-   across API instances, and a run left `running` by a process that died is failed as `interrupted`.
+   across API instances, and a run left `running` by a process that died is failed as `interrupted`: every run is stamped with its process and beaten every 10
+   seconds, a run with no beat for a minute is failed by the next runner tick, a run left by an earlier process of the same host is failed
+   by the first tick of its replacement, and a clean stop interrupts the workers and gives them 15 seconds, so a deploy never blocks the
+   one place of the staging host for the length of a timeout. The figures of the port are totalled as the loans arrive in blocks (memory
+   by group, not by loan) and call a checkpoint every 1,000 loans, so a cancel or a timeout does not wait for the first row. The repeat
+   check precedes the rate limit, and the limit is counted under a lock per requester.
 5. **Files, access and expiry.** The file of a run is a `documents` row of type `report` whose subject is the run; only the
-   requester, and only while they hold the report's permission, may fetch it (an auditor may read the status, not the file). The
+   requester may fetch it, judged when it is asked for: reports must still be on, they must still hold the report's permission, and
+   their branches and officers must still cover the frozen scope (`InsightsFigures.covers`); every refusal is 404, not 403, so a run is
+   not even known to anyone else (an auditor may read the status, not the file). The output is uploaded from the file on disk, never held
+   in memory (`Documents.putFile(Path, ...)`, `RequestBody.fromFile`). The
    nightly expiry deletes the object through a narrow `Documents` method that refuses any other document type, and marks the run;
    the row stays and a download answers 410 `report_expired`. The in-app notice of decision 7 is the screen's own refresh of the
    run list while any run is open; e-mail notice is left to the report centre (slice D5).

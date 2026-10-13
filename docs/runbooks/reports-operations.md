@@ -27,10 +27,10 @@ past `expires_at` and sets `files_deleted_at`. The `documents` row and the run r
 
 ## Switching it on for a tenant
 
-Report runs are off for every tenant until its administrator turns them on: the Reports page offers "Switch reports on" to a user
-with `core.settings.manage`, or `PATCH /api/v1/settings` with `{"reports_enabled": true}` and the current `If-Match`. The change is
-audited (`core.settings.updated`, with the old and new value). Turning it off again hides the catalogue, makes every run route answer
-404 `reports_not_enabled`, and fails any run still queued with `reports_disabled`; files already made stay until they expire.
+Report runs are off for every tenant until its administrator turns them on: the "Reports" box in Business set-up (a user with
+`core.settings.manage`), or `PATCH /api/v1/settings` with `{"reports_enabled": true}` and the current `If-Match`. The change is
+audited (`core.settings.updated`, with the old and new value). Turning it off again hides the Reports tab (`GET /me` says `reports_enabled: false`), makes the catalogue and every run route answer
+404 `reports_not_enabled`, stops every file download (404), and fails any run still queued with `reports_disabled`; files already made stay until they expire.
 
 ## The limits
 
@@ -69,13 +69,17 @@ SELECT error, count(*), max(finished_at) FROM report_runs
 | `report_too_large` | A table passed the row cap or the file passed the byte cap | Ask for fewer branches or a shorter range; raise the cap only if the host can hold it |
 | `snapshot_unavailable` | A past date has no nightly snapshot | The snapshot job (`lending.insights-snapshot`) has not written that date; ask for a later date, or check the job |
 | `timeout` | The run passed 10 minutes | Narrow the report; for a big book measure the query (`EXPLAIN` it as the owner) before raising the timeout |
-| `interrupted` | The process holding the run died (a restart, a kill, out of memory) | Run it again. The runner fails any run left `running` past the timeout plus two minutes |
+| `interrupted` | The process holding the run died or was stopped (a restart, a kill, out of memory) | Run it again. The runner fails any run whose heartbeat is a minute old, or which an earlier process of the host left |
 | `reports_disabled` | The tenant switched reports off before the run started | Switch them on and ask again |
 | `requester_deactivated` | The user was deactivated before the run started | None needed |
 | `run_failed` | An unexpected error | Find the line `report run <id> failed:` in the API log: it names the exception classes, the first application frame and, for a database error, the SQLSTATE, never a message or a value. Fix the cause; the user can ask again |
 
-A run `running` for more than about 12 minutes is not being worked on: the next runner tick fails it as `interrupted` and frees the
-tenant. To stop a healthy run, the requester cancels it in the Reports page (or `POST /report-runs/{id}/cancel`); the worker notices at
+Every run is stamped with the process that holds it (`report_runs.owner`, `host/instance`) and beaten every 10 seconds
+(`heartbeat_at`). A run with no beat for a minute is not being worked on: the next runner tick fails it as `interrupted` and frees the
+tenant, and the first tick of a process on a host fails at once the runs an earlier process of that host left, so a deploy on the
+staging Pi does not block its one place for the length of a timeout. A clean stop (a restart) interrupts the workers, gives them 15
+seconds to close their runs, and fails the rest itself. The properties are `bms.reports.heartbeat` (PT10S) and
+`bms.reports.heartbeat-stale` (PT1M); one API process per host is assumed. To stop a healthy run, the requester cancels it in the Reports page (or `POST /report-runs/{id}/cancel`); the worker notices at
 its next checkpoint, within a few seconds. An operator who must end one now can do it as the owner:
 
 ```sql
@@ -95,7 +99,7 @@ own clean-up removes and a restart sweeps.
 Files live in object storage under `tenants/<tenant id>/report/<year>/<month>/<id>.json` or `.csv`, as documents of type `report`
 whose subject is the run (`core.report_run`). They contain figures and, for reports that list members, names: they are fetched only
 through the 5 minute signed URL of `POST /documents/{id}/download-url`, by the requester, and each issue is audited. If storage fills,
-reduce `bms.reports.retention-days` and let the nightly job catch up (500 runs per tenant per night), or delete objects by key for
+reduce `bms.reports.retention-days` and let the nightly job catch up (2,000 runs per tenant per night, in batches of 50, storage called with no transaction open), or delete objects by key for
 `documents` rows of type `report` older than the retention; leave the rows.
 
 ## What to watch (chapter 9 section 9.11)

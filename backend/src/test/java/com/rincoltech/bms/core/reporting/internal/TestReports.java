@@ -28,6 +28,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * fabricated. They are registered through the same {@link ReportDefinition} bean contract as {@code lending.par}.
  */
 @TestConfiguration
+@org.springframework.context.annotation.Import(com.rincoltech.bms.core.documents.internal.WatchedStorage.Config.class)
 public class TestReports {
 
     /** 2026-10-08 10:00 UTC, 13:00 in Kampala. */
@@ -233,6 +234,65 @@ public class TestReports {
                 for (int i = 0; i < 3; i++) {
                     t.row(filler);
                 }
+            }
+        };
+    }
+
+    // JUSTIFICATION-A3: new synthetic reports and a watched storage; the existing ones cannot show a snapshot or an
+    // upload.
+
+    /** Rows of 360 characters: {@code n} of them make a file near the staging size cap of 8 MiB (20,000 make about 7.6 MB). */
+    @Bean
+    ReportDefinition fatReport(BusinessClock clock) {
+        return new Base("test.fat", "lending", clock) {
+            @Override
+            public void query(Prepared prepared, ReportOutput out) {
+                ReportOutput.Table t = out.table(
+                        "fat",
+                        "Fat",
+                        List.of(new Column("id", "Number", Kind.COUNT), new Column("text", "Text", Kind.TEXT)));
+                String filler = "y".repeat(360);
+                for (int i = 1; i <= n(prepared); i++) {
+                    t.row(i, filler);
+                }
+            }
+        };
+    }
+
+    /** Released by the test to let {@code test.snapshot} read its second count. */
+    public static volatile CountDownLatch snapshotGo = new CountDownLatch(0);
+
+    /** Counts down when {@code test.snapshot} has read its first count. */
+    public static volatile CountDownLatch snapshotMid = new CountDownLatch(1);
+
+    /** Reads the tenant's branch count twice with a committed write by the test in between: one snapshot sees equal counts. */
+    @Bean
+    ReportDefinition snapshotReport(BusinessClock clock, JdbcClient jdbc) {
+        return new Base("test.snapshot", "lending", clock) {
+            @Override
+            public void query(Prepared prepared, ReportOutput out) {
+                long first = jdbc.sql("SELECT count(*) FROM branches")
+                        .query(Long.class)
+                        .single();
+                snapshotMid.countDown();
+                try {
+                    if (!snapshotGo.await(60, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("the test never let the run go on");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+                long second = jdbc.sql("SELECT count(*) FROM branches")
+                        .query(Long.class)
+                        .single();
+                out.table(
+                                "counts",
+                                "Counts",
+                                List.of(
+                                        new Column("first", "First", Kind.COUNT),
+                                        new Column("second", "Second", Kind.COUNT)))
+                        .row(first, second);
             }
         };
     }

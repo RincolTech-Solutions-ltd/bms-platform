@@ -554,7 +554,8 @@ officer the requester could see when the run was queued, frozen: the job has no 
 [`json`, `csv`, `pdf`, `xlsx`, `pack`; slice D1 runs `json` and `csv`], `status text NOT NULL` [`queued`, `running`, `ready`,
 `failed`, `cancelled`], `requested_by uuid NOT NULL`, `as_of date NOT NULL` (the business date the figures stand at),
 `snapshot_at timestamptz` (the database's start time of the query transaction, set when the query phase has committed),
-`started_at`, `finished_at`, `cancel_requested_at` (a running run asked to stop), `document_id uuid` (the stored file; composite
+`started_at`, `finished_at`, `cancel_requested_at` (a running run asked to stop), `owner text` (the process that claimed
+the run, `host/instance`) and `heartbeat_at timestamptz` (when that process last said the run was alive), `document_id uuid` (the stored file; composite
 foreign key to `documents`), `row_count integer`, `size_bytes bigint`, `row_cap integer NOT NULL` and `size_cap_bytes bigint
 NOT NULL` (the limits the run was queued under; the run applies the smaller of these and the limits in force when it
 executes), `error text` (a stable code, never a message: `report_too_large`, `snapshot_unavailable`, `timeout`, `interrupted`,
@@ -565,7 +566,9 @@ run per tenant (`report_runs_one_running`) and one open run per tenant, requeste
 (`report_runs_dedupe`, over `queued` and `running`), so two identical requests give one run even when they arrive together.
 `bms_app` holds SELECT, INSERT and UPDATE; a row is never deleted. Slice D2 adds `pdf_document_id` and `xlsx_document_id` for
 the pack. Three read-only `SECURITY DEFINER` functions let the runner see across tenants without reading any run's content:
-`app_count_running_report_runs()`, `app_tenants_with_queued_report_runs()` and `app_tenants_with_stale_report_runs(cutoff)`.
+`app_count_running_report_runs()`, `app_tenants_with_queued_report_runs()` and
+`app_tenants_with_stale_report_runs(cutoff, host_prefix, owner)`, which names the tenants with a running run whose heartbeat
+(or start, if it never beat) is older than the cutoff, or which an earlier process of the same host claimed.
 
 ### `payment_methods` (RLS)
 

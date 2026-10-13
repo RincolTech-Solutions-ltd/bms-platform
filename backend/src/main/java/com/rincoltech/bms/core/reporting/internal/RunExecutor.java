@@ -186,8 +186,12 @@ class RunExecutor {
             // A rule the report states in its own words and with a stable code; the code is all that is kept.
             end(run, e.code().matches("^[a-z][a-z0-9_]{2,60}$") ? e.code() : "run_failed", false);
         } catch (Throwable t) {
-            log.error("report run {} failed: {}", runId, describe(t));
-            end(run, timedOut(t) ? "timeout" : "run_failed", false);
+            // A thread that was interrupted (the process is stopping) did not fail by its own fault.
+            boolean stopping = Thread.currentThread().isInterrupted();
+            if (!stopping) {
+                log.error("report run {} failed: {}", runId, describe(t));
+            }
+            end(run, timedOut(t) ? "timeout" : stopping ? "interrupted" : "run_failed", false);
         } finally {
             spool.delete();
         }
@@ -260,13 +264,15 @@ class RunExecutor {
 
     /** Stores the file with no transaction open, then records it and marks the run ready in one short one. */
     private void finish(Run run, ReportDefinition def, Queried q, Rendered rendered) {
-        byte[] bytes;
+        // Uploaded from the file: the output is never held in memory (the size cap bounds the disk, not the heap).
+        long size;
         try {
-            bytes = Files.readAllBytes(rendered.file());
+            size = Files.size(rendered.file());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        GeneratedObject object = documents.putFile(bytes, "report", rendered.contentType(), rendered.extension());
+        GeneratedObject object =
+                documents.putFile(rendered.file(), "report", rendered.contentType(), rendered.extension());
         boolean recorded = false;
         try {
             Instant now = clock.now();
@@ -274,12 +280,7 @@ class RunExecutor {
                 StoredDocument doc =
                         documents.recordGenerated(object, null, SUBJECT, run.id(), null, run.requestedBy());
                 boolean marked = store.markReady(
-                        run.id(),
-                        doc.id(),
-                        (int) q.rows(),
-                        bytes.length,
-                        now,
-                        now.plus(Duration.ofDays(limits.retentionDays)));
+                        run.id(), doc.id(), (int) q.rows(), size, now, now.plus(Duration.ofDays(limits.retentionDays)));
                 if (!marked) {
                     s.setRollbackOnly();
                     return false;
@@ -289,7 +290,7 @@ class RunExecutor {
                 after.put("format", run.format());
                 after.put("as_of", run.asOf().toString());
                 after.put("row_count", q.rows());
-                after.put("size_bytes", bytes.length);
+                after.put("size_bytes", size);
                 audit.record(
                         AuditLog.Entry.created(AUDIT_FINISHED, RunService.ENTITY, run.id(), null, after),
                         run.requestedBy(),
@@ -300,7 +301,7 @@ class RunExecutor {
             if (!recorded) {
                 throw new Cancelled();
             }
-            log.info("report run {} of {} ready: {} rows, {} bytes", run.id(), def.key(), q.rows(), bytes.length);
+            log.info("report run {} of {} ready: {} rows, {} bytes", run.id(), def.key(), q.rows(), size);
         } finally {
             if (!recorded) {
                 documents.discardGenerated(object);
@@ -310,6 +311,8 @@ class RunExecutor {
 
     /** Ends a run that did not finish: failed with a code, or cancelled; audited. */
     private void end(Run run, String errorCode, boolean cancelled) {
+        // A worker stopped by an interrupt still has its flag set, and a pooled connection cannot be taken with it set.
+        boolean interrupted = Thread.interrupted();
         try {
             plain.executeWithoutResult(s -> {
                 Instant now = clock.now();
@@ -336,6 +339,10 @@ class RunExecutor {
         } catch (RuntimeException e) {
             // The row stays running until the abandoned-run sweep fails it as interrupted.
             log.error("report run {} could not be closed: {}", run.id(), describe(e));
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

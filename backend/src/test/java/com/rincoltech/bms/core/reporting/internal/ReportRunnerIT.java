@@ -39,7 +39,8 @@ import tools.jackson.databind.ObjectMapper;
             "bms.reports.timeout=PT2S",
             "bms.reports.xlsx-row-cap=500",
             "bms.reports.max-file-bytes=1048576",
-            "bms.reports.cancel-poll=PT0.2S"
+            "bms.reports.cancel-poll=PT0.2S",
+            "bms.reports.heartbeat=PT0.1S"
         })
 @ExtendWith(OutputCaptureExtension.class)
 class ReportRunnerIT extends ReportsItSupport {
@@ -135,10 +136,13 @@ class ReportRunnerIT extends ReportsItSupport {
         UUID ua = UUID.randomUUID();
         UUID ub = UUID.randomUUID();
         TestReports.gate = new CountDownLatch(1);
+        // A asked a minute before B (the clock is ours), so A is the oldest and starts first.
+        clock.set(TestReports.START.minusSeconds(60));
         String idA = post(a, ua, PORTFOLIO, "test.gate", Map.of(), "json")
                 .getBody()
                 .get("id")
                 .asString();
+        clock.set(TestReports.START);
         String idB = post(b, ub, PORTFOLIO, "test.rows", Map.of("n", 2), "json")
                 .getBody()
                 .get("id")
@@ -195,7 +199,7 @@ class ReportRunnerIT extends ReportsItSupport {
         // The database refuses a second running run in the tenant (migration V49, report_runs_one_running).
         assertThatThrownBy(() -> insertRun(t, user, "running")).hasMessageContaining("report_runs_one_running");
         // And a claim finds nothing to start while one is running.
-        assertThat(tenantJobs.callAs(t.tenantId(), () -> store.claimNext(TestReports.START)))
+        assertThat(tenantJobs.callAs(t.tenantId(), () -> store.claimNext(TestReports.START, "test/1")))
                 .isEmpty();
         assertThat(owner.sql("SELECT status FROM report_runs WHERE id = ?")
                         .param(queued)
@@ -206,7 +210,7 @@ class ReportRunnerIT extends ReportsItSupport {
                 .param(running)
                 .update();
         assertThat(tenantJobs
-                        .callAs(t.tenantId(), () -> store.claimNext(TestReports.START))
+                        .callAs(t.tenantId(), () -> store.claimNext(TestReports.START, "test/1"))
                         .map(RunStore.Run::id))
                 .contains(queued);
     }
@@ -394,6 +398,295 @@ class ReportRunnerIT extends ReportsItSupport {
                         .query(Integer.class)
                         .single())
                 .isEqualTo(2);
+    }
+
+    // JUSTIFICATION-A3: new cases for the heartbeat, a restart, a clean stop, the single snapshot and the upload; none
+    // existed.
+    // ---- who holds a run, and what a restart does to it -------------------------------------------
+
+    @org.springframework.beans.factory.annotation.Autowired
+    RunExecutor runExecutor;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    org.springframework.jdbc.core.simple.JdbcClient jdbc;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    com.rincoltech.bms.kernel.BusinessClock businessClock;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    com.rincoltech.bms.core.audit.AuditLog auditLog;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    org.springframework.transaction.PlatformTransactionManager transactions;
+
+    /** A second runner stands in for another process (or the next one after a restart). */
+    private ReportRunner anotherProcess() {
+        return new ReportRunner(tenantJobs, store, runExecutor, jdbc, businessClock, limits, auditLog, transactions);
+    }
+
+    private static String thisHost() throws java.io.IOException {
+        return java.net.InetAddress.getLocalHost().getHostName();
+    }
+
+    private void setHeartbeat(UUID run, java.time.Instant at) {
+        TestDatabase.owner()
+                .sql("UPDATE report_runs SET heartbeat_at = ?, owner = 'other-host/aaaa0001' WHERE id = ?")
+                .params(java.sql.Timestamp.from(at), run)
+                .update();
+    }
+
+    private String statusOf(UUID run) {
+        return TestDatabase.owner()
+                .sql("SELECT status || ':' || coalesce(error, '') FROM report_runs WHERE id = ?")
+                .param(run)
+                .query(String.class)
+                .single();
+    }
+
+    @Test
+    void aRunWithAFreshHeartbeatIsLeftAloneHoweverOldItIsAndOneWithoutIsFailed() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        UUID run = insertRun(t, user, "running");
+        // Started an hour ago, but its process beat a moment ago: it is working.
+        TestDatabase.owner()
+                .sql("UPDATE report_runs SET started_at = ? WHERE id = ?")
+                .params(java.sql.Timestamp.from(TestReports.START.minus(Duration.ofHours(1))), run)
+                .update();
+        setHeartbeat(run, TestReports.START.minusSeconds(5));
+        runner.tick();
+        assertThat(statusOf(run)).isEqualTo("running:");
+
+        // Its process stopped beating two minutes ago (the stale limit is one): it is gone, and the tenant is freed.
+        setHeartbeat(run, TestReports.START.minus(Duration.ofMinutes(2)));
+        runner.tick();
+        assertThat(statusOf(run)).isEqualTo("failed:interrupted");
+    }
+
+    @Test
+    void aNewProcessOnTheSameHostFailsTheRunsOfTheEarlierOneAtOnce() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        UUID mine = insertRun(t, user, "running");
+        // Claimed by an earlier process of this host a moment ago; the process that replaced it is the one calling.
+        TestDatabase.owner()
+                .sql("UPDATE report_runs SET owner = ?, heartbeat_at = ? WHERE id = ?")
+                .params(thisHost() + "/deadbeef", java.sql.Timestamp.from(TestReports.START), mine)
+                .update();
+        TestDatabase.Fixture u = tenant(true);
+        UUID elsewhere = insertRun(u, user, "running");
+        setHeartbeat(elsewhere, TestReports.START);
+
+        ReportRunner replacement = anotherProcess();
+        try {
+            replacement.tick();
+            assertThat(statusOf(mine)).as("no wait for a heartbeat to go stale").isEqualTo("failed:interrupted");
+            assertThat(statusOf(elsewhere))
+                    .as("another host's live run is untouched")
+                    .isEqualTo("running:");
+            // Only the first tick does this: a later one trusts the heartbeats.
+            UUID later = insertRun(t, user, "queued");
+            TestDatabase.owner()
+                    .sql("UPDATE report_runs SET status = 'cancelled', finished_at = now() WHERE id = ?")
+                    .param(later)
+                    .update();
+        } finally {
+            replacement.stop();
+        }
+    }
+
+    @Test
+    void theHeartbeatOfARunningRunIsRenewedWhileItWorks() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        TestReports.gate = new CountDownLatch(1);
+        String id = post(t, user, PORTFOLIO, "test.gate", Map.of(), "json")
+                .getBody()
+                .get("id")
+                .asString();
+        runner.tick();
+        assertThat(TestReports.gateEntered.await(30, TimeUnit.SECONDS)).isTrue();
+        UUID run = UUID.fromString(id);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT owner FROM report_runs WHERE id = ?")
+                        .param(run)
+                        .query(String.class)
+                        .single())
+                .isEqualTo(runner.owner());
+
+        java.time.Instant later = TestReports.START.plusSeconds(30);
+        clock.set(later);
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        java.time.Instant beat = null;
+        while (System.nanoTime() < deadline) {
+            beat = TestDatabase.owner()
+                    .sql("SELECT heartbeat_at FROM report_runs WHERE id = ?")
+                    .param(run)
+                    .query(java.sql.Timestamp.class)
+                    .single()
+                    .toInstant();
+            if (beat.equals(later)) {
+                break;
+            }
+            Thread.sleep(50);
+        }
+        assertThat(beat)
+                .as("the heartbeat follows the clock while the run works")
+                .isEqualTo(later);
+        TestReports.gate.countDown();
+        assertThat(runner.awaitIdle(Duration.ofSeconds(60))).isTrue();
+    }
+
+    @Test
+    void aCleanStopClosesTheRunItWasExecutingAsInterruptedAndFreesTheTenant() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        TestReports.gate = new CountDownLatch(1);
+        String id = post(t, user, PORTFOLIO, "test.gate", Map.of(), "json")
+                .getBody()
+                .get("id")
+                .asString();
+        ReportRunner process = anotherProcess();
+        process.tick();
+        assertThat(TestReports.gateEntered.await(30, TimeUnit.SECONDS)).isTrue();
+        long start = System.nanoTime();
+        process.stop();
+        assertThat(Duration.ofNanos(System.nanoTime() - start))
+                .as("stop waits briefly, not for the run")
+                .isLessThan(Duration.ofSeconds(20));
+
+        assertThat(statusOf(UUID.fromString(id))).isEqualTo("failed:interrupted");
+        // Another run of the tenant is not held behind it.
+        assertThat(process.tick()).as("a stopped process claims nothing").isZero();
+        assertThat(runToTheEnd(t, user, "test.rows", Map.of("n", 1), "json")
+                        .get("status")
+                        .asString())
+                .isEqualTo("ready");
+    }
+
+    // ---- one snapshot, and nothing held while the file goes out ----------------------------------------
+
+    @Test
+    void twoReadsOfOneRunSeeOneSnapshotWhileAWriteLandsBetweenThem() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        TestReports.snapshotGo = new CountDownLatch(1);
+        TestReports.snapshotMid = new CountDownLatch(1);
+        ResponseEntity<JsonNode> posted = post(t, user, PORTFOLIO, "test.snapshot", Map.of(), "json");
+        long before = TestDatabase.owner()
+                .sql("SELECT count(*) FROM branches WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+        runner.tick();
+        assertThat(TestReports.snapshotMid.await(30, TimeUnit.SECONDS)).isTrue();
+        // A write by another session commits between the run's two reads.
+        TestDatabase.owner()
+                .sql("INSERT INTO branches (id, tenant_id, code, name) VALUES (?, ?, 'BR9', 'Test Branch Nine')")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        TestReports.snapshotGo.countDown();
+        assertThat(runner.awaitIdle(Duration.ofSeconds(60))).isTrue();
+
+        JsonNode run = run(t, user, PORTFOLIO, posted.getBody().get("id").asString());
+        assertThat(run.get("status").asString()).as("%s", run).isEqualTo("ready");
+        JsonNode counts = new ObjectMapper()
+                .readTree(download(t, user, PORTFOLIO, run.get("document_id").asString()))
+                .get("tables")
+                .get(0)
+                .get("rows")
+                .get(0);
+        assertThat(counts.get(0).asLong()).isEqualTo(before);
+        assertThat(counts.get(1).asLong())
+                .as("the second read still sees the first read's world")
+                .isEqualTo(before);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM branches WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("and the write did land")
+                .isEqualTo(before + 1);
+    }
+
+    @Test
+    void theFileIsUploadedFromDiskWithNoTransactionAndNoConnectionHeld() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        com.rincoltech.bms.core.documents.internal.WatchedStorage.UPLOAD.set("");
+        JsonNode ready = runToTheEnd(t, UUID.randomUUID(), "test.fat", Map.of("n", 50), "json");
+        assertThat(ready.get("status").asString()).isEqualTo("ready");
+        assertThat(ready.get("size_bytes").asLong()).isGreaterThan(50 * 360);
+        String seen = com.rincoltech.bms.core.documents.internal.WatchedStorage.UPLOAD.get();
+        assertThat(seen).as("the upload hook ran").startsWith("tx=false");
+        // At most a background poller (the scheduler) holds a connection; the run itself holds none.
+        int pool = Integer.parseInt(seen.substring(seen.indexOf("pool=") + 5));
+        assertThat(pool).isLessThanOrEqualTo(1);
+        // And the stored object is the file, whole: the checksum recorded for the document is the object's own.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT size_bytes FROM documents WHERE id = ?")
+                        .param(UUID.fromString(ready.get("document_id").asString()))
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(ready.get("size_bytes").asLong());
+    }
+
+    // ---- the 30 day expiry works in batches --------------------------------------------------------
+
+    @Test
+    void theExpiryHandlesMoreRunsThanOneBatchAndMarksEachOnce() {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        int n = ReportExpiry.BATCH * 2 + 20;
+        for (int i = 0; i < n; i++) {
+            UUID doc = UUID.randomUUID();
+            TestDatabase.owner()
+                    .sql("""
+                            INSERT INTO documents (id, tenant_id, doc_type, subject_type, subject_id, object_key, content_type,
+                                                   size_bytes, sha256)
+                            VALUES (?, ?, 'report', 'core.report_run', ?, ?, 'application/json', 1, repeat('0', 64))
+                            """)
+                    .params(
+                            doc,
+                            t.tenantId(),
+                            UUID.randomUUID(),
+                            "tenants/" + t.tenantId() + "/report/bulk/" + doc + ".json")
+                    .update();
+            TestDatabase.owner()
+                    .sql("""
+                            INSERT INTO report_runs (id, tenant_id, created_at, report_key, params, params_hash, scope, format,
+                                                     status, requested_by, as_of, finished_at, document_id, expires_at, row_cap,
+                                                     size_cap_bytes)
+                            VALUES (?, ?, ?, 'test.rows', '{}', ?, '{}', 'json', 'ready', ?, DATE '2026-09-01', ?, ?, ?, 500, 1048576)
+                            """)
+                    .params(
+                            UUID.randomUUID(),
+                            t.tenantId(),
+                            java.sql.Timestamp.from(TestReports.START.minus(Duration.ofDays(40))),
+                            (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", ""),
+                            user,
+                            java.sql.Timestamp.from(TestReports.START.minus(Duration.ofDays(40))),
+                            doc,
+                            java.sql.Timestamp.from(TestReports.START.minus(Duration.ofDays(10))))
+                    .update();
+        }
+        assertThat(tenantJobs.callAs(t.tenantId(), expiry::expireDue)).isEqualTo(n);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*)::int FROM report_runs WHERE tenant_id = ? AND files_deleted_at IS NOT NULL")
+                        .param(t.tenantId())
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(n);
+        assertThat(tenantJobs.callAs(t.tenantId(), expiry::expireDue))
+                .as("nothing twice")
+                .isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*)::int FROM audit_log WHERE tenant_id = ? AND action = 'core.reports.files_expired'")
+                        .param(t.tenantId())
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(n);
     }
 
     // ---- helpers --------------------------------------------------------------------------------

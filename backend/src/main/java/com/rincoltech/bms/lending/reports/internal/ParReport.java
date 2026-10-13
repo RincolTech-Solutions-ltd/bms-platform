@@ -135,11 +135,16 @@ class ParReport implements ReportDefinition {
     }
 
     @Override
+    public boolean stillAllowed(Prepared run) {
+        return figures.covers(mapper.convertValue(run.scope(), PortfolioScope.class));
+    }
+
+    @Override
     public void query(Prepared prepared, ReportOutput out) {
         PortfolioScope scope = mapper.convertValue(prepared.scope(), PortfolioScope.class);
         ParGroupBy by = ParGroupBy.valueOf(
                 String.valueOf(prepared.params().get("group_by")).toUpperCase(Locale.ROOT));
-        ParFigures f = figures.par(scope, by);
+        ParFigures f = figures.par(scope, by, out::checkpoint);
         out.note("Figures read from the "
                 + (f.source().equals("live") ? "loan tables" : "nightly snapshot of " + f.asAt()) + ".");
         out.note("Only active loans are counted; written-off loans are not.");

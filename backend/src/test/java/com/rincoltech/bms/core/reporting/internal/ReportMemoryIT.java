@@ -67,9 +67,17 @@ class ReportMemoryIT extends IntegrationTest {
         assertThat(Integer.parseInt(heap.group(1))).isBetween(190, 224);
         assertThat(output.lines().filter(l -> l.startsWith("MEMORY run ")).toList())
                 .as(lines)
-                .hasSize(5)
+                .hasSize(7)
                 .allMatch(l -> l.contains("status=ready"));
         assertThat(output).contains("MEMORY run test.rows json status=ready rows=20000");
         assertThat(output).contains("MEMORY run test.rows csv status=ready rows=20000");
+        // The files at the size cap: between 7 and 8 MiB each, stored from disk.
+        for (String format : List.of("json", "csv")) {
+            java.util.regex.Matcher fat = java.util.regex.Pattern.compile(
+                            "MEMORY run test.fat " + format + " status=ready rows=20000 bytes=(\\d+)")
+                    .matcher(output);
+            assertThat(fat.find()).as(output).isTrue();
+            assertThat(Long.parseLong(fat.group(1))).isBetween(7_000_000L, 8_388_608L);
+        }
     }
 }
