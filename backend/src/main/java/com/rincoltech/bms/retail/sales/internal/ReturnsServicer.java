@@ -589,7 +589,7 @@ class ReturnsServicer {
                 .map(LineRow::stockEntryId)
                 .filter(x -> x != null)
                 .distinct()
-                .forEach(e -> books.reverse(e, today, r.creditNoteNo(), RETURN + "_stock_void:" + returnId + ":" + e));
+                .forEach(e -> books.reverse(e, today, r.creditNoteNo(), RETURN + "_sv:" + e));
         Instant now = clock.now();
         if (repo.markVoided(returnId, principal.userId(), today, now, reason, reversal) == 0) {
             throw new ApiException(

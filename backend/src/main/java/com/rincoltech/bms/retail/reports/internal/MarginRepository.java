@@ -79,8 +79,7 @@ class MarginRepository {
                                    coalesce(sum(l.qty) FILTER (WHERE s.sale_date >= c.changed_on), 0) AS qty_after,
                                    coalesce(sum(l.line_total_minor) FILTER (WHERE s.sale_date >= c.changed_on), 0) AS sales_after,
                                    coalesce(sum(l.line_cost_minor) FILTER (WHERE s.sale_date >= c.changed_on), 0) AS cost_after
-                              FROM retail_sales s
-                              JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id
+                              FROM """ + SalesAnalysisRepository.NET_LINES + """
                               JOIN changed c ON c.product_id = l.product_id
                              WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to""" + branch + """
 

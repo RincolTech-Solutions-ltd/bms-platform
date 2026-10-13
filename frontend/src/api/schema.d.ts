@@ -3376,6 +3376,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Credit notes in the caller's branch scope, newest first (issue #201) */
+        get: operations["listRetailReturns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/returns/{return_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One return, the credit note, with its lines (issue #201) */
+        get: operations["getRetailReturn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/returns/{return_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a return as a whole by reversal (issue #201); M */
+        post: operations["voidRetailReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales": {
         parameters: {
             query?: never;
@@ -3423,6 +3474,24 @@ export interface paths {
         put?: never;
         /** Record a payment against a credit sale, partial allowed (FR-RET-05); M */
         post: operations["payRetailSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/sales/{sale_id}/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The returns made against a sale (issue #201) */
+        get: operations["listRetailSaleReturns"];
+        put?: never;
+        /** Take goods back against a sale: stock, entries and a numbered credit note (issue #201); M. 201 when recorded, 202 when it waits for a checker */
+        post: operations["createRetailSaleReturn"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8147,6 +8216,89 @@ export interface components {
             /** Format: date */
             paid_on?: string;
         };
+        RetailReturnLine: {
+            code?: string;
+            description?: string;
+            disposition?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read
+             */
+            line_cost_minor?: number;
+            /** Format: int32 */
+            line_no?: number;
+            /**
+             * Format: int64
+             * @description The credit for this line: its share of what the sale line was charged
+             */
+            line_total_minor?: number;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description In base units */
+            qty?: string;
+            reason?: string;
+            /** Format: uuid */
+            restock_branch_id?: string;
+            /** Format: uuid */
+            sale_line_id?: string;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read
+             */
+            unit_cost_minor?: number;
+            /** Format: uuid */
+            unit_id?: string;
+            /** @description In the unit it was entered in */
+            unit_qty?: string;
+        };
+        RetailReturnLineRequest: {
+            /** @description restock puts the goods back on the shelf; write_off is for damaged goods, which never enter stock */
+            disposition: string;
+            /** @example 2.0 */
+            qty: string;
+            /** @description defective|damaged|wrong_item|not_as_described|unwanted|price_error|other */
+            reason: string;
+            /**
+             * Format: uuid
+             * @description Where restocked goods go: any active branch or store in the caller's scope. Absent means the sale's branch
+             */
+            restock_branch_id?: string;
+            /**
+             * Format: uuid
+             * @description The line of the sale that comes back
+             */
+            sale_line_id: string;
+            /**
+             * Format: uuid
+             * @description The unit qty is in: the line's own unit, the product's base unit or a pack unit of the product (units capability). Absent means the base unit. The quantity must convert to thousandths of the base unit exactly
+             */
+            unit_id?: string;
+        };
+        RetailReturnList: {
+            items?: components["schemas"]["RetailSaleReturn"][];
+            next_cursor?: string;
+        };
+        /** @description 201 with the return when it was recorded; 202 with approval_id when it waits for a checker (the tenant's approval threshold for retail_sale_return was reached) */
+        RetailReturnOutcome: {
+            /** Format: uuid */
+            approval_id?: string;
+            executed?: boolean;
+            sale_return?: components["schemas"]["RetailSaleReturn"];
+        };
+        RetailReturnRequest: {
+            lines: components["schemas"]["RetailReturnLineRequest"][];
+            /** @description How any part that cannot be taken off the balance is paid out; required for it when refund_method is account */
+            money_method?: string;
+            note?: string;
+            /** @description cash, mobile_money or bank pay the customer back out of the sale's branch. account takes the value off what the customer owes on this credit sale, never below zero; any rest is refunded in money_method */
+            refund_method: string;
+        };
+        RetailReturnVoidRequest: {
+            reason: string;
+        };
         /** @description The sum of the balances of each role present in the report */
         RetailRoleQuantity: {
             qty?: string;
@@ -8318,6 +8470,66 @@ export interface components {
              * @description Defaults to today; not in the future
              */
             sale_date?: string;
+        };
+        /** @description A customer return and its numbered credit note */
+        RetailSaleReturn: {
+            /**
+             * Format: int64
+             * @description The part taken off what the customer owes on the credit sale
+             */
+            account_credit_minor?: number;
+            /** Format: uuid */
+            approval_id?: string;
+            /** Format: uuid */
+            approved_by?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read
+             */
+            cost_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            credit_note_no?: string;
+            currency?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            customer_name?: string;
+            /** Format: uuid */
+            id?: string;
+            lines?: components["schemas"]["RetailReturnLine"][];
+            note?: string;
+            /** @description What the caller asked for: cash, mobile_money, bank or account */
+            refund_choice?: string;
+            refund_method?: string;
+            /**
+             * Format: int64
+             * @description The part paid out in money
+             */
+            refund_minor?: number;
+            /** Format: date */
+            returned_on?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            status?: string;
+            /**
+             * Format: int64
+             * @description What the customer is credited: the returned lines at the price they were charged
+             */
+            total_minor?: number;
+            /** Format: int32 */
+            version?: number;
+            void_reason?: string;
+            /** Format: date-time */
+            voided_at?: string;
+            /** Format: uuid */
+            voided_by?: string;
+            /** Format: date */
+            voided_on?: string;
         };
         RetailSalesAnalysis: {
             by_branch?: components["schemas"]["RetailSalesAnalysisRow"][];
@@ -15800,6 +16012,86 @@ export interface operations {
             };
         };
     };
+    listRetailReturns: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                customer_id?: string;
+                sale_id?: string;
+                q?: string;
+                status?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReturnList"];
+                };
+            };
+        };
+    };
+    getRetailReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                return_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleReturn"];
+                };
+            };
+        };
+    };
+    voidRetailReturn: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                return_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailReturnVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleReturn"];
+                };
+            };
+        };
+    };
     listRetailSales: {
         parameters: {
             query?: {
@@ -15927,6 +16219,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPaymentResult"];
+                };
+            };
+        };
+    };
+    listRetailSaleReturns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleReturn"][];
+                };
+            };
+        };
+    };
+    createRetailSaleReturn: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailReturnRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailReturnOutcome"];
                 };
             };
         };
