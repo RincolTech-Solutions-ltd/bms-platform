@@ -947,6 +947,52 @@ class RetailDocumentsIT extends IntegrationTest {
         sample("retail_invoice_long", pdf);
     }
 
+    // JUSTIFICATION-A3: one more case of the same new test class (the lists page and filter).
+    /** The document and quotation lists page newest first with an opaque cursor, and filter by type, date and status. */
+    @Test
+    void theListsPageNewestFirstAndFilter() {
+        List<String> numbers = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            numbers.add(issued(sale(hq, "cash", "1"), "invoice").get("number").asString());
+        }
+        JsonNode first = api.get("/documents?limit=2", DOCS).getBody();
+        assertThat(first.get("items")).hasSize(2);
+        assertThat(first.get("items").get(0).get("number").asString()).isEqualTo(numbers.get(2));
+        assertThat(first.get("items").get(1).get("number").asString()).isEqualTo(numbers.get(1));
+        JsonNode second = api.get(
+                        "/documents?limit=2&cursor=" + first.get("next_cursor").asString(), DOCS)
+                .getBody();
+        assertThat(second.get("items")).hasSize(1);
+        assertThat(second.get("items").get(0).get("number").asString()).isEqualTo(numbers.get(0));
+        assertThat(second.get("next_cursor").isNull()).isTrue();
+        assertThat(api.get("/documents?cursor=not-a-cursor", DOCS).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(api.get("/documents?type=receipt", DOCS).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.get("/documents?from=2026-10-09", DOCS).getBody().get("items"))
+                .isEmpty();
+        assertThat(api.get("/documents?from=2026-10-08&to=2026-10-08&type=invoice", DOCS)
+                        .getBody()
+                        .get("items"))
+                .hasSize(3);
+
+        quote("2026-11-08", null, "list-key-1");
+        quote("2026-11-09", null, "list-key-2");
+        JsonNode quotes = api.get("/quotations?limit=1", DOCS).getBody();
+        assertThat(quotes.get("items")).hasSize(1);
+        assertThat(quotes.get("items").get(0).get("number").asString()).isEqualTo("QT-HQ-000002");
+        JsonNode more = api.get(
+                        "/quotations?limit=1&cursor="
+                                + quotes.get("next_cursor").asString(),
+                        DOCS)
+                .getBody();
+        assertThat(more.get("items").get(0).get("number").asString()).isEqualTo("QT-HQ-000001");
+        assertThat(api.get("/quotations?status=open", DOCS).getBody().get("items"))
+                .hasSize(2);
+        assertThat(api.get("/quotations?status=weird", DOCS).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
     // ---- the customer statement --------------------------------------------------------------
 
     byte[] statementPdf(UUID customer, String query, String perms) {

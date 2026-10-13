@@ -9,6 +9,7 @@ import { enteredPriceMinor, enteredQty } from './units-state';
 import { useCrumbTail } from '../../../components/breadcrumbs';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
+import { SaleDocuments } from './documents-ui';
 
 // Credit sales and All sales (#145): the lists the pilot's app has, 'Credit sales' and the sales
 // history, read from the sales list API in the branch chosen at the top of the page (every branch the
@@ -145,6 +146,7 @@ function OpenSale({ id, onClose }: { id: string; onClose: () => void }) {
       {sale.isPending && <p className="loading">Loading</p>}
       <Problem error={sale.error} />
       {sale.data && <SaleDetail sale={sale.data} today={businessToday()} branchName={nameOf(sale.data.branch_id)} />}
+      {sale.data?.id && <SaleDocuments saleId={sale.data.id} status={sale.data.status} branchId={sale.data.branch_id} />}
     </>
   );
 }

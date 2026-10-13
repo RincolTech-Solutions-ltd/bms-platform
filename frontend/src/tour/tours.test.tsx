@@ -14,6 +14,8 @@ import { Loans } from '../areas/staff/lending/loans';
 import { BranchRoles } from '../areas/staff/retail/branch-roles';
 import { PriceLists } from '../areas/staff/retail/price-lists';
 import { AccountsPage } from '../areas/staff/retail/accounts';
+import { DocumentsPage } from '../areas/staff/retail/documents';
+import { QuotationsPage } from '../areas/staff/retail/quotations';
 import { CataloguePage } from '../areas/staff/retail/catalogue';
 import { RetailHome } from '../areas/staff/retail/home';
 import { RetailNav } from '../areas/staff/retail/nav';
@@ -89,6 +91,10 @@ function screen(path: string | undefined): ReactElement {
       return <PriceLists />;
     case '/staff/retail/accounts':
       return <AccountsPage />;
+    case '/staff/retail/documents':
+      return <DocumentsPage />;
+    case '/staff/retail/quotations':
+      return <QuotationsPage />;
     case '/staff/lending':
       return <Loans />;
     case '/staff/lending/loans/$loanId':
@@ -175,6 +181,9 @@ const PRICER: Me = { ...ADMIN, full_name: 'Test Pricer 01', module_capabilities:
 // An administrator of a business that switched customer accounts on (ADR-033, issue #196).
 const LENDER: Me = { ...ADMIN, full_name: 'Test Lender 01', module_capabilities: { retail: ['branch_roles', 'customer_accounts'] } };
 
+// An administrator of a business that switched documents on (ADR-033, issue #197).
+const DOCUMENTER: Me = { ...ADMIN, full_name: 'Test Documenter 01', module_capabilities: { retail: ['branch_roles', 'documents'] } };
+
 const AUDIENCE: Record<string, Me[]> = {
   'admin-welcome': [ADMIN],
   'retail-sales': [SELLER, MANAGER],
@@ -196,6 +205,9 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-price-lists': [PRICER],
   'capability-customer-accounts': [LENDER],
   'page-accounts': [LENDER],
+  'capability-documents': [DOCUMENTER],
+  'page-documents': [DOCUMENTER],
+  'page-quotations': [DOCUMENTER],
 };
 
 describe('every tour target exists on its screen', () => {
