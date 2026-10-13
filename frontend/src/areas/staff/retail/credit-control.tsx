@@ -100,7 +100,7 @@ export function CreditControlView({ data, nameOf, sort, accounts = false }: { da
         )}
       </Section>
 
-      <Section title="Payments received" hint={`Payments on credit sales from ${data.from} to ${data.to}.`}>
+      <Section title="Payments received" hint={`Payments on credit sales from ${data.from} to ${data.to}. A payment that was reversed stays on the day it was received; the reversal is a minus row on the day it was undone.`}>
         {payments.length === 0 ? <Empty>No payment was received in this range.</Empty> : (
           <>
             <p className="rt-total">Received {money(data.payments_minor ?? 0)}</p>

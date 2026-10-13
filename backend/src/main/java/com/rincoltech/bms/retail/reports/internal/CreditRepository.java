@@ -201,8 +201,11 @@ class CreditRepository {
     }
 
     /**
-     * Payments on credit sales dated in the range, by day and method. A payment on account (issue #196) counts in the branch
-     * that received the money, as the ledger and the cash book post it; any other payment counts in the branch of its sale.
+     * Payments on credit sales in the range, by day and method. A payment on account (issue #196) counts in the branch that
+     * received it, as the ledger and the cash book post it; any other payment in the branch of its sale. A reversed payment on
+     * account is not removed from the day it was received, so a day already reported never changes: it stays on that day and
+     * the reversal is its own negative row on the day it was reversed, as in the cash book. A day and method where the two
+     * cancel is left out.
      */
     List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -214,17 +217,23 @@ class CreditRepository {
         if (branchIds != null) {
             params.put("branchIds", branchIds);
         }
-        return jdbc.sql("SELECT p.paid_on, p.method, count(*) AS payments, sum(p.amount_minor) AS amount"
+        String receivedIn = branchIds == null ? "" : " AND coalesce(ap.branch_id, s.branch_id) IN (:branchIds)";
+        String reversedIn = branchIds == null ? "" : " AND ap.branch_id IN (:branchIds)";
+        return jdbc.sql("SELECT m.d AS paid_on, m.method, sum(m.n) AS payments, sum(m.amt) AS amount FROM ("
+                        + " SELECT p.paid_on AS d, p.method, 1 AS n, p.amount_minor AS amt"
                         + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
                         + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
                         + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
-                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'"
-                        + (branchIds == null ? "" : " AND coalesce(ap.branch_id, s.branch_id) IN (:branchIds)")
-                        // A payment on account that was reversed (issue #196) was not money received after all.
-                        + " AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a"
-                        + " JOIN retail_account_payments r ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id"
-                        + " WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id AND r.status = 'reversed')"
-                        + " GROUP BY p.paid_on, p.method ORDER BY p.paid_on, p.method")
+                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + receivedIn
+                        + " UNION ALL"
+                        + " SELECT ap.reversed_on, p.method, -1, -p.amount_minor"
+                        + " FROM retail_account_payments ap"
+                        + " JOIN retail_account_payment_allocations al ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id"
+                        + " JOIN retail_sale_payments p ON p.tenant_id = al.tenant_id AND p.id = al.sale_payment_id"
+                        + " JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
+                        + " WHERE ap.status = 'reversed' AND ap.reversed_on BETWEEN :from AND :to AND s.status = 'completed'"
+                        + reversedIn
+                        + ") m GROUP BY m.d, m.method HAVING sum(m.n) <> 0 OR sum(m.amt) <> 0 ORDER BY m.d, m.method")
                 .params(params)
                 .query((rs, n) -> new Payment(
                         rs.getDate("paid_on").toLocalDate(),

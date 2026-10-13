@@ -1140,16 +1140,16 @@ class RetailCustomerAccountsIT extends IntegrationTest {
     }
 
     /**
-     * V44 lets a sale's paid amount fall only inside the reversal of a payment on account: a plain UPDATE that lowers it is
-     * refused (as it was before V44) whatever the value, and inside the reversal the new value must equal exactly what the
-     * sale's payments that were not reversed add up to.
+     * V44 lets a sale's paid amount fall only inside the reversal of one named receipt: the transaction-local setting holds
+     * that receipt's id, the receipt must have allocated to this very sale, read reversed, and the new value is the old one
+     * less exactly that allocation (and not below the sale's unreversed payments). Everything else is refused.
      */
     @Test
-    void aPaidAmountFallsOnlyInsideTheReversalAndOnlyToTheUnreversedPayments() throws Exception {
+    void aPaidAmountFallsOnlyInsideTheReversalOfTheReceiptThatPaidItByExactlyThatAmount() throws Exception {
         UUID c = buyer("Test Buyer 29", null, null);
         UUID s1 = sold(hq, c, "10", "2026-01-05");
         UUID s2 = sold(hq, c, "10", "2026-02-05");
-        // 400 on the first sale from a direct payment, and 700 on account that pays 600 of it and 100 of the second.
+        UUID s3 = sold(hq, c, "10", "2026-03-05");
         assertThat(api.postKeyed(
                                 "/sales/" + s1 + "/payments",
                                 Map.of("amount_minor", 400, "method", "cash", "paid_on", "2026-01-10"),
@@ -1158,33 +1158,55 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                                 UUID.randomUUID().toString())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
-        JsonNode receipt = pay(c, hq, 700).getBody();
+        assertThat(api.postKeyed(
+                                "/sales/" + s3 + "/payments",
+                                Map.of("amount_minor", 50, "method", "cash", "paid_on", "2026-03-10"),
+                                MANAGER,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        // R pays 600 of the first sale and 100 of the second; R2 pays 200 more of the second.
+        String r = pay(c, hq, 700).getBody().get("id").asString();
+        String r2 = pay(c, hq, 200).getBody().get("id").asString();
         assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
-        assertThat(sale(s2).get("paid_minor").asLong()).isEqualTo(100);
+        assertThat(sale(s2).get("paid_minor").asLong()).isEqualTo(300);
         // A plain UPDATE from the application role is refused: to any lower value, the right one included.
         for (long lower : new long[] {0, 400, 999}) {
-            assertThatThrownBy(() -> updatePaid(s1, lower, false)).hasStackTraceContaining("only the paid amount");
+            assertThatThrownBy(() -> updatePaid(s1, lower, null)).hasStackTraceContaining("only the paid amount");
         }
-        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
         // The owner role is held to it too (bms.allow_mutation is the only way round, for restores).
         assertThatThrownBy(() -> TestDatabase.owner()
                         .sql("UPDATE retail_sales SET paid_minor = 400 WHERE id = ?")
                         .param(s1)
                         .update())
                 .hasStackTraceContaining("only the paid amount");
-        // Even with the setting on, the receipt must read reversed first: the unreversed payments still add up to
-        // 1,000.
-        assertThatThrownBy(() -> updatePaid(s1, 400, true)).hasStackTraceContaining("only the paid amount");
-        // The reversal itself succeeds and leaves each sale at its unreversed payments.
-        UUID id = UUID.fromString(receipt.get("id").asString());
-        assertThat(reverse(c, id, "Wrong buyer", MANAGER).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // A setting that merely says "on", or names no receipt, or a receipt that is not there, opens nothing.
+        assertThatThrownBy(() -> updatePaid(s1, 0, "on")).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(s1, 0, UUID.randomUUID().toString()))
+                .hasStackTraceContaining("only the paid amount");
+        // The right receipt and the right value, but the receipt has not been reversed yet.
+        assertThatThrownBy(() -> updatePaid(s1, 400, r)).hasStackTraceContaining("only the paid amount");
+        assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(1_000);
+
+        // The reversal itself: each sale falls by what R paid it, and nothing else moves.
+        assertThat(reverse(c, UUID.fromString(r), "Wrong buyer", MANAGER).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         assertThat(sale(s1).get("paid_minor").asLong()).isEqualTo(400);
-        assertThat(sale(s2).get("paid_minor").asLong()).isZero();
-        // Once it is reversed, inside the reversal path only the exact sum is accepted, and outside it nothing is.
-        assertThatThrownBy(() -> updatePaid(s1, 100, true)).hasStackTraceContaining("only the paid amount");
-        assertThatThrownBy(() -> updatePaid(s1, 0, false)).hasStackTraceContaining("only the paid amount");
-        // A sale whose paid amount no payment row backs (as a database from before the payment rows had) cannot be
-        // written down by a plain UPDATE either.
+        assertThat(sale(s2).get("paid_minor").asLong()).isEqualTo(200);
+        assertThat(sale(s3).get("paid_minor").asLong()).isEqualTo(50);
+        // With R's id and R reversed: zero is refused, another value is refused, and a second lowering is refused (the
+        // allocation was given back once; the sale cannot go below its unreversed payments).
+        assertThatThrownBy(() -> updatePaid(s1, 0, r)).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(s2, 100, r)).hasStackTraceContaining("only the paid amount");
+        // R does not allocate to the third sale: its id opens nothing there, whatever the value.
+        assertThatThrownBy(() -> updatePaid(s3, 0, r)).hasStackTraceContaining("only the paid amount");
+        // R2 is posted, not reversed: its id opens nothing, even for the exact amount it paid.
+        assertThatThrownBy(() -> updatePaid(s2, 0, r2)).hasStackTraceContaining("only the paid amount");
+        // Without the setting nothing is accepted either.
+        assertThatThrownBy(() -> updatePaid(s1, 0, null)).hasStackTraceContaining("only the paid amount");
+        // A sale whose paid amount no payment row backs cannot be written down by anyone's receipt id or by a plain
+        // UPDATE.
         UUID legacy = UUID.randomUUID();
         TestDatabase.owner().sql("""
                         INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, customer_id,
@@ -1192,21 +1214,41 @@ class RetailCustomerAccountsIT extends IntegrationTest {
                         VALUES (?, ?, ?, 'RS9LEGACY1', DATE '2026-01-15', 'credit', ?, 'UGX', 300, 249, 100, 'completed',
                             gen_random_uuid())
                         """).params(legacy, t.tenantId(), hq, c).update();
-        assertThatThrownBy(() -> updatePaid(legacy, 0, false)).hasStackTraceContaining("only the paid amount");
-        assertThatThrownBy(() -> updatePaid(legacy, 40, true)).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(legacy, 0, null)).hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> updatePaid(legacy, 0, r)).hasStackTraceContaining("only the paid amount");
         assertThat(sale(legacy).get("paid_minor").asLong()).isEqualTo(100);
     }
 
-    /** One UPDATE of a sale's paid amount as the application role, in its own transaction; with the reversal setting or without. */
-    void updatePaid(UUID sale, long paid, boolean reversalSetting) throws Exception {
+    /** The list a sale was priced from is fixed when the sale is made (V41); the V44 guard keeps it so. */
+    @Test
+    void theApplicationCannotChangeTheListASaleWasPricedFrom() throws Exception {
+        UUID c = buyer("Test Buyer 34", null, null);
+        UUID s = sold(hq, c, "1", "2026-01-05");
+        assertThatThrownBy(() -> updateSale(s, "price_list_id = gen_random_uuid()", null))
+                .hasStackTraceContaining("only the paid amount");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT price_list_id IS NULL FROM retail_sales WHERE id = ?")
+                        .param(s)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+    }
+
+    /** One UPDATE of a sale's paid amount as the application role; the reversal setting holds {@code receipt} or is not set. */
+    void updatePaid(UUID sale, long paid, String receipt) throws Exception {
+        updateSale(sale, "paid_minor = " + paid, receipt);
+    }
+
+    /** One UPDATE of a sale as the application role, in its own transaction, with the reversal setting raised or not. */
+    void updateSale(UUID sale, String assignment, String receipt) throws Exception {
         try (Connection conn = TestDatabase.appDataSource().getConnection()) {
             conn.setAutoCommit(false);
             try (Statement st = conn.createStatement()) {
                 st.execute("SELECT set_config('app.tenant_id', '" + t.tenantId() + "', true)");
-                if (reversalSetting) {
-                    st.execute("SELECT set_config('bms.reverse_account_payment', 'on', true)");
+                if (receipt != null) {
+                    st.execute("SELECT set_config('bms.reverse_account_payment', '" + receipt + "', true)");
                 }
-                st.executeUpdate("UPDATE retail_sales SET paid_minor = " + paid + " WHERE id = '" + sale + "'");
+                st.executeUpdate("UPDATE retail_sales SET " + assignment + " WHERE id = '" + sale + "'");
             }
             conn.commit();
         }
@@ -1384,11 +1426,23 @@ class RetailCustomerAccountsIT extends IntegrationTest {
         assertThat(control.get("buyers").get(0).get("credit_limit_minor").asLong())
                 .isEqualTo(9_000);
         reverse(c, receipt, "Wrong buyer", MANAGER);
-        assertThat(api.get("/reports/credit-control?from=2026-01-01&to=2026-01-31", ADMIN)
-                        .getBody()
-                        .get("payments_minor")
-                        .asLong())
-                .isZero();
+        // The receipt stays on the day it was received, so a range that holds that day and not the day it was reversed
+        // (today) reports what it reported before: the books keep the money on that day, as the ledger and the cash
+        // book do.
+        JsonNode january = api.get("/reports/credit-control?from=2026-01-01&to=2026-01-31", ADMIN)
+                .getBody();
+        assertThat(january.get("payments_minor").asLong()).isEqualTo(300);
+        assertThat(january.get("payments").get(0).get("date").asString()).isEqualTo("2026-01-10");
+        // The reversal is its own negative row on the day it was undone.
+        JsonNode both = api.get("/reports/credit-control?from=2026-01-01&to=" + TODAY, ADMIN)
+                .getBody();
+        assertThat(both.get("payments_minor").asLong()).isZero();
+        assertThat(both.get("payments")).hasSize(2);
+        assertThat(both.get("payments").get(1).get("date").asString()).isEqualTo(TODAY);
+        assertThat(both.get("payments").get(1).get("amount_minor").asLong()).isEqualTo(-300);
+        JsonNode lateOnly = api.get("/reports/credit-control?from=2026-02-01&to=" + TODAY, ADMIN)
+                .getBody();
+        assertThat(lateOnly.get("payments_minor").asLong()).isEqualTo(-300);
         // The customer ageing lists the buyer with the limit; over limit is said only to a full-scope caller.
         sold(br2, c, "80", "2026-01-06");
         JsonNode ageing = api.get("/reports/customer-ageing", ADMIN).getBody();

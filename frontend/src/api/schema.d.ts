@@ -7536,7 +7536,7 @@ export interface components {
             /** Format: uuid */
             sale_id?: string;
         };
-        /** @description Payments on credit sales received in the range, by day and method */
+        /** @description Payments received on a day by method. A reversed payment on account stays on the day it was received; its reversal is a row of its own on the day it was undone, with a negative count and amount */
         RetailPaymentDay: {
             /** Format: int64 */
             amount_minor?: number;

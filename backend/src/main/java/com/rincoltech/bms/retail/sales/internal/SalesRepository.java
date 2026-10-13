@@ -392,23 +392,22 @@ class SalesRepository {
 
     /**
      * Gives a reversed payment on account back to the sale (V44): the sales guard lets paid_minor fall only while the
-     * transaction-local setting {@code bms.reverse_account_payment} is on, and only to the sum of the payments that were not
-     * reversed. The setting is raised for this one statement and cleared after it.
+     * transaction-local setting {@code bms.reverse_account_payment} holds the id of the reversed receipt that allocated
+     * {@code amountMinor} to this sale, and only by exactly that amount. The setting is raised for this one statement and
+     * cleared after it; when the statement throws the transaction is aborted and the setting dies with it.
      */
-    void releasePaid(UUID saleId, long amountMinor) {
-        jdbc.sql("SELECT set_config('bms.reverse_account_payment', 'on', true)")
+    void releasePaid(UUID saleId, UUID receiptId, long amountMinor) {
+        jdbc.sql("SELECT set_config('bms.reverse_account_payment', ?, true)")
+                .param(receiptId.toString())
                 .query()
                 .singleValue();
-        try {
-            jdbc.sql("""
-                            UPDATE retail_sales SET paid_minor = paid_minor - ?, updated_at = now(), version = version + 1
-                             WHERE id = ?
-                            """).params(amountMinor, saleId).update();
-        } finally {
-            jdbc.sql("SELECT set_config('bms.reverse_account_payment', '', true)")
-                    .query()
-                    .singleValue();
-        }
+        jdbc.sql("""
+                        UPDATE retail_sales SET paid_minor = paid_minor - ?, updated_at = now(), version = version + 1
+                         WHERE id = ?
+                        """).params(amountMinor, saleId).update();
+        jdbc.sql("SELECT set_config('bms.reverse_account_payment', '', true)")
+                .query()
+                .singleValue();
     }
 
     List<Payment> payments(UUID saleId) {

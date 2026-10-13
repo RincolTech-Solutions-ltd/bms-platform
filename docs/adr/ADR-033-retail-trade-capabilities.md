@@ -244,10 +244,10 @@ Decision 6 is built in slice 6 (migration V44; `docs/specs/trade-capabilities.md
    One ledger entry posts in the receiving branch with a credit to trade debtors for each sale, so cash lands where it is held.
 4. **Reversible as a whole.** `POST .../payments/{id}/reverse` (`retail.sale.void`, a reason) reverses the entry on the business
    day and gives each sale its paid amount back; there is no partial reversal. The V14 guard on `retail_sales` allowed
-   `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall only inside the reversal and
-   only to exactly the sale's unreversed payments: the reversal raises a transaction-local setting
-   (`bms.reverse_account_payment`, `set_config(..., true)`) for the one statement that gives the amount back, and the guard
-   refuses any lowering without it, so a plain UPDATE is refused as it was before V44. The receipt is changed once, `posted` to
+   `paid_minor` only to rise; it is replaced (a function body, no table lock) so that it may fall only inside the reversal, by exactly that
+   allocation. The reversal sets a transaction-local setting
+   (`bms.reverse_account_payment`, `set_config(..., true)`) to the id of the receipt for the one statement that gives the amount back, and the guard
+   accepts a lowering only for a reversed receipt that allocated to that sale, by exactly its allocation, so a plain UPDATE is refused as it was before V44. The receipt is changed once, `posted` to
    `reversed`, by a guard trigger. The reason is at least five characters once trimmed, on the screen and on the server alike.
 5. **The cash book follows the receiving branch.** A cash payment on account is takings of the branch that received it, on the day
    it was received; a reversal is taken back on the day of the reversal, as a voided cash sale is.

@@ -145,14 +145,17 @@ SELECT bms_make_append_only('retail_account_payment_allocations');
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_sales guard (V14): paid_minor could only go up. Reversing a payment on account has to give the paid
--- amount back, so the guard now lets it go down, but only inside that reversal and only to exactly what the
--- sale's payments that were not reversed add up to. Two conditions, both required: the transaction-local
--- setting bms.reverse_account_payment is 'on' (the reversal code sets it with set_config(..., true) just before
--- it gives the amount back and clears it after, so a plain UPDATE from bms_app, which never sets it, is refused
--- as it was before V44), and the new value equals that sum, so even inside the reversal no other value is
--- accepted. Everything else the guard refuses stays refused. Replacing the function body takes no lock on
--- retail_sales (the trigger stays as it is); the new rule reads the two tables created above, and only when
--- paid_minor goes down, which no other code path does.
+-- amount back, so the guard now lets it go down, but only inside the reversal of one named receipt. The
+-- transaction-local setting bms.reverse_account_payment (set_config(..., true), raised by the reversal code for the
+-- one UPDATE and cleared after it) holds the id of the receipt being reversed, and the guard accepts a lowering only
+-- when all of these hold: that receipt allocated an amount to this very sale, the receipt reads reversed, the new
+-- paid amount is exactly the old one less that allocation, and it is not below what the sale's payments that were not
+-- reversed add up to (so a second lowering for the same receipt is refused). A plain UPDATE from bms_app, or one with
+-- the setting on for another receipt, a receipt that does not allocate to this sale, or an unreversed receipt, is
+-- refused as it was before V44. The identity columns are compared as in V14 with price_list_id (added by V41) among
+-- them: the list a sale was priced from is fixed when the sale is made. Replacing the function body takes no lock on
+-- retail_sales (the trigger stays as it is); the new rule reads the two tables created above, and only when paid_minor
+-- goes down, which no other code path does.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION retail_sales_guard_update() RETURNS trigger
@@ -163,20 +166,26 @@ BEGIN
     END IF;
     IF (NEW.id, NEW.tenant_id, NEW.created_at, NEW.branch_id, NEW.sale_no, NEW.sale_date, NEW.payment_method,
         NEW.customer_id, NEW.buyer_name, NEW.buyer_contact, NEW.due_date, NEW.currency, NEW.total_minor,
-        NEW.cost_total_minor, NEW.historical, NEW.created_by)
+        NEW.cost_total_minor, NEW.historical, NEW.created_by, NEW.price_list_id)
        IS DISTINCT FROM
        (OLD.id, OLD.tenant_id, OLD.created_at, OLD.branch_id, OLD.sale_no, OLD.sale_date, OLD.payment_method,
         OLD.customer_id, OLD.buyer_name, OLD.buyer_contact, OLD.due_date, OLD.currency, OLD.total_minor,
-        OLD.cost_total_minor, OLD.historical, OLD.created_by)
+        OLD.cost_total_minor, OLD.historical, OLD.created_by, OLD.price_list_id)
        OR (NEW.paid_minor < OLD.paid_minor
-           AND (coalesce(current_setting('bms.reverse_account_payment', true), '') <> 'on'
-                OR NEW.paid_minor <> (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p
-                                       WHERE p.tenant_id = NEW.tenant_id AND p.sale_id = NEW.id
-                                         AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
-                                                           JOIN retail_account_payments r
-                                                             ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id
-                                                          WHERE a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id
-                                                            AND r.status = 'reversed'))))
+           AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a
+                             JOIN retail_account_payments r ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id
+                            WHERE a.tenant_id = NEW.tenant_id AND a.sale_id = NEW.id
+                              AND a.receipt_id::text = coalesce(current_setting('bms.reverse_account_payment', true), '')
+                              AND r.status = 'reversed'
+                              AND NEW.paid_minor = OLD.paid_minor - a.amount_minor
+                              AND NEW.paid_minor >= (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p
+                                                      WHERE p.tenant_id = NEW.tenant_id AND p.sale_id = NEW.id
+                                                        AND NOT EXISTS (SELECT 1 FROM retail_account_payment_allocations a2
+                                                                          JOIN retail_account_payments r2
+                                                                            ON r2.tenant_id = a2.tenant_id AND r2.id = a2.receipt_id
+                                                                         WHERE a2.tenant_id = p.tenant_id
+                                                                           AND a2.sale_payment_id = p.id
+                                                                           AND r2.status = 'reversed'))))
        OR (OLD.sale_entry_id IS NOT NULL AND NEW.sale_entry_id IS DISTINCT FROM OLD.sale_entry_id)
        OR (OLD.cost_entry_id IS NOT NULL AND NEW.cost_entry_id IS DISTINCT FROM OLD.cost_entry_id)
        OR (OLD.status = 'voided' AND (NEW.status, NEW.voided_at, NEW.voided_by, NEW.void_reason)

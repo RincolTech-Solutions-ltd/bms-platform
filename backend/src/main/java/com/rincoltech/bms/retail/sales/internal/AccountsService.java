@@ -684,10 +684,10 @@ class AccountsService {
                     "This payment has been reversed already.");
         }
         // After the receipt reads reversed: the sales guard lets paid_minor fall only inside this path (releasePaid
-        // raises
-        // the transaction-local setting) and only to exactly what the payments that were not reversed add up to.
+        // raises the
+        // transaction-local setting to this receipt's id) and only by exactly what this receipt allocated to the sale.
         for (AllocationRow a : parts) {
-            sales.releasePaid(a.saleId(), a.amountMinor());
+            sales.releasePaid(a.saleId(), receiptId, a.amountMinor());
         }
         audit.record(new AuditLog.Entry(
                 "retail.customer.account_payment_reversed",
