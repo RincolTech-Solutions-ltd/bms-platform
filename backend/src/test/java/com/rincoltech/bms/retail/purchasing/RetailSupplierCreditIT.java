@@ -369,6 +369,42 @@ class RetailSupplierCreditIT extends LandedCostTestBase {
         assertThat(code(refused)).isEqualTo("line_returned");
     }
 
+    @Test
+    void goodsSentBackFromANewerReceiptDoNotMakeAnOlderOnesStockLookSold() {
+        JsonNode older = receive(hq, product, "10", 100);
+        JsonNode newer = receive(hq, product, "10", 100);
+        JsonNode bill = billOf("INV-F", 100, newer);
+        // Four of the newer receipt go back: the branch holds 16, ten of them the older receipt's.
+        credited(creditBody(uuid(bill, "id"), "goods", "CN-F", 400, goodsLine(billLine(bill, 0), "4", null)));
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("16");
+        JsonNode doc = landed(freight("FWD-F", 100, lineId(older)));
+        JsonNode line = doc.get("lines").get(0);
+        assertThat(line.get("on_hand_qty").asString()).isEqualTo("10.000");
+        assertThat(line.get("to_inventory_minor").asLong()).isEqualTo(100);
+        assertThat(line.get("to_cogs_minor").asLong()).isZero();
+        // Nothing of the older receipt moved, so its landed cost can still be voided.
+        assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertBooksBalance();
+    }
+
+    @Test
+    void theDefaultCreditForGoodsSentBackFollowsWhatAPriceCreditAlreadyCorrected() {
+        JsonNode r = receive(hq, product, "10", 100);
+        JsonNode bill = billOf("INV-D", 120, r);
+        UUID billId = uuid(bill, "id");
+        // The supplier first corrects the price by the 200 the invoice was above the receipt.
+        credited(creditBody(billId, "price", "CN-D1", 200, priceLine(billLine(bill, 0), 200)));
+        // Five units go back at no typed price: they are credited at the corrected 100, not at the billed 120.
+        JsonNode credit = credited(creditBody(billId, "goods", "CN-D2", 500, goodsLine(billLine(bill, 0), "5", null)));
+        UUID id = uuid(credit, "id");
+        assertThat(posted("retail.supplier_credit", id).get("trade_creditors")).containsExactly(500, 0);
+        assertThat(posted("retail.supplier_credit", id).get("inventory")).containsExactly(0, 500);
+        assertThat(posted("retail.supplier_credit", id)).doesNotContainKey("purchase_price_variance");
+        // 1200 billed, 200 and 500 credited: 500 is left, and it is what 5 units at 100 are worth.
+        assertThat(bill(billId).get("open_minor").asLong()).isEqualTo(500);
+        assertBooksBalance();
+    }
+
     // ---- voids -------------------------------------------------------------------------------
 
     @Test

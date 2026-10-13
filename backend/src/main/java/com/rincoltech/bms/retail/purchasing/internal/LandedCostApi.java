@@ -117,13 +117,17 @@ final class LandedCostApi {
             String description,
             @Schema(description = "Received, in base units") String qty,
 
-            @Schema(description = "What the spread used: the value in minor units, the quantity or the weight")
+            @Schema(
+                    description =
+                            "What the spread used: the value in minor units, the quantity or the weight; needs retail.profit.read")
             String basis,
 
             String weight,
 
-            @Schema(description = "This line's share of the total")
-            long allocatedMinor,
+            @Schema(
+                    description =
+                            "This line's share of the total, which is the landed cost of the line; needs retail.profit.read")
+            Long allocatedMinor,
 
             @Schema(
                     description =

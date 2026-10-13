@@ -157,12 +157,18 @@ class LotRepository {
 
     /**
      * The stock that came into the branch after the receipt line's own movement and is still counted: positive movements
-     * that are not themselves the undoing of another movement and have not been undone. First in, first out reads the
-     * balance less this as what is left of the receipt line.
+     * that are not themselves the undoing of another movement and have not been undone, less what standing supplier credit
+     * notes sent back out of those later receipts (a unit sent back never reached the shelf the earlier receipt's units sit
+     * on). First in, first out reads the balance less this as what is left of the receipt line.
      */
     BigDecimal laterInflow(UUID branchId, UUID productId, MovementKey after) {
         return jdbc.sql("""
-                        SELECT coalesce(sum(m.qty), 0) FROM retail_stock_movements m
+                        SELECT coalesce(sum(m.qty - coalesce((SELECT sum(c.qty) FROM retail_supplier_credit_lines c
+                                                                JOIN retail_supplier_credits h ON h.tenant_id = c.tenant_id
+                                                                     AND h.id = c.credit_id AND h.status = 'posted' AND h.kind = 'goods'
+                                                               WHERE c.tenant_id = m.tenant_id AND c.receipt_line_id = m.source_line_id
+                                                                 AND m.source_type = 'retail.goods_receipt'), 0)), 0)
+                          FROM retail_stock_movements m
                           %s
                          WHERE m.branch_id = :branch AND m.product_id = :product AND m.qty > 0 AND m.reverses_movement_id IS NULL
                            AND %s

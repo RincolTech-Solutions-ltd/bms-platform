@@ -103,7 +103,7 @@ class ReceiptsController {
     }
 
     @PostMapping("/{receipt_id}/release-hold")
-    @RequiresPermission("retail.purchase.create")
+    @RequiresPermission("retail.payable.manage")
     @Operation(
             summary =
                     "Release a receipt held as received and not costed without a landed cost, with a reason (issue #199); M",

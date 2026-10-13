@@ -63,7 +63,7 @@ class CatalogueLookup implements RetailCatalogue {
     @Transactional(propagation = Propagation.MANDATORY)
     public void noteCostNotApplied(UUID productId, UUID sourceId, String reason) {
         CatalogueApi.Product locked = repo.lock(productId).orElseThrow(ApiException::notFound);
-        service.changePrices(locked, locked.costMinor(), locked.sellMinor(), "purchase", sourceId, reason);
+        service.noteCostUnchanged(locked, sourceId, reason);
     }
 
     static ProductSnapshot snapshot(CatalogueApi.Product p) {

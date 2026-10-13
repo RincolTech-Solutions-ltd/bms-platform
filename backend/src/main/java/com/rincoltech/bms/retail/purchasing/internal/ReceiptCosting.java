@@ -66,7 +66,7 @@ class ReceiptCosting {
         return Allocation.remaining(
                 stock.balance(lot.branchId(), lot.productId()),
                 lots.laterInflow(lot.branchId(), lot.productId(), key),
-                lot.qty());
+                lot.qty().subtract(lot.returnedQty()));
     }
 
     /** The effect of a share on a lot, worked out without changing anything: for the preview. */
@@ -99,7 +99,7 @@ class ReceiptCosting {
                     e.costAfter(),
                     documentId,
                     (raise ? "Landed cost " : "Supplier credit ") + documentNo + " on " + lot.receiptNo()
-                            + ": cost per unit " + (raise ? "+" : "-") + perUnit(share, lot.qty()));
+                            + (raise ? ": cost raised" : ": cost lowered"));
         } else {
             catalogue.noteCostNotApplied(
                     lot.productId(),
@@ -111,23 +111,25 @@ class ReceiptCosting {
     }
 
     /**
-     * Undoes a cost move when the document is voided: the cost goes back only if it is still what the document set it to.
-     * Otherwise it is left and a history row says so.
+     * Undoes a cost move when the document is voided: the cost goes back only if it is still what the document set it to and
+     * no newer cost event has set it since (a later receipt at the same cost counts). Otherwise it is left and a history row says so.
      */
-    void restore(
-            UUID productId, long costBefore, long costAfter, UUID documentId, String documentNo, String receiptNo) {
-        long now = catalogue.find(productId).map(p -> p.costMinor()).orElse(costAfter);
-        if (now == costAfter) {
+    void restore(Lot lot, long costBefore, long costAfter, UUID documentId, String documentNo) {
+        long now = catalogue.find(lot.productId()).map(p -> p.costMinor()).orElse(costAfter);
+        MovementKey key = lots.receiptMovement(lot.receiptLineId()).orElse(null);
+        boolean newer = key != null && lots.newerCostEvent(lot.productId(), key, documentId);
+        if (now == costAfter && !newer) {
             catalogue.applyCostChange(
-                    productId,
+                    lot.productId(),
                     costBefore,
                     documentId,
-                    "Void of " + documentNo + " on " + receiptNo + ": cost put back");
+                    "Void of " + documentNo + " on " + lot.receiptNo() + ": cost put back");
         } else {
             catalogue.noteCostNotApplied(
-                    productId,
+                    lot.productId(),
                     documentId,
-                    "Void of " + documentNo + " on " + receiptNo + ": cost not put back, it has changed since.");
+                    "Void of " + documentNo + " on " + lot.receiptNo()
+                            + ": cost not put back, a newer cost has been set since.");
         }
     }
 

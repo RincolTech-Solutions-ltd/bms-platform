@@ -136,7 +136,7 @@ class CreditsRepository {
             String costNote) {}
 
     /** What standing credit notes have already taken off one line of an invoice. */
-    record Credited(BigDecimal qty, long totalMinor, long varianceMinor) {}
+    record Credited(BigDecimal qty, long totalMinor, long varianceMinor, long priceMinor) {}
 
     void insert(NewCredit c) {
         jdbc.sql("""
@@ -236,14 +236,16 @@ class CreditsRepository {
         Map<UUID, Credited> out = new HashMap<>();
         jdbc.sql("""
                         SELECT l.bill_line_id, coalesce(sum(l.qty), 0) AS qty, sum(l.line_total_minor) AS total,
-                               sum(l.variance_minor) AS variance
+                               sum(l.variance_minor) AS variance,
+                               coalesce(sum(l.line_total_minor) FILTER (WHERE c.kind = 'price'), 0) AS price
                           FROM retail_supplier_credit_lines l
                           JOIN retail_supplier_credits c ON c.tenant_id = l.tenant_id AND c.id = l.credit_id AND c.status = 'posted'
                          WHERE c.bill_id = ? GROUP BY l.bill_line_id
                         """).param(billId).query(rs -> {
             out.put(
                     rs.getObject("bill_line_id", UUID.class),
-                    new Credited(rs.getBigDecimal("qty"), rs.getLong("total"), rs.getLong("variance")));
+                    new Credited(
+                            rs.getBigDecimal("qty"), rs.getLong("total"), rs.getLong("variance"), rs.getLong("price")));
         });
         return out;
     }

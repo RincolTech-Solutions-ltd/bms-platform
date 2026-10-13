@@ -8350,12 +8350,12 @@
       "RetailLandedCostLine" : {
         "properties" : {
           "allocated_minor" : {
-            "description" : "This line's share of the total",
+            "description" : "This line's share of the total, which is the landed cost of the line; needs retail.profit.read",
             "format" : "int64",
             "type" : "integer"
           },
           "basis" : {
-            "description" : "What the spread used: the value in minor units, the quantity or the weight",
+            "description" : "What the spread used: the value in minor units, the quantity or the weight; needs retail.profit.read",
             "type" : "string"
           },
           "branch_id" : {

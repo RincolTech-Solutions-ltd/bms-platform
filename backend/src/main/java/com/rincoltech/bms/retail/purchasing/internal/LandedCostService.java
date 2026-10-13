@@ -312,9 +312,9 @@ class LandedCostService {
                     p.lot().code(),
                     p.lot().description(),
                     Quantities.format(p.lot().qty()),
-                    plain(p.basis()),
+                    costs ? plain(p.basis()) : null,
                     p.weight() == null ? null : Quantities.format(p.weight()),
-                    p.share(),
+                    costs ? p.share() : null,
                     costs ? Quantities.format(e.onHand()) : null,
                     costs ? e.inventory() : null,
                     costs ? e.gone() : null,
@@ -377,6 +377,10 @@ class LandedCostService {
                     "landed_total_mismatch",
                     "The charges come to " + total + " but the invoice total is " + r.totalMinor()
                             + ". Check the charges against the paper invoice.");
+        }
+        if (lock && r.goodsBillId() != null) {
+            // The goods invoice first, then the receipts, as a credit note takes them, so the two cannot deadlock.
+            billRepo.lock(r.goodsBillId());
         }
         Map<UUID, Lot> lots = lotRepo.lots(ids);
         if (lock) {
@@ -576,13 +580,7 @@ class LandedCostService {
         for (int i = ls.size() - 1; i >= 0; i--) {
             LineRow l = ls.get(i);
             if (l.costApplied()) {
-                costing.restore(
-                        l.productId(),
-                        l.costBeforeMinor(),
-                        l.costAfterMinor(),
-                        id,
-                        d.landedNo(),
-                        lots.get(l.receiptLineId()).receiptNo());
+                costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, d.landedNo());
             }
         }
         Instant now = clock.now();
@@ -713,9 +711,9 @@ class LandedCostService {
                 l.code(),
                 l.description(),
                 Quantities.format(l.lineQty()),
-                plain(l.basis()),
+                costs ? plain(l.basis()) : null,
                 l.weight() == null ? null : Quantities.format(l.weight()),
-                l.allocatedMinor(),
+                costs ? l.allocatedMinor() : null,
                 costs ? Quantities.format(l.onHandQty()) : null,
                 costs ? l.toInventoryMinor() : null,
                 costs ? l.toCogsMinor() : null,

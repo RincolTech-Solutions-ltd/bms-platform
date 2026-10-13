@@ -527,7 +527,7 @@ class ReceiptsService {
                 key, "POST", RECEIPTS + "/" + id + "/release-hold", r, Receipt.class, () -> releaseNow(id, r));
     }
 
-    /** Releases a receipt held as received and not costed without a landed cost, with a reason: no landed cost will come. */
+    /** Releases a receipt held as received and not costed without a landed cost, with a reason: no landed cost will come. Needs retail.payable.manage in the receipt's branch. */
     private Receipt releaseNow(UUID id, ReleaseRequest request) {
         Principal principal = CurrentPrincipal.require();
         String reason = request.reason().trim();
@@ -535,8 +535,9 @@ class ReceiptsService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "reason", "invalid", "Give a reason of at least " + OrdersService.MIN_REASON + " characters.")));
         }
+        // Lifting the hold is the administrator's, not the receiving clerk's, or the hold would stop nothing.
         Row r = repo.find(id, false)
-                .filter(x -> principal.may(PERMISSION, x.branchId()))
+                .filter(x -> principal.may(OrdersService.PAYABLE, x.branchId()))
                 .orElseThrow(ApiException::notFound);
         if (repo.release(id, principal.userId(), "waived", reason, null) == 0) {
             throw new ApiException(

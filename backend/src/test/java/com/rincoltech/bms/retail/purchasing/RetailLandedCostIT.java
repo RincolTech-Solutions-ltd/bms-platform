@@ -185,7 +185,7 @@ class RetailLandedCostIT extends LandedCostTestBase {
         assertThat(last.get("new_cost_minor").asLong()).isEqualTo(150);
         assertThat(last.get("source").asString()).isEqualTo("purchase");
         assertThat(last.get("source_id").asString()).isEqualTo(id.toString());
-        assertThat(last.get("reason").asString()).contains("LCHQ-000001");
+        assertThat(last.get("reason").asString()).contains("LCHQ-000001").doesNotContain("per unit");
         // The receipt shows what was added to its line.
         JsonNode receipt = api.get("/goods-receipts/" + uuid(a, "id"), PAYER).getBody();
         assertThat(receipt.get("lines").get(0).get("landed_minor").asLong()).isEqualTo(500);
@@ -208,8 +208,17 @@ class RetailLandedCostIT extends LandedCostTestBase {
         JsonNode first = receive(hq, product, "10", 100);
         receive(hq, product, "10", 120);
         assertThat(costOf(product)).isEqualTo(120);
+        int version =
+                api.get("/products/" + product, ADMIN).getBody().get("version").asInt();
         JsonNode doc = landed(freight("FWD-L", 500, lineId(first)));
         JsonNode line = doc.get("lines").get(0);
+        // A note in the history is not an edit of the product: its version stays, so nobody editing it is told it
+        // changed.
+        assertThat(api.get("/products/" + product, ADMIN)
+                        .getBody()
+                        .get("version")
+                        .asInt())
+                .isEqualTo(version);
         // The newer receipt set the cost: the landed cost is posted, the cost is not moved, and a history row says so.
         assertThat(line.get("cost_applied").asBoolean()).isFalse();
         assertThat(line.get("cost_note").asString()).contains("newer");
@@ -394,6 +403,15 @@ class RetailLandedCostIT extends LandedCostTestBase {
         body.put("goods_bill_id", goodsBill);
         JsonNode ok = landed(body);
         assertThat(ok.get("goods_bill_id").asString()).isEqualTo(goodsBill.toString());
+        // The invoice cannot be voided while a landed cost names it.
+        ResponseEntity<JsonNode> blocked =
+                keyed("/supplier-bills/" + goodsBill + "/void", Map.of("reason", "Test wrong invoice"), PAYER);
+        assertThat(blocked.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(blocked)).isEqualTo("bill_costed");
+        assertThat(voidLanded(uuid(ok, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(keyed("/supplier-bills/" + goodsBill + "/void", Map.of("reason", "Test wrong invoice"), PAYER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         Map<String, Object> wrong = freight("FWD-GB2", 500, lineId(b));
         wrong.put("goods_bill_id", goodsBill);
         ResponseEntity<JsonNode> r = landedRaw(wrong);
@@ -555,6 +573,22 @@ class RetailLandedCostIT extends LandedCostTestBase {
         assertThat(costOf(product)).isEqualTo(170);
     }
 
+    @Test
+    void aVoidLeavesANewerReceiptsCostAloneEvenWhenItIsTheSameNumber() {
+        JsonNode a = receive(hq, product, "10", 100);
+        JsonNode doc = landed(freight("FWD-VE", 100, lineId(a)));
+        assertThat(costOf(product)).isEqualTo(110);
+        // A newer receipt arrives at the very cost the landed cost made: it, not the document, is the latest cost
+        // event.
+        receive(hq, product, "10", 110);
+        assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(costOf(product)).isEqualTo(110);
+        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN)
+                .getBody()
+                .get("items");
+        assertThat(history.get(history.size() - 1).get("reason").asString()).contains("not put back");
+    }
+
     // ---- idempotency, scope, visibility, tenancy ---------------------------------------------
 
     @Test
@@ -611,9 +645,14 @@ class RetailLandedCostIT extends LandedCostTestBase {
         JsonNode doc = landed(freight("FWD-CV", 500, lineId(a)));
         JsonNode seen = api.get("/landed-costs/" + uuid(doc, "id"), NO_COSTS).getBody();
         JsonNode line = seen.get("lines").get(0);
-        assertThat(line.get("allocated_minor").asLong()).isEqualTo(500);
         for (String hidden : List.of(
-                "to_inventory_minor", "to_cogs_minor", "cost_before_minor", "cost_after_minor", "on_hand_qty")) {
+                "allocated_minor",
+                "basis",
+                "to_inventory_minor",
+                "to_cogs_minor",
+                "cost_before_minor",
+                "cost_after_minor",
+                "on_hand_qty")) {
             assertThat(line.has(hidden)).as(hidden).isFalse();
         }
         JsonNode receipt = api.get("/goods-receipts/" + uuid(a, "id"), NO_COSTS).getBody();
@@ -821,15 +860,22 @@ class RetailLandedCostIT extends LandedCostTestBase {
         JsonNode held = receive(hq, product, "10", 100, true);
         requireCosting(true);
         UUID id = uuid(held, "id");
-        assertThat(code(keyed("/goods-receipts/" + id + "/release-hold", Map.of("reason", "x"), BUYER)))
+        // The clerk who received the goods cannot lift the hold; an administrator can.
+        assertThat(keyed(
+                                "/goods-receipts/" + id + "/release-hold",
+                                Map.of("reason", "No freight on this delivery"),
+                                BUYER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(code(keyed("/goods-receipts/" + id + "/release-hold", Map.of("reason", "x"), PAYER)))
                 .isEqualTo("validation_failed");
         ResponseEntity<JsonNode> released = keyed(
-                "/goods-receipts/" + id + "/release-hold", Map.of("reason", "No freight on this delivery"), BUYER);
+                "/goods-receipts/" + id + "/release-hold", Map.of("reason", "No freight on this delivery"), PAYER);
         assertThat(released.getStatusCode()).as("%s", released.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(released.getBody().get("held_for_costing").asBoolean()).isFalse();
         assertThat(transfer(hq, br2, product, "1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
         ResponseEntity<JsonNode> twice = keyed(
-                "/goods-receipts/" + id + "/release-hold", Map.of("reason", "No freight on this delivery"), BUYER);
+                "/goods-receipts/" + id + "/release-hold", Map.of("reason", "No freight on this delivery"), PAYER);
         assertThat(twice.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(code(twice)).isEqualTo("not_held");
     }

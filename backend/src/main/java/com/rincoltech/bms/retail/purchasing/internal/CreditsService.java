@@ -409,7 +409,7 @@ class CreditsService {
                 problems.add(new FieldProblem(field + ".bill_line_id", "duplicate", "Credit each invoice line once."));
                 continue;
             }
-            Credited done = credited.getOrDefault(bl.id(), new Credited(BigDecimal.ZERO, 0, 0));
+            Credited done = credited.getOrDefault(bl.id(), new Credited(BigDecimal.ZERO, 0, 0, 0));
             long room = bl.lineTotalMinor() - done.totalMinor();
             if (goods) {
                 if (l.qty() == null || l.amountMinor() != null) {
@@ -438,7 +438,7 @@ class CreditsService {
                                     + Quantities.format(bl.qty()) + " of " + lot.receiptNo() + " and "
                                     + Quantities.format(done.qty()) + " has been credited already.");
                 }
-                long unitCredit = l.unitCreditMinor() != null ? l.unitCreditMinor() : bl.unitPriceMinor();
+                long unitCredit = l.unitCreditMinor() != null ? l.unitCreditMinor() : defaultUnitCredit(bl, done);
                 long amount = PurchaseLines.value(l.qty(), unitCredit);
                 if (amount <= 0) {
                     problems.add(new FieldProblem(
@@ -480,6 +480,21 @@ class CreditsService {
             throw ApiException.validation(problems);
         }
         return out;
+    }
+
+    /**
+     * The credit for one unit when the person did not type one: the price the invoice billed, less what price credit notes
+     * have taken off the line since (spread over the billed units, rounded half up), so a credit never gives back a price
+     * the supplier has already corrected.
+     */
+    private static long defaultUnitCredit(LineRow bl, Credited done) {
+        if (done.priceMinor() == 0) {
+            return bl.unitPriceMinor();
+        }
+        BigDecimal units = bl.unitQty() != null ? bl.unitQty() : bl.qty();
+        return BigDecimal.valueOf(bl.lineTotalMinor() - done.priceMinor())
+                .divide(units, 0, RoundingMode.HALF_UP)
+                .longValueExact();
     }
 
     // ---- Void ------------------------------------------------------------------------------
@@ -566,13 +581,7 @@ class CreditsService {
         for (int i = ls.size() - 1; i >= 0; i--) {
             CreditsRepository.LineRow l = ls.get(i);
             if (l.costApplied()) {
-                costing.restore(
-                        l.productId(),
-                        l.costBeforeMinor(),
-                        l.costAfterMinor(),
-                        id,
-                        c.creditNo(),
-                        lots.get(l.receiptLineId()).receiptNo());
+                costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, c.creditNo());
             }
         }
         Instant now = clock.now();

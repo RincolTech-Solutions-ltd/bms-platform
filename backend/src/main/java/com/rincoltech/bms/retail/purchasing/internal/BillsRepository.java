@@ -252,6 +252,15 @@ class BillsRepository {
                 .single();
     }
 
+    /** True when a landed cost that stands names the invoice as the goods invoice its charges belong to. */
+    boolean namedByLandedCost(UUID billId) {
+        return jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM retail_landed_costs WHERE goods_bill_id = ? AND status = 'posted')")
+                .param(billId)
+                .query(Boolean.class)
+                .single();
+    }
+
     boolean refExists(UUID supplierId, String ref) {
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM retail_supplier_bills

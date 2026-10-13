@@ -8459,10 +8459,10 @@ export interface components {
         RetailLandedCostLine: {
             /**
              * Format: int64
-             * @description This line's share of the total
+             * @description This line's share of the total, which is the landed cost of the line; needs retail.profit.read
              */
             allocated_minor?: number;
-            /** @description What the spread used: the value in minor units, the quantity or the weight */
+            /** @description What the spread used: the value in minor units, the quantity or the weight; needs retail.profit.read */
             basis?: string;
             /** Format: uuid */
             branch_id?: string;

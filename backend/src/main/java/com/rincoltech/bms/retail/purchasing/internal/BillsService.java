@@ -427,6 +427,13 @@ class BillsService {
                     "Invoice paid",
                     "A payment stands against this invoice. Reverse the payment first.");
         }
+        if (repo.namedByLandedCost(id)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "bill_costed",
+                    "Invoice has a landed cost",
+                    "A landed cost names this invoice. Void the landed cost first.");
+        }
         if (repo.credited(id)) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
