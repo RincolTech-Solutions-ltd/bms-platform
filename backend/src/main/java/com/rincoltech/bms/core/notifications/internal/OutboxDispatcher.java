@@ -155,6 +155,7 @@ class OutboxDispatcher {
         String outcome;
         String error = null;
         Instant retryAt = null;
+        Instant newExpiry = null;
         try {
             Map<String, String> params = mapper.readValue(row.params(), PARAMS);
             String subject = null;
@@ -190,6 +191,7 @@ class OutboxDispatcher {
                     retryAt = deferred.until() == null || !deferred.until().isAfter(now)
                             ? now.plus(Duration.ofMinutes(1))
                             : deferred.until();
+                    newExpiry = deferred.extendExpiryTo();
                 }
                 case OutboxChannel.Result.Unknown unknown -> outcome = "unknown";
                 case OutboxChannel.Result.Refused refused -> {
@@ -208,15 +210,17 @@ class OutboxDispatcher {
         String recordedOutcome = outcome;
         String recordedError = error;
         Instant recordedRetry = retryAt;
+        Instant recordedExpiry = newExpiry;
         String status =
-                transactions.execute(tx -> jdbc.sql("SELECT notification_outbox_record_result(?, ?, ?, ?, ?, ?)")
+                transactions.execute(tx -> jdbc.sql("SELECT notification_outbox_record_result(?, ?, ?, ?, ?, ?, ?)")
                         .params(
                                 row.id(),
                                 recordedOutcome,
                                 recordedError,
                                 MAX_ATTEMPTS,
                                 Timestamp.from(recordedRetry),
-                                Timestamp.from(now))
+                                Timestamp.from(now),
+                                recordedExpiry == null ? null : Timestamp.from(recordedExpiry))
                         .query(String.class)
                         .optional()
                         .orElse("none"));

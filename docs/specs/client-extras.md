@@ -517,6 +517,10 @@ sharpens, the text above:
 - **No message is sent twice by the machine.** The delivery row is written `queued` before the network call; an attempt that
   finds it `queued` or `unknown` answers `Unknown` and does not call the provider. The operator's "send again" is the only way
   to resend an unknown message.
+- **An over-cap reminder outlives today.** Deferred to tomorrow's window, it also gets an expiry at the end of tomorrow's window
+  day (bounded to 2 days after it was queued), so it can be sent then.
+- **Ambiguity is wider than a timeout.** An HTTP 500, 502 or 504, a gateway error code in the answer and an SSL error while
+  reading are unknown, not retried. The provider alert of 4.14 (key refused, no credit) is one Telegram alert a day.
 - **Fairness has a memory.** One row is claimed per call, so a tenant's turn is its rank among its own due rows plus the rows it
   was given in the last minute.
 - **The guard covers every non-production environment**, including an unset `BMS_ENVIRONMENT`, and production refuses the

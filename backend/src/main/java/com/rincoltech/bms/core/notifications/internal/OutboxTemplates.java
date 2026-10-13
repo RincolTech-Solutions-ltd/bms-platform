@@ -107,6 +107,11 @@ class OutboxTemplates {
             new Template(null, "{text}"),
             // ADR-036 decision 13: the operator hears when SMS use reaches 80 percent of a daily cap or
             // a cap holds messages back. The scope is "platform" or a tenant id; no number, no text.
+            "sms.provider_alert",
+            new Template(
+                    null,
+                    "BMS SMS provider problem on {day}: {reason}. Check the Africa's Talking key and credit. Messages"
+                            + " are retried, then fail; receipts expire after an hour."),
             "sms.cap_alert",
             new Template(
                     null,

@@ -170,6 +170,7 @@ final class SmsOutboxChannel implements OutboxChannel {
             outcome = provider.send(prepared.to(), prepared.text(), null, delivery.idempotencyKey());
         } catch (SmsProvider.Transient e) {
             finish(row, prepared, provider.name(), "failed", null, e.getMessage());
+            providerAlert(e.getMessage());
             throw new SendFailure(e.getMessage());
         } catch (SmsProvider.Ambiguous e) {
             finish(row, prepared, provider.name(), "unknown", null, e.getMessage());
@@ -302,7 +303,12 @@ final class SmsOutboxChannel implements OutboxChannel {
             return Prepared.done(Result.deferred(holdUntil), alerts);
         }
         if (transactional ? tenantCount >= 2 * tenantCap : tenantCount >= tenantCap) {
-            return Prepared.done(Result.deferred(transactional ? holdUntil : window.nextDayStart(now)), alerts);
+            if (transactional) {
+                return Prepared.done(Result.deferred(holdUntil), alerts);
+            }
+            // Tomorrow's window, and an expiry that reaches its end (the row expired at the end of today's).
+            Instant tomorrow = window.nextDayStart(now);
+            return Prepared.done(Result.deferred(tomorrow, window.endOfDay(tomorrow)), alerts);
         }
 
         Map<String, String> params = new HashMap<>(row.params());
@@ -452,6 +458,27 @@ final class SmsOutboxChannel implements OutboxChannel {
             } catch (RuntimeException e) {
                 log.warn("SMS cap alert not queued: {}", e.getClass().getSimpleName());
             }
+        }
+    }
+
+    /**
+     * The provider refused our key or has no credit (spec 4.14): the operator hears once a day through the
+     * Telegram operator chat. Nothing else about the message goes in it.
+     */
+    private void providerAlert(String reason) {
+        if (!"provider_auth_failed".equals(reason) && !"provider_insufficient_balance".equals(reason)) {
+            return;
+        }
+        String day = clock.now().atZone(ZONE).toLocalDate().toString();
+        try {
+            transactions.executeWithoutResult(tx -> outbox.enqueue(new Outbox.Message(
+                    Outbox.TELEGRAM,
+                    Outbox.OPERATOR_CHAT,
+                    "sms.provider_alert",
+                    Map.of("day", day, "reason", reason),
+                    "sms.provider_alert:" + reason + ":" + day)));
+        } catch (RuntimeException e) {
+            log.warn("SMS provider alert not queued: {}", e.getClass().getSimpleName());
         }
     }
 

@@ -210,6 +210,23 @@ Building the slice changed or sharpened these decisions; the numbers refer to th
 - **Decision 3 and the Watch-for item on phone numbers in the outbox.** The nightly outbox purge also deletes a failed SMS row
   30 days after it failed, as it does a sent one, because the `recipient` column of a failed row would otherwise keep a
   phone number for ever; email and Telegram rows are unchanged.
+- **Decision 13, a reminder over its cap must outlive today.** A reminder expires at the end of its window day, and one over the
+  tenant cap is deferred to tomorrow's window, so it would always expire first. `Deferred` can therefore carry a later
+  expiry (the end of tomorrow's window day); `notification_outbox_record_result` takes it as an optional last argument and
+  only ever moves the expiry later, at most 2 days after the row was queued. A receipt held past twice the cap still
+  expires after its hour: holding it is not deferring it to a day when it would be stale.
+- **Decision 13, what the caps count and how exactly.** The caps count messages, not segments (a two segment message is one
+  toward the cap, though two toward the bill; `segments` in the delivery log is what the bill uses). The check reads the
+  count and then sends without a lock, so concurrent senders could overshoot a cap by a few messages. One SMS sender job runs
+  at a time across instances (db-scheduler), which bounds this to the messages in flight; a hard cap would need a per day
+  counter row locked per message, which is not worth its cost for a cost limit.
+- **Decision 6, what is ambiguous.** An HTTP 500, 502 or 504, a gateway or internal error code (500, 501) inside the
+  provider's answer, a read timeout, a broken connection and an SSL error after the connection was made are all `Unknown`
+  (no automatic retry), because the provider may have taken the message first. Only a connection that could not be made, a
+  failed TLS handshake, a 401 or 403, a 429, a 503 and "no balance" are clean failures. A 409 (Do Not Disturb) is a final
+  rejection (`provider_dnd`).
+- **Spec 4.14, the provider alert.** On `provider_auth_failed` and `provider_insufficient_balance` the channel queues one
+  Telegram operator alert per reason per day (`sms.provider_alert`; the text carries the reason and the day, nothing else).
 - **The keyed phone hash is application code, not a database function.** The migration lists no SQL hash helper: the key is
   derived from the application data key (HMAC-SHA256 with a fixed purpose label, `SmsRecipientHash`), so the secret never
   reaches the database and an operator with SQL access cannot test a number against the log. The column

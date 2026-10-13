@@ -54,7 +54,13 @@ interface OutboxChannel {
 
         record Sent() implements Result {}
 
-        record Deferred(Instant until) implements Result {}
+        /** @param extendExpiryTo a later expiry the row should get (bounded by the database), or null */
+        record Deferred(Instant until, Instant extendExpiryTo) implements Result {
+
+            public Deferred(Instant until) {
+                this(until, null);
+            }
+        }
 
         record Unknown() implements Result {}
 
@@ -62,6 +68,10 @@ interface OutboxChannel {
 
         static Result deferred(Instant until) {
             return new Deferred(until);
+        }
+
+        static Result deferred(Instant until, Instant extendExpiryTo) {
+            return new Deferred(until, extendExpiryTo);
         }
 
         static Result unknown() {

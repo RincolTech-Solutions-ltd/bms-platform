@@ -290,7 +290,8 @@ SKIP LOCKED`, counting the attempt and setting the lease in the same statement),
 `notification_outbox_record` (sent, or pending again after 1 then 5 minutes, or `failed` at the
 third attempt), `notification_outbox_record_result` (`V50`: `sent`, a clean `failed` with the same retry rule, `deferred`
 which gives the attempt back and holds the row until a time, `unknown` which marks it `failed` with `unknown_outcome` and
-keeps its parameters, `refused` which marks it `failed` with a reason code and clears them), `notification_outbox_failures`
+keeps its parameters, `refused` which marks it `failed` with a reason code and clears them; an optional last argument lets a
+deferral move the expiry later, at most 2 days after the row was queued), `notification_outbox_failures`
 (with the tenant and the category from `V50`), `notification_outbox_counts`,
 `notification_outbox_retry` (only a failed row younger than 7 days, with its link not expired and
 its parameters kept; for an SMS whose delivery log row is `unknown` it also moves that row back to `failed`, the operator's

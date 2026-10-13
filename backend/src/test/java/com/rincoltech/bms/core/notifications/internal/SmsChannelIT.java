@@ -818,7 +818,7 @@ class SmsChannelIT extends IntegrationTest {
      */
     @Test
     void theTenantCapDefersRemindersAndHoldsReceiptsPastTwiceTheCap() {
-        Instant start = day(16);
+        Instant start = day(40);
         Rig rig = live(start);
         TestDatabase.Fixture t = tenant(5);
         for (int i = 0; i < 5; i++) {
@@ -833,7 +833,11 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(rig.dispatch(10)).isEqualTo(1);
         assertThat(outboxRow(over).get("status")).isEqualTo("pending");
         assertThat(outboxRow(over).get("attempts")).isEqualTo(0);
-        assertThat(at(outboxRow(over).get("next_attempt_at"))).isEqualTo(kampala(start.plus(Duration.ofDays(1)), 8, 0));
+        Instant tomorrow = start.plus(Duration.ofDays(1));
+        assertThat(at(outboxRow(over).get("next_attempt_at"))).isEqualTo(kampala(tomorrow, 8, 0));
+        // It must outlive today's window day: its expiry moves to the end of tomorrow's (it would have expired
+        // at 20:00 today, before its turn).
+        assertThat(at(outboxRow(over).get("expires_at"))).isEqualTo(kampala(tomorrow, 20, 0));
         assertThat(rig.provider.sent()).hasSize(5);
 
         // Receipts go on to twice the cap (10) ...
@@ -860,6 +864,131 @@ class SmsChannelIT extends IntegrationTest {
         // The operator was told at 80 percent and at the cap, once each for the day.
         String day = start.atZone(ZoneId.of("Africa/Kampala")).toLocalDate().toString();
         assertThat(alerts("tenant " + t.tenantId(), day)).containsExactlyInAnyOrder("80 percent", "100 percent");
+
+        // Tomorrow the count starts again and the deferred reminder is sent, as the spec says.
+        rig.at(kampala(tomorrow, 8, 0));
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        assertThat(outboxRow(over).get("status")).isEqualTo("sent");
+        assertThat(rig.provider.sent()).hasSize(11);
+    }
+
+    /** The extension is bounded: a deferral cannot push an expiry past 2 days after the row was queued. */
+    @Test
+    void aDeferralCanOnlyMoveTheExpiryLaterAndOnlyWithinTwoDays() {
+        Instant start = day(30);
+        TestDatabase.Fixture t = tenant(100);
+        String key = key();
+        raw(t, "reminder", "+256700000208", start, key);
+        Map<String, Object> before = outboxRow(key);
+        UUID id = TestDatabase.owner()
+                .sql("SELECT id FROM notification_outbox WHERE idempotency_key = ?")
+                .param(key)
+                .query(UUID.class)
+                .single();
+        TestDatabase.owner()
+                .sql("UPDATE notification_outbox SET attempts = 1 WHERE id = ?")
+                .param(id)
+                .update();
+        for (Instant asked : List.of(start.plus(Duration.ofDays(30)), start.minus(Duration.ofDays(1)))) {
+            jdbc.sql("SELECT notification_outbox_record_result(?, 'deferred', NULL, 3, ?, ?, ?)")
+                    .params(id, Timestamp.from(start.plusSeconds(60)), Timestamp.from(start), Timestamp.from(asked))
+                    .query(String.class)
+                    .single();
+            TestDatabase.owner()
+                    .sql("UPDATE notification_outbox SET attempts = 1 WHERE id = ?")
+                    .param(id)
+                    .update();
+        }
+        // 30 days asked: capped at created_at + 2 days; one day earlier asked: unchanged.
+        assertThat(at(outboxRow(key).get("expires_at"))).isEqualTo(start.plus(Duration.ofDays(2)));
+        assertThat(at(before.get("expires_at"))).isBefore(start.plus(Duration.ofDays(2)));
+    }
+
+    /** Two senders racing for the same due rows never take one twice (the locked row is re-checked). */
+    @Test
+    void concurrentClaimersNeverTakeTheSameRow() throws Exception {
+        Instant start = day(31);
+        TestDatabase.Fixture t = tenant(100_000);
+        int rows = 300;
+        bulk(t, "reminder", "+256700000209", rows, start.minus(Duration.ofHours(1)), "race-");
+        java.util.Set<UUID> taken = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        java.util.concurrent.atomic.AtomicInteger duplicates = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(6);
+        List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            futures.add(pool.submit(() -> {
+                JdbcClient app = JdbcClient.create(TestDatabase.appDataSource());
+                while (true) {
+                    List<UUID> got = app.sql("SELECT id FROM notification_outbox_claim(ARRAY['sms'], 3, ?, ?)")
+                            .params(Timestamp.from(start), Timestamp.from(start.plus(Duration.ofMinutes(2))))
+                            .query(UUID.class)
+                            .list();
+                    if (got.isEmpty()) {
+                        // SKIP LOCKED can come back empty while another holds the best rows: stop when none are due.
+                        if (remaining(start) == 0) {
+                            return null;
+                        }
+                        continue;
+                    }
+                    for (UUID id : got) {
+                        if (!taken.add(id)) {
+                            duplicates.incrementAndGet();
+                        }
+                    }
+                }
+            }));
+        }
+        for (var f : futures) {
+            f.get(120, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+        assertThat(duplicates.get()).isZero();
+        assertThat(taken).hasSize(rows);
+    }
+
+    /** Rows of this tenant's bulk still due at {@code at}. */
+    long remaining(Instant at) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM notification_outbox WHERE channel = 'sms' AND status = 'pending'"
+                        + " AND attempts = 0 AND next_attempt_at <= ?")
+                .param(Timestamp.from(at))
+                .query(Long.class)
+                .single();
+    }
+
+    /** Spec 4.14: a refused key or an empty account tells the operator once a day, with no message detail. */
+    @Test
+    void aRefusedKeyOrAnEmptyAccountAlertsTheOperatorOncePerDay() {
+        Instant start = day(32);
+        Rig rig = live(start);
+        TestDatabase.Fixture t = tenant(100);
+        rig.provider.failWith("provider_auth_failed");
+        for (int i = 0; i < 3; i++) {
+            receipt(rig, t, "+25670000021" + i);
+        }
+        rig.dispatch(10);
+        rig.provider.failWith("provider_insufficient_balance");
+        receipt(rig, t, "+256700000214");
+        rig.dispatch(10);
+        // A different failure does not alert.
+        rig.provider.failWith("provider_http_503");
+        receipt(rig, t, "+256700000215");
+        rig.dispatch(10);
+
+        String day = start.atZone(ZoneId.of("Africa/Kampala")).toLocalDate().toString();
+        List<String> alerts = TestDatabase.owner()
+                .sql("SELECT params->>'reason' FROM notification_outbox WHERE channel = 'telegram'"
+                        + " AND template_key = 'sms.provider_alert' AND params->>'day' = ? AND tenant_id IS NULL"
+                        + " ORDER BY 1")
+                .param(day)
+                .query(String.class)
+                .list();
+        assertThat(alerts).containsExactly("provider_auth_failed", "provider_insufficient_balance");
+        // The alert text renders and carries neither a number nor a message.
+        String text = templates
+                .render("telegram", "sms.provider_alert", Map.of("day", day, "reason", "provider_auth_failed"))
+                .text();
+        assertThat(text).contains("provider_auth_failed").doesNotContain("+256");
     }
 
     /** The platform ceiling sits above every tenant: over it, even a receipt is held. */

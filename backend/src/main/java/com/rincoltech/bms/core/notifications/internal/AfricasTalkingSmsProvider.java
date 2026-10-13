@@ -17,7 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
-import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLHandshakeException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -114,12 +114,14 @@ final class AfricasTalkingSmsProvider implements SmsProvider {
     }
 
     /** A failure before the request could have been written is clean; any other may have reached the provider. */
-    private static Outcome classify(Throwable cause) throws Transient, Ambiguous {
+    static Outcome classify(Throwable cause) throws Transient, Ambiguous {
         if (cause instanceof ConnectException
                 || cause instanceof HttpConnectTimeoutException
                 || cause instanceof UnknownHostException
                 || cause instanceof UnresolvedAddressException
-                || cause instanceof SSLException) {
+                // Only a failed handshake is certainly before the request was written; an SSL error while
+                // reading the answer may follow a message the provider already took.
+                || cause instanceof SSLHandshakeException) {
             throw new Transient("provider_unreachable");
         }
         throw new Ambiguous(cause instanceof IOException ? "provider_io_error" : "provider_error");
@@ -129,14 +131,19 @@ final class AfricasTalkingSmsProvider implements SmsProvider {
         if (http == 401 || http == 403) {
             throw new Transient("provider_auth_failed");
         }
-        if (http == 429 || http == 500 || http == 503) {
+        if (http == 429 || http == 503) {
             throw new Transient("provider_http_" + http);
         }
-        if (http == 502 || http == 504) {
+        // 500 comes after the request was written: the provider may have queued the message first.
+        if (http == 500 || http == 502 || http == 504) {
             throw new Ambiguous("provider_http_" + http);
         }
         if (http == 400) {
             return rejected("provider_http_400");
+        }
+        if (http == 409) {
+            // Do Not Disturb: the recipient does not take messages; final.
+            return rejected("provider_dnd");
         }
         if (http / 100 != 2) {
             return rejected("provider_http_" + http);
@@ -170,7 +177,8 @@ final class AfricasTalkingSmsProvider implements SmsProvider {
             }
             case 401, 402, 403, 404, 406, 407, 502 -> rejected("provider_" + code);
             case 405 -> throw new Transient("provider_insufficient_balance");
-            case 500, 501 -> throw new Transient("provider_" + code);
+            // A gateway error after the request was taken: the message may still go.
+            case 500, 501 -> throw new Ambiguous("provider_" + code);
             default -> throw new Ambiguous("provider_unknown_status");
         };
     }

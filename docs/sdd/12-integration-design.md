@@ -43,7 +43,9 @@ SmsProvider
 
 Built in issue #212: `send` only. Adapters are `AfricasTalkingSmsProvider` (a form POST with the key in the `apiKey` header, the
 JSON answer read per recipient, a 15 second total time per message, a clean failure for a connection that could not be made
-or an error answer and an ambiguous one for anything after the request was written), `SinkSmsProvider` (no client, no URL, no
+or a 401, 403, 429 or 503 answer, or no balance, and an ambiguous one for anything after the request was written: a timeout,
+a broken connection, an SSL error while reading, an HTTP 500, 502 or 504 or an internal or gateway error code in the answer;
+a 409 Do Not Disturb is a final rejection), `SinkSmsProvider` (no client, no URL, no
 credential; the only provider allowed outside production), `AllowlistSmsProvider` (the real provider for listed numbers, the
 sink for the rest) and `RecordingSmsProvider` (the fake). The configuration picks the provider from `BMS_SMS_MODE`
 (`SmsConfiguration`) and the startup guard (`SmsSettings.resolve`) refuses every combination that could text a real phone from

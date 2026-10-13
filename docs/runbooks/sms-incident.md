@@ -21,10 +21,10 @@ listed?), and the failed rows with tenant, category, masked recipient and `last_
 
 | `last_error` | Meaning | What to do |
 |---|---|---|
-| `unknown_outcome` | The request reached the provider and no answer came back (a timeout, a broken connection, a proxy error). The message may or may not have been sent. Never retried by the machine, because a retry could text twice | Look at the provider's dashboard for the number and the time. If it was not sent, a staff member may resend by hand (the operator "send again" is a deliberate duplicate risk, and only works while the row has not expired). The delivery log row says `unknown` |
-| `provider_auth_failed` | The key was refused | Check `BMS_SMS_AT_API_KEY` and the account; rotate if needed. Rows are retried, then fail |
-| `provider_insufficient_balance` | The provider account has no credit | Top up; rows are retried, then fail. Receipts expire after an hour, so some are lost |
-| `provider_403`, `provider_406` and similar (`provider_<code>`) | The provider refused this message for good (invalid or blocked number, unsupported number type, unregistered sender) | Not retried. Fix the number or the sender; the delivery row is `rejected` |
+| `unknown_outcome` | The request reached the provider and no usable answer came back (a timeout, a broken connection, an SSL error while reading, an HTTP 500, 502 or 504). The message may or may not have been sent. Never retried by the machine, because a retry could text twice | Look at the provider's dashboard for the number and the time. If it was not sent, a staff member may resend by hand (the operator "send again" is a deliberate duplicate risk, and only works while the row has not expired). The delivery log row says `unknown` |
+| `provider_auth_failed` | The key was refused (the operator also gets one Telegram alert a day) | Check `BMS_SMS_AT_API_KEY` and the account; rotate if needed. Rows are retried, then fail |
+| `provider_insufficient_balance` | The provider account has no credit (one Telegram alert a day) | Top up; rows are retried, then fail. Receipts expire after an hour, so some are lost |
+| `provider_403`, `provider_406`, `provider_dnd` and similar (`provider_<code>`; `provider_dnd` is Do Not Disturb) | The provider refused this message for good (invalid or blocked number, unsupported number type, unregistered sender) | Not retried. Fix the number or the sender; the delivery row is `rejected` |
 | `invalid_phone` | The number is not one we read without guessing | Fix the member's number |
 | `tenant_inactive` | The tenant was suspended or closed after the row was queued | Nothing; resume the tenant if it was a mistake |
 | `blocked_optout` | The member opted out | Nothing; it is logged on purpose |

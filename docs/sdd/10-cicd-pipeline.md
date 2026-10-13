@@ -77,7 +77,8 @@ The documentation guards (`dash-guard`, `adr-citation-guard`, `architecture-mode
 read-only token and no secrets. Nothing in CI pushes images or deploys.
 
 Contract tests against a real provider are a separate, manual workflow, never part of this one (spec
-`docs/specs/client-extras.md` section 8, chapter 12 section 12.8). `sms-sandbox-contract` (`workflow_dispatch` only) sends one
+`docs/specs/client-extras.md` section 8, chapter 12 section 12.8). `sms-sandbox-contract` (`workflow_dispatch` only, on a
+GitHub-hosted runner and only on `main`, because it holds a secret and the shared self-hosted runner never does, ADR-018 finding H1) sends one
 message to the Africa's Talking **sandbox** with the repository secret `BMS_SMS_SANDBOX_API_KEY` and the repository variable
 `BMS_SMS_CONTRACT_TO` (a sandbox test number), through `AfricasTalkingSandboxContractTest`, which builds its settings
 through the SMS startup guard as a staging host would and so cannot be pointed at the live host. The test is skipped

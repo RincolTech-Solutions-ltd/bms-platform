@@ -7,18 +7,20 @@
 -- gains result columns, which an older reader that selects columns by name does not notice; the
 -- drop and the create run in this one migration transaction, so no caller sees it missing.
 --
--- Lock note, stated honestly. ALTER TABLE ... ADD COLUMN with a constant default or no default is a
--- catalogue change in PostgreSQL 11 and later (no rewrite), but each ALTER takes ACCESS EXCLUSIVE
--- on notification_outbox for an instant and waits behind any open transaction on it; the sender
--- claim and the enqueue are short transactions, so the wait is a few milliseconds at the current
--- size (rows are purged 30 days after sending). The CHECK and the foreign key are added NOT VALID
--- and validated afterwards, so the scan runs under SHARE UPDATE EXCLUSIVE (and SHARE ROW
--- EXCLUSIVE on tenants for the key) and does not block reads or writes. Every new table is empty. The
--- one new index on notification_outbox (updated_at, for the claim's fairness count) is built without
--- CONCURRENTLY, which a migration transaction cannot do, so it blocks writes to the outbox while it
--- builds: milliseconds at the size of a table purged 30 days after sending. The functions replaced here
--- (the claim and the failed-rows list gain result columns; notification_outbox_retry gains a statement)
--- are dropped and created, or replaced, inside this one migration transaction.
+-- Lock note, stated honestly. Flyway runs this whole file as ONE transaction, so every lock taken
+-- below is held until the final COMMIT. The first ALTER TABLE takes ACCESS EXCLUSIVE on
+-- notification_outbox: from then until commit nothing can read or write the outbox (the sender, the
+-- enqueue of a savings receipt or a sign-up email, the operator portal wait), and the foreign key
+-- adds SHARE ROW EXCLUSIVE on tenants, which blocks writes to tenants for the same time. ADD COLUMN
+-- with a constant default is a catalogue change (no rewrite), but the CHECK constraints and the foreign
+-- key scan the table, and so does the index build. The table is purged 30 days after sending, so this is
+-- seconds at the current size, not minutes; it is a short outage of the outbox and of tenant writes, not
+-- a zero-lock change, and the migrate step runs before the application containers switch (ADR-006), so
+-- the old containers queue behind it. (NOT VALID followed by VALIDATE inside this one transaction gains
+-- nothing, so the constraints are added validated.) The index on notification_outbox(updated_at) is
+-- built without CONCURRENTLY, which a migration transaction cannot do. Every new table is empty. The
+-- functions replaced here (the claim and the failed-rows list gain result columns, the retry and the
+-- purge gain a statement) are dropped and created, or replaced, in this same transaction.
 --
 -- What this migration holds:
 --   1. notification_outbox learns its tenant, a category and an optional subject, and the enqueue
@@ -49,15 +51,12 @@ ALTER TABLE notification_outbox
 
 ALTER TABLE notification_outbox
     ADD CONSTRAINT notification_outbox_category_check
-        CHECK (category IN ('transactional', 'reminder', 'arrears')) NOT VALID,
+        CHECK (category IN ('transactional', 'reminder', 'arrears')),
     ADD CONSTRAINT notification_outbox_subject_check
         CHECK ((subject_type IS NULL AND subject_id IS NULL)
-            OR (subject_type IN ('member', 'account') AND subject_id IS NOT NULL)) NOT VALID,
+            OR (subject_type IN ('member', 'account') AND subject_id IS NOT NULL)),
     ADD CONSTRAINT notification_outbox_tenant_fk
-        FOREIGN KEY (tenant_id) REFERENCES tenants (id) NOT VALID;
-ALTER TABLE notification_outbox VALIDATE CONSTRAINT notification_outbox_category_check;
-ALTER TABLE notification_outbox VALIDATE CONSTRAINT notification_outbox_subject_check;
-ALTER TABLE notification_outbox VALIDATE CONSTRAINT notification_outbox_tenant_fk;
+        FOREIGN KEY (tenant_id) REFERENCES tenants (id);
 
 -- ---------------------------------------------------------------------------------------------
 -- 6 (created early because the enqueue function reads the controls). The operator-only per tenant
@@ -209,7 +208,10 @@ BEGIN
     ), picked AS (
         SELECT x.id AS pid
           FROM candidates k JOIN notification_outbox x ON x.id = k.cid
-         WHERE x.status = 'pending'
+         -- PostgreSQL re-evaluates this on the locked row if another sender claimed and committed it
+         -- first: by then its lease has moved next_attempt_at into the future, so it is no longer due.
+         WHERE x.status = 'pending' AND x.next_attempt_at <= p_now AND x.attempts < p_max_attempts
+           AND x.channel = ANY (p_channels)
          ORDER BY k.pos
          LIMIT 1
            FOR UPDATE OF x SKIP LOCKED
@@ -233,7 +235,7 @@ CREATE INDEX notification_outbox_by_updated ON notification_outbox (updated_at);
 --   sent      the message went; parameters cleared.
 --   failed    a clean failure: pending again at p_retry_at, or failed once p_max_attempts is reached.
 --   deferred  not sent and not a failure (outside the window, over a cap): the attempt is given
---             back and the row waits until p_retry_at.
+--             back and the row waits until p_retry_at; p_expires_at may move its expiry later (bounded).
 --   unknown   the outcome cannot be known (a read timeout after the request was written): failed
 --             with last_error 'unknown_outcome', parameters kept, never retried automatically.
 --   refused   the channel will never send it (opt-out, switched off, a number it will not text):
@@ -242,7 +244,8 @@ CREATE INDEX notification_outbox_by_updated ON notification_outbox (updated_at);
 -- ---------------------------------------------------------------------------------------------
 
 CREATE FUNCTION notification_outbox_record_result(
-    p_id uuid, p_outcome text, p_error text, p_max_attempts integer, p_retry_at timestamptz, p_now timestamptz)
+    p_id uuid, p_outcome text, p_error text, p_max_attempts integer, p_retry_at timestamptz, p_now timestamptz,
+    p_expires_at timestamptz DEFAULT NULL)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -271,6 +274,12 @@ BEGIN
                             ELSE left(p_error, 300)
                         END,
            next_attempt_at = CASE WHEN p_outcome IN ('failed', 'deferred') THEN p_retry_at ELSE o.next_attempt_at END,
+           -- A deferral may name a later expiry (a reminder over its tenant's cap waits for tomorrow's window and
+           -- must outlive today's): it only ever moves the expiry later, and at most 2 days after the row was queued.
+           expires_at = CASE WHEN p_outcome = 'deferred' AND p_expires_at IS NOT NULL AND o.expires_at IS NOT NULL
+                                  AND p_expires_at > o.expires_at
+                             THEN least(p_expires_at, o.created_at + interval '2 days')
+                             ELSE o.expires_at END,
            updated_at = p_now
      WHERE o.id = p_id AND o.status = 'pending'
     RETURNING o.status INTO v_status;
@@ -510,7 +519,7 @@ REVOKE ALL ON FUNCTION sms_tenant_control_get(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_tenant_control_set(uuid, boolean, integer, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz, timestamptz, text, text, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_claim(text[], integer, timestamptz, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION notification_outbox_record_result(uuid, text, text, integer, timestamptz, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION notification_outbox_record_result(uuid, text, text, integer, timestamptz, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION notification_outbox_failures(integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_channel_mode_changed(text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_platform_count_since(timestamptz, timestamptz) FROM PUBLIC;
@@ -523,7 +532,7 @@ GRANT EXECUTE ON FUNCTION sms_tenant_control_get(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_tenant_control_set(uuid, boolean, integer, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_enqueue(uuid, text, text, text, jsonb, text, text, timestamptz, timestamptz, text, text, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_claim(text[], integer, timestamptz, timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION notification_outbox_record_result(uuid, text, text, integer, timestamptz, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION notification_outbox_record_result(uuid, text, text, integer, timestamptz, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION notification_outbox_failures(integer) TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_channel_mode_changed(text, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_platform_count_since(timestamptz, timestamptz) TO bms_app;

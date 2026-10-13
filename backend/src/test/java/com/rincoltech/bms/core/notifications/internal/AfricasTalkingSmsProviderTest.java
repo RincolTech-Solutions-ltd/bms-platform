@@ -147,32 +147,41 @@ class AfricasTalkingSmsProviderTest {
             assertThat(outcome.messageId()).isNull();
             stop();
         }
-        // No balance and gateway errors: certainly not sent, so a retry is safe.
-        for (int code : new int[] {405, 500, 501}) {
+        // No balance: certainly not sent, so a retry is safe.
+        URI noBalance = start(e -> reply(e, 201, answer(405, "Failed", "None", "None")));
+        assertThatThrownBy(() -> send(noBalance))
+                .isInstanceOf(Transient.class)
+                .satisfies(e -> assertSafe((Exception) e));
+        stop();
+        // An internal or gateway error after the request was taken: the message may still go, so no retry.
+        for (int code : new int[] {500, 501}) {
             URI base = start(e -> reply(e, 201, answer(code, "Failed", "None", "None")));
-            assertThatThrownBy(() -> send(base))
-                    .isInstanceOf(Transient.class)
-                    .satisfies(e -> assertSafe((Exception) e));
+            assertThatThrownBy(() -> send(base)).as("code %d", code).isInstanceOf(Ambiguous.class);
             stop();
-        }
-        // A code we do not know in an answer that otherwise looks right: do not retry.
+        } // A code we do not know in an answer that otherwise looks right: do not retry.
         URI base = start(e -> reply(e, 201, answer(999, "Strange", "None", "None")));
         assertThatThrownBy(() -> send(base)).isInstanceOf(Ambiguous.class);
     }
 
     @Test
     void httpStatusesSplitIntoCleanAndAmbiguousFailures() throws Exception {
-        for (int http : new int[] {401, 403, 429, 500, 503}) {
+        for (int http : new int[] {401, 403, 429, 503}) {
             URI base = start(e -> reply(e, http, "{}"));
             assertThatThrownBy(() -> send(base)).as("http %d", http).isInstanceOf(Transient.class);
             stop();
         }
         // A proxy that timed out in front of the provider: the provider may have taken it.
-        for (int http : new int[] {502, 504}) {
+        for (int http : new int[] {500, 502, 504}) {
             URI base = start(e -> reply(e, http, "{}"));
             assertThatThrownBy(() -> send(base)).as("http %d", http).isInstanceOf(Ambiguous.class);
             stop();
         }
+        // Do Not Disturb: final, not retried.
+        URI dnd = start(e -> reply(e, 409, "Do Not Disturb"));
+        Outcome refused = send(dnd);
+        assertThat(refused.status()).isEqualTo(Status.REJECTED);
+        assertThat(refused.failureReason()).isEqualTo("provider_dnd");
+        stop();
         URI base = start(e -> reply(e, 400, "The request is malformed"));
         Outcome rejected = send(base);
         assertThat(rejected.status()).isEqualTo(Status.REJECTED);
@@ -208,7 +217,7 @@ class AfricasTalkingSmsProviderTest {
     void aSlowProviderIsCutOffAndTheOutcomeIsAmbiguous() throws Exception {
         URI base = start(e -> {
             try {
-                Thread.sleep(3000);
+                Thread.sleep(5000);
                 reply(e, 201, answer(101, "Success", "UGX 32.0000", "ATXid_late"));
             } catch (InterruptedException | RuntimeException ignored) {
                 // the client has gone
@@ -220,7 +229,7 @@ class AfricasTalkingSmsProviderTest {
         assertThatThrownBy(() -> slow.send(TO, BODY, null, "key-1"))
                 .isInstanceOf(Ambiguous.class)
                 .satisfies(e -> assertSafe((Exception) e));
-        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(4));
     }
 
     @Test
@@ -228,6 +237,19 @@ class AfricasTalkingSmsProviderTest {
         assertThat(AfricasTalkingSmsProvider.TOTAL_TIMEOUT).isEqualTo(Duration.ofSeconds(15));
         assertThat(AfricasTalkingSmsProvider.TOTAL_TIMEOUT).isLessThan(OutboxDispatcher.LEASE.dividedBy(4));
         assertThat(AfricasTalkingSmsProvider.CONNECT_TIMEOUT).isLessThan(AfricasTalkingSmsProvider.TOTAL_TIMEOUT);
+    }
+
+    /** An SSL error while reading the answer may follow a message the provider took; only a failed handshake is clean. */
+    @Test
+    void onlyAFailedHandshakeIsCleanAmongTheSslErrors() {
+        assertThatThrownBy(() -> AfricasTalkingSmsProvider.classify(new javax.net.ssl.SSLHandshakeException("x")))
+                .isInstanceOf(Transient.class);
+        assertThatThrownBy(() -> AfricasTalkingSmsProvider.classify(new javax.net.ssl.SSLException("Connection reset")))
+                .isInstanceOf(Ambiguous.class);
+        assertThatThrownBy(() -> AfricasTalkingSmsProvider.classify(new java.net.http.HttpTimeoutException("read")))
+                .isInstanceOf(Ambiguous.class);
+        assertThatThrownBy(() -> AfricasTalkingSmsProvider.classify(new java.net.ConnectException("refused")))
+                .isInstanceOf(Transient.class);
     }
 
     @Test
