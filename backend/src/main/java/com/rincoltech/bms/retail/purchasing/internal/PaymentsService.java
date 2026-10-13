@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -202,6 +203,21 @@ class PaymentsService {
         UUID id = UUID.randomUUID();
         Numbered no = lines.next("SP", "retail_supplier_payment_no", branch);
         String reference = PurchasingService.blankToNull(r.reference());
+        // The debt sits in the branch of each invoice (the branch of a restock that moved stock into one branch; the
+        // paying
+        // branch for a restock that moved stock into several). The paying branch's entry credits the method's account
+        // for all
+        // of it; for what is owed elsewhere it debits inter-branch clearing, and each such branch debits its trade
+        // creditors
+        // against clearing in an entry of its own, as a transfer does, so no branch is left short or over.
+        Map<UUID, Long> byHome = new TreeMap<>();
+        for (Map.Entry<Target, Long> e : split.entrySet()) {
+            Open o = open.get(e.getKey());
+            UUID home = o.branchIds().size() == 1 ? o.branchIds().iterator().next() : branch;
+            byHome.merge(home, e.getValue(), Math::addExact);
+        }
+        long here = byHome.getOrDefault(branch, 0L);
+        long apart = r.amountMinor() - here;
         UUID entry = books.post(new Posting(
                         branch,
                         today,
@@ -211,11 +227,29 @@ class PaymentsService {
                         id,
                         PAYMENT + ":" + id,
                         List.of(
-                                Leg.debit("trade_creditors", r.amountMinor())
-                                        .withSubledger("retail.supplier", r.supplierId()),
+                                Leg.debit("trade_creditors", here).withSubledger("retail.supplier", r.supplierId()),
+                                Leg.debit("interbranch_clearing", apart),
                                 Leg.credit(accountFor(r.method()), r.amountMinor()))))
                 .map(e -> e.entryId())
                 .orElseThrow();
+        Map<UUID, UUID> others = new LinkedHashMap<>();
+        for (Map.Entry<UUID, Long> e : byHome.entrySet()) {
+            if (!e.getKey().equals(branch)) {
+                books.post(new Posting(
+                                e.getKey(),
+                                today,
+                                no.no(),
+                                "Supplier payment " + no.no() + " made by another branch",
+                                PAYMENT,
+                                id,
+                                PAYMENT + ":" + id + ":" + e.getKey(),
+                                List.of(
+                                        Leg.debit("trade_creditors", e.getValue())
+                                                .withSubledger("retail.supplier", r.supplierId()),
+                                        Leg.credit("interbranch_clearing", e.getValue()))))
+                        .ifPresent(posted -> others.put(e.getKey(), posted.entryId()));
+            }
+        }
         repo.insert(new NewPayment(
                 id,
                 no.no(),
@@ -231,8 +265,17 @@ class PaymentsService {
                 PurchasingService.blankToNull(r.note()),
                 entry,
                 principal.userId()));
-        split.forEach((t, amount) -> repo.insertAllocation(
-                id, t.kind().equals("bill") ? t.id() : null, t.kind().equals("restock") ? t.id() : null, amount));
+        others.forEach((home, other) -> repo.insertEntry(id, home, other));
+        int n = 1;
+        for (Map.Entry<Target, Long> e : split.entrySet()) {
+            Target t = e.getKey();
+            repo.insertAllocation(
+                    id,
+                    n++,
+                    t.kind().equals("bill") ? t.id() : null,
+                    t.kind().equals("restock") ? t.id() : null,
+                    e.getValue());
+        }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("payment_no", no.no());
         after.put("supplier_id", r.supplierId());
@@ -273,6 +316,9 @@ class PaymentsService {
         LocalDate today = clock.today(tenant.profile().timezone());
         UUID reversal = books.reverse(p.journalEntryId(), today, p.paymentNo(), PAYMENT + "_reverse:" + id)
                 .entryId();
+        for (UUID other : repo.entries(id)) {
+            books.reverse(other, today, p.paymentNo(), PAYMENT + "_reverse:" + other);
+        }
         Instant now = clock.now();
         if (repo.markReversed(id, principal.userId(), today, now, reason, reversal) == 0) {
             throw new ApiException(

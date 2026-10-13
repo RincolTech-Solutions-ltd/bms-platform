@@ -322,11 +322,11 @@ class OrdersService {
                 .orElseThrow(ApiException::notFound);
     }
 
-    /** An order the caller may receive against: one for their branch, or one landing in a branch of their scope. */
+    /** An order the caller may receive against: its branch and the receiving branch are both in their scope, else 404. */
     OrderRow receivable(UUID id, UUID receivingBranch) {
         Principal principal = CurrentPrincipal.require();
         return repo.find(id, true)
-                .filter(o -> principal.may(PERMISSION, o.branchId()) || principal.may(PERMISSION, receivingBranch))
+                .filter(o -> principal.may(PERMISSION, o.branchId()) && principal.may(PERMISSION, receivingBranch))
                 .orElseThrow(ApiException::notFound);
     }
 

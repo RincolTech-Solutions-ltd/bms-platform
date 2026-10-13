@@ -135,6 +135,13 @@ class ReceiptsService {
             problems.add(new FieldProblem("received_on", "invalid", "A receipt cannot be dated in the future."));
         }
         UUID branch = branches.resolve(PERMISSION, r.branchId());
+        // Lock order, as for a void: the supplier, then the order, then the products and balances.
+        UUID lockSupplier = r.orderId() == null
+                ? r.supplierId()
+                : orderRepo.find(r.orderId(), false).map(OrderRow::supplierId).orElse(null);
+        if (lockSupplier != null) {
+            suppliers.lockSupplier(lockSupplier);
+        }
         OrderRow order = null;
         Map<UUID, OrdersRepository.LineRow> orderLines = new HashMap<>();
         if (r.orderId() != null) {

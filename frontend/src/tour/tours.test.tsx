@@ -15,6 +15,7 @@ import { BranchRoles } from '../areas/staff/retail/branch-roles';
 import { PriceLists } from '../areas/staff/retail/price-lists';
 import { AccountsPage } from '../areas/staff/retail/accounts';
 import { ReturnsPage } from '../areas/staff/retail/returns';
+import { PurchaseOrdersPage } from '../areas/staff/retail/purchase-orders';
 import { CataloguePage } from '../areas/staff/retail/catalogue';
 import { RetailHome } from '../areas/staff/retail/home';
 import { RetailNav } from '../areas/staff/retail/nav';
@@ -92,6 +93,8 @@ function screen(path: string | undefined): ReactElement {
       return <AccountsPage />;
     case '/staff/retail/returns':
       return <ReturnsPage />;
+    case '/staff/retail/purchase-orders':
+      return <PurchaseOrdersPage />;
     case '/staff/lending':
       return <Loans />;
     case '/staff/lending/loans/$loanId':
@@ -181,6 +184,9 @@ const LENDER: Me = { ...ADMIN, full_name: 'Test Lender 01', module_capabilities:
 // An administrator of a business that switched customer returns on (ADR-033, issue #201).
 const RETURNER: Me = { ...ADMIN, full_name: 'Test Returner 01', module_capabilities: { retail: ['branch_roles', 'returns'] } };
 
+// An administrator of a business that switched optional purchasing on (ADR-033, issue #198).
+const BUYER: Me = { ...ADMIN, full_name: 'Test Buyer 01', module_capabilities: { retail: ['branch_roles', 'purchasing'] } };
+
 const AUDIENCE: Record<string, Me[]> = {
   'admin-welcome': [ADMIN],
   'retail-sales': [SELLER, MANAGER],
@@ -204,6 +210,8 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-accounts': [LENDER],
   'capability-returns': [RETURNER],
   'page-returns': [RETURNER],
+  'capability-purchasing': [BUYER],
+  'page-purchase-orders': [BUYER],
 };
 
 describe('every tour target exists on its screen', () => {

@@ -141,11 +141,27 @@ class PaymentsRepository {
                 .update();
     }
 
-    void insertAllocation(UUID paymentId, UUID billId, UUID purchaseId, long amountMinor) {
+    void insertAllocation(UUID paymentId, int lineNo, UUID billId, UUID purchaseId, long amountMinor) {
         jdbc.sql("""
-                        INSERT INTO retail_supplier_payment_allocations (id, tenant_id, payment_id, bill_id, purchase_id, amount_minor)
-                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """).params(paymentId, billId, purchaseId, amountMinor).update();
+                        INSERT INTO retail_supplier_payment_allocations (id, tenant_id, payment_id, line_no, bill_id, purchase_id,
+                                                                         amount_minor)
+                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                        """).params(paymentId, lineNo, billId, purchaseId, amountMinor).update();
+    }
+
+    /** The entries a payment posted in branches other than the paying one, kept so a reversal can reverse each. */
+    void insertEntry(UUID paymentId, UUID branchId, UUID entryId) {
+        jdbc.sql("""
+                        INSERT INTO retail_supplier_payment_entries (tenant_id, payment_id, branch_id, entry_id)
+                        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?)
+                        """).params(paymentId, branchId, entryId).update();
+    }
+
+    List<UUID> entries(UUID paymentId) {
+        return jdbc.sql("SELECT entry_id FROM retail_supplier_payment_entries WHERE payment_id = ? ORDER BY branch_id")
+                .param(paymentId)
+                .query(UUID.class)
+                .list();
     }
 
     int markReversed(UUID id, UUID by, LocalDate on, Instant at, String reason, UUID reversalEntryId) {
@@ -225,7 +241,7 @@ class PaymentsRepository {
                           FROM retail_supplier_payment_allocations a
                           LEFT JOIN retail_supplier_bills b ON b.tenant_id = a.tenant_id AND b.id = a.bill_id
                           LEFT JOIN retail_purchases pu ON pu.tenant_id = a.tenant_id AND pu.id = a.purchase_id
-                         WHERE a.payment_id IN (:ids) ORDER BY a.payment_id, a.created_at, a.id
+                         WHERE a.payment_id IN (:ids) ORDER BY a.payment_id, a.line_no
                         """).param("ids", paymentIds).query(rs -> {
             out.computeIfAbsent(rs.getObject("payment_id", UUID.class), k -> new ArrayList<>())
                     .add(new AllocationRow(

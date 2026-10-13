@@ -156,18 +156,36 @@ class BillsService {
             sums[1] = Math.addExact(sums[1], p.variance());
             sums[2] = Math.addExact(sums[2], p.lineTotal());
         }
+        // The whole invoice is owed from the bill's branch: its entry credits trade creditors for all of it, and a
+        // branch
+        // whose receipts it clears credits inter-branch clearing for its part, as a transfer or a return does, so each
+        // branch's
+        // goods received not invoiced clears in its own books and the creditor balance sits in one.
+        long elsewhere = 0;
+        for (Map.Entry<UUID, long[]> e : byBranch.entrySet()) {
+            if (!e.getKey().equals(billBranch)) {
+                elsewhere = Math.addExact(elsewhere, e.getValue()[2]);
+            }
+        }
         Map<UUID, UUID> entries = new LinkedHashMap<>();
         for (Map.Entry<UUID, long[]> e : byBranch.entrySet()) {
             long cleared = e.getValue()[0];
             long variance = e.getValue()[1];
             long total = e.getValue()[2];
+            boolean home = e.getKey().equals(billBranch);
             List<Leg> legs = new ArrayList<>();
             legs.add(Leg.debit("goods_received_not_invoiced", cleared));
             legs.add(
                     variance >= 0
                             ? Leg.debit("purchase_price_variance", variance)
                             : Leg.credit("purchase_price_variance", -variance));
-            legs.add(Leg.credit("trade_creditors", total).withSubledger("retail.supplier", r.supplierId()));
+            if (home) {
+                legs.add(Leg.debit("interbranch_clearing", elsewhere));
+                legs.add(Leg.credit("trade_creditors", Math.addExact(total, elsewhere))
+                        .withSubledger("retail.supplier", r.supplierId()));
+            } else {
+                legs.add(Leg.credit("interbranch_clearing", total));
+            }
             books.post(new Posting(
                             e.getKey(),
                             r.billDate(),
@@ -269,6 +287,13 @@ class BillsService {
                         field + ".receipt_line_id",
                         "unknown_receipt_line",
                         "No such received line of this supplier that is still standing."));
+                continue;
+            }
+            if (r.billDate().isBefore(rl.receivedOn())) {
+                problems.add(new FieldProblem(
+                        "bill_date",
+                        "bill_before_receipt",
+                        "The invoice is dated before " + rl.receiptNo() + " was received on " + rl.receivedOn() + "."));
                 continue;
             }
             if (!seen.add(rl.receiptLineId())) {

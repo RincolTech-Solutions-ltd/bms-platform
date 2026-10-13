@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.purchasing.internal;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 class PurchasingSettingsService {
 
     @Schema(name = "RetailPurchasingSettings")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Settings(
             @Schema(
                     description =

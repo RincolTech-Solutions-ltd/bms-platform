@@ -656,10 +656,12 @@ CREATE TABLE retail_supplier_payment_allocations (
     tenant_id    uuid        NOT NULL REFERENCES tenants (id),
     created_at   timestamptz NOT NULL DEFAULT now(),
     payment_id   uuid        NOT NULL,
+    line_no      smallint    NOT NULL CHECK (line_no >= 1),
     bill_id      uuid,
     purchase_id  uuid,
     amount_minor bigint      NOT NULL CHECK (amount_minor > 0 AND amount_minor <= 10000000000000),
     UNIQUE (tenant_id, id),
+    UNIQUE (payment_id, line_no),
     FOREIGN KEY (tenant_id, payment_id) REFERENCES retail_supplier_payments (tenant_id, id),
     FOREIGN KEY (tenant_id, bill_id) REFERENCES retail_supplier_bills (tenant_id, id),
     FOREIGN KEY (tenant_id, purchase_id) REFERENCES retail_purchases (tenant_id, id),
@@ -676,3 +678,20 @@ CREATE INDEX retail_supplier_payment_allocations_purchase_open ON retail_supplie
 SELECT bms_apply_tenant_rls('retail_supplier_payment_allocations');
 SELECT bms_grant_app('retail_supplier_payment_allocations', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_supplier_payment_allocations');
+
+-- The journal entries of a payment in branches other than the paying one (the debt sits in the branch of each invoice;
+-- the paying branch clears through inter-branch clearing), kept so a reversal can reverse each of them.
+CREATE TABLE retail_supplier_payment_entries (
+    tenant_id  uuid        NOT NULL REFERENCES tenants (id),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    payment_id uuid        NOT NULL,
+    branch_id  uuid        NOT NULL,
+    entry_id   uuid        NOT NULL,
+    PRIMARY KEY (tenant_id, payment_id, branch_id),
+    FOREIGN KEY (tenant_id, payment_id) REFERENCES retail_supplier_payments (tenant_id, id),
+    FOREIGN KEY (tenant_id, branch_id) REFERENCES branches (tenant_id, id),
+    FOREIGN KEY (tenant_id, entry_id) REFERENCES journal_entries (tenant_id, id)
+);
+SELECT bms_apply_tenant_rls('retail_supplier_payment_entries');
+SELECT bms_grant_app('retail_supplier_payment_entries', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_supplier_payment_entries');
