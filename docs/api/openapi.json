@@ -3553,6 +3553,46 @@
         },
         "required" : [ "decision" ]
       },
+      "LoanDocumentIssued" : {
+        "properties" : {
+          "created" : {
+            "description" : "True when this request rendered and stored it",
+            "type" : "boolean"
+          },
+          "doc_number" : {
+            "description" : "The transaction's RC- or VC- number",
+            "type" : "string"
+          },
+          "doc_type" : {
+            "description" : "receipt or voucher",
+            "type" : "string"
+          },
+          "document_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reversed" : {
+            "description" : "The transaction was reversed. The stored copy is as issued and unchanged; show the document as reversed",
+            "type" : "boolean"
+          },
+          "reversed_on" : {
+            "description" : "The value date of the reversal; null when not reversed",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "LoanDocumentList" : {
+        "description" : "The receipts and vouchers stored for a loan, newest first",
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/LoanDocumentIssued"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "LoanGuarantor" : {
         "properties" : {
           "guaranteed_amount_minor" : {
@@ -4840,6 +4880,42 @@
           "failures" : {
             "items" : {
               "$ref" : "#/components/schemas/OutboxFailure"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "PaymentMethodMapping" : {
+        "properties" : {
+          "account_code" : {
+            "type" : "string"
+          },
+          "branch_id" : {
+            "description" : "Null for the tenant's mapping",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "gl_account_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "is_active" : {
+            "type" : "boolean"
+          },
+          "method_key" : {
+            "type" : "string"
+          },
+          "source" : {
+            "description" : "mapped (a row) or default (the seeded account, ADR-026)",
+            "type" : "string"
+          }
+        }
+      },
+      "PaymentMethodMappingList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PaymentMethodMapping"
             },
             "type" : "array"
           }
@@ -11996,6 +12072,28 @@
         },
         "required" : [ "guarantors" ]
       },
+      "SetPaymentMethodRequest" : {
+        "properties" : {
+          "branch_id" : {
+            "description" : "Omit for the tenant's mapping",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "gl_account_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "is_active" : {
+            "description" : "Default true; false switches the method off for this scope",
+            "type" : "boolean"
+          },
+          "method_key" : {
+            "pattern" : "cash|bank|mtn_momo|airtel_money|gateway|savings_transfer",
+            "type" : "string"
+          }
+        },
+        "required" : [ "gl_account_id", "method_key" ]
+      },
       "SetRetailBranchRoleRequest" : {
         "properties" : {
           "role" : {
@@ -13555,6 +13653,127 @@
         },
         "summary" : "A 5 minute signed download URL (FR-DOC-03)",
         "tags" : [ "documents" ]
+      }
+    },
+    "/api/v1/ledger/payment-methods" : {
+      "get" : {
+        "operationId" : "listPaymentMethods",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Each payment method's account: the mapped rows, then the defaults still in use",
+        "tags" : [ "ledger" ]
+      },
+      "put" : {
+        "operationId" : "setPaymentMethod",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetPaymentMethodRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Not in the caller's branch scope (permission_denied)"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Another first save of the same method and scope won (payment_method_changed)"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "invalid_payment_account, unknown_branch, account_used_by_retail (cash and bank with retail on)"
+          }
+        },
+        "summary" : "Map a payment method to an asset account (FR-GL-08)",
+        "tags" : [ "ledger" ]
+      }
+    },
+    "/api/v1/ledger/payment-methods/{method_key}" : {
+      "delete" : {
+        "operationId" : "clearPaymentMethod",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "method_key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "403" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Not in the caller's branch scope (permission_denied)"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "That scope has no mapping for the method (not_found)"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PaymentMethodMappingList"
+                }
+              }
+            },
+            "description" : "Not a payment method key (validation_failed)"
+          }
+        },
+        "summary" : "Return a payment method to its default account for the tenant or a branch (FR-GL-08)",
+        "tags" : [ "ledger" ]
       }
     },
     "/api/v1/lending/collateral" : {
@@ -15931,6 +16150,100 @@
         "tags" : [ "lending-loans" ]
       }
     },
+    "/api/v1/lending/loans/{loan_id}/documents" : {
+      "get" : {
+        "operationId" : "listLoanDocuments",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanDocumentList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The receipts and vouchers stored for a loan, each marked when its transaction was reversed",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/documents/{doc_type}" : {
+      "post" : {
+        "operationId" : "renderLoanDocument",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "doc_type",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/pdf" : {
+                "schema" : {
+                  "format" : "binary",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "The PDF"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "No such loan in the caller's branches, or no such document type"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "The loan is not disbursed yet (invalid_status_transition)"
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Too many documents are being produced; see Retry-After"
+          }
+        },
+        "summary" : "The repayment schedule (schedule) or loan statement (loan_statement) as a PDF, as at today",
+        "tags" : [ "lending-loans" ]
+      }
+    },
     "/api/v1/lending/loans/{loan_id}/guarantors" : {
       "put" : {
         "operationId" : "setLoanGuarantors",
@@ -16218,6 +16531,42 @@
           }
         },
         "summary" : "The loan's money events with their allocations, newest first",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/{loan_id}/transactions/{txn_id}/document" : {
+      "post" : {
+        "operationId" : "issueLoanTransactionDocument",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "txn_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanDocumentIssued"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The receipt or voucher of a loan transaction, stored on first request (FR-DOC-01)",
         "tags" : [ "lending-loans" ]
       }
     },
