@@ -12,7 +12,7 @@ import {
 } from './account-state';
 import { usePersistedDraft, newIdempotencyKey } from './idempotency';
 import { CREDIT_MANAGE, DOCUMENT_ISSUE, SALE_VOID, branchesWhere, canIssueDocuments, canOpenAccount, holds, holdsAt } from './permissions';
-import { openBlob } from './documents-ui';
+import { openMadePdf } from './documents-ui';
 import { Problem, Success, changeFailureText, money, requireVersion, useToast } from './ui';
 
 // One credit buyer's account (customer_accounts capability, ADR-033, issue #196): the limit and the terms, what is owed,
@@ -281,7 +281,7 @@ export function AccountScreen({ customerId, me, branch }: { customerId: string; 
     onSuccess: (r, v) => { reverseKeys.current.done(v.receipt.id ?? ''); done(`Reversed ${r.receipt_no}.`); },
   });
   // The statement as a PDF (documents capability, issue #197): rendered as at today for the dates chosen, never stored.
-  const statementPdf = useMutation({ mutationFn: () => retail.customerStatementPdf(customerId, { from, to }), onSuccess: openBlob });
+  const statementPdf = useMutation({ mutationFn: () => openMadePdf(() => retail.customerStatementPdf(customerId, { from, to })) });
   const nameOf = (id: string | undefined) => branchLabel((me.branches ?? []).find((b) => b.id === id));
   if (!allowed) {
     return (

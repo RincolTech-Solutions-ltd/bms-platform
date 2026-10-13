@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -68,9 +69,10 @@ class DocumentsService {
     static final String SALES_PATH = "/api/v1/retail/sales";
     static final String TRANSFERS_PATH = "/api/v1/retail/transfers";
     static final String SETTINGS = "core.settings.manage";
-    static final List<String> TYPES = List.of("quotation", "invoice", "delivery_note", "credit_note");
+    // A credit note has no series here: the return numbers it, and its PDF carries that number (ADR-033 amendment).
+    static final List<String> TYPES = List.of("quotation", "invoice", "delivery_note");
     static final Map<String, String> DEFAULT_PREFIX =
-            Map.of("quotation", "QT", "invoice", "INV", "delivery_note", "DN", "credit_note", "CN");
+            Map.of("quotation", "QT", "invoice", "INV", "delivery_note", "DN");
     static final int DEFAULT_LIMIT = 50;
     static final int MAX_LIMIT = 200;
     /** A statement PDF is held in memory while it is laid out; the heap of the smallest host is about 224 MB. */
@@ -155,6 +157,9 @@ class DocumentsService {
 
     private Ref recordForSale(UUID saleId, IssueRequest r) {
         Principal principal = CurrentPrincipal.require();
+        // A void that has not committed yet finishes first, and one that starts after waits for the document: no
+        // invoice is ever numbered for a sale that is voided as it is issued.
+        repo.lockSaleShared(saleId);
         Sale sale = sales.get(saleId);
         if (!principal.may(ISSUE, sale.branchId())) {
             throw ApiException.notFound();
@@ -387,7 +392,15 @@ class DocumentsService {
     // ---- The stored PDF ----------------------------------------------------------------------------------
 
     /** What the read step found: the stored PDF, or the model to render. */
-    private record Draft(Doc doc, UUID pdfId, Map<String, Object> model) {}
+    private record Draft(Doc doc, String storedNumber, UUID pdfId, Map<String, Object> model) {}
+
+    /** A void document is served only as a second stored version marked void: the number with this suffix. */
+    static final String VOID_SUFFIX = " VOID";
+
+    /** The number a document's PDF is stored under: its own, or for a void document the void version's. */
+    static String storedNumber(Doc doc) {
+        return doc.status().equals("void") ? doc.number() + VOID_SUFFIX : doc.number();
+    }
 
     /**
      * The document with its PDF: the stored copy when there is one, else rendered now from the snapshot and stored
@@ -402,7 +415,7 @@ class DocumentsService {
             GeneratedObject object = documents.putGenerated(bytes, draft.doc().type());
             boolean recorded = false;
             try {
-                pdf = writing.execute(status -> recordPdf(draft.doc(), object));
+                pdf = writing.execute(status -> recordPdf(draft.doc(), draft.storedNumber(), object));
                 recorded = pdf.equals(object.id());
             } finally {
                 if (!recorded) {
@@ -416,27 +429,32 @@ class DocumentsService {
 
     private Draft draft(UUID id) {
         Doc doc = visible(id);
+        // A void document never gets a clean copy: only a version with the VOID banner (the issued copy stays in
+        // storage
+        // as it was, and is no longer served).
+        String number = storedNumber(doc);
         Optional<Documents.StoredDocument> stored =
-                documents.findGenerated(DocumentsRepository.SUBJECT, doc.id(), doc.type(), doc.number());
+                documents.findGenerated(DocumentsRepository.SUBJECT, doc.id(), doc.type(), number);
         if (stored.isPresent()) {
-            return new Draft(doc, stored.get().id(), null);
+            return new Draft(doc, number, stored.get().id(), null);
         }
-        return new Draft(doc, null, models.model(snapshot(id)));
+        return new Draft(
+                doc, number, null, models.model(snapshot(id), doc.status().equals("void") ? doc.voidReason() : null));
     }
 
     /** Under an advisory lock on the document: look again, then record. Nothing slow happens here. */
-    private UUID recordPdf(Doc doc, GeneratedObject object) {
+    private UUID recordPdf(Doc doc, String number, GeneratedObject object) {
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('retail.document:' || ?::text, 0))")
                 .param(doc.id())
                 .query()
                 .singleRow();
         Optional<Documents.StoredDocument> stored =
-                documents.findGenerated(DocumentsRepository.SUBJECT, doc.id(), doc.type(), doc.number());
+                documents.findGenerated(DocumentsRepository.SUBJECT, doc.id(), doc.type(), number);
         if (stored.isPresent()) {
             return stored.get().id();
         }
         return documents
-                .recordGenerated(object, doc.number(), DocumentsRepository.SUBJECT, doc.id(), doc.branchId())
+                .recordGenerated(object, number, DocumentsRepository.SUBJECT, doc.id(), doc.branchId())
                 .id();
     }
 
@@ -604,6 +622,15 @@ class DocumentsService {
      */
     byte[] statementPdf(UUID customerId, LocalDate from, LocalDate to) {
         requireOn();
+        // The lines are the buyer's sales in the caller's scope of retail.sale.read, so the document needs that
+        // permission too.
+        if (!CurrentPrincipal.require().hasPermission("retail.sale.read")) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "A statement shows the buyer's sales, which needs permission to read sales.");
+        }
         Map<String, Object> model = reading.execute(status -> {
             Statement st = accounts.statement(customerId, from, to);
             if (st.lines().size() > STATEMENT_PDF_MAX_LINES) {
@@ -613,7 +640,8 @@ class DocumentsService {
                                 + " lines do not fit one document.");
             }
             DocumentsRepository.BuyerInfo buyer = repo.customer(customerId).orElseThrow(ApiException::notFound);
-            Integer terms = accounts.account(customerId).termsDays();
+            AccountsApi.Account account = accounts.account(customerId);
+            Integer terms = account.termsDays();
             Principal principal = CurrentPrincipal.require();
             List<UUID> filter = principal.branchFilter("retail.sale.read", null);
             String scope = filter == null
@@ -626,7 +654,7 @@ class DocumentsService {
             String number = "ST-" + today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE) + "-"
                     + customerId.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
             String termsText = terms == null ? null : terms == 0 ? "Due on the day of the sale" : terms + " days";
-            return models.statement(st, buyer.contact(), termsText, null, scope, today, number);
+            return models.statement(st, buyer.contact(), termsText, account.creditLimitMinor(), scope, today, number);
         });
         return documents.renderPdf("customer_statement", model);
     }

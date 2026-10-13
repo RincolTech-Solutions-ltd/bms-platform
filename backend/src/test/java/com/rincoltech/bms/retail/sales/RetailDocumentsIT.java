@@ -1062,4 +1062,391 @@ class RetailDocumentsIT extends IntegrationTest {
                 byte[].class);
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
+
+    // JUSTIFICATION-A3: the review follow-up cases of the same new test class (void banner, switched-off features at
+    // conversion,
+    // statement reconciliation, escaping, part payment, the void race, the prefix race).
+
+    // ---- a void document is never printed clean ------------------------------------------------
+
+    /** A void document is served only as a version with the VOID banner; the copy issued before is no longer readable. */
+    @Test
+    void aVoidDocumentIsServedOnlyWithAVoidBanner() throws Exception {
+        UUID s = sale(hq, "cash", "2");
+        JsonNode invoice = issued(s, "invoice");
+        String cleanPdf = invoice.get("pdf_document_id").asString();
+        assertThat(text(pdf(invoice))).doesNotContain("VOID");
+        assertThat(api.post("/sales/" + s + "/void", Map.of("reason", "Wrong item sold"), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        JsonNode after =
+                api.get("/documents/" + invoice.get("id").asString(), DOCS).getBody();
+        assertThat(after.get("status").asString()).isEqualTo("void");
+        assertThat(after.has("pdf_document_id"))
+                .as("the clean copy is not offered")
+                .isFalse();
+        ResponseEntity<JsonNode> link = http.exchange(
+                "/api/v1/documents/" + cleanPdf + "/download-url",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(api.headers(DOCS, "*", Map.of())),
+                JsonNode.class);
+        assertThat(link.getStatusCode()).as("the clean copy is not served").isEqualTo(HttpStatus.FORBIDDEN);
+
+        ResponseEntity<JsonNode> marked =
+                api.post("/documents/" + invoice.get("id").asString() + "/pdf", Map.of(), DOCS);
+        assertThat(marked.getStatusCode()).as("%s", marked.getBody()).isEqualTo(HttpStatus.OK);
+        String voidPdf = marked.getBody().get("pdf_document_id").asString();
+        assertThat(voidPdf).isNotEqualTo(cleanPdf);
+        byte[] bytes = pdf(marked.getBody());
+        String text = text(bytes);
+        assertThat(text).contains("VOID: its sale was voided", "INV-HQ-000001", "Test Product DC-1");
+        sample("retail_invoice_void", bytes);
+        // One void version, however many ask.
+        assertThat(api.post("/documents/" + invoice.get("id").asString() + "/pdf", Map.of(), DOCS)
+                        .getBody()
+                        .get("pdf_document_id")
+                        .asString())
+                .isEqualTo(voidPdf);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_number = 'INV-HQ-000001 VOID'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+
+        // A cancelled quotation reads the same way.
+        JsonNode q = quote("2026-11-08", null, "void-quote-1").getBody();
+        String quoteDoc = q.get("document_id").asString();
+        assertThat(api.post(
+                                "/quotations/" + q.get("id").asString() + "/cancel",
+                                Map.of("reason", "Changed our mind"),
+                                DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JsonNode cancelled =
+                api.post("/documents/" + quoteDoc + "/pdf", Map.of(), DOCS).getBody();
+        assertThat(text(pdf(cancelled))).contains("VOID: the quotation was cancelled");
+    }
+
+    // ---- a feature switched off since the quotation was made -------------------------------------
+
+    /** Spec 14.1: with lists or packs off at conversion the sale is priced at the product's price, in single units, and says so. */
+    @Test
+    void aQuotationConvertsAfterPriceListsAndPacksAreSwitchedOff() throws Exception {
+        capability("units", true);
+        capability("price_lists", true);
+        String perms = DOCS + ",retail.pricelist.manage,retail.pricelist.use";
+        UUID carton = api.unit("carton");
+        assertThat(api.post("/products/" + product + "/units", Map.of("unit_id", carton, "factor", "12"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Wholesale"), perms));
+        assertThat(api.post(
+                                "/price-lists/" + list + "/items",
+                                Map.of("product_id", product, "unit_id", carton, "price_minor", 1_100),
+                                perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("buyer_name", "Test Buyer 01");
+        body.put("price_list_id", list);
+        body.put("valid_until", "2026-11-08");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "2", "unit_id", carton)));
+        ResponseEntity<JsonNode> made = api.postKeyed("/quotations", body, perms, "*", "off-quote-1");
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(made.getBody().get("total_minor").asLong()).isEqualTo(2_200);
+
+        capability("price_lists", false);
+        capability("units", false);
+        ResponseEntity<JsonNode> done = convert(RetailTestSupport.id(made), false, true, "off-convert-1");
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("note").asString())
+                .contains("Price lists are switched off", "Pack sizes are switched off");
+        JsonNode sale = api.get("/sales/" + done.getBody().get("sale_id").asString(), DOCS)
+                .getBody();
+        assertThat(sale.get("lines").get(0).get("qty").asString())
+                .as("two cartons of twelve")
+                .isEqualTo("24.000");
+        assertThat(sale.get("total_minor").asLong())
+                .as("24 pieces at the product's 100")
+                .isEqualTo(2_400);
+        assertThat(sale.has("price_list_id") && !sale.get("price_list_id").isNull())
+                .isFalse();
+        assertThat(done.getBody().get("invoice").get("number").asString()).isEqualTo("INV-HQ-000001");
+
+        // Keeping the quoted prices also works with both off: the price per piece the carton came to.
+        capability("units", true);
+        capability("price_lists", true);
+        body.put("valid_until", "2026-11-09");
+        ResponseEntity<JsonNode> second = api.postKeyed("/quotations", body, perms, "*", "off-quote-2");
+        capability("price_lists", false);
+        capability("units", false);
+        ResponseEntity<JsonNode> kept = convert(RetailTestSupport.id(second), true, false, "off-convert-2");
+        assertThat(kept.getStatusCode()).as("%s", kept.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(kept.getBody().get("note").asString()).contains("Pack sizes are switched off");
+    }
+
+    // ---- the statement reconciles ----------------------------------------------------------------
+
+    /**
+     * A hand-computed account: 500 sold before the range and 100 paid, so 400 opens it; then 300, 200 (later voided) and
+     * 100 (branch two) are sold, 150 is paid on account and reversed. The running balance, the closing balance, the imported
+     * sale apart, the credit limit, a branch-scoped view and the permission to read sales are all checked.
+     */
+    @Test
+    void theStatementReconcilesLineByLineWithTheLedgerAndTheScope() throws Exception {
+        capability("customer_accounts", true);
+        UUID customer = RetailTestSupport.id(
+                api.post("/customers", Map.of("name", "Test Buyer 02", "contact", "+256700000002"), DOCS));
+        int version = api.get("/customers/" + customer + "/account", DOCS)
+                .getBody()
+                .get("version")
+                .asInt();
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/customers/" + customer + "/account",
+                                Map.of("credit_limit_minor", 5_000, "clear_terms_days", true),
+                                DOCS,
+                                "*",
+                                Map.of("If-Match", String.valueOf(version)))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // Sales are made with exact quantities: 5 x 100 before the range, 3 x 100, 2 x 100 and 1 x 100 inside it.
+        UUID s1 = creditSale(customer, hq, "2026-09-10", "5");
+        assertThat(api.postKeyed(
+                                "/sales/" + s1 + "/payments",
+                                Map.of("amount_minor", 100, "method", "cash", "paid_on", "2026-09-12"),
+                                DOCS,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        creditSale(customer, hq, "2026-10-02", "3");
+        UUID s3 = creditSale(customer, hq, "2026-10-03", "2");
+        creditSale(customer, br2, "2026-10-04", "1");
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + customer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 150, "method", "cash", "paid_on", "2026-10-05"),
+                DOCS,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(receipt.getStatusCode()).as("%s", receipt.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(api.post("/sales/" + s3 + "/void", Map.of("reason", "Wrong buyer"), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.postKeyed(
+                                "/customers/" + customer + "/payments/" + RetailTestSupport.id(receipt) + "/reverse",
+                                Map.of("reason", "Entered twice"),
+                                DOCS,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // An imported credit sale from before the system started: listed apart, never in the ledger.
+        TestDatabase.owner().sql("""
+                        INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, customer_id,
+                            due_date, currency, total_minor, cost_total_minor, paid_minor, status, historical, created_by)
+                        VALUES (gen_random_uuid(), ?, ?, 'RS99999990', DATE '2025-12-01', 'credit', ?, DATE '2025-12-31', 'UGX',
+                            1000, 700, 0, 'completed', true, gen_random_uuid())
+                        """).params(t.tenantId(), hq, customer).update();
+
+        // A void is dated by the database clock (not the pinned one), so the range runs well past it: no test depends
+        // on the day it runs.
+        String range = "from=2026-10-01&to=2028-06-30";
+        JsonNode screen =
+                api.get("/customers/" + customer + "/statement?" + range, DOCS).getBody();
+        // 400 opens it. The hand-computed running balance, in the order the lines fall.
+        assertThat(screen.get("opening_minor").asLong()).isEqualTo(400);
+        List<String> kinds = new ArrayList<>();
+        List<Long> running = new ArrayList<>();
+        for (JsonNode l : screen.get("lines")) {
+            kinds.add(l.get("kind").asString());
+            running.add(l.get("balance_minor").asLong());
+        }
+        assertThat(kinds).containsExactly("sale", "sale", "sale", "account_payment", "reversal", "void");
+        assertThat(running).containsExactly(700L, 900L, 1_000L, 850L, 1_000L, 800L);
+        assertThat(screen.get("closing_minor").asLong()).isEqualTo(800);
+        assertThat(screen.get("balance_minor").asLong())
+                .as("with the imported sale")
+                .isEqualTo(1_800);
+
+        byte[] pdf = statementPdf(customer, "?" + range, DOCS);
+        String text = text(pdf);
+        assertThat(text)
+                .contains(
+                        "Opening balance",
+                        "Sale on credit",
+                        "Payment on account (Cash)",
+                        "Sale voided",
+                        "Payment reversed")
+                .contains("Closing balance", "800", "Eight hundred Uganda shillings only")
+                .contains("Credit sales before the system started", "1,000", "1,800 UGX")
+                .contains("Credit limit", "5,000", "All branches");
+        for (String balance : List.of("700", "900", "1,000", "850")) {
+            assertThat(text).contains(balance);
+        }
+        golden("retail_customer_statement_reconciled", pdf);
+
+        // Scoped to branch two the statement is that branch's sale only; the imported sale of another branch is not
+        // there.
+        ResponseEntity<byte[]> scoped = http.exchange(
+                "/api/v1/retail/customers/" + customer + "/statement/pdf?" + range,
+                HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(api.headers(DOCS, br2.toString(), Map.of())),
+                byte[].class);
+        assertThat(scoped.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String scopedText = text(scoped.getBody());
+        assertThat(scopedText)
+                .contains("Test Branch Two", "Closing balance", "100", "One hundred Uganda shillings only");
+        assertThat(scopedText)
+                .doesNotContain(
+                        "RS99999990", "Sale voided", "Payment reversed", "Credit sales before the system started");
+        JsonNode scopedScreen = api.call(
+                        HttpMethod.GET,
+                        "/customers/" + customer + "/statement?" + range,
+                        null,
+                        DOCS,
+                        br2.toString(),
+                        Map.of())
+                .getBody();
+        assertThat(scopedScreen.get("closing_minor").asLong()).isEqualTo(100);
+
+        // The lines are the sales the caller may read, so the document needs that permission as well as the document
+        // one.
+        ResponseEntity<byte[]> noSales = http.exchange(
+                "/api/v1/retail/customers/" + customer + "/statement/pdf?" + range,
+                HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(api.headers("retail.document.issue", "*", Map.of())),
+                byte[].class);
+        assertThat(noSales.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    UUID creditSale(UUID customer, UUID branch, String date, String qty) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", branch);
+        body.put("payment_method", "credit");
+        body.put("customer_id", customer);
+        body.put("sale_date", date);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", qty)));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    // ---- escaping and other scripts --------------------------------------------------------------
+
+    static final String AWKWARD = "Amélie & Sons <b>\"Ltd\"</b> Привет";
+
+    /** Markup characters print as typed, Greek and Cyrillic print, and a script the font lacks prints as "?" and never breaks the PDF. */
+    @Test
+    void awkwardNamesPrintAsTypedOnEveryDocument() throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "credit");
+        body.put("buyer_name", AWKWARD + " 日本語");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> sold =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID s = RetailTestSupport.id(sold);
+        for (String type : List.of("invoice", "delivery_note")) {
+            String text = text(pdf(issued(s, type)));
+            assertThat(text).as(type).contains(AWKWARD).contains("???").doesNotContain("<script");
+        }
+        Map<String, Object> quote = new LinkedHashMap<>();
+        quote.put("branch_id", hq);
+        quote.put("buyer_name", AWKWARD);
+        quote.put("notes", "<i>Pay & collect</i>");
+        quote.put("valid_until", "2026-11-08");
+        quote.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> q = api.postKeyed("/quotations", quote, DOCS, "*", "awkward-quote");
+        assertThat(q.getStatusCode()).as("%s", q.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(text(pdf(q.getBody()))).contains(AWKWARD, "<i>Pay & collect</i>");
+    }
+
+    // ---- an invoice after a part payment ---------------------------------------------------------
+
+    /** The invoice of a credit sale says what was paid when it was issued, and what was still owed. */
+    @Test
+    void anInvoiceAfterAPartPaymentSaysWhatWasPaidAndWhatIsOwed() throws Exception {
+        UUID s = sale(hq, "credit", "5");
+        assertThat(api.postKeyed(
+                                "/sales/" + s + "/payments",
+                                Map.of("amount_minor", 200, "method", "cash"),
+                                DOCS,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        String text = text(pdf(issued(s, "invoice")));
+        assertThat(text)
+                .contains("Part paid when issued.", "Paid when issued: 200", "Balance due when issued: 300 UGX");
+    }
+
+    // ---- races -------------------------------------------------------------------------------------
+
+    /** A void that has not committed yet finishes first: the invoice of that moment is refused, not numbered for a voided sale. */
+    @Test
+    void anInvoiceWaitsForAVoidThatIsInFlightAndThenRefuses() throws Exception {
+        UUID s = sale(hq, "cash", "1");
+        try (java.sql.Connection voiding = TestDatabase.ownerDataSource().getConnection()) {
+            voiding.setAutoCommit(false);
+            try (java.sql.PreparedStatement st = voiding.prepareStatement(
+                    "UPDATE retail_sales SET status = 'voided', voided_at = now(), voided_by = gen_random_uuid(),"
+                            + " void_reason = 'Race test', version = version + 1 WHERE id = ?")) {
+                st.setObject(1, s);
+                assertThat(st.executeUpdate()).isEqualTo(1);
+            }
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            Future<ResponseEntity<JsonNode>> issuing = pool.submit(
+                    () -> issue(s, "invoice", DOCS, "*", UUID.randomUUID().toString()));
+            Thread.sleep(700);
+            assertThat(issuing.isDone()).as("the invoice waits for the void").isFalse();
+            voiding.commit();
+            ResponseEntity<JsonNode> r = issuing.get(30, TimeUnit.SECONDS);
+            pool.shutdown();
+            assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(code(r)).isEqualTo("sale_voided");
+        }
+        assertThat(count("retail_documents")).isZero();
+        assertThat(count("retail_document_series") == 0
+                        || TestDatabase.owner()
+                                        .sql(
+                                                "SELECT last_no FROM retail_document_series WHERE tenant_id = ? AND type = 'invoice'")
+                                        .param(t.tenantId())
+                                        .query(Integer.class)
+                                        .single()
+                                == 0)
+                .as("no number was taken")
+                .isTrue();
+    }
+
+    /** Two first changes of one prefix at once both succeed: the second updates what the first wrote. */
+    @Test
+    void twoFirstChangesOfAPrefixDoNotCollide() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<ResponseEntity<JsonNode>>> calls = new ArrayList<>();
+        for (String prefix : List.of("AAA", "BBB", "CCC", "DDD")) {
+            calls.add(pool.submit(() -> {
+                start.await();
+                return api.call(
+                        HttpMethod.PUT,
+                        "/document-series/invoice",
+                        Map.of("prefix", prefix),
+                        DOCS + "," + SETTINGS,
+                        "*",
+                        Map.of());
+            }));
+        }
+        start.countDown();
+        for (Future<ResponseEntity<JsonNode>> f : calls) {
+            assertThat(f.get(30, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+        pool.shutdown();
+        assertThat(count("retail_document_prefixes")).isEqualTo(1);
+    }
 }

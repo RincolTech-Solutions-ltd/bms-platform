@@ -47,7 +47,20 @@ class DocumentModels {
     // ---- Documents of a snapshot ---------------------------------------------------------------------
 
     Map<String, Object> model(DocumentSnapshot s) {
+        return model(s, null);
+    }
+
+    /**
+     * The model of a document; with a void reason it carries the VOID banner of every page (a void document is never
+     * printed clean: its sale was voided, its stock move cancelled or its quotation cancelled since it was issued).
+     */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> model(DocumentSnapshot s, String voidReason) {
         Map<String, Object> m = common(s.branch(), TITLES.get(s.type()), s.number(), s.issueDate());
+        if (voidReason != null) {
+            ((Map<String, Object>) m.get("doc"))
+                    .put("voided", "VOID: " + voidReason + ". Do not accept this document.");
+        }
         m.put("currency", s.currency());
         m.put("buyer", buyer(s));
         m.put("lines", lines(s));
@@ -78,12 +91,18 @@ class DocumentModels {
         Map<String, Object> totals = totals(s);
         long balance = s.totalMinor() - sale.paidMinor();
         if (sale.paymentMethod().equals("credit")) {
-            totals.put("status", balance <= 0 ? "Paid in full when issued." : "Sold on credit.");
+            boolean partPaid = sale.paidMinor() > 0 && balance > 0;
+            totals.put(
+                    "status",
+                    balance <= 0
+                            ? "Paid in full when issued."
+                            : partPaid ? "Part paid when issued." : "Sold on credit.");
             totals.put(
                     "due",
                     balance <= 0
                             ? null
-                            : "Balance due when issued: " + money(balance, s.currency()) + " " + s.currency());
+                            : (partPaid ? "Paid when issued: " + money(sale.paidMinor(), s.currency()) + ". " : "")
+                                    + "Balance due when issued: " + money(balance, s.currency()) + " " + s.currency());
         } else {
             totals.put(
                     "status",

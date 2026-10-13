@@ -138,6 +138,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
       {done && (
         <div role="status" className="alert alert-success" data-testid="converted">
           <p>Sale {done.sale_no} made.</p>
+          {done.note && <p className="hint" data-testid="convert-note">{done.note}</p>}
           {done.invoice && <button type="button" className="btn-sm" onClick={() => void openDocumentPdf(done.invoice ?? {})}>Open invoice {done.invoice.number}</button>}
         </div>
       )}

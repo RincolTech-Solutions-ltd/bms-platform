@@ -119,8 +119,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   leaves a numbered document that renders on the next request, the statement never stored); documents are an after-step: a sale, a transfer and a
   restock never read or wait for one, and with the capability off no route, menu entry or response field exists. The Documents screen (with the
   Document numbers), the Quotations screen, the Make invoice and Make delivery note buttons on a sale and on a stock move, the statement PDF on the account page
-  and the tour show while `module_capabilities` lists `documents`, which is marked ready with its own tour (`capability-documents`). The credit note template and series are designed and tested; wiring
-  it needs the returns tables of issue #201 (V45, open) and is the follow-up of the returns slice.
+  and the tour show while `module_capabilities` lists `documents`, which is marked ready with its own tour (`capability-documents`). A void document is served only as a version with a VOID banner. A credit note has one number, the return's (V45), and
+  `POST /retail/returns/{id}/document` renders it as the credit note PDF under that number.
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator

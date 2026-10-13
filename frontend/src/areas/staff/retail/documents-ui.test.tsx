@@ -114,7 +114,6 @@ describe('the numbered series', () => {
   const series: DocumentSeries[] = [
     { type: 'invoice', prefix: 'TAX', default_prefix: 'INV', branches: [{ branch_id: 'b1', branch_code: 'HQ', issued: 2, next: 'TAX-HQ-000003' }] },
     { type: 'quotation', prefix: 'QT', default_prefix: 'QT', branches: [{ branch_id: 'b1', branch_code: 'HQ', issued: 0, next: 'QT-HQ-000001' }] },
-    { type: 'credit_note', prefix: 'CN', default_prefix: 'CN', branches: [] },
   ];
 
   it('shows the next number of each branch, the usual prefix once changed, and no credit note yet', () => {

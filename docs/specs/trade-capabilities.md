@@ -386,9 +386,11 @@ partial unique index per source. The quotation tables are as sketched with `pric
 (`PATCH` is not built: a change is a new quotation) and is cancelled or converted once. The first version of rendering (a print-styled
 page) is not built: the stored PDF of ADR-034 is the rendering. A document is read in the branch scope of `retail.document.issue`; the
 delivery note of a stock move is built too (quantities only, source branch). The customer statement as a PDF
-(`GET /retail/customers/{id}/statement/pdf`) is the fourth document, rendered on each request and not stored. The credit note
-template and series are designed and tested but not wired: the returns tables arrive with issue #201, and the follow-up adds the
-source and the route. API in SDD 7.11.20, tables in SDD 6, permission in SDD 8.
+(`GET /retail/customers/{id}/statement/pdf`) is the fourth document, rendered on each request and not stored. The credit note has one
+number, the return's (`credit_note_no`, V45), so there is no credit note series here; `POST /retail/returns/{id}/document` renders the
+return as the credit note PDF under that number and stores it once. A void document is served only as a version with a VOID banner;
+converting a quotation after price lists or packs are switched off prices at the product and says so; the statement PDF needs
+`retail.sale.read` as well and shows the credit limit. API in SDD 7.11.20, tables in SDD 6, permission in SDD 8.
 
 ### 6.3 What a retail shop sees
 
@@ -781,6 +783,6 @@ capabilities off changing nothing. Order matters: **slice 1 alone unblocks the w
 | 5 | #195 | Price lists, quantity breaks, effective dates, customer groups (adds the group and list columns to customers). **Built**, migration V41 | 4 |
 | 6 | #196 | Customer accounts: limit, terms (admin only), ageing, statement, payment on account. **Built**, migration V44 | none |
 | 7 | #201 | Customer returns and sales credit notes (`returns`) | 6 |
-| 8 | #197 | Optional documents: invoice, delivery note, quotation, credit note, numbered series. **Built** (credit note designed, wired with slice 7), migration V46 | 5, 6 and 7 optional |
+| 8 | #197 | Optional documents: invoice, delivery note, quotation, credit note PDF, numbered series. **Built**, migration V46 | 5, 6 and 7 optional |
 | 9 | #198 | Optional purchasing: purchase order, goods received, supplier invoice, supplier credit, supplier payment (also against credit restocks) | 1, 4 |
 | 10 | #199 | Landed cost allocation and the supplier payables report | 9 |

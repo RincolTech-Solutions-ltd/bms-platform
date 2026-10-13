@@ -29,8 +29,8 @@ export type DocumentsMock = Pick<
   | 'setDocumentPrefix' | 'listQuotations' | 'getQuotation' | 'createQuotation' | 'cancelQuotation' | 'convertQuotation' | 'customerStatementPdf'
 >;
 
-const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN', credit_note: 'CN' };
-const TYPES: DocumentType[] = ['quotation', 'invoice', 'delivery_note', 'credit_note'];
+const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
+const TYPES: DocumentType[] = ['quotation', 'invoice', 'delivery_note'];
 
 export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
   const docs: (RetailDocument & { pdf?: string })[] = [];

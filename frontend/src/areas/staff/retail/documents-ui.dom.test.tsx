@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { retail, type DocumentSeries, type RetailDocument } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { StaffContext } from '../context';
-import { PdfButton, SaleDocuments, SeriesRow } from './documents-ui';
+import { PdfButton, SaleDocuments, SeriesRow, openMadePdf } from './documents-ui';
 import { blankConvert, type ConvertForm } from './documents-state';
 import { ConvertPanel } from './quotations';
 
@@ -134,5 +134,28 @@ describe('the documents of a sale', () => {
     render(withStaff(<SaleDocuments saleId="s1" status="voided" branchId={branch} />));
     await waitFor(() => expect(screen.getByText('A voided sale takes no new document.')).toBeTruthy());
     expect(screen.queryByRole('button', { name: /^Make/ })).toBeNull();
+  });
+});
+
+describe('opening a PDF that has to be made first', () => {
+  it('opens the tab before the waiting, so a pop-up blocker does not stop it, and points it at the file', async () => {
+    const tab = { location: { href: '' }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:statement', revokeObjectURL: () => undefined }));
+    let finish: (b: Blob) => void = () => undefined;
+    const waiting = openMadePdf(() => new Promise<Blob>((resolve) => { finish = resolve; }));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('');
+    finish(new Blob(['%PDF']));
+    await waiting;
+    expect(tab.location.href).toBe('blob:statement');
+    vi.unstubAllGlobals();
+  });
+
+  it('closes the tab when the PDF cannot be made', async () => {
+    const tab = { location: { href: '' }, close: vi.fn() };
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    await expect(openMadePdf(() => Promise.reject(new Error('Choose a shorter range.')))).rejects.toThrow('shorter range');
+    expect(tab.close).toHaveBeenCalled();
   });
 });

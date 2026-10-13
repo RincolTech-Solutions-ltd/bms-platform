@@ -7446,7 +7446,7 @@ export interface components {
             total_minor?: number;
             /** Format: uuid */
             transfer_id?: string;
-            /** @description quotation|invoice|delivery_note|credit_note */
+            /** @description quotation|invoice|delivery_note */
             type?: string;
             /** Format: date */
             valid_until?: string;
@@ -8447,6 +8447,8 @@ export interface components {
         };
         RetailQuotationConverted: {
             invoice?: components["schemas"]["RetailDocument"];
+            /** @description Said plainly when a feature switched off since the quotation was made changed how it was sold */
+            note?: string;
             /** Format: uuid */
             quotation_id?: string;
             /** Format: uuid */

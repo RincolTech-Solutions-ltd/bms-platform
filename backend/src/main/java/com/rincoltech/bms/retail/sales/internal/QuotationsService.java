@@ -36,6 +36,7 @@ import com.rincoltech.bms.retail.sales.internal.SalesRepository.NewLine;
 import com.rincoltech.bms.retail.sales.internal.SalesService.Priced;
 import com.rincoltech.bms.retail.stock.BranchRoles;
 import com.rincoltech.bms.retail.stock.RetailBranchContext;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,6 +61,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 class QuotationsService {
 
     static final String PATH = "/api/v1/retail/quotations";
+    private static final String PACKS_OFF =
+            "Pack sizes are switched off, so the lines quoted in packs were sold in single units.";
 
     private final QuotationsRepository repo;
     private final DocumentsRepository docRepo;
@@ -67,6 +70,7 @@ class QuotationsService {
     private final SalesService sales;
     private final SalesRepository salesRepo;
     private final BranchRoles roles;
+    private final RetailCapabilities capabilities;
     private final RetailBranchContext branches;
     private final Idempotency idempotency;
     private final CurrentTenant tenant;
@@ -81,6 +85,7 @@ class QuotationsService {
             SalesService sales,
             SalesRepository salesRepo,
             BranchRoles roles,
+            RetailCapabilities capabilities,
             RetailBranchContext branches,
             Idempotency idempotency,
             CurrentTenant tenant,
@@ -92,6 +97,7 @@ class QuotationsService {
         this.sales = sales;
         this.salesRepo = salesRepo;
         this.roles = roles;
+        this.capabilities = capabilities;
         this.branches = branches;
         this.idempotency = idempotency;
         this.tenant = tenant;
@@ -106,7 +112,7 @@ class QuotationsService {
     record Made(UUID id, UUID documentId) {}
 
     /** What the converting transaction answers, stored for replays. */
-    record Done(UUID quotationId, UUID saleId, String saleNo, UUID invoiceId) {}
+    record Done(UUID quotationId, UUID saleId, String saleNo, UUID invoiceId, String note) {}
 
     // ---- Creating ----------------------------------------------------------------------------------
 
@@ -350,7 +356,8 @@ class QuotationsService {
                         done.body().quotationId(),
                         done.body().saleId(),
                         done.body().saleNo(),
-                        invoice),
+                        invoice,
+                        done.body().note()),
                 done.replayed());
     }
 
@@ -364,16 +371,30 @@ class QuotationsService {
                     "This quotation was valid until " + DocumentModels.date(h.validUntil()) + ". Make a new one.");
         }
         boolean keep = Boolean.TRUE.equals(r.keepQuotedPrices());
+        // A capability switched off since the quotation was made is not an error (spec 14.1: a quotation keeps its
+        // stored
+        // prices; conversion re-prices at the product price when lists are off, and says so). The sale takes the
+        // plain path: no list, and a line quoted in a pack is sold in base units.
+        boolean listsOn = capabilities.enabled(RetailCapabilities.PRICE_LISTS);
+        boolean unitsOn = capabilities.enabled(RetailCapabilities.UNITS);
+        List<String> notes = new ArrayList<>();
+        if (!listsOn && h.priceListId() != null && !keep) {
+            notes.add(
+                    "Price lists are switched off, so the lines were priced at the product's price and not by the list.");
+        }
         List<SaleLineRequest> lines = new ArrayList<>();
         for (StoredLine l : repo.lines(id)) {
-            boolean pack = l.saleUnitId() != null;
+            boolean pack = l.saleUnitId() != null && unitsOn;
+            if (l.saleUnitId() != null && !unitsOn && !notes.contains(PACKS_OFF)) {
+                notes.add(PACKS_OFF);
+            }
             Long price = !keep ? null : pack ? l.saleUnitPriceMinor() : l.unitPriceMinor();
             lines.add(new SaleLineRequest(
                     l.productId(),
                     pack ? l.saleQty() : l.qty(),
                     price,
                     pack ? l.saleUnitId() : null,
-                    keep ? "Quoted on " + h.number() : null));
+                    keep && listsOn ? "Quoted on " + h.number() : null));
         }
         Sale sale = sales.record(new SaleRequest(
                 h.branchId(),
@@ -383,7 +404,7 @@ class QuotationsService {
                 h.customerId() == null ? h.buyerName() : null,
                 h.customerId() == null ? h.buyerContact() : null,
                 r.dueDate(),
-                h.priceListId(),
+                listsOn ? h.priceListId() : null,
                 r.creditOverrideReason(),
                 lines));
         if (repo.markConverted(id, sale.id(), principal.userId()) == 0) {
@@ -404,7 +425,7 @@ class QuotationsService {
             Ref ref = docs.recordSaleDocument(sale, "invoice", true, quotationDoc);
             invoice = ref.id();
         }
-        return new Done(id, sale.id(), sale.saleNo(), invoice);
+        return new Done(id, sale.id(), sale.saleNo(), invoice, notes.isEmpty() ? null : String.join(" ", notes));
     }
 
     private void requireOpen(Header h) {

@@ -26,7 +26,7 @@ import java.util.UUID;
  */
 final class DocumentsApi {
 
-    static final String TYPES = "quotation|invoice|delivery_note|credit_note";
+    static final String TYPES = "quotation|invoice|delivery_note";
 
     private DocumentsApi() {}
 
@@ -209,7 +209,13 @@ final class DocumentsApi {
             UUID quotationId,
             UUID saleId,
             String saleNo,
-            @JsonInclude(JsonInclude.Include.NON_NULL) IssuedDocument invoice) {}
+            @JsonInclude(JsonInclude.Include.NON_NULL) IssuedDocument invoice,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Said plainly when a feature switched off since the quotation was made changed how it was sold")
+            String note) {}
 
     // ---- Numbered series ----------------------------------------------------------------------
 

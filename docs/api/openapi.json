@@ -7386,7 +7386,7 @@
             "type" : "string"
           },
           "type" : {
-            "description" : "quotation|invoice|delivery_note|credit_note",
+            "description" : "quotation|invoice|delivery_note",
             "type" : "string"
           },
           "valid_until" : {
@@ -9406,6 +9406,10 @@
         "properties" : {
           "invoice" : {
             "$ref" : "#/components/schemas/RetailDocument"
+          },
+          "note" : {
+            "description" : "Said plainly when a feature switched off since the quotation was made changed how it was sold",
+            "type" : "string"
           },
           "quotation_id" : {
             "format" : "uuid",

@@ -792,7 +792,7 @@ class MigrationOrderIT {
 
     /**
      * #197: staging already holds sales, transfers and stored receipts when the optional documents arrive. The migration
-     * adds six tables and one permission and replaces one CHECK on documents: every sale, transfer and stored file is as
+     * adds five tables and one permission and replaces one CHECK on documents: every sale, transfer and stored file is as
      * it was, the sales tables keep their shape, every new check ends validated, the old stored kinds are still accepted
      * and the new ones are too (an unknown one is not), only the administrator gets the permission, and the database
      * itself refuses a counter that skips, a deleted counter, an edited document and a second change of a quotation.

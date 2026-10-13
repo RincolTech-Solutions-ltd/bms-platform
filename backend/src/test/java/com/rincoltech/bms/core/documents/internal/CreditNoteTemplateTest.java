@@ -88,4 +88,26 @@ class CreditNoteTemplateTest {
             }
         }
     }
+
+    /** Markup characters print as typed, Greek and Cyrillic print, and a script the font lacks prints as "?" and breaks nothing. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void awkwardNamesAndReasonsPrintAsTypedAndNeverBreakTheDocument() throws Exception {
+        String typed =
+                "Am\u00e9lie & Sons <b>\"Ltd\"</b> \u03a9\u03bc\u03ad\u03b3\u03b1 \u041f\u0440\u0438\u0432\u0435\u0442";
+        Map<String, Object> m = model();
+        m.put("buyer", Map.of("name", typed + " \u65e5\u672c\u8a9e", "contact", "<script>x</script>"));
+        Map<String, Object> ref = new java.util.LinkedHashMap<>((Map<String, Object>) m.get("ref"));
+        ref.put("reason", "Damaged & <wet> \"boxes\"");
+        m.put("ref", ref);
+        byte[] pdf = renderer.render("credit_note", m);
+        try (PDDocument d = Loader.loadPDF(pdf)) {
+            String text = new PDFTextStripper().getText(d).replaceAll("\\s+", " ");
+            assertThat(text)
+                    .contains(typed)
+                    .contains("???")
+                    .contains("<script>x</script>")
+                    .contains("Damaged & <wet> \"boxes\"");
+        }
+    }
 }

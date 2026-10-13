@@ -30,11 +30,21 @@ export async function openDocumentPdf(doc: Pick<RetailDocument, 'id' | 'pdf_docu
   }
 }
 
-/** Opens a statement PDF that came back as a blob. */
-export function openBlob(blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+/**
+ * Opens a PDF that has to be made first (the customer statement, which is rendered on each request) in a new tab. The tab is opened
+ * before the waiting, as {@link openDocumentPdf} does, so a pop-up blocker does not stop it.
+ */
+export async function openMadePdf(make: () => Promise<Blob>): Promise<void> {
+  const tab = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('about:blank', '_blank') : null;
+  try {
+    const url = URL.createObjectURL(await make());
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }
 
 /** The button that opens a document's PDF, with its own waiting and its own failure. */
@@ -83,7 +93,7 @@ export function DocumentCards({ items, branchOf, term }: { items: RetailDocument
   );
 }
 
-/** The types an administrator numbers today: the credit note arrives with customer returns. */
+/** The types a series numbers: a credit note is numbered by its return, not here. */
 const NUMBERED: DocumentType[] = ['quotation', 'invoice', 'delivery_note'];
 
 /** One series: its prefix (changed by whoever may change settings) and, per branch, how many were issued and the next number. */

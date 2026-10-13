@@ -12,7 +12,6 @@ export const TYPE_LABEL: Record<DocumentType, string> = {
   quotation: 'Quotation',
   invoice: 'Invoice',
   delivery_note: 'Delivery note',
-  credit_note: 'Credit note',
 };
 
 export const typeLabel = (type: string | undefined): string => TYPE_LABEL[type as DocumentType] ?? type ?? '';

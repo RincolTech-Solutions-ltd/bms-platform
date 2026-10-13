@@ -32,10 +32,15 @@ class DocumentsRepository {
                    retail_documents.created_at, retail_documents.created_by,
                    CASE WHEN s.status = 'voided' OR t.status IN ('voided', 'cancelled') OR q.status = 'cancelled'
                         THEN 'void' ELSE 'issued' END AS status,
+                   CASE WHEN s.status = 'voided' THEN 'its sale was voided'
+                        WHEN t.status IN ('voided', 'cancelled') THEN 'its stock move was cancelled'
+                        WHEN q.status = 'cancelled' THEN 'the quotation was cancelled' END AS void_reason,
                    q.valid_until, q.status AS quotation_status,
                    (SELECT g.id FROM documents g
                      WHERE g.subject_type = 'retail.document' AND g.subject_id = retail_documents.id
-                       AND g.doc_type = retail_documents.type AND g.doc_number = retail_documents.number
+                       AND g.doc_type = retail_documents.type
+                       AND g.doc_number = CASE WHEN s.status = 'voided' OR t.status IN ('voided', 'cancelled') OR q.status = 'cancelled'
+                                               THEN retail_documents.number || ' VOID' ELSE retail_documents.number END
                      ORDER BY g.created_at LIMIT 1) AS pdf_id
               FROM retail_documents
               LEFT JOIN retail_sales s ON s.id = retail_documents.sale_id
@@ -71,6 +76,7 @@ class DocumentsRepository {
             Instant createdAt,
             UUID createdBy,
             String status,
+            String voidReason,
             LocalDate validUntil,
             String quotationStatus,
             UUID pdfId) {}
@@ -94,17 +100,13 @@ class DocumentsRepository {
                 .param(type)
                 .query(String.class)
                 .optional();
-        if (before.isPresent()) {
-            jdbc.sql(
-                            "UPDATE retail_document_prefixes SET prefix = ?, changed_by = ?, changed_at = now() WHERE type = ?")
-                    .params(prefix, by, type)
-                    .update();
-        } else {
-            jdbc.sql("""
-                            INSERT INTO retail_document_prefixes (tenant_id, type, prefix, changed_by)
-                            VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?)
-                            """).params(type, prefix, by).update();
-        }
+        // One statement, so two first changes of a type cannot both insert: the second updates what the first wrote.
+        jdbc.sql("""
+                        INSERT INTO retail_document_prefixes (tenant_id, type, prefix, changed_by)
+                        VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?)
+                        ON CONFLICT (tenant_id, type) DO UPDATE
+                           SET prefix = EXCLUDED.prefix, changed_by = EXCLUDED.changed_by, changed_at = now()
+                        """).params(type, prefix, by).update();
         return before;
     }
 
@@ -145,6 +147,25 @@ class DocumentsRepository {
         return spec.query((rs, n) -> new SeriesRow(
                         rs.getString("type"), rs.getObject("branch_id", UUID.class), rs.getInt("last_no")))
                 .list();
+    }
+
+    /** The document number a stored file was recorded under, or empty for a file that is not of this module. */
+    Optional<String> storedNumber(UUID storedDocumentId) {
+        return jdbc.sql("SELECT doc_number FROM documents WHERE id = ? AND subject_type = 'retail.document'")
+                .param(storedDocumentId)
+                .query(String.class)
+                .optional();
+    }
+
+    /**
+     * Takes a share lock on the sale's row, so a void that is not yet committed finishes first and one that starts after
+     * waits for the document to commit. Returns the status read once the lock is held.
+     */
+    Optional<String> lockSaleShared(UUID saleId) {
+        return jdbc.sql("SELECT status FROM retail_sales WHERE id = ? FOR SHARE")
+                .param(saleId)
+                .query(String.class)
+                .optional();
     }
 
     String branchCode(UUID branchId) {
@@ -392,6 +413,7 @@ class DocumentsRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getObject("created_by", UUID.class),
                 rs.getString("status"),
+                rs.getString("void_reason"),
                 valid == null ? null : valid.toLocalDate(),
                 rs.getString("quotation_status"),
                 rs.getObject("pdf_id", UUID.class));

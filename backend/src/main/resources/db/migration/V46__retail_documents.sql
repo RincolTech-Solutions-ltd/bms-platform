@@ -1,8 +1,7 @@
--- V46: retail optional documents: quotation, invoice, delivery note (and the credit note series, designed here and
--- wired with the returns slice) with numbered series per tenant and branch (ADR-033, issue #197;
+-- V46: retail optional documents: quotation, invoice and delivery note with numbered series per tenant and branch (ADR-033, issue #197;
 -- docs/specs/trade-capabilities.md section 6; ADR-034 for the stored PDF).
 --
--- Expand only, safe on a populated database. Six new tables, one new permission, and one replaced CHECK on the
+-- Expand only, safe on a populated database. Five new tables, one new permission, and one replaced CHECK on the
 -- core documents table. Nothing existing is dropped, renamed or rewritten, no tenant is switched on (the documents
 -- capability lives in the tenant settings group retail.capabilities and is off until an administrator turns it on)
 -- and a tenant that never issues a document never writes a row to any of the new tables. A sale, a transfer and a
@@ -34,13 +33,14 @@ ALTER TABLE documents DROP CONSTRAINT documents_doc_type_check;
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_document_prefixes: the prefix of a series, one per tenant and document type. A document number is
--- prefix, branch code and a six digit counter (INV-HQ-000001). A type with no row uses its default (QT, INV, DN, CN).
+-- prefix, branch code and a six digit counter (INV-HQ-000001). A type with no row uses its default (QT, INV, DN). A credit
+-- note has no series here: the return numbers it itself (V45) and its PDF carries that number.
 -- Changing a prefix changes the numbers of later documents only; a number already issued is never rewritten.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_document_prefixes (
     tenant_id  uuid        NOT NULL REFERENCES tenants (id),
-    type       text        NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note', 'credit_note')),
+    type       text        NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note')),
     prefix     varchar(8)  NOT NULL CHECK (prefix ~ '^[A-Z][A-Z0-9]{0,7}$'),
     changed_by uuid        NOT NULL,
     changed_at timestamptz NOT NULL DEFAULT now(),
@@ -61,7 +61,7 @@ CREATE TRIGGER retail_document_prefixes_reject_delete BEFORE DELETE ON retail_do
 
 CREATE TABLE retail_document_series (
     tenant_id uuid    NOT NULL REFERENCES tenants (id),
-    type      text    NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note', 'credit_note')),
+    type      text    NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note')),
     branch_id uuid    NOT NULL,
     last_no   integer NOT NULL DEFAULT 0 CHECK (last_no >= 0),
     PRIMARY KEY (tenant_id, type, branch_id),
@@ -198,8 +198,8 @@ SELECT bms_make_append_only('retail_quotation_lines');
 -- document is void is read from its source (a voided sale voids its invoice and delivery note, a cancelled quotation
 -- its document) and the number is kept, never reused. seq_no is the counter value the number was built from; the unique
 -- key on it is the database's own check that a series has no duplicate. A sale holds at most one invoice and one
--- delivery note, a transfer at most one delivery note, a quotation exactly one document. The credit note takes its
--- source (the return) in the returns slice's follow-up; until then no row of that type is written.
+-- delivery note, a transfer at most one delivery note, a quotation exactly one document. A credit note is not a row here:
+-- the return numbers it (V45) and its PDF is stored in documents under that number (subject type retail.credit_note).
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_documents (
@@ -207,7 +207,7 @@ CREATE TABLE retail_documents (
     tenant_id          uuid         NOT NULL REFERENCES tenants (id),
     created_at         timestamptz  NOT NULL DEFAULT now(),
     created_by         uuid         NOT NULL,
-    type               text         NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note', 'credit_note')),
+    type               text         NOT NULL CHECK (type IN ('quotation', 'invoice', 'delivery_note')),
     number             varchar(40)  NOT NULL,
     seq_no             integer      NOT NULL CHECK (seq_no >= 1),
     branch_id          uuid         NOT NULL,
@@ -239,7 +239,7 @@ CREATE UNIQUE INDEX retail_documents_transfer ON retail_documents (tenant_id, tr
     WHERE transfer_id IS NOT NULL;
 CREATE UNIQUE INDEX retail_documents_quotation ON retail_documents (tenant_id, quotation_id)
     WHERE quotation_id IS NOT NULL;
-CREATE INDEX retail_documents_list ON retail_documents (tenant_id, branch_id, issue_date DESC, id DESC);
+CREATE INDEX retail_documents_list ON retail_documents (tenant_id, branch_id, created_at DESC, id DESC);
 SELECT bms_apply_tenant_rls('retail_documents');
 SELECT bms_grant_app('retail_documents', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_documents');
