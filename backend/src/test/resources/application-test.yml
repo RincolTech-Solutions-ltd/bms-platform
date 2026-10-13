@@ -15,6 +15,16 @@ bms:
     # other profiles use the chapter 8 cost (64 MiB, 3 iterations).
     argon2-memory-kib: 4096
     argon2-iterations: 2
+  # The recording stub, so no test can reach a provider; the adapter's own tests use a local server.
+  ai:
+    provider: recording
+    model: test-model
+    platform-daily-tokens: 100000
+    platform-daily-cost-micro: 1000000
+    tenant-daily-tokens: 10000
+    tenant-daily-cost-micro: 500000
+    price-input-micro-per-million: 1000000
+    price-output-micro-per-million: 2000000
   # High global caps, so the whole suite's sign-ups fit in one hour; OnboardingIT fills them on
   # purpose to prove the cap.
   onboarding:
