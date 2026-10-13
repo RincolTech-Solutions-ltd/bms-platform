@@ -371,6 +371,37 @@ class RlsIsolationIT {
         owner.sql("INSERT INTO retail_branch_roles (tenant_id, branch_id, role) VALUES (?, ?, 'store')")
                 .params(t.tenantId(), t.secondBranch())
                 .update();
+        // Retail optional documents (ADR-033, #197): a prefix, a counter, a quotation with a line and its document.
+        // JUSTIFICATION-A3: a fixture row for each new table; the isolation test needs one row per tenant table.
+        owner.sql(
+                        "INSERT INTO retail_document_prefixes (tenant_id, type, prefix, changed_by) VALUES (?, 'invoice', 'TAX', ?)")
+                .params(t.tenantId(), user)
+                .update();
+        owner.sql(
+                        "INSERT INTO retail_document_series (tenant_id, type, branch_id, last_no) VALUES (?, 'invoice', ?, 1)")
+                .params(t.tenantId(), t.headOffice())
+                .update();
+        UUID quotation = UUID.randomUUID();
+        owner.sql("""
+                        INSERT INTO retail_quotations (id, tenant_id, created_by, branch_id, quote_date, valid_until, buyer_name,
+                                                       currency, total_minor)
+                        VALUES (?, ?, ?, ?, DATE '2026-01-15', DATE '2026-02-15', 'Test Buyer 01', 'UGX', 150)
+                        """).params(quotation, t.tenantId(), user, t.headOffice()).update();
+        owner.sql("""
+                        INSERT INTO retail_quotation_lines (id, tenant_id, quotation_id, line_no, product_id, qty, unit_price_minor,
+                                                            line_total_minor)
+                        VALUES (?, ?, ?, 1, ?, 1, 150, 150)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), quotation, retailProduct)
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_documents (id, tenant_id, created_by, type, number, seq_no, branch_id, issue_date,
+                                                      sale_id, buyer_name, currency, total_minor, snapshot)
+                        VALUES (?, ?, ?, 'invoice', 'TAX-HQ-000001', 1, ?, DATE '2026-01-15', ?, 'Test Buyer 01', 'UGX', 150,
+                                '{"v": 1}')
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), user, t.headOffice(), sale)
+                .update();
         // Retail pack sizes (ADR-033, #194): a pack of a unit other than the product's own.
         // JUSTIFICATION-A3: a fixture row for the new table; the isolation test needs one row per tenant table.
         owner.sql("""

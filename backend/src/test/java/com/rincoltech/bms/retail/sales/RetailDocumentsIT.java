@@ -1,0 +1,1019 @@
+package com.rincoltech.bms.retail.sales;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.Documents;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.retail.RetailTestSupport;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Optional documents (documents capability; ADR-033, issue #197; docs/specs/trade-capabilities.md sections 6 and 13):
+ * the invoice, delivery note and quotation with their numbered series per branch, stored PDFs, the customer
+ * statement PDF, and "capability off equals today". Every name and amount is fabricated. The clock is pinned at 22:30
+ * UTC, which is already 01:30 the next day in Africa/Kampala, so every test runs at the edge where the UTC date and
+ * the business date differ and none depends on the day it runs.
+ */
+@Import(RetailDocumentsIT.FixedClock.class)
+class RetailDocumentsIT extends IntegrationTest {
+
+    /** 2026-10-08 01:30 in Kampala, 2026-10-07 22:30 in UTC. */
+    static final Instant NOW = Instant.parse("2026-10-07T22:30:00Z");
+
+    static final String TODAY = "2026-10-08";
+
+    @TestConfiguration
+    static class FixedClock {
+        @Bean
+        @Primary
+        Clock fixedClock() {
+            return Clock.fixed(NOW, ZoneOffset.UTC);
+        }
+    }
+
+    static final String SETTINGS = "core.settings.manage";
+    /** The administrator column after migration V46: the document permission is the administrator's only. */
+    static final String DOCS = ADMIN + ",retail.document.issue,retail.credit.manage,retail.credit.override";
+
+    @Autowired
+    TestRestTemplate http;
+
+    /** Spied so that a render can be made to fail; every other call runs the real documents module. */
+    @MockitoSpyBean
+    Documents documents;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    UUID hq;
+    UUID br2;
+    /** Cost 30, sell 100 per piece. */
+    UUID product;
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-docs", false, true);
+        api = new RetailTestSupport(http, t);
+        hq = t.headOffice();
+        br2 = t.secondBranch();
+        product = api.product("DC-1", 30, 100);
+        api.stockUp(hq, product, "100000");
+        api.stockUp(br2, product, "100000");
+        capability("documents", true);
+        namedStaff();
+    }
+
+    // ---- helpers ---------------------------------------------------------------------------
+
+    // JUSTIFICATION-A3: new test fixture in a new test class; a golden text needs a fixed name, user, address and logo.
+    /** A named user, a branch address, and a fixed name, footer, brand colour and logo, so the golden text is stable. */
+    void namedStaff() {
+        TestDatabase.owner()
+                .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                        + " VALUES (?, ?, 'staff', 'Test Cashier', 'test.cashier@example.test', 'active')"
+                        + " ON CONFLICT DO NOTHING")
+                .params(api.userId(), t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE branches SET location = 'Plot 1, Test Road, Kampala' WHERE id = ?")
+                .param(hq)
+                .update();
+        HttpHeaders h = api.headers(SETTINGS + ",core.settings.read", "*", Map.of());
+        int version = http.exchange(
+                        "/api/v1/settings",
+                        HttpMethod.GET,
+                        new org.springframework.http.HttpEntity<>(h),
+                        JsonNode.class)
+                .getBody()
+                .get("version")
+                .asInt();
+        h.add("If-Match", "\"" + version + "\"");
+        assertThat(http.exchange(
+                                "/api/v1/settings",
+                                HttpMethod.PATCH,
+                                new org.springframework.http.HttpEntity<>(
+                                        Map.of(
+                                                "display_name", "Test Trading Ltd",
+                                                "receipt_footer",
+                                                        "Test Trading Ltd, Plot 1 Test Road. Thank you for your business.",
+                                                "theme_primary", "#1E5631"),
+                                        h),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        org.springframework.util.LinkedMultiValueMap<String, Object> form =
+                new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("file", new org.springframework.core.io.ByteArrayResource(logoPng()) {
+            @Override
+            public String getFilename() {
+                return "logo.png";
+            }
+        });
+        HttpHeaders upload = api.headers(SETTINGS + ",core.settings.read", "*", Map.of());
+        upload.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        assertThat(http.exchange(
+                                "/api/v1/settings/logo",
+                                HttpMethod.PUT,
+                                new org.springframework.http.HttpEntity<>(form, upload),
+                                JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /** A fabricated logo: a green square with a white bar, 256 by 128 pixels. */
+    static byte[] logoPng() {
+        java.awt.image.BufferedImage img =
+                new java.awt.image.BufferedImage(256, 128, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setColor(new java.awt.Color(0x1E, 0x56, 0x31));
+        g.fillRect(0, 0, 256, 128);
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(32, 52, 192, 24);
+        g.dispose();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try {
+            javax.imageio.ImageIO.write(img, "png", out);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        return out.toByteArray();
+    }
+
+    void capability(String key, boolean on) {
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of(key, on),
+                SETTINGS,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    static String code(ResponseEntity<JsonNode> r) {
+        return r.getBody().get("code").asString();
+    }
+
+    UUID sale(UUID branch, String method, String qty) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", branch);
+        body.put("payment_method", method);
+        if (method.equals("credit")) {
+            body.put("buyer_name", "Test Buyer 01");
+        }
+        body.put("lines", List.of(Map.of("product_id", product, "qty", qty)));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    ResponseEntity<JsonNode> issue(UUID sale, String type, String perms, String branches, String key) {
+        return api.postKeyed("/sales/" + sale + "/documents", Map.of("type", type), perms, branches, key);
+    }
+
+    JsonNode issued(UUID sale, String type) {
+        ResponseEntity<JsonNode> r =
+                issue(sale, type, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
+        return r.getBody();
+    }
+
+    /** The stored PDF of a document, downloaded through the signed URL as the staff user would. */
+    byte[] pdf(JsonNode document) {
+        assertThat(document.has("pdf_document_id")).as("%s", document).isTrue();
+        ResponseEntity<JsonNode> url = http.exchange(
+                "/api/v1/documents/" + document.get("pdf_document_id").asString() + "/download-url",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(api.headers(DOCS, "*", Map.of())),
+                JsonNode.class);
+        assertThat(url.getStatusCode()).as("%s", url.getBody()).isEqualTo(HttpStatus.OK);
+        HttpHeaders h = new HttpHeaders();
+        h.add("X-Tenant", t.slug());
+        return http.exchange(
+                        java.net.URI.create(
+                                http.getRootUri() + url.getBody().get("url").asString()),
+                        HttpMethod.GET,
+                        new org.springframework.http.HttpEntity<>(h),
+                        byte[].class)
+                .getBody();
+    }
+
+    /** The text of a PDF with every printed date replaced, so a golden file does not move with the calendar. */
+    static String text(byte[] pdf) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            String raw = new org.apache.pdfbox.text.PDFTextStripper().getText(d);
+            return raw.replaceAll("\\b\\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4}\\b", "{DATE}")
+                    .replaceAll("ST-\\d{8}-[0-9A-F]{8}", "ST-{YYYYMMDD}-{ID}")
+                    .replaceAll("RS\\d{8}", "RS{N}")
+                    .replace("\r", "")
+                    .strip();
+        }
+    }
+
+    /** With {@code -Dbms.documents.samples}: the PDF and a PNG of each page, for the visual check (ADR-034 item 8). */
+    static void sample(String name, byte[] pdf) throws Exception {
+        if (System.getProperty("bms.documents.samples") == null) {
+            return;
+        }
+        java.nio.file.Path dir = java.nio.file.Path.of("target/document-samples");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.write(dir.resolve(name + ".pdf"), pdf);
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            org.apache.pdfbox.rendering.PDFRenderer r = new org.apache.pdfbox.rendering.PDFRenderer(d);
+            for (int i = 0; i < d.getNumberOfPages(); i++) {
+                javax.imageio.ImageIO.write(
+                        r.renderImageWithDPI(i, 110),
+                        "png",
+                        dir.resolve(name + "-p" + (i + 1) + ".png").toFile());
+            }
+        }
+    }
+
+    /** Compares with {@code golden/documents/<name>.txt}; {@code -Dbms.golden.record=true} writes it instead. */
+    static void golden(String name, byte[] pdf) throws Exception {
+        sample(name, pdf);
+        java.nio.file.Path file = java.nio.file.Path.of("src/test/resources/golden/documents/" + name + ".txt");
+        String actual = text(pdf) + "\n";
+        if (Boolean.getBoolean("bms.golden.record")) {
+            java.nio.file.Files.createDirectories(file.getParent());
+            java.nio.file.Files.writeString(file, actual);
+            return;
+        }
+        assertThat(actual).as("golden text of %s", name).isEqualTo(java.nio.file.Files.readString(file));
+    }
+
+    static int pages(byte[] pdf) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            return d.getNumberOfPages();
+        }
+    }
+
+    long count(String table) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM " + table + " WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    // ---- capability off ----------------------------------------------------------------------
+
+    /** Spec 1.1 and 6.3: off is the default; no route answers, nothing is written, a sale is as it was. */
+    @Test
+    void withTheCapabilityOffNoRouteAnswersAndASaleIsAsItWas() {
+        capability("documents", false);
+        UUID s = sale(hq, "cash", "2");
+        JsonNode sale = api.get("/sales/" + s, ADMIN).getBody();
+        assertThat(sale.has("documents")).isFalse();
+        assertThat(sale.get("status").asString()).isEqualTo("completed");
+        UUID any = UUID.randomUUID();
+        List<ResponseEntity<JsonNode>> answers = List.of(
+                api.postKeyed("/sales/" + s + "/documents", Map.of("type", "invoice"), DOCS, "*", "key-00000001"),
+                api.get("/sales/" + s + "/documents", DOCS),
+                api.postKeyed(
+                        "/transfers/" + any + "/documents", Map.of("type", "delivery_note"), DOCS, "*", "key-00000002"),
+                api.get("/documents", DOCS),
+                api.get("/documents/" + any, DOCS),
+                api.post("/documents/" + any + "/pdf", Map.of(), DOCS),
+                api.get("/document-series", DOCS),
+                api.call(
+                        HttpMethod.PUT,
+                        "/document-series/invoice",
+                        Map.of("prefix", "TAX"),
+                        DOCS + "," + SETTINGS,
+                        "*",
+                        Map.of()),
+                api.get("/quotations", DOCS),
+                api.get("/quotations/" + any, DOCS),
+                api.post("/quotations/" + any + "/cancel", Map.of("reason", "no longer needed"), DOCS),
+                api.postKeyed(
+                        "/quotations/" + any + "/convert", Map.of("payment_method", "cash"), DOCS, "*", "key-00000003"),
+                api.get("/customers/" + any + "/statement/pdf", DOCS));
+        for (ResponseEntity<JsonNode> r : answers) {
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(code(r)).isEqualTo("capability_not_enabled");
+        }
+        assertThat(count("retail_documents")).isZero();
+        assertThat(count("retail_document_series")).isZero();
+        assertThat(count("retail_quotations")).isZero();
+    }
+
+    // ---- the invoice -------------------------------------------------------------------------
+
+    /** Numbered in the branch's series, stored once, idempotent by sale and type, text as the golden file. */
+    @Test
+    void anInvoiceIsNumberedStoredOnceAndIssuedOncePerSale() throws Exception {
+        UUID s1 = sale(hq, "cash", "3");
+        ResponseEntity<JsonNode> first = issue(s1, "invoice", DOCS, "*", "invoice-key-1");
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode doc = first.getBody();
+        assertThat(doc.get("number").asString()).isEqualTo("INV-HQ-000001");
+        assertThat(doc.get("type").asString()).isEqualTo("invoice");
+        assertThat(doc.get("status").asString()).isEqualTo("issued");
+        assertThat(doc.get("total_minor").asLong()).isEqualTo(300);
+        assertThat(doc.get("created").asBoolean()).isTrue();
+        assertThat(doc.get("issue_date").asString()).isEqualTo(TODAY);
+
+        // The same key replays; another key finds the document already issued, whatever the type of call.
+        ResponseEntity<JsonNode> replay = issue(s1, "invoice", DOCS, "*", "invoice-key-1");
+        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(replay.getBody().get("id").asString())
+                .isEqualTo(doc.get("id").asString());
+        ResponseEntity<JsonNode> again = issue(s1, "invoice", DOCS, "*", "invoice-key-2");
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getBody().get("id").asString()).isEqualTo(doc.get("id").asString());
+        assertThat(again.getBody().get("created").asBoolean()).isFalse();
+        assertThat(again.getBody().get("pdf_document_id").asString())
+                .isEqualTo(doc.get("pdf_document_id").asString());
+
+        // A second sale takes the next number; the other branch has a series of its own.
+        UUID s2 = sale(hq, "cash", "1");
+        assertThat(issued(s2, "invoice").get("number").asString()).isEqualTo("INV-HQ-000002");
+        UUID s3 = sale(br2, "cash", "1");
+        assertThat(issued(s3, "invoice").get("number").asString()).isEqualTo("INV-BR2-000001");
+
+        assertThat(count("retail_documents")).isEqualTo(3);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_type = 'invoice'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("one stored PDF each")
+                .isEqualTo(3);
+        byte[] pdf = pdf(doc);
+        assertThat(pages(pdf)).isEqualTo(1);
+        golden("retail_invoice", pdf);
+
+        // The list and the sale's own list show it, with the stored PDF.
+        JsonNode forSale = api.get("/sales/" + s1 + "/documents", DOCS).getBody();
+        assertThat(forSale.get("items")).hasSize(1);
+        assertThat(forSale.get("items").get(0).get("number").asString()).isEqualTo("INV-HQ-000001");
+        JsonNode list = api.get("/documents?type=invoice", DOCS).getBody();
+        assertThat(list.get("items")).hasSize(3);
+        assertThat(api.get("/documents?query=INV-BR2", DOCS).getBody().get("items"))
+                .hasSize(1);
+        assertThat(api.get("/documents?type=quotation", DOCS).getBody().get("items"))
+                .isEmpty();
+    }
+
+    /** Spec 14.3: the prefix is configurable, audited and needs the settings permission; numbers already issued never change. */
+    @Test
+    void thePrefixIsConfigurableAuditedAndNeverRewritesAnIssuedNumber() {
+        UUID s1 = sale(hq, "cash", "1");
+        assertThat(issued(s1, "invoice").get("number").asString()).isEqualTo("INV-HQ-000001");
+
+        ResponseEntity<JsonNode> denied =
+                api.call(HttpMethod.PUT, "/document-series/invoice", Map.of("prefix", "TAX"), DOCS, "*", Map.of());
+        assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        ResponseEntity<JsonNode> lower = api.call(
+                HttpMethod.PUT,
+                "/document-series/invoice",
+                Map.of("prefix", "tax"),
+                DOCS + "," + SETTINGS,
+                "*",
+                Map.of());
+        assertThat(lower.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> changed = api.call(
+                HttpMethod.PUT,
+                "/document-series/invoice",
+                Map.of("prefix", "TAX"),
+                DOCS + "," + SETTINGS,
+                "*",
+                Map.of());
+        assertThat(changed.getStatusCode()).as("%s", changed.getBody()).isEqualTo(HttpStatus.OK);
+
+        UUID s2 = sale(hq, "cash", "1");
+        assertThat(issued(s2, "invoice").get("number").asString()).isEqualTo("TAX-HQ-000002");
+        JsonNode first = api.get("/sales/" + s1 + "/documents", DOCS)
+                .getBody()
+                .get("items")
+                .get(0);
+        assertThat(first.get("number").asString()).isEqualTo("INV-HQ-000001");
+
+        JsonNode invoice = null;
+        for (JsonNode series : api.get("/document-series", DOCS).getBody().get("items")) {
+            if (series.get("type").asString().equals("invoice")) {
+                invoice = series;
+            }
+        }
+        assertThat(invoice.get("prefix").asString()).isEqualTo("TAX");
+        assertThat(invoice.get("default_prefix").asString()).isEqualTo("INV");
+        for (JsonNode b : invoice.get("branches")) {
+            if (b.get("branch_code").asString().equals("HQ")) {
+                assertThat(b.get("issued").asInt()).isEqualTo(2);
+                assertThat(b.get("next").asString()).isEqualTo("TAX-HQ-000003");
+            }
+        }
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.document.prefix_changed'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    /** Spec 13: gapless numbering under concurrent issue, and one document per sale however many race for it. */
+    @Test
+    void numberingIsGaplessUnderConcurrentIssueAndOneDocumentPerSale() throws Exception {
+        List<UUID> sales = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            sales.add(sale(hq, "cash", "1"));
+        }
+        UUID raced = sales.get(0);
+        ExecutorService pool = Executors.newFixedThreadPool(16);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<ResponseEntity<JsonNode>>> calls = new ArrayList<>();
+        for (UUID s : sales) {
+            calls.add(pool.submit(() -> {
+                start.await();
+                return issue(s, "invoice", DOCS, "*", UUID.randomUUID().toString());
+            }));
+        }
+        for (int i = 0; i < 8; i++) {
+            calls.add(pool.submit(() -> {
+                start.await();
+                return issue(raced, "invoice", DOCS, "*", UUID.randomUUID().toString());
+            }));
+        }
+        start.countDown();
+        for (Future<ResponseEntity<JsonNode>> f : calls) {
+            ResponseEntity<JsonNode> r = f.get(60, TimeUnit.SECONDS);
+            assertThat(r.getStatusCode().is2xxSuccessful())
+                    .as("%s", r.getBody())
+                    .isTrue();
+        }
+        pool.shutdown();
+        List<Integer> numbers = TestDatabase.owner()
+                .sql("SELECT seq_no FROM retail_documents WHERE tenant_id = ? AND type = 'invoice' ORDER BY seq_no")
+                .param(t.tenantId())
+                .query(Integer.class)
+                .list();
+        assertThat(numbers)
+                .as("eight sales, eight numbers, no gap and no duplicate")
+                .containsExactly(1, 2, 3, 4, 5, 6, 7, 8);
+        assertThat(count("documents"))
+                .as("one stored PDF each, however many raced")
+                .isGreaterThanOrEqualTo(8);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_type = 'invoice'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(8);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT last_no FROM retail_document_series WHERE tenant_id = ? AND type = 'invoice'")
+                        .param(t.tenantId())
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(8);
+    }
+
+    // JUSTIFICATION-A3: the remaining cases of the same new test class (delivery note, void, quotation, scope,
+    // transfer, statement).
+
+    // ---- the delivery note -------------------------------------------------------------------
+
+    /** Quantities only by default, prices when the issuer asks, a signature block for the receiver, linked to the invoice. */
+    @Test
+    void aDeliveryNoteShowsQuantitiesAndNoPricesUnlessAsked() throws Exception {
+        UUID s = sale(hq, "credit", "5");
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + s + "/documents", Map.of("type", "delivery_note"), DOCS, "*", "delivery-key-1");
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode dn = r.getBody();
+        assertThat(dn.get("number").asString()).isEqualTo("DN-HQ-000001");
+        assertThat(dn.has("total_minor"))
+                .as("a delivery note without prices carries no total")
+                .isFalse();
+        byte[] pdf = pdf(dn);
+        String text = text(pdf);
+        assertThat(text).contains("DELIVERY NOTE", "Test Buyer 01", "Delivered by", "Received by", "Test Product DC-1");
+        assertThat(text).doesNotContain("Unit price").doesNotContain("Amount (UGX)");
+        golden("retail_delivery_note", pdf);
+
+        // The invoice of the same sale is its own document in its own series; a delivery note issued after it names it.
+        UUID s2 = sale(hq, "cash", "2");
+        assertThat(issued(s2, "invoice").get("number").asString()).isEqualTo("INV-HQ-000001");
+        ResponseEntity<JsonNode> priced = api.postKeyed(
+                "/sales/" + s2 + "/documents",
+                Map.of("type", "delivery_note", "show_prices", true),
+                DOCS,
+                "*",
+                "delivery-key-2");
+        assertThat(priced.getBody().get("number").asString()).isEqualTo("DN-HQ-000002");
+        assertThat(priced.getBody().get("total_minor").asLong()).isEqualTo(200);
+        String pricedText = text(pdf(priced.getBody()));
+        assertThat(pricedText).contains("Unit price (UGX)", "INV-HQ-000001");
+    }
+
+    /** Spec 6.2 and 13: a void sale voids its documents and keeps the number; no new document is issued for it. */
+    @Test
+    void aVoidedSaleVoidsItsDocumentsAndKeepsTheNumber() {
+        UUID s = sale(hq, "cash", "1");
+        JsonNode invoice = issued(s, "invoice");
+        assertThat(invoice.get("status").asString()).isEqualTo("issued");
+        ResponseEntity<JsonNode> voided = api.post("/sales/" + s + "/void", Map.of("reason", "Wrong item sold"), DOCS);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+
+        JsonNode after =
+                api.get("/documents/" + invoice.get("id").asString(), DOCS).getBody();
+        assertThat(after.get("status").asString()).isEqualTo("void");
+        assertThat(after.get("number").asString()).isEqualTo("INV-HQ-000001");
+        ResponseEntity<JsonNode> late =
+                issue(s, "delivery_note", DOCS, "*", UUID.randomUUID().toString());
+        assertThat(late.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(late)).isEqualTo("sale_voided");
+        // The number is never reused: the next sale takes the next one.
+        UUID s2 = sale(hq, "cash", "1");
+        assertThat(issued(s2, "invoice").get("number").asString()).isEqualTo("INV-HQ-000002");
+        // The document row itself is append-only for every role.
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE retail_documents SET buyer_name = 'x' WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .update())
+                .hasStackTraceContaining("append-only");
+    }
+
+    // ---- the quotation -----------------------------------------------------------------------
+
+    ResponseEntity<JsonNode> quote(String validUntil, String price, String key) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("qty", "10");
+        if (price != null) {
+            line.put("unit_price_minor", Long.parseLong(price));
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("buyer_name", "Test Buyer 01");
+        body.put("buyer_contact", "+256700000001");
+        body.put("valid_until", validUntil);
+        body.put("notes", "Delivery within three days of the order.");
+        body.put("lines", List.of(line));
+        return api.postKeyed("/quotations", body, DOCS, "*", key);
+    }
+
+    ResponseEntity<JsonNode> convert(UUID quotation, boolean keep, boolean invoice, String key) {
+        return api.postKeyed(
+                "/quotations/" + quotation + "/convert",
+                Map.of("payment_method", "cash", "keep_quoted_prices", keep, "issue_invoice", invoice),
+                DOCS,
+                "*",
+                key);
+    }
+
+    /** A quotation reserves nothing, is numbered and stored, and converts once to a sale and its linked invoice. */
+    @Test
+    void aQuotationConvertsOnceToASaleAndItsInvoice() throws Exception {
+        long before = TestDatabase.owner()
+                .sql("SELECT qty FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ? AND product_id = ?")
+                .params(t.tenantId(), hq, product)
+                .query(Long.class)
+                .single();
+        long entries = count("journal_entries");
+        ResponseEntity<JsonNode> made = quote("2026-11-08", "120", "quote-key-1");
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode q = made.getBody();
+        assertThat(q.get("number").asString()).isEqualTo("QT-HQ-000001");
+        assertThat(q.get("total_minor").asLong()).isEqualTo(1_200);
+        assertThat(q.get("status").asString()).isEqualTo("open");
+        assertThat(q.get("expired").asBoolean()).isFalse();
+        assertThat(q.get("lines").get(0).get("unit_price_minor").asLong()).isEqualTo(120);
+        byte[] pdf = pdf(q);
+        golden("retail_quotation", pdf);
+        assertThat(api.postKeyed("/quotations", Map.of(), DOCS, "*", "quote-key-1")
+                        .getStatusCode())
+                .as("the same key with another body is refused")
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT qty FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ? AND product_id = ?")
+                        .params(t.tenantId(), hq, product)
+                        .query(Long.class)
+                        .single())
+                .as("a quotation reserves no stock")
+                .isEqualTo(before);
+        assertThat(count("journal_entries")).as("and posts nothing").isEqualTo(entries);
+        UUID id = RetailTestSupport.id(made);
+        assertThat(api.get("/quotations/" + id, DOCS).getBody().get("lines")).hasSize(1);
+        assertThat(api.get("/quotations?status=open&query=QT-HQ", DOCS)
+                        .getBody()
+                        .get("items"))
+                .hasSize(1);
+        assertThat(api.get("/quotations?status=converted", DOCS).getBody().get("items"))
+                .isEmpty();
+
+        ResponseEntity<JsonNode> done = convert(id, true, true, "convert-key-1");
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        UUID saleId = UUID.fromString(done.getBody().get("sale_id").asString());
+        assertThat(api.get("/sales/" + saleId, DOCS)
+                        .getBody()
+                        .get("total_minor")
+                        .asLong())
+                .as("the quoted price is kept")
+                .isEqualTo(1_200);
+        JsonNode invoice = done.getBody().get("invoice");
+        assertThat(invoice.get("number").asString()).isEqualTo("INV-HQ-000001");
+        assertThat(invoice.get("source_document_id").asString())
+                .isEqualTo(api.get("/quotations/" + id, DOCS)
+                        .getBody()
+                        .get("document_id")
+                        .asString());
+        assertThat(text(pdf(invoice))).contains("Quotation", "QT-HQ-000001");
+        JsonNode converted = api.get("/quotations/" + id, DOCS).getBody();
+        assertThat(converted.get("status").asString()).isEqualTo("converted");
+        assertThat(converted.get("converted_sale_id").asString()).isEqualTo(saleId.toString());
+
+        // A replay answers the same; another key finds it converted already.
+        assertThat(convert(id, true, true, "convert-key-1").getHeaders().getFirst("Idempotent-Replayed"))
+                .isEqualTo("true");
+        ResponseEntity<JsonNode> twice = convert(id, true, true, "convert-key-2");
+        assertThat(twice.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(twice)).isEqualTo("quotation_not_open");
+        assertThat(count("retail_sales")).isEqualTo(1);
+    }
+
+    /** Without keep_quoted_prices the sale is priced again today, through the ordinary sale path. */
+    @Test
+    void aQuotationIsPricedAgainUnlessTheQuotedPricesAreKept() {
+        UUID id = RetailTestSupport.id(quote("2026-11-08", "120", "quote-key-2"));
+        ResponseEntity<JsonNode> done = convert(id, false, false, "convert-key-3");
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().has("invoice")).isFalse();
+        assertThat(api.get("/sales/" + done.getBody().get("sale_id").asString(), DOCS)
+                        .getBody()
+                        .get("total_minor")
+                        .asLong())
+                .as("the product's price today, 100, not the quoted 120")
+                .isEqualTo(1_000);
+        assertThat(count("retail_documents"))
+                .as("only the quotation's own document")
+                .isEqualTo(1);
+    }
+
+    /** A quotation is cancelled, not edited; it voids its document, and it cannot be converted after. */
+    @Test
+    void aCancelledQuotationIsVoidAndCannotBeConverted() {
+        JsonNode q = quote("2026-11-08", null, "quote-key-3").getBody();
+        UUID id = UUID.fromString(q.get("id").asString());
+        assertThat(api.post("/quotations/" + id + "/cancel", Map.of("reason", " "), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> cancelled =
+                api.post("/quotations/" + id + "/cancel", Map.of("reason", "Customer went elsewhere"), DOCS);
+        assertThat(cancelled.getStatusCode()).as("%s", cancelled.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cancelled.getBody().get("status").asString()).isEqualTo("cancelled");
+        assertThat(api.get("/documents/" + q.get("document_id").asString(), DOCS)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("void");
+        assertThat(code(convert(id, false, false, "convert-key-4"))).isEqualTo("quotation_not_open");
+        assertThat(code(api.post("/quotations/" + id + "/cancel", Map.of("reason", "Again please"), DOCS)))
+                .isEqualTo("quotation_not_open");
+    }
+
+    /** Valid until is a business date: a past one is refused, and an expired quotation can no longer be converted. */
+    @Test
+    void anExpiredQuotationCannotBeConverted() {
+        ResponseEntity<JsonNode> past = quote("2026-10-07", null, "quote-key-4");
+        assertThat(past.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // Valid today in Kampala (2026-10-08, while UTC is still the 7th) is allowed.
+        assertThat(quote(TODAY, null, "quote-key-5").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID expired = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO retail_quotations (id, tenant_id, created_by, branch_id, quote_date, valid_until, buyer_name,
+                            currency, total_minor)
+                        VALUES (?, ?, ?, ?, DATE '2026-01-05', DATE '2026-01-31', 'Test Buyer 03', 'UGX', 0)
+                        """)
+                .params(expired, t.tenantId(), api.userId(), hq)
+                .update();
+        ResponseEntity<JsonNode> r = convert(expired, false, false, "convert-key-5");
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(r)).isEqualTo("quotation_expired");
+        assertThat(api.get("/quotations/" + expired, DOCS)
+                        .getBody()
+                        .get("expired")
+                        .asBoolean())
+                .isTrue();
+    }
+
+    // ---- permissions and scope ---------------------------------------------------------------
+
+    /** Seeded permission rows only: the sales role cannot issue, and a user scoped to one branch sees only its documents. */
+    @Test
+    void documentsFollowThePermissionAndTheBranchScope() {
+        UUID hqSale = sale(hq, "cash", "1");
+        UUID br2Sale = sale(br2, "cash", "1");
+        String sales = RetailTestSupport.SALES;
+        assertThat(issue(hqSale, "invoice", sales, "*", "scope-key-1").getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(api.get("/documents", sales).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(api.postKeyed("/quotations", Map.of(), sales, "*", "scope-key-2")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        // Scoped to branch 2: the head office sale is invisible (404), its own branch's is fine.
+        assertThat(issue(hqSale, "invoice", DOCS, br2.toString(), "scope-key-3").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        ResponseEntity<JsonNode> own = issue(br2Sale, "invoice", DOCS, br2.toString(), "scope-key-4");
+        assertThat(own.getStatusCode()).as("%s", own.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode hqDoc = issued(hqSale, "invoice");
+        JsonNode scoped = api.call(HttpMethod.GET, "/documents", null, DOCS, br2.toString(), Map.of())
+                .getBody();
+        assertThat(scoped.get("items")).hasSize(1);
+        assertThat(scoped.get("items").get(0).get("branch_id").asString()).isEqualTo(br2.toString());
+        assertThat(api.call(
+                                HttpMethod.GET,
+                                "/documents/" + hqDoc.get("id").asString(),
+                                null,
+                                DOCS,
+                                br2.toString(),
+                                Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(api.call(
+                                HttpMethod.POST,
+                                "/documents/" + hqDoc.get("id").asString() + "/pdf",
+                                Map.of(),
+                                DOCS,
+                                br2.toString(),
+                                Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        // The signed link of a stored PDF follows the same rule.
+        ResponseEntity<JsonNode> link = http.exchange(
+                "/api/v1/documents/" + hqDoc.get("pdf_document_id").asString() + "/download-url",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(api.headers(DOCS, br2.toString(), Map.of())),
+                JsonNode.class);
+        assertThat(link.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // Another tenant sees nothing at all.
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-docs-other", false, true);
+        RetailTestSupport theirs = new RetailTestSupport(http, other);
+        ResponseEntity<JsonNode> foreign =
+                theirs.get("/documents/" + hqDoc.get("id").asString(), DOCS);
+        assertThat(foreign.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    // ---- the delivery note of a stock move ---------------------------------------------------
+
+    /** Quantities only, from the source branch to the destination, one per stock move. */
+    @Test
+    void aStockMoveHasADeliveryNoteWithoutPrices() throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("from_branch_id", hq);
+        body.put("to_branch_id", br2);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "4")));
+        ResponseEntity<JsonNode> move =
+                api.postKeyed("/transfers", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(move.getStatusCode()).as("%s", move.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID transfer = RetailTestSupport.id(move);
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/transfers/" + transfer + "/documents", Map.of("type", "delivery_note"), DOCS, "*", "transfer-key-1");
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("number").asString()).isEqualTo("DN-HQ-000001");
+        assertThat(r.getBody().get("transfer_id").asString()).isEqualTo(transfer.toString());
+        assertThat(r.getBody().has("total_minor")).isFalse();
+        byte[] pdf = pdf(r.getBody());
+        assertThat(text(pdf))
+                .contains("Stock move", "Test Branch Two", "Test Product DC-1")
+                .doesNotContain("Unit price");
+        golden("retail_delivery_note_transfer", pdf);
+        ResponseEntity<JsonNode> again = api.postKeyed(
+                "/transfers/" + transfer + "/documents", Map.of("type", "delivery_note"), DOCS, "*", "transfer-key-2");
+        assertThat(again.getBody().get("id").asString())
+                .isEqualTo(r.getBody().get("id").asString());
+        assertThat(api.postKeyed(
+                                "/transfers/" + transfer + "/documents",
+                                Map.of("type", "invoice"),
+                                DOCS,
+                                "*",
+                                "transfer-key-3")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.call(
+                                HttpMethod.POST,
+                                "/transfers/" + transfer + "/documents",
+                                Map.of("type", "delivery_note"),
+                                DOCS,
+                                br2.toString(),
+                                Map.of("Idempotency-Key", "transfer-key-4"))
+                        .getStatusCode())
+                .as("the source branch issues it")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    // JUSTIFICATION-A3: one more case of the same new test class (a failed render leaves the sale and a numbered
+    // document).
+    /** Spec 6.1 and 13: a failing render leaves the sale committed and a numbered document, and the next request renders it. */
+    @Test
+    void aFailedRenderLeavesTheSaleAndANumberedDocumentThatRendersOnTheNextRequest() throws Exception {
+        UUID s = sale(hq, "cash", "2");
+        Mockito.doThrow(new ApiException(
+                        HttpStatus.SERVICE_UNAVAILABLE, "documents_busy", "Documents busy", "Try again."))
+                .when(documents)
+                .renderPdf(ArgumentMatchers.any(), ArgumentMatchers.any());
+        ResponseEntity<JsonNode> failed = issue(s, "invoice", DOCS, "*", "render-key-1");
+        assertThat(failed.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(api.get("/sales/" + s, ADMIN).getBody().get("status").asString())
+                .as("the sale is untouched")
+                .isEqualTo("completed");
+        JsonNode listed = api.get("/sales/" + s + "/documents", DOCS)
+                .getBody()
+                .get("items")
+                .get(0);
+        assertThat(listed.get("number").asString())
+                .as("the number was taken and is kept")
+                .isEqualTo("INV-HQ-000001");
+        assertThat(listed.has("pdf_document_id")).as("no PDF yet").isFalse();
+
+        Mockito.reset(documents);
+        // The same key replays the issue and finishes the PDF from the stored snapshot.
+        ResponseEntity<JsonNode> retried = issue(s, "invoice", DOCS, "*", "render-key-1");
+        assertThat(retried.getStatusCode().is2xxSuccessful())
+                .as("%s", retried.getBody())
+                .isTrue();
+        assertThat(retried.getBody().get("id").asString())
+                .isEqualTo(listed.get("id").asString());
+        assertThat(text(pdf(retried.getBody()))).contains("INV-HQ-000001", "Test Product DC-1");
+        UUID next = sale(hq, "cash", "1");
+        assertThat(issued(next, "invoice").get("number").asString())
+                .as("no gap and no duplicate")
+                .isEqualTo("INV-HQ-000002");
+        assertThat(count("retail_documents")).isEqualTo(2);
+    }
+
+    // JUSTIFICATION-A3: one more case of the same new test class (packs and the price list as sold).
+    /** Pack units are printed as they were sold (units V39) and the price list that applied is named (price lists V41). */
+    @Test
+    void packsAndThePriceListAreShownAsSold() throws Exception {
+        capability("units", true);
+        capability("price_lists", true);
+        String perms = DOCS + ",retail.pricelist.manage,retail.pricelist.use";
+        UUID carton = api.unit("carton");
+        assertThat(api.post("/products/" + product + "/units", Map.of("unit_id", carton, "factor", "12"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Wholesale"), perms));
+        assertThat(api.post(
+                                "/price-lists/" + list + "/items",
+                                Map.of("product_id", product, "unit_id", carton, "price_minor", 1_100),
+                                perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "cash");
+        body.put("price_list_id", list);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "3", "unit_id", carton)));
+        ResponseEntity<JsonNode> sold =
+                api.postKeyed("/sales", body, perms, "*", UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(sold.getBody().get("total_minor").asLong()).isEqualTo(3_300);
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + RetailTestSupport.id(sold) + "/documents",
+                Map.of("type", "invoice"),
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        byte[] pdf = pdf(r.getBody());
+        assertThat(text(pdf)).contains("3 carton", "= 36 u-dc-1", "Price list", "Wholesale", "1,100", "3,300");
+        golden("retail_invoice_pack", pdf);
+    }
+
+    // JUSTIFICATION-A3: one more case of the same new test class (a long invoice runs to several pages).
+    /** ADR-034 quality bar 6: a long table repeats its header on each page and the footer says page x of y with the real numbers. */
+    @Test
+    void aLongInvoiceRepeatsItsHeaderAndNumbersItsPages() throws Exception {
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int i = 1; i <= 45; i++) {
+            UUID p = api.product("LP-" + i, 30, 100 + i);
+            api.stockUp(hq, p, "50");
+            lines.add(Map.of("product_id", p, "qty", "2"));
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "cash");
+        body.put("lines", lines);
+        ResponseEntity<JsonNode> sold =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        byte[] pdf = pdf(issued(RetailTestSupport.id(sold), "invoice"));
+        int pages = pages(pdf);
+        assertThat(pages).as("forty-five lines run to several pages").isGreaterThanOrEqualTo(3);
+        String text = text(pdf);
+        for (int page = 1; page <= pages; page++) {
+            assertThat(text).contains("page " + page + " of " + pages);
+        }
+        assertThat(text.split("Unit price \\(UGX\\)", -1).length - 1)
+                .as("the table header is on every page")
+                .isEqualTo(pages);
+        sample("retail_invoice_long", pdf);
+    }
+
+    // ---- the customer statement --------------------------------------------------------------
+
+    byte[] statementPdf(UUID customer, String query, String perms) {
+        ResponseEntity<byte[]> r = http.exchange(
+                "/api/v1/retail/customers/" + customer + "/statement/pdf" + query,
+                HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(api.headers(perms, "*", Map.of())),
+                byte[].class);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(r.getHeaders().getContentType().toString()).isEqualTo("application/pdf");
+        assertThat(r.getHeaders().getCacheControl()).isEqualTo("no-store");
+        return r.getBody();
+    }
+
+    /** The fourth document: rendered as at today and never stored, closing at what the account screen shows. */
+    @Test
+    void theCustomerStatementIsAPdfOfTheAccountAndIsNeverStored() throws Exception {
+        capability("customer_accounts", true);
+        UUID customer = RetailTestSupport.id(
+                api.post("/customers", Map.of("name", "Test Buyer 02", "contact", "+256700000002"), DOCS));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "credit");
+        body.put("customer_id", customer);
+        body.put("sale_date", "2026-10-01");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "50")));
+        ResponseEntity<JsonNode> sold =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> paid = api.postKeyed(
+                "/customers/" + customer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 2_000, "method", "cash"),
+                DOCS,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        byte[] pdf = statementPdf(customer, "?from=2026-09-01&to=2026-10-08", DOCS);
+        String text = text(pdf);
+        assertThat(text).contains("STATEMENT OF ACCOUNT", "Test Buyer 02", "+256700000002", "Closing balance", "3,000");
+        assertThat(text).contains("Three thousand Uganda shillings only");
+        JsonNode screen = api.get("/customers/" + customer + "/statement?from=2026-09-01&to=2026-10-08", DOCS)
+                .getBody();
+        assertThat(screen.get("closing_minor").asLong()).isEqualTo(3_000);
+        golden("retail_customer_statement", pdf);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND subject_type = 'retail.document'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("a statement is rendered on each request and never stored")
+                .isZero();
+
+        // It needs both capabilities and the permission.
+        capability("customer_accounts", false);
+        ResponseEntity<byte[]> off = http.exchange(
+                "/api/v1/retail/customers/" + customer + "/statement/pdf",
+                HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(api.headers(DOCS, "*", Map.of())),
+                byte[].class);
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        capability("customer_accounts", true);
+        ResponseEntity<byte[]> denied = http.exchange(
+                "/api/v1/retail/customers/" + customer + "/statement/pdf",
+                HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(api.headers(RetailTestSupport.SALES, "*", Map.of())),
+                byte[].class);
+        assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+}

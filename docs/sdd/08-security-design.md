@@ -226,6 +226,7 @@ platform API and holds no tenant permissions.
 | `retail.price.override` | Y | | | | | | | Y |
 | `retail.credit.manage` | Y | | | | | | | |
 | `retail.credit.override` | Y | | | | | | | |
+| `retail.document.issue` | Y | | | | | | | |
 
 Notes:
 
@@ -298,8 +299,13 @@ Notes:
   `retail.credit.manage` (set a buyer's credit limit and payment terms) and `retail.credit.override` (sell on credit above a
   buyer's limit, with a reason of at least five characters, written to the audit trail), both administrators only; payment on
   account needs `retail.sale.create` at the receiving branch and its reversal `retail.sale.void`, so no permission is added for
-  them. Both are consulted only while the `customer_accounts` capability is on. Design only: three more permissions,
-  `retail.sale.return`, `retail.document.issue` and `retail.payable.manage`.
+  them. Both are consulted only while the `customer_accounts` capability is on. Built with the optional documents (issue #197, migration V46):
+  `retail.document.issue` (issue and reprint an invoice, a delivery note or a quotation, make and convert a quotation, produce a customer statement PDF),
+  administrators only, not money-moving, consulted only while the `documents` capability is on, in the branch scope of the permission (the
+  source branch for the delivery note of a stock move); converting a quotation also needs `retail.sale.create`, which the sale it makes checks as any
+  sale does, and changing a series prefix needs `core.settings.manage`. The stored PDF of a document is readable through the core download route by
+  whoever holds the permission in the document's branch (FR-DOC-03) and only while the capability is on. Design only: two more permissions,
+  `retail.sale.return` and `retail.payable.manage`.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares
   the seeded permissions with the matrix; all of them go to administrators only.
   `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales
