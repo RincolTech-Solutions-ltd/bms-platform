@@ -75,6 +75,9 @@ class SmsChannelIT extends IntegrationTest {
     SmsRecipientHash hasher;
 
     @Autowired
+    com.rincoltech.bms.core.jobs.TenantJobs tenantJobs;
+
+    @Autowired
     OutboxDispatcher managedDispatcher;
 
     @Autowired
@@ -134,6 +137,7 @@ class SmsChannelIT extends IntegrationTest {
                     templates,
                     business,
                     tenantSettings,
+                    tenantJobs,
                     hasher,
                     outbox);
             this.dispatcher =
@@ -336,6 +340,7 @@ class SmsChannelIT extends IntegrationTest {
                     templates,
                     rig.business,
                     tenantSettings,
+                    tenantJobs,
                     hasher,
                     rig.outbox);
             assertThat(noProvider.enabled()).as(mode).isFalse();
@@ -449,6 +454,38 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(outboxRow(key).get("status")).isEqualTo("sent");
     }
 
+    /** The operator's "send again" is the deliberate duplicate: it alone lets an unknown message go once more. */
+    @Test
+    void theOperatorsSendAgainResendsAnUnknownMessageOnce() {
+        Instant start = day(28);
+        Rig rig = live(start);
+        rig.provider.timeOut("provider_timeout");
+        TestDatabase.Fixture t = tenant(100);
+        String key = receipt(rig, t, "+256700000204");
+        rig.dispatch(1);
+        assertThat(outboxRow(key).get("last_error")).isEqualTo("unknown_outcome");
+        assertThat(rig.provider.sent()).hasSize(1);
+
+        // Not by itself, however long it waits.
+        rig.advance(Duration.ofMinutes(5));
+        assertThat(rig.dispatch(10)).isZero();
+
+        // The operator resends it, inside the hour the receipt lives.
+        String result = jdbc.sql("SELECT notification_outbox_retry((SELECT id FROM notification_outbox_failures(1000)"
+                        + " f WHERE f.last_error = 'unknown_outcome' AND f.tenant_id = ? LIMIT 1), ?, ?)")
+                .params(t.tenantId(), Timestamp.from(start.minus(Duration.ofDays(7))), Timestamp.from(rig.clock.now))
+                .query(String.class)
+                .single();
+        assertThat(result).isEqualTo("retried");
+        rig.provider.answer(() ->
+                new SmsProvider.Outcome("fake", SmsProvider.Status.ACCEPTED, "fake-resent", 1, "UGX 32.0000", null));
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        assertThat(rig.provider.sent()).hasSize(2);
+        assertThat(outboxRow(key).get("status")).isEqualTo("sent");
+        assertThat(delivery(key).get("status")).isEqualTo("sent");
+        assertThat(delivery(key).get("provider_message_id")).isEqualTo("fake-resent");
+    }
+
     /** A crash after the request may have gone, before the answer: found queued, recorded unknown, not sent. */
     @Test
     void aMessageFoundQueuedAfterACrashIsNeverResent() {
@@ -503,7 +540,7 @@ class SmsChannelIT extends IntegrationTest {
 
     // ---- Numbers -------------------------------------------------------------------------------
 
-    /** An ambiguous or foreign number is never sent: the lesson of the WhatsApp bridge. */
+    /** An ambiguous or foreign number is never sent: it is refused rather than guessed (FR-NTF-19). */
     @Test
     void anAmbiguousNumberIsRefusedAndNeverReachesTheProvider() {
         Rig rig = live(day(8));
@@ -558,6 +595,22 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(rig.provider.sent()).isEmpty();
         assertThat(outboxRow(key).get("status")).isEqualTo("failed");
         assertThat(outboxRow(key).get("last_error")).isEqualTo("tenant_sms_off");
+    }
+
+    /** A suspended tenant's queued messages are refused, not sent: its outbox rows are no longer its to use. */
+    @Test
+    void aSuspendedTenantsMessageIsRefused() {
+        Rig rig = live(day(29));
+        TestDatabase.Fixture t = tenant(100);
+        String key = receipt(rig, t, "+256700000207");
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+        assertThat(rig.dispatch(1)).isEqualTo(1);
+        assertThat(rig.provider.sent()).isEmpty();
+        assertThat(outboxRow(key).get("status")).isEqualTo("failed");
+        assertThat(outboxRow(key).get("last_error")).isEqualTo("tenant_inactive");
     }
 
     @Test
@@ -1021,6 +1074,7 @@ class SmsChannelIT extends IntegrationTest {
                 templates,
                 live.business,
                 tenantSettings,
+                tenantJobs,
                 hasher,
                 live.outbox);
         assertThat(off.enabled()).isFalse();
@@ -1146,7 +1200,7 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(outboxRow(deferred).get("attempts")).isEqualTo(0);
         assertThat(channel.attempts).containsExactly(1, 1);
         TestDatabase.owner()
-                .sql("UPDATE notification_outbox SET status = 'failed' WHERE idempotency_key = ?")
+                .sql("UPDATE notification_outbox SET status = 'failed', failed_at = now() WHERE idempotency_key = ?")
                 .param(deferred)
                 .update();
 
@@ -1209,7 +1263,22 @@ class SmsChannelIT extends IntegrationTest {
                         + " 'transactional', '+256*****0202', repeat('d', 64), 'fake', 'sent')")
                 .params(old, t.tenantId(), Timestamp.from(start.minus(Duration.ofDays(14 * 31))), UUID.randomUUID())
                 .update();
-        assertThat(rig.dispatcher.purge()).isGreaterThanOrEqualTo(1);
+        // A failed SMS row keeps its recipient column until it is deleted: 30 days after it failed, like a sent one.
+        String oldFailed = key();
+        String recentFailed = key();
+        raw(t, "transactional", "+256700000205", start.minus(Duration.ofDays(40)), oldFailed);
+        raw(t, "transactional", "+256700000206", start.minus(Duration.ofDays(2)), recentFailed);
+        TestDatabase.owner()
+                .sql("UPDATE notification_outbox SET status = 'failed', params = '{}'::jsonb, failed_at = ?"
+                        + " WHERE idempotency_key = ?")
+                .params(Timestamp.from(start.minus(Duration.ofDays(31))), oldFailed)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE notification_outbox SET status = 'failed', params = '{}'::jsonb, failed_at = ?"
+                        + " WHERE idempotency_key = ?")
+                .params(Timestamp.from(start.minus(Duration.ofDays(1))), recentFailed)
+                .update();
+        assertThat(rig.dispatcher.purge()).isGreaterThanOrEqualTo(2);
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM sms_deliveries WHERE id = ?")
                         .param(old)
@@ -1217,6 +1286,13 @@ class SmsChannelIT extends IntegrationTest {
                         .single())
                 .isZero();
         assertThat(hasDelivery(key)).isTrue();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM notification_outbox WHERE idempotency_key = ?")
+                        .param(oldFailed)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(outboxRow(recentFailed).get("status")).isEqualTo("failed");
     }
 
     /** Spec section 4.6, throughput: measured with the fake provider, so the figure is the dispatcher's own cost. */

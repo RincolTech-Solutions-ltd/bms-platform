@@ -13,7 +13,7 @@
 @ApplicationModule(
         id = "core.notifications",
         displayName = "Core: Notifications",
-        allowedDependencies = {"kernel", "core.audit", "core.tenancy"})
+        allowedDependencies = {"kernel", "core.audit", "core.tenancy", "core.jobs"})
 package com.rincoltech.bms.core.notifications;
 
 import org.springframework.modulith.ApplicationModule;

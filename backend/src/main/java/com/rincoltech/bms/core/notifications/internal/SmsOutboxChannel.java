@@ -1,11 +1,11 @@
 package com.rincoltech.bms.core.notifications.internal;
 
+import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.Masking;
 import com.rincoltech.bms.kernel.PhoneNumbers;
-import com.rincoltech.bms.kernel.TenantContext;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -30,7 +30,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <ol>
  *   <li><b>A short tenant transaction</b> binds the tenant stored on the row (the dispatcher claimed
- *       it as a platform step) and decides: SMS switched off for the tenant (refused), the number
+ *       it as a platform step; {@code TenantJobs.callForTenant} is the one way a stored tenant id becomes a
+ *       bound tenant, and refuses a suspended or closed one) and decides: SMS switched off for the tenant (refused), the number
  *       (refused unless it is a Uganda mobile number we can read without guessing), the opt-out
  *       (logged {@code blocked_optout}, refused), the sending window for reminders and arrears
  *       (deferred), the per tenant and platform caps (deferred or held, never dropped), the text
@@ -65,6 +66,7 @@ final class SmsOutboxChannel implements OutboxChannel {
     private final OutboxTemplates templates;
     private final BusinessClock clock;
     private final TenantSettings tenantSettings;
+    private final TenantJobs tenantJobs;
     private final SmsRecipientHash hasher;
     private final Outbox outbox;
     private final AtomicBoolean modeRecorded = new AtomicBoolean();
@@ -78,6 +80,7 @@ final class SmsOutboxChannel implements OutboxChannel {
             OutboxTemplates templates,
             BusinessClock clock,
             TenantSettings tenantSettings,
+            TenantJobs tenantJobs,
             SmsRecipientHash hasher,
             Outbox outbox) {
         this.jdbc = jdbc;
@@ -91,6 +94,7 @@ final class SmsOutboxChannel implements OutboxChannel {
         this.templates = templates;
         this.clock = clock;
         this.tenantSettings = tenantSettings;
+        this.tenantJobs = tenantJobs;
         this.hasher = hasher;
         this.outbox = outbox;
     }
@@ -149,8 +153,13 @@ final class SmsOutboxChannel implements OutboxChannel {
             return Result.refused("no_tenant");
         }
         Instant now = clock.now();
-        Prepared prepared =
-                TenantContext.callAs(row.tenantId(), () -> transactions.execute(tx -> prepare(delivery, row, now)));
+        Prepared prepared;
+        try {
+            prepared = tenantJobs.callForTenant(row.tenantId(), () -> prepare(delivery, row, now));
+        } catch (TenantJobs.InactiveTenantException e) {
+            // A suspended or closed tenant sends nothing (its outbox rows are not its to use any more).
+            return Result.refused("tenant_inactive");
+        }
         raise(prepared.alerts());
         if (prepared.result() != null) {
             return prepared.result();
@@ -191,6 +200,12 @@ final class SmsOutboxChannel implements OutboxChannel {
 
         static Prepared done(Result result, List<Alert> alerts) {
             return new Prepared(result, alerts, null, null, 0, null);
+        }
+
+        /** The number and the text are not printed, even by accident. */
+        @Override
+        public String toString() {
+            return "Prepared[segments=" + segments + "]";
         }
     }
 
@@ -388,12 +403,11 @@ final class SmsOutboxChannel implements OutboxChannel {
                 outcome == null ? null : SmsCost.parse(outcome.costRaw()).orElse(null);
         Instant now = clock.now();
         try {
-            TenantContext.callAs(
+            tenantJobs.callForTenant(
                     row.tenantId(),
-                    () -> transactions.execute(tx -> jdbc.sql(
-                                    "UPDATE sms_deliveries SET status = ?, provider = ?, provider_message_id = ?,"
-                                            + " provider_segments = ?, cost_minor = ?, currency = ?, cost_raw = ?,"
-                                            + " failure_reason = ?, updated_at = ? WHERE outbox_id = ?")
+                    () -> jdbc.sql("UPDATE sms_deliveries SET status = ?, provider = ?, provider_message_id = ?,"
+                                    + " provider_segments = ?, cost_minor = ?, currency = ?, cost_raw = ?,"
+                                    + " failure_reason = ?, updated_at = ? WHERE outbox_id = ?")
                             .params(
                                     status,
                                     providerName,
@@ -405,7 +419,7 @@ final class SmsOutboxChannel implements OutboxChannel {
                                     reason == null ? null : tail(reason, 100),
                                     Timestamp.from(now),
                                     row.outboxId())
-                            .update()));
+                            .update());
         } catch (RuntimeException e) {
             log.warn(
                     "SMS delivery log not updated: outbox={} status={} error={}",

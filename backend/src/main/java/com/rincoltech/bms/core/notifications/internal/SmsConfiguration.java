@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.notifications.internal;
 
+import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -45,6 +46,7 @@ class SmsConfiguration {
             OutboxTemplates templates,
             BusinessClock clock,
             TenantSettings tenantSettings,
+            TenantJobs tenantJobs,
             SmsRecipientHash hasher,
             Outbox outbox,
             ObjectMapper mapper) {
@@ -55,7 +57,16 @@ class SmsConfiguration {
                     settings.mode().key());
         }
         return new SmsOutboxChannel(
-                jdbc, transactionManager, settings, provider, templates, clock, tenantSettings, hasher, outbox);
+                jdbc,
+                transactionManager,
+                settings,
+                provider,
+                templates,
+                clock,
+                tenantSettings,
+                tenantJobs,
+                hasher,
+                outbox);
     }
 
     /** The provider for a resolved configuration, or null when the channel cannot send. */

@@ -13,7 +13,12 @@
 -- claim and the enqueue are short transactions, so the wait is a few milliseconds at the current
 -- size (rows are purged 30 days after sending). The CHECK and the foreign key are added NOT VALID
 -- and validated afterwards, so the scan runs under SHARE UPDATE EXCLUSIVE (and SHARE ROW
--- EXCLUSIVE on tenants for the key) and does not block reads or writes. Every new table is empty.
+-- EXCLUSIVE on tenants for the key) and does not block reads or writes. Every new table is empty. The
+-- one new index on notification_outbox (updated_at, for the claim's fairness count) is built without
+-- CONCURRENTLY, which a migration transaction cannot do, so it blocks writes to the outbox while it
+-- builds: milliseconds at the size of a table purged 30 days after sending. The functions replaced here
+-- (the claim and the failed-rows list gain result columns; notification_outbox_retry gains a statement)
+-- are dropped and created, or replaced, inside this one migration transaction.
 --
 -- What this migration holds:
 --   1. notification_outbox learns its tenant, a category and an optional subject, and the enqueue
@@ -27,7 +32,7 @@
 --   6. sms_deliveries (row-level security): the delivery and cost log.
 --   7. sms_opt_outs (row-level security).
 --   8. Platform helpers: the platform-wide daily count, the per tenant count for the operator, the
---      13 month retention purge.
+--      13 month retention purge, and the outbox purge now deleting a failed SMS row 30 days after it failed.
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. The outbox row learns its tenant, its category and its subject (ADR-036 decision 2).
@@ -273,6 +278,36 @@ BEGIN
 END
 $$;
 
+-- The operator's "send again" (body as in V23, plus one statement). For an SMS whose outcome was unknown it
+-- is the deliberate duplicate of ADR-036 decision 6: the delivery log row is moved from unknown back to
+-- failed ('operator_resend'), so the channel, which never resends an unknown message by itself, may send it
+-- once more. Only unknown: a message that was sent, rejected or blocked by the opt-out stays so.
+CREATE OR REPLACE FUNCTION notification_outbox_retry(p_id uuid, p_created_after timestamptz, p_now timestamptz)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v notification_outbox%ROWTYPE;
+BEGIN
+    SELECT * INTO v FROM notification_outbox WHERE notification_outbox.id = p_id FOR UPDATE;
+    IF NOT FOUND OR v.status <> 'failed' THEN
+        RETURN 'not_failed';
+    END IF;
+    IF v.created_at < p_created_after OR v.params = '{}'::jsonb
+       OR (v.expires_at IS NOT NULL AND v.expires_at <= p_now) THEN
+        RETURN 'too_old';
+    END IF;
+    UPDATE notification_outbox
+       SET status = 'pending', attempts = 0, failed_at = NULL, next_attempt_at = p_now, updated_at = p_now
+     WHERE notification_outbox.id = p_id;
+    IF v.channel = 'sms' THEN
+        UPDATE sms_deliveries
+           SET status = 'failed', failure_reason = 'operator_resend', updated_at = p_now
+         WHERE outbox_id = p_id AND status = 'unknown';
+    END IF;
+    RETURN 'retried';
+END
+$$;
+
 -- The operator's failed rows now say which tenant and category a row belongs to.
 DROP FUNCTION notification_outbox_failures(integer);
 
@@ -426,12 +461,44 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
        AND d.status IN ('queued', 'sent', 'delivered', 'undelivered', 'unknown', 'sunk')
 $$;
 
+-- The nightly outbox purge (body as in V23, plus one clause): a failed SMS row is deleted at the same age as a sent
+-- one (30 days after it failed), because its recipient column holds a phone number that nothing else clears; the
+-- operator's failed list is a recent list. Email and Telegram rows are unchanged.
+CREATE OR REPLACE FUNCTION notification_outbox_purge(p_sent_before timestamptz, p_links_before timestamptz, p_now timestamptz)
+RETURNS integer
+LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    WITH d AS (DELETE FROM notification_outbox
+                WHERE (status = 'sent' AND sent_at < p_sent_before)
+                   OR (channel = 'sms' AND status = 'failed' AND failed_at < p_sent_before)
+                RETURNING 1),
+         c AS (UPDATE notification_outbox
+                  SET params = '{}'::jsonb,
+                      status = 'failed',
+                      failed_at = coalesce(failed_at, p_now),
+                      last_error = CASE WHEN status = 'pending' THEN 'expired' ELSE last_error END,
+                      updated_at = p_now
+                WHERE status IN ('pending', 'failed')
+                  AND (created_at < p_links_before OR (expires_at IS NOT NULL AND expires_at < p_now))
+                  AND (params <> '{}'::jsonb OR status = 'pending')
+                  AND NOT (channel = 'sms' AND status = 'failed' AND failed_at < p_sent_before)
+               RETURNING 1)
+    SELECT ((SELECT count(*) FROM d) + (SELECT count(*) FROM c))::integer
+$$;
+
 -- Nightly: the delivery log is kept 13 months (ADR-036 decision 3). Returns the rows deleted.
 CREATE FUNCTION sms_deliveries_purge(p_before timestamptz)
 RETURNS integer
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
     WITH d AS (DELETE FROM sms_deliveries WHERE created_at < p_before RETURNING 1)
     SELECT count(*)::integer FROM d
+$$;
+
+-- Whether a tenant is active, for the sender that binds the tenant a stored outbox row names
+-- (TenantJobs.callForTenant): a suspended or closed tenant's messages are refused, not sent.
+CREATE FUNCTION app_tenant_is_active(p_tenant_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT EXISTS (SELECT 1 FROM tenants WHERE id = p_tenant_id AND status = 'active')
 $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -449,6 +516,7 @@ REVOKE ALL ON FUNCTION sms_channel_mode_changed(text, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_platform_count_since(timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_tenant_count_since(uuid, timestamptz, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sms_deliveries_purge(timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_tenant_is_active(uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION sms_tenant_control_current() TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_tenant_control_get(uuid) TO bms_app;
@@ -461,3 +529,4 @@ GRANT EXECUTE ON FUNCTION sms_channel_mode_changed(text, timestamptz) TO bms_app
 GRANT EXECUTE ON FUNCTION sms_platform_count_since(timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_tenant_count_since(uuid, timestamptz, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION sms_deliveries_purge(timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_tenant_is_active(uuid) TO bms_app;

@@ -1,0 +1,36 @@
+name: SMS sandbox contract
+
+# Manual only (spec section 8, ADR-036, issue #212): one real message to the Africa's Talking
+# SANDBOX, to confirm that the answer format and status codes the adapter reads are the provider's.
+# Never on a pull request, never on a schedule, never against production: the test builds its
+# settings through the startup guard as a staging host would, so it cannot be pointed at the live
+# host. The sandbox key is a repository secret and the test number a repository variable; neither
+# is printed.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Africa's Talking sandbox contract
+    runs-on: [self-hosted, hillary-pi]
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Contract test against the sandbox
+        env:
+          BMS_SMS_CONTRACT: "true"
+          BMS_SMS_AT_API_KEY: ${{ secrets.BMS_SMS_SANDBOX_API_KEY }}
+          BMS_SMS_CONTRACT_TO: ${{ vars.BMS_SMS_CONTRACT_TO }}
+        run: mvn -B -Dtest=AfricasTalkingSandboxContractTest -Dsurefire.failIfNoSpecifiedTests=false test

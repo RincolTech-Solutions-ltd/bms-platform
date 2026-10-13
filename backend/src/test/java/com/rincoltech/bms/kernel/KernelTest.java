@@ -51,8 +51,8 @@ class KernelTest {
     }
 
     /**
-     * A bare 10 digit foreign number must never be sent: it must not be read as someone else's (the
-     * WhatsApp bridge once parsed a bare US number as +64 or +46 and reached a stranger).
+     * A bare 10 digit foreign number must never be sent: without its country code it would be read as
+     * a stranger's number in another country, so it is refused rather than guessed.
      */
     @ParameterizedTest
     @ValueSource(
