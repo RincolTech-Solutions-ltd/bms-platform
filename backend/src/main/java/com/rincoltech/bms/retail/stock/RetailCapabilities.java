@@ -23,6 +23,7 @@ public class RetailCapabilities {
     public static final String CUSTOMER_ACCOUNTS = "customer_accounts";
     public static final String TRANSFER_RECEIPT = "transfer_receipt";
     public static final String RETURNS = "returns";
+    public static final String PURCHASING = "purchasing";
     private static final String MODULE = "retail";
 
     private final ModuleSettings settings;

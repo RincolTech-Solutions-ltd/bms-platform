@@ -69,6 +69,19 @@ class PurchasingRepository {
                 .optional();
     }
 
+    /**
+     * Takes the supplier's row lock for the rest of the transaction: the one lock that serialises billing, paying,
+     * voiding receipts and voiding bills for a supplier (ADR-033, issue #198), so two requests cannot both spend what
+     * is left of a receipt or of a bill. False when there is no such supplier.
+     */
+    boolean lockSupplier(UUID id) {
+        return jdbc.sql("SELECT id FROM retail_suppliers WHERE id = ? FOR UPDATE")
+                .param(id)
+                .query(UUID.class)
+                .optional()
+                .isPresent();
+    }
+
     List<Supplier> suppliers() {
         return jdbc.sql(
                         "SELECT id, name, contact, active, created_at, version FROM retail_suppliers ORDER BY lower(name), id")
