@@ -156,8 +156,10 @@ describe('the administrator screen', () => {
     expect(html).toMatch(/checked=""[^>]*\/?><span><strong>Branch roles/);
   });
 
-  it('says plainly when the pages of a feature are not released', () => {
-    expect(settings(admin([]))).toContain('not released yet');
+  it('says plainly when the pages of a feature are not released, and only then', () => {
+    // Every feature has its pages now (the last, purchasing, with #198), so the note is shown for none; it returns with a feature
+    // that is added before its pages.
+    expect(settings(admin([])).includes('not released yet')).toBe(CAPABILITIES.some((c) => !c.ready));
   });
 
   it('is closed to anyone without core.settings.manage', () => {
