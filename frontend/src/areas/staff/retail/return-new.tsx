@@ -10,7 +10,7 @@ import { qtyString, showQty } from './maths';
 import { usePersistedDraft } from './idempotency';
 import { SALE_RETURN, branchesWhere, canUse, holdsAt } from './permissions';
 import {
-  DISPOSITION_WORDS, MONEY_METHODS, REASONS, REFUND_WORDS, backOf, blankReturn, blankRow, buildReturnRequest, lineUnit, plannedLines, refundPlan, remainingMilli,
+  DISPOSITION_WORDS, MONEY_METHODS, accountRefundAllowed, REASONS, REFUND_WORDS, backOf, blankReturn, blankRow, buildReturnRequest, lineUnit, plannedLines, refundPlan, remainingMilli,
   resolved, returnProblem, rowProblem, soldMilli, type Back, type Disposition, type MoneyMethod, type RefundChoice, type ReturnForm, type RowForm,
 } from './returns-state';
 import { showDate } from './transfers';
@@ -21,6 +21,14 @@ import { Problem, Success, money } from './ui';
 // credit is settled. The form shows the credit note it would make before anything is saved. The server decides every rule
 // again under the sale's lock: nothing can come back beyond what was sold, the credit is the price actually charged, and an
 // account refund only works for a credit sale that still owes.
+
+/** Why "take it off what they owe" is not offered, in the server's terms. */
+const accountWhy = (sale: Sale): string =>
+  sale.historical === true
+    ? 'This is an imported credit sale, so it cannot be taken off the balance. Pay it back instead.'
+    : sale.payment_method === 'credit'
+      ? 'Nothing is owed on this credit sale any more, so there is no balance to take it off.'
+      : 'Taking it off what they owe is only for a credit sale that still owes.';
 
 const qtyWords = (milli: number): string => showQty(qtyString(milli));
 
@@ -104,7 +112,6 @@ export function ReturnFormView({ sale, back, form: chosen, branches, busy, error
   const plan = refundPlan(sale, total, form, back);
   const problem = returnProblem(sale, chosen, back);
   const setRow = (lineId: string, row: RowForm) => onChange({ ...form, rows: { ...form.rows, [lineId]: row } });
-  const credit = sale.payment_method === 'credit';
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!problem && !busy) onSubmit(); }} data-tour="return-form">
       <ul style={{ listStyle: 'none', padding: 0 }} data-tour="return-lines">
@@ -117,10 +124,19 @@ export function ReturnFormView({ sale, back, form: chosen, branches, busy, error
         <label htmlFor="refund-choice">Repay by</label>
         <select id="refund-choice" value={form.refund} onChange={(e) => onChange({ ...form, refund: e.target.value as RefundChoice, moneyMethod: '' })}>
           {(Object.keys(REFUND_WORDS) as RefundChoice[]).map((m) => (
-            <option key={m} value={m} disabled={m === 'account' && !credit}>{REFUND_WORDS[m]}</option>
+            <option key={m} value={m} disabled={m === 'account' && !accountRefundAllowed(sale)}>{REFUND_WORDS[m]}</option>
           ))}
         </select>
-        {!credit && <p className="hint">Taking it off what they owe is only for a credit sale that still owes.</p>}
+        {!accountRefundAllowed(sale) && <p className="hint">{accountWhy(sale)}</p>}
+        {plan.moneyMinor > 0 && branches.length > 1 && (
+          <>
+            <label htmlFor="refund-branch">Pay the money out of the till of</label>
+            <select id="refund-branch" value={form.refundBranchId} onChange={(e) => onChange({ ...form, refundBranchId: e.target.value })}>
+              <option value="">{sale.branch_id ? 'The usual branch' : 'Choose a branch'}</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
+            </select>
+          </>
+        )}
         {plan.needsMoneyMethod && (
           <>
             <label htmlFor="money-method">The part that is not taken off the balance is paid back by</label>

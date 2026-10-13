@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Sale, SaleLine, SaleReturn } from '../../../api/retail';
 import {
-  backOf, blankReturn, blankRow, buildReturnRequest, creditFor, defaultRefund, plannedLines, refundPlan, remainingMilli, returnProblem, rowProblem, settledWords, shareOf,
+  accountRefundAllowed, backOf, blankReturn, blankRow, buildReturnRequest, creditFor, defaultRefund, plannedLines, refundPlan, remainingMilli, returnProblem, rowProblem, settledWords, shareOf,
   type ReturnForm,
 } from './returns-state';
 
@@ -138,6 +138,24 @@ describe('the form as a whole', () => {
     expect(request).toMatchObject({ refund_method: 'account', money_method: 'mobile_money' });
     const plain = buildReturnRequest(sale(), { ...form({ l2: row('1') }), moneyMethod: 'bank' }, none);
     expect(plain).not.toHaveProperty('money_method');
+  });
+});
+
+describe('the account option and the till', () => {
+  it('is offered only where the server allows it: a credit sale, not imported, still owing', () => {
+    expect(accountRefundAllowed({ payment_method: 'credit', balance_minor: 100 })).toBe(true);
+    expect(accountRefundAllowed({ payment_method: 'credit', balance_minor: 0 })).toBe(false);
+    expect(accountRefundAllowed({ payment_method: 'credit', balance_minor: 100, historical: true })).toBe(false);
+    expect(accountRefundAllowed({ payment_method: 'cash', balance_minor: 0 })).toBe(false);
+  });
+
+  it('sends the till money is paid out of only when something is paid out in money and a till was chosen', () => {
+    const s = sale();
+    const f = { ...form({ l2: row('2') }), refundBranchId: 'b2' };
+    expect(buildReturnRequest(s, f, none)).toMatchObject({ refund_method: 'cash', refund_branch_id: 'b2' });
+    expect(buildReturnRequest(s, { ...f, refundBranchId: '' }, none)).not.toHaveProperty('refund_branch_id');
+    const owing = sale({ payment_method: 'credit', total_minor: 3000, paid_minor: 0, balance_minor: 3000 });
+    expect(buildReturnRequest(owing, { ...form({ l2: row('2') }, { refund: 'account' }), refundBranchId: 'b2' }, none)).not.toHaveProperty('refund_branch_id');
   });
 });
 

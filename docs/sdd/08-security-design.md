@@ -423,9 +423,10 @@ CHECK constraint as well as the service.
 | `member_branch_transfer` | `lending.members.update` | `lending.members.transfer_approve` | No |
 | `import_commit` | `core.imports.manage` | `core.imports.approve_commit` | No |
 | `member_credit_refund` | `lending.repayments.create` | `lending.credits.refund_approve` | Yes |
-| `retail_sale_return` | `retail.sale.return` | `retail.sale.return` | Yes, and no checker at all while no threshold is set |
+| `retail_sale_return` | `retail.sale.return` | `retail.sale.return` | Yes, counted over the returns of the sale, and no checker at all while no threshold is set |
+| `retail_sale_return_void` | `retail.sale.return` | `retail.sale.return` | Reads the threshold of `retail_sale_return`: needed for a return that was approved or is worth it alone; none while no threshold is set |
 
-Registered so far: `collateral_release` (#13); `retail_sale_return` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
+Registered so far: `collateral_release` (#13); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
 action pends only at or above a threshold the tenant sets); `loan_disbursement`, `repayment_reversal` and
 `loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
 and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker

@@ -124,7 +124,7 @@ class JdbcCashSales implements CashSales {
         // the void, like a voided cash sale takes it out, so the day it was paid is never rewritten.
         jdbc.sql("""
                         SELECT returned_on AS day, sum(refund_minor) AS refunded FROM retail_sale_returns
-                         WHERE branch_id = :branch AND refund_method = 'cash' AND refund_minor > 0
+                         WHERE refund_branch_id = :branch AND refund_method = 'cash' AND refund_minor > 0
                            AND returned_on BETWEEN :from AND :to
                          GROUP BY returned_on
                         """)
@@ -141,7 +141,7 @@ class JdbcCashSales implements CashSales {
                 .list();
         jdbc.sql("""
                         SELECT voided_on AS day, sum(refund_minor) AS returned FROM retail_sale_returns
-                         WHERE branch_id = :branch AND refund_method = 'cash' AND refund_minor > 0 AND status = 'voided'
+                         WHERE refund_branch_id = :branch AND refund_method = 'cash' AND refund_minor > 0 AND status = 'voided'
                            AND voided_on BETWEEN :from AND :to
                          GROUP BY voided_on
                         """)

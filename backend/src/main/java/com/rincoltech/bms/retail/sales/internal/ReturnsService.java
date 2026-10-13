@@ -31,8 +31,11 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * The routes of customer returns (returns capability; ADR-033, issue #201): record, list, read and void. A return is
- * recorded at once unless the tenant set an approval threshold for {@code retail_sale_return} and the return reaches it,
- * when it waits for a second administrator (maker-checker, ADR-015). With no threshold set there is no checker.
+ * recorded at once unless the tenant set an approval threshold for {@code retail_sale_return} and the returns of that sale
+ * reach it, counted together (the returns of the sale that were not voided, with this one), so splitting a return into parts
+ * does not get round it; then it waits for a second administrator (maker-checker, ADR-015). Voiding a return that needed
+ * that approval, or that is worth the threshold by itself, needs a second administrator too. With no threshold set there is
+ * no checker for either: the default is open, because the code may not invent a currency amount (ADR-033).
  */
 @Service
 class ReturnsService {
@@ -81,14 +84,21 @@ class ReturnsService {
         Principal principal = CurrentPrincipal.require();
         Plan plan = servicer.plan(saleId, r);
         long threshold = settings.approvalThresholdMinor(ReturnAction.TYPE);
-        if (threshold > 0 && plan.totalMinor() >= threshold) {
-            Map<String, Object> payload = mapper.convertValue(r, MAP);
+        long cumulative = Math.addExact(plan.priorReturnedMinor(), plan.totalMinor());
+        if (threshold > 0 && cumulative >= threshold) {
+            // The till is fixed now, so a checker with another scope executes the same return.
+            ReturnRequest fixed =
+                    new ReturnRequest(r.lines(), r.refundMethod(), r.moneyMethod(), plan.refundBranchId(), r.note());
+            Map<String, Object> payload = mapper.convertValue(fixed, MAP);
+            // The amount is what the sale's returns come to with this one, so the pending request is never taken for a
+            // small one
+            // and executed at once by the approvals module.
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     ReturnAction.TYPE,
                     plan.sale().branchId(),
                     saleId,
                     plan.sale().version(),
-                    plan.totalMinor(),
+                    cumulative,
                     plan.sale().currency(),
                     payload));
             return new ReturnOutcome(false, o.approvalId(), null);
@@ -97,14 +107,33 @@ class ReturnsService {
     }
 
     @Transactional
-    Outcome<SaleReturn> voidReturn(String key, UUID returnId, VoidReturnRequest r) {
+    Outcome<ReturnOutcome> voidReturn(String key, UUID returnId, VoidReturnRequest r) {
         return idempotency.once(
-                key,
-                "POST",
-                RETURNS + returnId + "/void",
-                r,
-                SaleReturn.class,
-                () -> servicer.voidReturn(returnId, r.reason()));
+                key, "POST", RETURNS + returnId + "/void", r, ReturnOutcome.class, () -> voidOrAsk(returnId, r));
+    }
+
+    private ReturnOutcome voidOrAsk(UUID returnId, VoidReturnRequest r) {
+        capabilities.require(RetailCapabilities.RETURNS);
+        Principal principal = CurrentPrincipal.require();
+        Row row = repo.find(returnId, false)
+                .filter(x -> principal.may(ReturnsServicer.PERMISSION, x.branchId()))
+                .orElseThrow(ApiException::notFound);
+        long threshold = settings.approvalThresholdMinor(ReturnAction.TYPE);
+        // A return that needed a second person to be made needs one to be undone, and so does one worth the threshold
+        // alone.
+        boolean asks = threshold > 0 && (row.approvalId() != null || row.totalMinor() >= threshold);
+        if (asks && row.status().equals("completed") && r.reason().trim().length() >= ReturnsServicer.MIN_REASON) {
+            Approvals.Outcome o = approvals.request(new ActionRequest(
+                    ReturnVoidAction.TYPE,
+                    row.branchId(),
+                    row.id(),
+                    row.version(),
+                    row.totalMinor(),
+                    row.currency(),
+                    Map.of(ReturnVoidAction.REASON, r.reason().trim())));
+            return new ReturnOutcome(false, o.approvalId(), null);
+        }
+        return new ReturnOutcome(true, null, servicer.voidReturn(returnId, r.reason()));
     }
 
     @Transactional(readOnly = true)

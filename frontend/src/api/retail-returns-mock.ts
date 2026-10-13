@@ -80,7 +80,7 @@ export function createReturnsMock(env: ReturnsEnv): ReturnsMock {
     const made: SaleReturn = {
       id: env.nextId('retail-return'), credit_note_no: `CN${env.branchCode(sale.branch_id)}-${String(seq).padStart(6, '0')}`, sale_id: sale.id, sale_no: sale.sale_no,
       branch_id: sale.branch_id, ...(sale.customer_id ? { customer_id: sale.customer_id } : {}), returned_on: env.today(), currency: 'UGX', total_minor: total,
-      account_credit_minor: account, refund_minor: money, ...(money > 0 ? { refund_method: body.refund_method === 'account' ? body.money_method : body.refund_method } : {}),
+      account_credit_minor: account, refund_minor: money, ...(money > 0 ? { refund_method: body.refund_method === 'account' ? body.money_method : body.refund_method, refund_branch_id: body.refund_branch_id ?? sale.branch_id } : {}),
       refund_choice: body.refund_method, ...(body.note ? { note: body.note } : {}), status: 'completed', lines, created_at: new Date().toISOString(), created_by: 'mock-user', version: 1,
     };
     returns.push(made);
@@ -99,7 +99,7 @@ export function createReturnsMock(env: ReturnsEnv): ReturnsMock {
     getReturn: (id) => gate(() => returns.find((r) => r.id === id) ?? env.refuse(404, 'not_found', 'That could not be found.')),
     voidReturn: (id, reason, key) =>
       gate(() =>
-        env.once(key, { id, reason }, () => {
+        env.once(key, { id, reason }, (): ReturnOutcome => {
           const r = returns.find((x) => x.id === id) ?? env.refuse(404, 'not_found', 'That could not be found.');
           if (r.status === 'voided') env.refuse(409, 'return_voided', 'This return has been voided already.');
           if ((r.account_credit_minor ?? 0) > 0) {
@@ -108,7 +108,7 @@ export function createReturnsMock(env: ReturnsEnv): ReturnsMock {
             sale.balance_minor = (sale.total_minor ?? 0) - sale.paid_minor;
           }
           Object.assign(r, { status: 'voided', voided_on: env.today(), voided_at: new Date().toISOString(), voided_by: 'mock-user', void_reason: reason, version: (r.version ?? 1) + 1 });
-          return r;
+          return { executed: true, sale_return: r };
         }),
       ),
   };

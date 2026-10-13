@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Sale, SaleReturn } from '../../../api/retail';
 import { CreditNoteView, VoidPanel } from './credit-note';
+import { ReturnsThresholdWarning } from './settings';
 import { ReturnFormView } from './return-new';
 import { backOf, blankReturn, buildReturnRequest, type ReturnForm } from './returns-state';
 
@@ -80,6 +81,26 @@ describe('taking goods back', () => {
     expect(option.disabled).toBe(true);
   });
 
+  it('does not offer to take it off the balance for an imported credit sale or one that is paid up', () => {
+    const imported = sale({ payment_method: 'credit', paid_minor: 100, balance_minor: 900, historical: true });
+    const { unmount } = render(<Form s={imported} onSubmit={() => undefined} />);
+    expect((screen.getByRole('option', { name: 'Take it off what they owe' }) as HTMLOptionElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Repay by') as HTMLSelectElement).value).toBe('cash');
+    unmount();
+    render(<Form s={sale({ payment_method: 'credit', paid_minor: 1000, balance_minor: 0 })} onSubmit={() => undefined} />);
+    expect((screen.getByRole('option', { name: 'Take it off what they owe' }) as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getByText(/nothing is owed on this credit sale/i)).toBeTruthy();
+  });
+
+  it('offers the till the money comes out of when the person may use more than one branch', () => {
+    const sent = vi.fn();
+    render(<Form s={sale()} onSubmit={sent} />);
+    type(/Quantity to return/, '2');
+    type(/Pay the money out of the till of/, 'b2');
+    fireEvent.click(save());
+    expect(buildReturnRequest(sale(), sent.mock.calls[0]?.[0] as ReturnForm, backOf([]))).toMatchObject({ refund_branch_id: 'b2' });
+  });
+
   it('shows what has come back already and what can still come back', () => {
     const earlier: SaleReturn = { id: 'r1', status: 'completed', lines: [{ sale_line_id: 'l1', qty: '6.000', line_total_minor: 600 }] } as SaleReturn;
     render(<Form s={sale()} onSubmit={() => undefined} back={backOf([earlier])} />);
@@ -118,5 +139,18 @@ describe('a credit note on screen', () => {
     expect(go.disabled).toBe(false);
     fireEvent.click(go);
     expect(onVoid).toHaveBeenCalledWith('Sent twice');
+  });
+});
+
+describe('the settings warning', () => {
+  it('says so while returns are on and no approval limit is set, and stays quiet otherwise', () => {
+    const { unmount } = render(<ReturnsThresholdWarning capabilities={{ returns: true } as never} />);
+    expect(screen.getByTestId('returns-no-threshold').textContent).toMatch(/no approval limit/i);
+    unmount();
+    render(<ReturnsThresholdWarning capabilities={{ returns: true, returns_approval_threshold_minor: 500 } as never} />);
+    expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
+    cleanup();
+    render(<ReturnsThresholdWarning capabilities={{ returns: false } as never} />);
+    expect(screen.queryByTestId('returns-no-threshold')).toBeNull();
   });
 });

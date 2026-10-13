@@ -58,16 +58,22 @@ export interface ReturnForm {
   /** Empty until the person chooses; then the sale's own default applies (see {@link resolved}). */
   refund: RefundChoice | '';
   moneyMethod: '' | MoneyMethod;
+  /** The till money is paid out of; empty means the server's default (the person's own branch when it is one, else the sale's). */
+  refundBranchId: string;
   note: string;
 }
 
 export const blankRow = (branchId: string): RowForm => ({ qty: '', entered: 'line', reason: 'defective', disposition: 'restock', restockBranchId: branchId });
 
-export const blankReturn = (): ReturnForm => ({ rows: {}, refund: '', moneyMethod: '', note: '' });
+export const blankReturn = (): ReturnForm => ({ rows: {}, refund: '', moneyMethod: '', refundBranchId: '', note: '' });
+
+/** Whether the sale can be credited to the account: the rule the server applies (a credit sale, not imported, still owing). */
+export const accountRefundAllowed = (sale: Pick<Sale, 'payment_method' | 'balance_minor' | 'historical'>): boolean =>
+  sale.payment_method === 'credit' && sale.historical !== true && (sale.balance_minor ?? 0) > 0;
 
 /** A credit sale with something still owing is credited to the account by default; every other sale is paid back in cash. */
 export function defaultRefund(sale: Pick<Sale, 'payment_method' | 'balance_minor' | 'historical'>): RefundChoice {
-  return sale.payment_method === 'credit' && (sale.balance_minor ?? 0) > 0 && sale.historical !== true ? 'account' : 'cash';
+  return accountRefundAllowed(sale) ? 'account' : 'cash';
 }
 
 /** The form with the refund the person chose, or the sale's default when they have not chosen. */
@@ -229,6 +235,7 @@ export function buildReturnRequest(sale: Sale, chosen: ReturnForm, back: Back): 
     lines,
     refund_method: form.refund,
     ...(plan.needsMoneyMethod && form.moneyMethod !== '' ? { money_method: form.moneyMethod } : {}),
+    ...(plan.moneyMinor > 0 && form.refundBranchId !== '' ? { refund_branch_id: form.refundBranchId } : {}),
     ...(form.note.trim() !== '' ? { note: form.note.trim() } : {}),
   };
 }

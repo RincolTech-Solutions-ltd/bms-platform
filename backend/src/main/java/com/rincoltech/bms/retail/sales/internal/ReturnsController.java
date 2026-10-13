@@ -99,13 +99,17 @@ class ReturnsController {
 
     @PostMapping("/returns/{return_id}/void")
     @RequiresPermission("retail.sale.return")
-    @Operation(summary = "Void a return as a whole by reversal (issue #201); M", operationId = "voidRetailReturn")
-    ResponseEntity<SaleReturn> voidReturn(
+    @Operation(
+            summary =
+                    "Void a return as a whole by reversal (issue #201); M. 200 when voided, 202 when it waits for a checker",
+            operationId = "voidRetailReturn")
+    ResponseEntity<ReturnOutcome> voidReturn(
             @PathVariable("return_id") UUID id,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody VoidReturnRequest request) {
-        Outcome<SaleReturn> outcome = service.voidReturn(idempotencyKey, id, request);
-        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        Outcome<ReturnOutcome> outcome = service.voidReturn(idempotencyKey, id, request);
+        ResponseEntity.BodyBuilder response =
+                outcome.body().executed() ? ResponseEntity.ok() : ResponseEntity.status(HttpStatus.ACCEPTED);
         if (outcome.replayed()) {
             response.header("Idempotent-Replayed", "true");
         }

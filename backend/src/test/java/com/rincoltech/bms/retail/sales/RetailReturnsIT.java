@@ -241,6 +241,14 @@ class RetailReturnsIT extends IntegrationTest {
                 .single();
     }
 
+    long movementUnitCost(UUID returnId) {
+        return TestDatabase.owner()
+                .sql("SELECT unit_cost_minor FROM retail_stock_movements WHERE source_id = ? AND kind = 'return'")
+                .param(returnId)
+                .query(Long.class)
+                .single();
+    }
+
     /** What the entries of a return posted: system key to {debit, credit}, over every entry of the return. */
     Map<String, long[]> posted(UUID returnId) {
         Map<String, long[]> out = new TreeMap<>();
@@ -603,6 +611,9 @@ class RetailReturnsIT extends IntegrationTest {
         JsonNode c3 = back(s, List.of(line(l, "7", "restock")), "cash");
         assertThat(c3.get("total_minor").asLong()).isEqualTo(583);
         assertThat(c3.get("cost_minor").asLong()).isEqualTo(210);
+        // The stock movements are valued from the same rounded share of the line's cost the journal took, per piece.
+        assertThat(movementUnitCost(uuid(c2, "id"))).isEqualTo(30);
+        assertThat(movementUnitCost(uuid(c3, "id"))).isEqualTo(30);
         assertThat(c1.get("total_minor").asLong()
                         + c2.get("total_minor").asLong()
                         + c3.get("total_minor").asLong())
@@ -763,8 +774,11 @@ class RetailReturnsIT extends IntegrationTest {
         back(s, List.of(line(lineOf(s, 0), "3", "restock")), "cash");
         assertThat(code(ret(s, List.of(line(lineOf(s, 0), "1", "restock")), "cash")))
                 .isEqualTo("refund_exceeds_paid");
-        // The debtors did not move for money refunded to a buyer who had paid.
+        // The debtors did not move for money refunded to a buyer who had paid, and the statement lists no line for it.
         assertThat(ledgerDebtors(c)).isEqualTo(700);
+        JsonNode st = api.get("/customers/" + c + "/statement?from=2026-01-01&to=" + TODAY, ADMIN)
+                .getBody();
+        st.get("lines").forEach(l -> assertThat(l.get("kind").asString()).isNotIn("return", "return_void"));
         assertThat(api.get("/customers/" + c + "/balance", ADMIN)
                         .getBody()
                         .get("balance_minor")
@@ -794,8 +808,10 @@ class RetailReturnsIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> voided = voidReturn(id, "Customer changed their mind");
         assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(voided.getBody().get("status").asString()).isEqualTo("voided");
-        assertThat(voided.getBody().get("voided_on").asString()).isEqualTo(TODAY);
+        assertThat(voided.getBody().get("executed").asBoolean()).isTrue();
+        assertThat(voided.getBody().get("sale_return").get("status").asString()).isEqualTo("voided");
+        assertThat(voided.getBody().get("sale_return").get("voided_on").asString())
+                .isEqualTo(TODAY);
         assertThat(sale(s).get("paid_minor").asLong()).isZero();
         assertThat(sale(s).get("balance_minor").asLong()).isEqualTo(1_000);
         assertThat(ledgerDebtors(c)).isEqualTo(1_900);
@@ -1222,6 +1238,263 @@ class RetailReturnsIT extends IntegrationTest {
     }
 
     // ---- the sale path with returns off in the settings group ----------------------------------
+
+    // ---- review of #251 ---------------------------------------------------------------------------
+
+    /** The reversal of a payment on account waits on the sale's lock; a refund that commits meanwhile must be seen by it. */
+    @Test
+    void aPaymentReversalWaitingOnTheSaleSeesAMoneyRefundThatCommittedMeanwhile() throws Exception {
+        UUID c = customer("Test Buyer 08");
+        UUID s = creditSale(hq, c, "10", "2026-01-05");
+        ResponseEntity<JsonNode> paid = api.postKeyed(
+                "/customers/" + c + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 1_000, "method", "cash", "paid_on", "2026-01-10"),
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(paid.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try (Connection conn = TestDatabase.ownerDataSource().getConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                // Hold the sale, as a return that is refunding money would.
+                st.execute("SELECT 1 FROM retail_sales WHERE id = '" + s + "' FOR UPDATE");
+                Future<ResponseEntity<JsonNode>> reversal = pool.submit(() -> api.postKeyed(
+                        "/customers/" + c + "/payments/"
+                                + paid.getBody().get("id").asString() + "/reverse",
+                        Map.of("reason", "Wrong buyer"),
+                        RETURNER,
+                        "*",
+                        UUID.randomUUID().toString()));
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (System.nanoTime() < until
+                        && TestDatabase.owner()
+                                        .sql("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                                        .query(Long.class)
+                                        .single()
+                                == 0) {
+                    Thread.sleep(50);
+                }
+                // The refund commits while the reversal waits: a completed return that paid 100 out.
+                st.execute("""
+                        INSERT INTO retail_sale_returns (id, tenant_id, credit_note_no, branch_seq, sale_id, branch_id,
+                            refund_branch_id, returned_on, currency, total_minor, cost_minor, refund_minor, refund_method,
+                            refund_choice, created_by)
+                        VALUES (gen_random_uuid(), '%s', 'CNHQ-009999', 9999, '%s', '%s', '%s', DATE '2026-10-08', 'UGX', 100, 0,
+                            100, 'cash', 'cash', gen_random_uuid())
+                        """.formatted(t.tenantId(), s, hq, hq));
+                conn.commit();
+                ResponseEntity<JsonNode> r = reversal.get(60, TimeUnit.SECONDS);
+                assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+                assertThat(code(r)).isEqualTo("payment_not_reversible");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(sale(s).get("paid_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void moneyCanLeaveAnotherBranchsTillAndBothTillsReconcileWithTheLedger() {
+        UUID s = cashSale(hq, "10", "2026-01-05");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("lines", List.of(line(lineOf(s, 0), "4", "restock")));
+        body.put("refund_method", "cash");
+        body.put("refund_branch_id", br2);
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + s + "/returns",
+                body,
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode note = r.getBody().get("sale_return");
+        UUID id = uuid(note, "id");
+        assertThat(note.get("refund_branch_id").asString()).isEqualTo(br2.toString());
+        // The credit note belongs to the sale's branch; the money, in clearing between the two, left the other till.
+        assertThat(note.get("credit_note_no").asString()).isEqualTo("CNHQ-000001");
+        Map<String, long[]> p = posted(id);
+        assertThat(p.get("cash_on_hand")).containsExactly(0, 400);
+        assertThat(p.get("interbranch_clearing")).containsExactly(400, 400);
+        JsonNode br2Days = cashDays(br2, "2026-01-05", TODAY);
+        assertThat(dayRow(br2Days, TODAY).get("cash_sale_voids_minor").asLong()).isEqualTo(400);
+        JsonNode hqDays = cashDays(hq, "2026-01-05", TODAY);
+        for (JsonNode row : hqDays.get("items")) {
+            if (row.get("business_date").asString().equals(TODAY)) {
+                assertThat(row.get("cash_sale_voids_minor").asLong()).isZero();
+            }
+        }
+        for (JsonNode days : List.of(br2Days, hqDays)) {
+            for (JsonNode row : days.get("items")) {
+                assertThat(row.get("other_movements_minor").asLong())
+                        .as(row.get("business_date").asString())
+                        .isZero();
+            }
+        }
+        // A till outside the caller's scope is not offered.
+        Map<String, Object> other = new LinkedHashMap<>(body);
+        other.put("lines", List.of(line(lineOf(s, 0), "1", "restock")));
+        ResponseEntity<JsonNode> out = api.postKeyed(
+                "/sales/" + s + "/returns",
+                other,
+                RETURNER,
+                hq.toString(),
+                UUID.randomUUID().toString());
+        assertThat(out.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // The void gives the money back to the same till, on the day of the void, and clearing is empty again.
+        assertThat(voidReturn(id, "Paid at the wrong till").getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode after = cashDays(br2, "2026-01-05", TODAY);
+        assertThat(dayRow(after, TODAY).get("cash_takings_minor").asLong()).isEqualTo(400);
+        for (JsonNode row : after.get("items")) {
+            assertThat(row.get("other_movements_minor").asLong()).isZero();
+        }
+        assertThat(net("interbranch_clearing", hq)).isZero();
+        assertThat(net("interbranch_clearing", br2)).isZero();
+    }
+
+    @Test
+    void splittingAReturnIntoPartsDoesNotGetRoundTheThreshold() {
+        UUID s = cashSale(hq, "20", null);
+        UUID l = lineOf(s, 0);
+        threshold(500);
+        back(s, List.of(line(l, "3", "restock")), "cash");
+        // 300 and 300 come to 600 on this sale: the second part waits, though it is small by itself.
+        ResponseEntity<JsonNode> second = ret(s, List.of(line(l, "3", "restock")), "cash");
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        // A void gives room back: with the first one voided, 300 is a return like any other.
+        UUID first = UUID.fromString(api.get("/sales/" + s + "/returns", RETURNER)
+                .getBody()
+                .get(0)
+                .get("id")
+                .asString());
+        assertThat(voidReturn(first, "Entered twice").getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void voidingAReturnThatNeededApprovalNeedsApprovalAndASmallOneVoidsAtOnce() {
+        UUID s = cashSale(hq, "20", null);
+        UUID l = lineOf(s, 0);
+        threshold(500);
+        JsonNode small = back(s, List.of(line(l, "2", "restock")), "cash");
+        ResponseEntity<JsonNode> big = ret(s, List.of(line(l, "5", "restock")), "cash");
+        assertThat(big.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        RetailTestSupport checker = new RetailTestSupport(http, t);
+        String perms = RETURNER + ",core.approvals.read";
+        assertThat(decide(big.getBody().get("approval_id").asString(), checker, perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        UUID approved = null;
+        for (JsonNode r : api.get("/sales/" + s + "/returns", RETURNER).getBody()) {
+            if (r.get("total_minor").asLong() == 500) {
+                approved = uuid(r, "id");
+            }
+        }
+        assertThat(approved).isNotNull();
+        BigDecimal onShelf = stockAt(hq, product);
+        // Its void is not done at once: a request waits for a second administrator.
+        ResponseEntity<JsonNode> ask = voidReturn(approved, "Customer changed their mind");
+        assertThat(ask.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(ask.getBody().get("executed").asBoolean()).isFalse();
+        assertThat(api.get("/returns/" + approved, RETURNER)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("completed");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo(onShelf);
+        assertThat(decide(ask.getBody().get("approval_id").asString(), api, perms)
+                        .getStatusCode()
+                        .is2xxSuccessful())
+                .isFalse();
+        assertThat(decide(ask.getBody().get("approval_id").asString(), checker, perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/returns/" + approved, RETURNER)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("voided");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo(onShelf.subtract(new BigDecimal("5")));
+        // The small one, made without a second person, is voided without one.
+        assertThat(voidReturn(uuid(small, "id"), "Entered twice").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // A return worth the threshold by itself needs approval to void even if it was made before the threshold was
+        // set.
+        threshold(0);
+        JsonNode early = back(s, List.of(line(l, "6", "restock")), "cash");
+        threshold(500);
+        assertThat(voidReturn(uuid(early, "id"), "Entered twice").getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void theCapabilitiesAnswerSaysWhetherAReturnApprovalThresholdIsSet() {
+        assertThat(api.get("/settings/capabilities", SETTINGS).getBody().has("returns_approval_threshold_minor"))
+                .isFalse();
+        threshold(500);
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("returns_approval_threshold_minor")
+                        .asLong())
+                .isEqualTo(500);
+    }
+
+    @Test
+    void anItemWhoseOnlyActivityInTheWindowIsAReturnDidNotSell() {
+        UUID p2 = api.product("RT-2", 30, 100);
+        api.stockUp(hq, p2, "5");
+        UUID s = sold(hq, "cash", null, p2, "2", null, "2026-01-05");
+        back(s, List.of(line(lineOf(s, 0), "1", "restock")), "cash");
+        JsonNode a = api.get("/reports/sales-analysis?from=" + TODAY + "&to=" + TODAY + "&slow_days=7", RETURNER)
+                .getBody();
+        // Its sales are not in the window, and its return is: the sales show the return, the lists do not call it sold.
+        assertThat(a.get("totals").get("sales_minor").asLong()).isEqualTo(-100);
+        List<String> slow = new ArrayList<>();
+        a.get("slow_movers").forEach(r -> slow.add(r.get("code").asString()));
+        List<String> none = new ArrayList<>();
+        a.get("no_sales").forEach(r -> none.add(r.get("code").asString()));
+        assertThat(slow).contains("RT-2");
+        assertThat(none).contains("RT-2");
+    }
+
+    @Test
+    void aPackThatIsNoLongerSoldCannotBeReturnedIn() {
+        capability("units", true);
+        UUID tray = api.unit("tray");
+        assertThat(api.post("/products/" + product + "/units", Map.of("unit_id", tray, "factor", "2"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID s = cashSale(hq, "10", null);
+        TestDatabase.owner()
+                .sql("UPDATE retail_product_units SET active = false WHERE product_id = ? AND unit_id = ?")
+                .params(product, tray)
+                .update();
+        Map<String, Object> inTrays = line(lineOf(s, 0), "1", "restock");
+        inTrays.put("unit_id", tray);
+        ResponseEntity<JsonNode> r = ret(s, List.of(inTrays), "cash");
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("unknown_pack_unit");
+    }
+
+    @Test
+    void aReturnCannotBeInsertedAlreadyVoided() throws Exception {
+        UUID s = cashSale(hq, "5", null);
+        try (Connection conn = TestDatabase.appDataSource().getConnection()) {
+            conn.setAutoCommit(false);
+            try (Statement st = conn.createStatement()) {
+                st.execute("SELECT set_config('app.tenant_id', '" + t.tenantId() + "', true)");
+                assertThatThrownBy(() -> st.execute("""
+                                INSERT INTO retail_sale_returns (id, tenant_id, credit_note_no, branch_seq, sale_id, branch_id,
+                                    refund_branch_id, returned_on, currency, total_minor, cost_minor, refund_minor, refund_method,
+                                    refund_choice, status, voided_at, voided_on, voided_by, void_reason, created_by)
+                                VALUES (gen_random_uuid(), '%s', 'CNHQ-009998', 9998, '%s', '%s', '%s', DATE '2026-10-08', 'UGX',
+                                    100, 0, 100, 'cash', 'cash', 'voided', now(), DATE '2026-10-08', gen_random_uuid(), 'Made up',
+                                    gen_random_uuid())
+                                """.formatted(t.tenantId(), s, hq, hq)))
+                        .hasMessageContaining("recorded completed");
+            }
+            conn.rollback();
+        }
+    }
 
     @Test
     void reportsKeepTheReturnsOfATenantThatSwitchedTheCapabilityOffAgain() {

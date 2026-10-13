@@ -3419,7 +3419,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a return as a whole by reversal (issue #201); M */
+        /** Void a return as a whole by reversal (issue #201); M. 200 when voided, 202 when it waits for a checker */
         post: operations["voidRetailReturn"];
         delete?: never;
         options?: never;
@@ -6572,6 +6572,11 @@ export interface components {
             profile?: "shop" | "trade";
             purchasing?: boolean;
             returns?: boolean;
+            /**
+             * Format: int64
+             * @description Read only: the tenant's approval threshold for customer returns (action retail_sale_return), present only when one is set; while it is absent a return needs no second administrator
+             */
+            returns_approval_threshold_minor?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
@@ -8281,7 +8286,7 @@ export interface components {
             items?: components["schemas"]["RetailSaleReturn"][];
             next_cursor?: string;
         };
-        /** @description 201 with the return when it was recorded; 202 with approval_id when it waits for a checker (the tenant's approval threshold for retail_sale_return was reached) */
+        /** @description 201 (200 for a void) with the return when it was done; 202 with approval_id when it waits for a checker (the tenant's approval threshold for retail_sale_return was reached by the returns on the sale) */
         RetailReturnOutcome: {
             /** Format: uuid */
             approval_id?: string;
@@ -8293,6 +8298,11 @@ export interface components {
             /** @description How any part that cannot be taken off the balance is paid out; required for it when refund_method is account */
             money_method?: string;
             note?: string;
+            /**
+             * Format: uuid
+             * @description The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the caller's own branch when their scope is one branch, else the sale's branch. Not used when nothing is paid out in money
+             */
+            refund_branch_id?: string;
             /** @description cash, mobile_money or bank pay the customer back out of the sale's branch. account takes the value off what the customer owes on this credit sale, never below zero; any rest is refunded in money_method */
             refund_method: string;
         };
@@ -8502,6 +8512,11 @@ export interface components {
             id?: string;
             lines?: components["schemas"]["RetailReturnLine"][];
             note?: string;
+            /**
+             * Format: uuid
+             * @description The branch whose till paid the money out; present with refund_method
+             */
+            refund_branch_id?: string;
             /** @description What the caller asked for: cash, mobile_money, bank or account */
             refund_choice?: string;
             refund_method?: string;
@@ -16087,7 +16102,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RetailSaleReturn"];
+                    "application/json": components["schemas"]["RetailReturnOutcome"];
                 };
             };
         };

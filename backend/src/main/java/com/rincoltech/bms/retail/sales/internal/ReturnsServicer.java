@@ -128,7 +128,9 @@ class ReturnsServicer {
             long accountCreditMinor,
             long refundMinor,
             String refundMethod,
-            String refundChoice) {}
+            String refundChoice,
+            UUID refundBranchId,
+            long priorReturnedMinor) {}
 
     /**
      * Locks the sale and works the request out against it without writing anything: every refusal of the spec happens
@@ -209,7 +211,7 @@ class ReturnsServicer {
                         continue;
                     }
                     PackUnit pack = catalogue.packUnit(product.id(), l.unitId()).orElse(null);
-                    if (pack == null) {
+                    if (pack == null || !pack.active()) {
                         problems.add(new FieldProblem(
                                 field + ".unit_id", "unknown_pack_unit", "This item is not sold in that unit."));
                         continue;
@@ -325,7 +327,31 @@ class ReturnsServicer {
                                 + money + " cannot be paid out. Credit the rest to the account.");
             }
         }
-        return new Plan(s, on, lines, total, cost, account, money, method, choice);
+        UUID payBranch = refundBranch(principal, s, money > 0 ? r.refundBranchId() : null);
+        return new Plan(
+                s, on, lines, total, cost, account, money, method, choice, payBranch, repo.returnedTotal(saleId));
+    }
+
+    /**
+     * The till money goes out of (spec 5.3, "money out of the receiving branch"): the branch the caller named, inside their
+     * {@code retail.sale.return} scope and active; else their own branch when the scope is exactly one branch; else the sale's
+     * branch.
+     */
+    private UUID refundBranch(Principal principal, Sale s, UUID requested) {
+        if (requested != null) {
+            if (!principal.may(PERMISSION, requested)
+                    || branches.findActive(requested).isEmpty()) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        "refund_branch_id", "unknown_branch", "No such active branch in your scope.")));
+            }
+            return requested;
+        }
+        return principal
+                .scopeOf(PERMISSION)
+                .filter(sc -> !sc.all() && sc.branchIds().size() == 1)
+                .map(sc -> sc.branchIds().iterator().next())
+                .filter(b -> branches.findActive(b).isPresent())
+                .orElse(s.branchId());
     }
 
     /** {@code amount x part / whole}, rounded half up once. */
@@ -364,7 +390,7 @@ class ReturnsServicer {
                         l.saleLine().productId(),
                         "return",
                         l.baseQty(),
-                        l.saleLine().unitCostMinor(),
+                        Quantities.perBase(l.costMinor(), l.baseQty()),
                         RETURN,
                         id,
                         l.id(),
@@ -378,8 +404,16 @@ class ReturnsServicer {
         // The value: the returned goods against what is paid out or taken off what the customer owes.
         List<Leg> legs = new ArrayList<>();
         legs.add(Leg.debit("sales_returns", p.totalMinor()));
+        // Money leaves the till of the refund branch: in the sale's own branch it is one entry; elsewhere the sale's
+        // branch
+        // owes it through inter-branch clearing and that branch pays it out in an entry of its own, as a transfer does.
+        UUID payBranch = p.refundBranchId();
+        boolean apart = p.refundMinor() > 0 && !payBranch.equals(branch);
         if (p.refundMinor() > 0) {
-            legs.add(Leg.credit(SalesService.accountFor(p.refundMethod()), p.refundMinor()));
+            legs.add(
+                    apart
+                            ? Leg.credit("interbranch_clearing", p.refundMinor())
+                            : Leg.credit(SalesService.accountFor(p.refundMethod()), p.refundMinor()));
         }
         if (p.accountCreditMinor() > 0) {
             legs.add(Leg.credit("trade_debtors", p.accountCreditMinor()).withSubledger(SalesService.SALE, s.id()));
@@ -395,6 +429,21 @@ class ReturnsServicer {
                         legs))
                 .map(PostedEntry::entryId)
                 .orElse(null);
+        UUID refundEntry = apart
+                ? books.post(new Posting(
+                                payBranch,
+                                p.on(),
+                                no,
+                                "Credit note " + no + " paid out for " + code,
+                                RETURN,
+                                id,
+                                RETURN + "_refund:" + id,
+                                List.of(
+                                        Leg.debit("interbranch_clearing", p.refundMinor()),
+                                        Leg.credit(SalesService.accountFor(p.refundMethod()), p.refundMinor()))))
+                        .map(PostedEntry::entryId)
+                        .orElse(null)
+                : null;
         // The cost: at the original cost of the sale line. Restocked in the sale's own branch it goes back to
         // inventory;
         // damaged goods go to stock shrinkage; stock restocked in another branch goes through inter-branch clearing,
@@ -461,10 +510,12 @@ class ReturnsServicer {
                 p.accountCreditMinor(),
                 p.refundMinor(),
                 p.refundMethod(),
+                p.refundMinor() > 0 ? payBranch : branch,
                 p.refundChoice(),
                 SalesService.blankToNull(note),
                 entry,
                 costEntry,
+                refundEntry,
                 approvalId,
                 makerId,
                 checkerId));
@@ -585,6 +636,9 @@ class ReturnsServicer {
         if (r.costEntryId() != null) {
             books.reverse(r.costEntryId(), today, r.creditNoteNo(), RETURN + "_cost_void:" + returnId);
         }
+        if (r.refundEntryId() != null) {
+            books.reverse(r.refundEntryId(), today, r.creditNoteNo(), RETURN + "_refund_void:" + returnId);
+        }
         lines.stream()
                 .map(LineRow::stockEntryId)
                 .filter(x -> x != null)
@@ -635,6 +689,7 @@ class ReturnsServicer {
                 r.accountCreditMinor(),
                 r.refundMinor(),
                 r.refundMethod(),
+                r.refundMethod() == null ? null : r.refundBranchId(),
                 r.refundChoice(),
                 r.note(),
                 r.status(),

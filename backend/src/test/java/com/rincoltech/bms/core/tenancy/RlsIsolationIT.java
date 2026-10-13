@@ -350,10 +350,10 @@ class RlsIsolationIT {
         // JUSTIFICATION-A3: a fixture row for each new table; the isolation test needs one row per tenant table.
         UUID saleReturn = UUID.randomUUID();
         owner.sql("""
-                        INSERT INTO retail_sale_returns (id, tenant_id, credit_note_no, branch_seq, sale_id, branch_id,
+                        INSERT INTO retail_sale_returns (id, tenant_id, credit_note_no, branch_seq, sale_id, branch_id, refund_branch_id,
                                                          returned_on, currency, total_minor, cost_minor, refund_minor,
                                                          refund_method, refund_choice, journal_entry_id, created_by)
-                        SELECT ?, ?, 'CNRLS-000001', 1, s.id, s.branch_id, DATE '2026-01-15', 'UGX', 10, 5, 10, 'cash', 'cash',
+                        SELECT ?, ?, 'CNRLS-000001', 1, s.id, s.branch_id, s.branch_id, DATE '2026-01-15', 'UGX', 10, 5, 10, 'cash', 'cash',
                                ?, ?
                           FROM retail_sales s WHERE s.tenant_id = ? LIMIT 1
                         """)

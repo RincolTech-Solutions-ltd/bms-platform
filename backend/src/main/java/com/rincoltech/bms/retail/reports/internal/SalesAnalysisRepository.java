@@ -80,6 +80,14 @@ class SalesAnalysisRepository {
 
     private static final String BASE = " FROM " + NET_LINES;
 
+    /**
+     * The same lines with no returns: what "sold" means for the lists of items that did or did not sell in a window (slow
+     * movers, items with no sales). A return alone, in a window where an item was not sold, is not a sale, and the stock
+     * health report counts sales the same way, so the three agree.
+     */
+    private static final String GROSS_LINES =
+            " FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id";
+
     private static final String WHERE = " WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to";
 
     private static Map<String, Object> params(List<UUID> branchIds, LocalDate from, LocalDate to) {
@@ -233,7 +241,8 @@ class SalesAnalysisRepository {
         Map<String, Object> params = params(branchIds, since, today);
         params.put("limit", limit);
         String stockBranch = branchIds == null ? "" : " AND b.branch_id IN (:branchIds)";
-        return jdbc.sql("WITH sold AS (SELECT DISTINCT l.product_id" + BASE + WHERE + branchClause(branchIds) + ")"
+        return jdbc.sql("WITH sold AS (SELECT DISTINCT l.product_id" + GROSS_LINES + WHERE + branchClause(branchIds)
+                        + ")"
                         + " SELECT p.id, p.code, p.description, u.name AS unit, sum(b.qty) AS qty, p.sell_minor,"
                         + " count(*) OVER () AS total"
                         + "  FROM retail_stock_balances b"
@@ -256,7 +265,8 @@ class SalesAnalysisRepository {
         Map<String, Object> params = params(branchIds, from, to);
         params.put("limit", limit);
         String stockBranch = branchIds == null ? "" : " WHERE branch_id IN (:branchIds)";
-        return jdbc.sql("WITH sold AS (SELECT DISTINCT l.product_id" + BASE + WHERE + branchClause(branchIds) + ")"
+        return jdbc.sql("WITH sold AS (SELECT DISTINCT l.product_id" + GROSS_LINES + WHERE + branchClause(branchIds)
+                        + ")"
                         + " SELECT p.id, p.code, p.description, u.name AS unit, coalesce(st.qty, 0) AS qty, p.sell_minor,"
                         + " count(*) OVER () AS total"
                         + "  FROM retail_products p"

@@ -13,15 +13,98 @@
 -- CREATE TABLE with foreign keys takes SHARE ROW EXCLUSIVE on each referenced table (tenants, branches, currencies,
 -- retail_sales, retail_sale_lines, retail_products, retail_units, journal_entries) until the commit, which blocks
 -- writes to those tables, but not reads, while the file runs; the new tables are empty, so the cost is the lock wait
--- and not a scan. CREATE OR REPLACE FUNCTION takes no lock on retail_sales (the trigger stays as it is). The chart
--- seed inserts at most one row per retail tenant into gl_accounts.
+-- and not a scan. The statements that take no such lock (the chart seed, which inserts at most one row per retail tenant
+-- into gl_accounts, and the permission rows) come first and the tables last, so the referenced tables are locked for
+-- the shortest time the single transaction allows. The seed is not moved to a migration of its own (a V46): it never
+-- touches journal_entries, so a second file would not shorten that lock, and it would leave a window in which a tenant has
+-- the capability but no account 4110. CREATE OR REPLACE FUNCTION takes no lock on retail_sales (the trigger stays as it is).
 -- Flyway runs with outOfOrder off, so the number is assigned at merge time above the highest one on main.
+
+-- ---------------------------------------------------------------------------------------------
+-- Chart addition (trade-capabilities.md section 12.1): 4110 sales_returns, the contra income account that
+-- takes the value of returned goods, so sales revenue keeps what was sold and the return shows beside it. It
+-- is the seed function of V39 with one row added, and a debit normal balance. A code or system key a tenant
+-- already has is kept. Tenants that switched retail on earlier get the account now; it stays at zero until a
+-- return is recorded.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION bms_seed_retail_chart(p_tenant_id uuid) RETURNS integer
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+DECLARE
+    v_currency char(3);
+    v_count    integer;
+BEGIN
+    SELECT currency INTO STRICT v_currency FROM tenants WHERE id = p_tenant_id;
+
+    INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
+                             system_key, is_postable, is_system_controlled)
+    SELECT gen_random_uuid(), p_tenant_id, c.code, c.name, c.account_type,
+           CASE WHEN c.account_type IN ('asset', 'expense') OR c.system_key = 'sales_returns' THEN 'debit' ELSE 'credit' END,
+           v_currency, c.system_key, c.postable, c.system_controlled
+      FROM (VALUES
+        ('1000', 'Assets',                                'asset',     NULL,                     false, false),
+        ('1010', 'Cash on hand',                          'asset',     'cash_on_hand',           true,  false),
+        ('1015', 'Savings reserve (restricted cash)',     'asset',     'savings_reserve',        true,  false),
+        ('1020', 'Bank',                                  'asset',     'bank',                   true,  false),
+        ('1035', 'Mobile money',                          'asset',     'mobile_money',           true,  false),
+        ('1190', 'Inter-branch clearing',                 'asset',     'interbranch_clearing',   true,  true),
+        ('1200', 'Trade debtors',                         'asset',     'trade_debtors',          true,  true),
+        ('1250', 'Advances to owner and related parties', 'asset',     'owner_advances',         true,  true),
+        ('1300', 'Inventory',                             'asset',     'inventory',              true,  true),
+        ('2000', 'Liabilities',                           'liability', NULL,                     false, false),
+        ('2100', 'Trade creditors',                       'liability', 'trade_creditors',        true,  true),
+        ('3000', 'Equity',                                'equity',    NULL,                     false, false),
+        ('3030', 'Opening balance equity',                'equity',    'opening_balance_equity', true,  false),
+        ('4000', 'Income',                                'income',    NULL,                     false, false),
+        ('4100', 'Sales revenue',                         'income',    'sales_revenue',          true,  false),
+        ('4110', 'Sales returns',                         'income',    'sales_returns',          true,  false),
+        ('5000', 'Expenses',                              'expense',   NULL,                     false, false),
+        ('5100', 'Cost of goods sold',                    'expense',   'cost_of_goods_sold',     true,  false),
+        ('5110', 'Stock shrinkage',                       'expense',   'stock_shrinkage',        true,  false),
+        ('5120', 'Purchase price rounding',               'expense',   'purchase_rounding',      true,  false),
+        ('5900', 'Operating expenses',                    'expense',   'operating_expenses',     true,  false)
+      ) AS c (code, name, account_type, system_key, postable, system_controlled)
+     WHERE NOT EXISTS (SELECT 1 FROM gl_accounts a
+                        WHERE a.tenant_id = p_tenant_id
+                          AND (a.code = c.code OR a.system_key = c.system_key))
+    ON CONFLICT DO NOTHING;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+
+    UPDATE gl_accounts child
+       SET parent_id = header.id
+      FROM gl_accounts header
+     WHERE child.tenant_id = p_tenant_id
+       AND header.tenant_id = p_tenant_id
+       AND child.is_postable
+       AND child.parent_id IS NULL
+       AND header.code = left(child.code, 1) || '000';
+    RETURN v_count;
+END
+$$;
+REVOKE ALL ON FUNCTION bms_seed_retail_chart(uuid) FROM PUBLIC;
+
+SELECT bms_seed_retail_chart(tenant_id) FROM tenant_modules WHERE module_key = 'retail';
+
+-- ---------------------------------------------------------------------------------------------
+-- Permission (chapter 8 section 8.3.2; PermissionMatrixIT compares these rows with the matrix). retail.sale.return
+-- goes to administrators only (issue #201): the sales role sells and does not take goods back. It is consulted
+-- only while the returns capability is on. A return at or above the tenant's approval threshold for the action
+-- retail_sale_return needs a second administrator (maker-checker, ADR-015); with no threshold set there is no
+-- checker, like every other optional threshold of ADR-033.
+-- ---------------------------------------------------------------------------------------------
+
+INSERT INTO permissions (key, module, description, is_money_moving) VALUES
+    ('retail.sale.return', 'retail', 'Sales: take goods back from a customer and give a refund or a credit note', true);
+
+INSERT INTO role_permissions (role_key, permission_key) VALUES
+    ('tenant_admin', 'retail.sale.return');
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_sale_returns: the return of goods against one sale, which is also the numbered credit note. Never an
 -- edit of the sale. branch_id is the sale's branch: the credit note is numbered per tenant and branch, the
--- refund leaves that branch (the cash book reads it there on the day it was paid) and the scope of the route
--- is the sale's branch. total_minor is what the returned lines were charged for (the price actually charged on
+-- scope of the route is the sale's branch. Money leaves the till of refund_branch_id, the branch the caller chose within their
+-- scope (the sale's branch unless said otherwise): when it is not the sale's branch the money leg is its own entry there
+-- (refund_entry_id), through inter-branch clearing, and the cash book reads the day and the till from refund_branch_id. total_minor is what the returned lines were charged for (the price actually charged on
 -- the sale line, never the price now) and splits into account_credit_minor (taken off what the customer owes on
 -- a credit sale, through paid_minor) and refund_minor (money out by refund_method). cost_minor is the cost of
 -- the returned lines at the sale line's own snapshot. Only the void can change a row, once.
@@ -40,6 +123,7 @@ CREATE TABLE retail_sale_returns (
     customer_id          uuid,
     returned_on          date         NOT NULL,
     currency             char(3)      NOT NULL REFERENCES currencies (code),
+    refund_branch_id     uuid         NOT NULL,
     total_minor          bigint       NOT NULL CHECK (total_minor >= 0 AND total_minor <= 10000000000000),
     cost_minor           bigint       NOT NULL CHECK (cost_minor >= 0 AND cost_minor <= 10000000000000),
     account_credit_minor bigint       NOT NULL DEFAULT 0 CHECK (account_credit_minor >= 0),
@@ -50,6 +134,7 @@ CREATE TABLE retail_sale_returns (
     status               text         NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'voided')),
     journal_entry_id     uuid,
     cost_entry_id        uuid,
+    refund_entry_id      uuid,
     approval_id          uuid,
     created_by           uuid         NOT NULL,
     approved_by          uuid,
@@ -66,6 +151,8 @@ CREATE TABLE retail_sale_returns (
     FOREIGN KEY (tenant_id, customer_id) REFERENCES retail_customers (tenant_id, id),
     FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id),
     FOREIGN KEY (tenant_id, cost_entry_id) REFERENCES journal_entries (tenant_id, id),
+    FOREIGN KEY (tenant_id, refund_branch_id) REFERENCES branches (tenant_id, id),
+    FOREIGN KEY (tenant_id, refund_entry_id) REFERENCES journal_entries (tenant_id, id),
     FOREIGN KEY (tenant_id, void_entry_id) REFERENCES journal_entries (tenant_id, id),
     CHECK (account_credit_minor + refund_minor = total_minor),
     CHECK ((refund_minor > 0) = (refund_method IS NOT NULL)),
@@ -93,12 +180,12 @@ BEGIN
        OR (NEW.id, NEW.tenant_id, NEW.created_at, NEW.credit_note_no, NEW.branch_seq, NEW.sale_id, NEW.branch_id,
            NEW.customer_id, NEW.returned_on, NEW.currency, NEW.total_minor, NEW.cost_minor, NEW.account_credit_minor,
            NEW.refund_minor, NEW.refund_method, NEW.refund_choice, NEW.note, NEW.journal_entry_id, NEW.cost_entry_id,
-           NEW.approval_id, NEW.created_by, NEW.approved_by)
+           NEW.approval_id, NEW.created_by, NEW.approved_by, NEW.refund_branch_id, NEW.refund_entry_id)
           IS DISTINCT FROM
           (OLD.id, OLD.tenant_id, OLD.created_at, OLD.credit_note_no, OLD.branch_seq, OLD.sale_id, OLD.branch_id,
            OLD.customer_id, OLD.returned_on, OLD.currency, OLD.total_minor, OLD.cost_minor, OLD.account_credit_minor,
            OLD.refund_minor, OLD.refund_method, OLD.refund_choice, OLD.note, OLD.journal_entry_id, OLD.cost_entry_id,
-           OLD.approval_id, OLD.created_by, OLD.approved_by)
+           OLD.approval_id, OLD.created_by, OLD.approved_by, OLD.refund_branch_id, OLD.refund_entry_id)
     THEN
         RAISE EXCEPTION 'retail_sale_returns: a return can only be voided, once'
             USING ERRCODE = 'insufficient_privilege';
@@ -106,6 +193,23 @@ BEGIN
     RETURN NEW;
 END
 $$;
+-- A return is born completed: the only way to a voided row is the one UPDATE above, so a row inserted already voided, or
+-- with the void columns set, is refused whoever inserts it (the owner's maintenance escape hatch aside).
+CREATE FUNCTION retail_sale_returns_guard_insert() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on' THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.status <> 'completed' OR NEW.voided_at IS NOT NULL OR NEW.void_entry_id IS NOT NULL OR NEW.version <> 1 THEN
+        RAISE EXCEPTION 'retail_sale_returns: a return is recorded completed and is voided afterwards'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER retail_sale_returns_guard_insert BEFORE INSERT ON retail_sale_returns
+    FOR EACH ROW EXECUTE FUNCTION retail_sale_returns_guard_insert();
 CREATE TRIGGER retail_sale_returns_guard_update BEFORE UPDATE ON retail_sale_returns
     FOR EACH ROW EXECUTE FUNCTION retail_sale_returns_guard_update();
 CREATE TRIGGER retail_sale_returns_reject_delete BEFORE DELETE ON retail_sale_returns
@@ -239,82 +343,3 @@ BEGIN
     RETURN NEW;
 END
 $$;
-
--- ---------------------------------------------------------------------------------------------
--- Chart addition (trade-capabilities.md section 12.1): 4110 sales_returns, the contra income account that
--- takes the value of returned goods, so sales revenue keeps what was sold and the return shows beside it. It
--- is the seed function of V39 with one row added, and a debit normal balance. A code or system key a tenant
--- already has is kept. Tenants that switched retail on earlier get the account now; it stays at zero until a
--- return is recorded.
--- ---------------------------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION bms_seed_retail_chart(p_tenant_id uuid) RETURNS integer
-LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
-DECLARE
-    v_currency char(3);
-    v_count    integer;
-BEGIN
-    SELECT currency INTO STRICT v_currency FROM tenants WHERE id = p_tenant_id;
-
-    INSERT INTO gl_accounts (id, tenant_id, code, name, account_type, normal_balance, currency,
-                             system_key, is_postable, is_system_controlled)
-    SELECT gen_random_uuid(), p_tenant_id, c.code, c.name, c.account_type,
-           CASE WHEN c.account_type IN ('asset', 'expense') OR c.system_key = 'sales_returns' THEN 'debit' ELSE 'credit' END,
-           v_currency, c.system_key, c.postable, c.system_controlled
-      FROM (VALUES
-        ('1000', 'Assets',                                'asset',     NULL,                     false, false),
-        ('1010', 'Cash on hand',                          'asset',     'cash_on_hand',           true,  false),
-        ('1015', 'Savings reserve (restricted cash)',     'asset',     'savings_reserve',        true,  false),
-        ('1020', 'Bank',                                  'asset',     'bank',                   true,  false),
-        ('1035', 'Mobile money',                          'asset',     'mobile_money',           true,  false),
-        ('1190', 'Inter-branch clearing',                 'asset',     'interbranch_clearing',   true,  true),
-        ('1200', 'Trade debtors',                         'asset',     'trade_debtors',          true,  true),
-        ('1250', 'Advances to owner and related parties', 'asset',     'owner_advances',         true,  true),
-        ('1300', 'Inventory',                             'asset',     'inventory',              true,  true),
-        ('2000', 'Liabilities',                           'liability', NULL,                     false, false),
-        ('2100', 'Trade creditors',                       'liability', 'trade_creditors',        true,  true),
-        ('3000', 'Equity',                                'equity',    NULL,                     false, false),
-        ('3030', 'Opening balance equity',                'equity',    'opening_balance_equity', true,  false),
-        ('4000', 'Income',                                'income',    NULL,                     false, false),
-        ('4100', 'Sales revenue',                         'income',    'sales_revenue',          true,  false),
-        ('4110', 'Sales returns',                         'income',    'sales_returns',          true,  false),
-        ('5000', 'Expenses',                              'expense',   NULL,                     false, false),
-        ('5100', 'Cost of goods sold',                    'expense',   'cost_of_goods_sold',     true,  false),
-        ('5110', 'Stock shrinkage',                       'expense',   'stock_shrinkage',        true,  false),
-        ('5120', 'Purchase price rounding',               'expense',   'purchase_rounding',      true,  false),
-        ('5900', 'Operating expenses',                    'expense',   'operating_expenses',     true,  false)
-      ) AS c (code, name, account_type, system_key, postable, system_controlled)
-     WHERE NOT EXISTS (SELECT 1 FROM gl_accounts a
-                        WHERE a.tenant_id = p_tenant_id
-                          AND (a.code = c.code OR a.system_key = c.system_key))
-    ON CONFLICT DO NOTHING;
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-
-    UPDATE gl_accounts child
-       SET parent_id = header.id
-      FROM gl_accounts header
-     WHERE child.tenant_id = p_tenant_id
-       AND header.tenant_id = p_tenant_id
-       AND child.is_postable
-       AND child.parent_id IS NULL
-       AND header.code = left(child.code, 1) || '000';
-    RETURN v_count;
-END
-$$;
-REVOKE ALL ON FUNCTION bms_seed_retail_chart(uuid) FROM PUBLIC;
-
-SELECT bms_seed_retail_chart(tenant_id) FROM tenant_modules WHERE module_key = 'retail';
-
--- ---------------------------------------------------------------------------------------------
--- Permission (chapter 8 section 8.3.2; PermissionMatrixIT compares these rows with the matrix). retail.sale.return
--- goes to administrators only (issue #201): the sales role sells and does not take goods back. It is consulted
--- only while the returns capability is on. A return at or above the tenant's approval threshold for the action
--- retail_sale_return needs a second administrator (maker-checker, ADR-015); with no threshold set there is no
--- checker, like every other optional threshold of ADR-033.
--- ---------------------------------------------------------------------------------------------
-
-INSERT INTO permissions (key, module, description, is_money_moving) VALUES
-    ('retail.sale.return', 'retail', 'Sales: take goods back from a customer and give a refund or a credit note', true);
-
-INSERT INTO role_permissions (role_key, permission_key) VALUES
-    ('tenant_admin', 'retail.sale.return');

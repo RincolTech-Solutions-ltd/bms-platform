@@ -73,7 +73,7 @@ describe('customer returns in the mock', () => {
     expect(made.sale_return).toMatchObject({ account_credit_minor: 6000, refund_minor: 0 });
     const id = made.sale_return?.id ?? '';
     const voided = await api.voidReturn(id, 'Taken back by mistake', 'void-1');
-    expect(voided.status).toBe('voided');
+    expect(voided.sale_return?.status).toBe('voided');
     expect((await api.getSale(credit.id ?? '')).balance_minor).toBe(6000);
     await expect(api.voidReturn(id, 'Again for luck', 'void-2')).rejects.toMatchObject({ code: 'return_voided' });
   });

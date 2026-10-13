@@ -24,7 +24,7 @@ class ReturnsRepository {
     private static final String SELECT_RETURN = """
             SELECT r.id, r.credit_note_no, r.sale_id, s.sale_no, r.branch_id, r.customer_id, c.name AS customer_name,
                    r.returned_on, r.currency, r.total_minor, r.cost_minor, r.account_credit_minor, r.refund_minor,
-                   r.refund_method, r.refund_choice, r.note, r.status, r.journal_entry_id, r.cost_entry_id, r.approval_id,
+                   r.refund_method, r.refund_branch_id, r.refund_choice, r.note, r.status, r.journal_entry_id, r.cost_entry_id, r.refund_entry_id, r.approval_id,
                    r.created_at, r.created_by, r.approved_by, r.voided_at, r.voided_on, r.voided_by, r.void_reason,
                    r.void_entry_id, r.version
               FROM retail_sale_returns r
@@ -58,11 +58,13 @@ class ReturnsRepository {
             long accountCreditMinor,
             long refundMinor,
             String refundMethod,
+            UUID refundBranchId,
             String refundChoice,
             String note,
             String status,
             UUID journalEntryId,
             UUID costEntryId,
+            UUID refundEntryId,
             UUID approvalId,
             Instant createdAt,
             UUID createdBy,
@@ -111,10 +113,12 @@ class ReturnsRepository {
             long accountCreditMinor,
             long refundMinor,
             String refundMethod,
+            UUID refundBranchId,
             String refundChoice,
             String note,
             UUID journalEntryId,
             UUID costEntryId,
+            UUID refundEntryId,
             UUID approvalId,
             UUID createdBy,
             UUID approvedBy) {}
@@ -155,6 +159,15 @@ class ReturnsRepository {
                         rs.getLong("total"),
                         rs.getLong("cost")))
                 .list();
+    }
+
+    /** What the returns of the sale that were not voided came to: the base of the tenant's approval threshold, which counts a sale's returns together. */
+    long returnedTotal(UUID saleId) {
+        return jdbc.sql(
+                        "SELECT coalesce(sum(total_minor), 0) FROM retail_sale_returns WHERE sale_id = ? AND status = 'completed'")
+                .param(saleId)
+                .query(Long.class)
+                .single();
     }
 
     /** Money paid out so far on the sale by returns that were not voided. */
@@ -319,11 +332,13 @@ class ReturnsRepository {
                 rs.getLong("account_credit_minor"),
                 rs.getLong("refund_minor"),
                 rs.getString("refund_method"),
+                rs.getObject("refund_branch_id", UUID.class),
                 rs.getString("refund_choice"),
                 rs.getString("note"),
                 rs.getString("status"),
                 rs.getObject("journal_entry_id", UUID.class),
                 rs.getObject("cost_entry_id", UUID.class),
+                rs.getObject("refund_entry_id", UUID.class),
                 rs.getObject("approval_id", UUID.class),
                 SalesRepository.instant(rs, "created_at"),
                 rs.getObject("created_by", UUID.class),
@@ -342,11 +357,11 @@ class ReturnsRepository {
         jdbc.sql("""
                         INSERT INTO retail_sale_returns (id, tenant_id, credit_note_no, branch_seq, sale_id, branch_id,
                             customer_id, returned_on, currency, total_minor, cost_minor, account_credit_minor, refund_minor,
-                            refund_method, refund_choice, note, journal_entry_id, cost_entry_id, approval_id, created_by,
-                            approved_by)
+                            refund_method, refund_branch_id, refund_choice, note, journal_entry_id, cost_entry_id, refund_entry_id,
+                            approval_id, created_by, approved_by)
                         VALUES (:id, current_setting('app.tenant_id')::uuid, :no, :seq, :sale, :branch, :customer, :on,
-                            :currency, :total, :cost, :credit, :refund, :method, :choice, :note, :entry, :costEntry,
-                            :approval, :by, :approvedBy)
+                            :currency, :total, :cost, :credit, :refund, :method, :refundBranch, :choice, :note, :entry, :costEntry,
+                            :refundEntry, :approval, :by, :approvedBy)
                         """)
                 .param("id", r.id())
                 .param("no", r.creditNoteNo())
@@ -361,6 +376,8 @@ class ReturnsRepository {
                 .param("credit", r.accountCreditMinor())
                 .param("refund", r.refundMinor())
                 .param("method", r.refundMethod())
+                .param("refundBranch", r.refundBranchId())
+                .param("refundEntry", r.refundEntryId())
                 .param("choice", r.refundChoice())
                 .param("note", r.note())
                 .param("entry", r.journalEntryId())

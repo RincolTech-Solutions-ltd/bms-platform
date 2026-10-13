@@ -111,7 +111,7 @@ export function CreditNotePage() {
     mutationFn: (reason: string) => retail.voidReturn(returnId, reason, keys.current.keyFor(returnId, reason)),
     onSuccess: (r) => {
       keys.current.done(returnId);
-      const text = `Voided ${r.credit_note_no}.`;
+      const text = r.executed ? `Voided ${r.sale_return?.credit_note_no ?? 'the credit note'}.` : 'This return is large enough to need a second administrator. It will be voided when they approve it in Approvals.';
       setMessage(text);
       show(text);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });

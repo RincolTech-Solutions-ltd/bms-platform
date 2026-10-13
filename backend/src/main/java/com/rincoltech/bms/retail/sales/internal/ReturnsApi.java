@@ -79,6 +79,12 @@ final class ReturnsApi {
                             "How any part that cannot be taken off the balance is paid out; required for it when refund_method is account")
             String moneyMethod,
 
+            @Schema(
+                    description =
+                            "The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the"
+                                    + " caller's own branch when their scope is one branch, else the sale's branch. Not used when nothing is paid out in money")
+            UUID refundBranchId,
+
             @Size(max = 300) String note) {}
 
     @Schema(name = "RetailReturnVoidRequest")
@@ -136,6 +142,10 @@ final class ReturnsApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL) String refundMethod,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "The branch whose till paid the money out; present with refund_method")
+            UUID refundBranchId,
+
             @Schema(description = "What the caller asked for: cash, mobile_money, bank or account")
             String refundChoice,
 
@@ -158,8 +168,9 @@ final class ReturnsApi {
 
     @Schema(
             name = "RetailReturnOutcome",
-            description = "201 with the return when it was recorded; 202 with approval_id when it waits for a checker"
-                    + " (the tenant's approval threshold for retail_sale_return was reached)")
+            description =
+                    "201 (200 for a void) with the return when it was done; 202 with approval_id when it waits for a checker"
+                            + " (the tenant's approval threshold for retail_sale_return was reached by the returns on the sale)")
     record ReturnOutcome(
             boolean executed,
             @JsonInclude(JsonInclude.Include.NON_NULL) UUID approvalId,

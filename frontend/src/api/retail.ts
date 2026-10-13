@@ -259,8 +259,8 @@ export interface RetailApi {
   /** Credit notes in the caller's branch scope, newest first; `query` matches the credit note number, the sale number and the buyer's name. */
   listReturns(q: { query?: string; status?: string; cursor?: string; signal?: AbortSignal }): Promise<ReturnPage>;
   getReturn(id: string): Promise<SaleReturn>;
-  /** Voids a return as a whole by reversal (retail.sale.return); takes the Idempotency-Key of its form. */
-  voidReturn(id: string, reason: string, idempotencyKey: string): Promise<SaleReturn>;
+  /** Voids a return as a whole by reversal (retail.sale.return); takes the Idempotency-Key of its form. 202 `executed: false` when it needs a second administrator. */
+  voidReturn(id: string, reason: string, idempotencyKey: string): Promise<ReturnOutcome>;
   updateCustomer(id: string, version: number, body: { name?: string; contact?: string }): Promise<Customer>;
   createSale(body: SaleRequest, idempotencyKey: string): Promise<Sale>;
   createPurchase(body: PurchaseRequest, idempotencyKey: string): Promise<Purchase>;
