@@ -39,7 +39,6 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -204,10 +203,23 @@ class CreditsService {
             throw duplicate();
         }
         new TreeSet<>(ps.stream().map(p -> p.lot().productId()).toList()).forEach(catalogue::lock);
-        Map<List<UUID>, Boolean> balances = new TreeMap<>(
-                Comparator.<List<UUID>, UUID>comparing(k -> k.get(0)).thenComparing(k -> k.get(1)));
-        ps.forEach(p -> balances.put(List.of(p.lot().branchId(), p.lot().productId()), true));
-        balances.keySet().forEach(k -> stock.lock(k.get(0), k.get(1)));
+        costing.lockStock(ps.stream().map(Planned::lot).toList());
+        if (goods) {
+            // Only units of the receipt that are still in its branch can go back: the stock may hold the product from a
+            // later
+            // delivery at another cost, and units of this receipt that were sold are not there to return.
+            for (int i = 0; i < ps.size(); i++) {
+                Planned p = ps.get(i);
+                BigDecimal here = costing.onHandInBranch(p.lot());
+                if (p.base().compareTo(here) > 0) {
+                    throw ApiException.rule(
+                            "credit_exceeds_on_hand",
+                            "Line " + (i + 1) + " sends back " + Quantities.format(p.base()) + " of "
+                                    + p.lot().receiptNo() + " but only " + Quantities.format(here)
+                                    + " of that delivery is still in the branch. The rest were sold, used or moved.");
+                }
+            }
+        }
 
         UUID id = UUID.randomUUID();
         UUID by = principal.userId();
@@ -229,6 +241,7 @@ class CreditsService {
             long costBefore =
                     catalogue.find(p.lot().productId()).map(x -> x.costMinor()).orElse(0L);
             long costAfter = costBefore;
+            Map<UUID, Long> inventoryByBranch = Map.of();
             boolean applied = false;
             String note = null;
             if (goods) {
@@ -247,12 +260,15 @@ class CreditsService {
                 variance = p.amount() - inventory;
                 returnedNow.merge(p.lot().receiptLineId(), p.base(), BigDecimal::add);
                 inventoryNow.merge(p.lot().receiptLineId(), inventory, Long::sum);
+                // The movement carries what the ledger credits to inventory for these units, per unit.
                 movements.add(new Movement(
                         p.lot().branchId(),
                         p.lot().productId(),
                         "return_to_supplier",
                         p.base().negate(),
-                        costBefore,
+                        BigDecimal.valueOf(inventory)
+                                .divide(p.base(), 0, RoundingMode.HALF_UP)
+                                .longValueExact(),
                         CREDIT,
                         id,
                         lineId,
@@ -264,6 +280,7 @@ class CreditsService {
                 if (share > 0) {
                     Effect e = costing.apply(p.lot(), share, false, id, no.no());
                     inventory = e.inventory();
+                    inventoryByBranch = e.byBranch();
                     cogs = e.gone();
                     onHand = e.onHand();
                     costBefore = e.costBefore();
@@ -277,9 +294,16 @@ class CreditsService {
                 }
             }
             long[] sums = byBranch.computeIfAbsent(p.lot().branchId(), k -> new long[3]);
-            sums[0] = Math.addExact(sums[0], inventory);
             sums[1] = Math.addExact(sums[1], cogs);
             sums[2] = Math.addExact(sums[2], variance);
+            if (goods) {
+                sums[0] = Math.addExact(sums[0], inventory);
+            } else {
+                for (Map.Entry<UUID, Long> part : inventoryByBranch.entrySet()) {
+                    long[] there = byBranch.computeIfAbsent(part.getKey(), k -> new long[3]);
+                    there[0] = Math.addExact(there[0], part.getValue());
+                }
+            }
             newLines.add(new NewLine(
                     lineId,
                     i + 1,
@@ -536,12 +560,9 @@ class CreditsService {
         }
         List<CreditsRepository.LineRow> ls = repo.lines(List.of(id)).getOrDefault(id, List.of());
         new TreeSet<>(ls.stream().map(CreditsRepository.LineRow::productId).toList()).forEach(catalogue::lock);
-        Map<List<UUID>, Boolean> balances = new TreeMap<>(
-                Comparator.<List<UUID>, UUID>comparing(k -> k.get(0)).thenComparing(k -> k.get(1)));
-        ls.forEach(l -> balances.put(List.of(l.branchId(), l.productId()), true));
-        balances.keySet().forEach(k -> stock.lock(k.get(0), k.get(1)));
         Map<UUID, Lot> lots = lotRepo.lots(
                 ls.stream().map(CreditsRepository.LineRow::receiptLineId).toList());
+        costing.lockStock(lots.values());
         boolean goods = c.kind().equals("goods");
         if (!goods) {
             for (CreditsRepository.LineRow l : ls) {
@@ -662,7 +683,11 @@ class CreditsService {
         List<Line> ls = null;
         if (detail) {
             Principal principal = CurrentPrincipal.require();
+            // Only the lines of branches the caller may read; a document across branches shows a reader scoped to one
+            // of them
+            // that branch's lines.
             ls = repo.lines(List.of(c.id())).getOrDefault(c.id(), List.of()).stream()
+                    .filter(l -> principal.may(PERMISSION, l.branchId()))
                     .map(l -> line(l, principal.may(LandedCostService.PROFIT_READ, l.branchId())))
                     .toList();
         }

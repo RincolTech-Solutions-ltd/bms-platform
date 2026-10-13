@@ -590,19 +590,25 @@ the bill. The choices the design left open, and where the build differs from sec
    remainder on the largest line", which can make the parts exceed the total. A line with a zero basis takes nothing; when every basis
    is zero a value spread is refused (422 `allocation_basis_zero`). A deferred database trigger refuses a document whose charges or
    allocated lines do not add to its total. A line that has goods sent back to the supplier cannot be costed (422 `line_returned`).
-3. **Goods already sold or moved.** Stock is not tracked by lot, so the units of a receipt line still on hand are read first in, first
-   out: the receiving branch's balance less the stock that came in after the receipt (positive movements that are not undoing another
-   and have not been undone), up to the quantity received. The share of a line for those units is debited to inventory and the share for
-   the rest to cost of goods sold, in the receiving branch, dated the day of the charge, rounded half up once. A unit transferred to
-   another branch counts as gone (it is expensed in the receiving branch, so no posting reaches a branch the caller may not see; the
-   other branch keeps the cost the unit moved at). The credit is trade creditors for the whole total in the document's branch (the branch
-   of its first line) with the payee as the subledger, and inter-branch clearing for the other branches' parts, as a supplier invoice
-   does. The earlier sales' snapshots are not restated; the revaluation difference no longer takes the late charge.
-4. **Cost.** The product's cost per base unit rises by the line's share over the received quantity, rounded half up, only when no
+3. **Goods already sold, used or in transit.** Stock is not tracked by lot, so the units of a receipt line still on hand are read first in, first
+   out over every branch together: the balances less the stock that came in after the receipt (positive movements that are not undone, not a
+   transfer in and not a customer return, less what credit notes sent back out of them), up to the quantity received less what was sent back.
+   The product's cost is one figure and the valuation is balance times cost, so the ledger follows the valuation: the cost change per unit (the
+   charge over the quantity received, rounded down) times those units is debited to the inventory of the branches that hold the product, in
+   proportion to what each holds, and the rest of the charge to cost of goods sold in the receiving branch, dated the day of the charge. After a
+   charge each branch's valuation equals its inventory account; a unit moved to another branch takes its share there; a charge under one minor
+   unit a unit is expensed because it cannot move the cost; when a newer cost event stops the cost moving, the share for the units on hand goes to
+   inventory all the same and the difference is left to the revaluation difference. The credit is trade creditors for the whole total in the
+   document's branch (the branch of its first line) with the payee as the subledger, and inter-branch clearing for the other branches' parts, as a
+   supplier invoice does. The earlier sales' snapshots are not restated. The part for goods already sold is a cost of sales in the daily profit
+   report on the day of the charge (and a price credit's part is taken off on the day of the credit); the margin, sales analysis, dashboard and
+   evaluation reports analyse what was sold at the cost it was sold at and do not change.
+4. **Cost.** The product's cost per base unit rises by the line's share over the received quantity, rounded down, only when no
    purchase movement that stands and no change of the cost in the price history (other than a landed cost or a credit note of ours) is newer
-   than the receipt line's movement; else a history row (source `purchase`, the same cost on both sides, the reason says so) notes it was
-   not applied. The allocation row keeps the cost before and after and why. Voiding puts the cost back only where it is still what the
-   document made it.
+   than the receipt line's movement; else a history row (source `purchase`, the same cost on both sides, the reason says so and names no amount,
+   the product row untouched) notes it was not applied. The allocation row keeps the cost before and after and why. Voiding takes back the
+   document's own change per unit, in any order of voids, unless a different cost event (a later receipt or restock, a manual change) has set the
+   cost since; then it is left and the history says so.
 5. **Void.** A landed cost is voided as a whole by reversing each entry and voiding its invoice, once, with a reason; refused while a
    payment stands against the invoice (409 `bill_paid`), while a standing credit note touches one of its lines (409
    `landed_cost_credited`), and when the goods it was added to have been sold or moved since (422 `landed_cost_stock_moved`). A receipt
@@ -622,11 +628,13 @@ the bill. The choices the design left open, and where the build differs from sec
    invoice and a cash refund from the supplier are deferred. A bill with a credit note standing cannot be voided (409 `bill_credited`).
    Voiding a credit note reverses its entries and puts the goods back; a price credit is refused once the goods it credited moved (422
    `credit_stock_moved`).
-7. **The hold and the setting.** A receipt can be received with `hold_for_costing`; it then shows as held until a landed cost allocates
-   to it (released automatically) or an administrator releases it with a reason (`POST /retail/goods-receipts/{id}/release-hold`).
-   With `require_costing_before_sale` on (a column of the purchasing settings row, `core.settings.manage`, `If-Match`, audited), a
-   transfer out of the receiving branch of a product on a held receipt is refused (422 `receipt_not_costed`). Sales are not blocked:
-   stores do not sell, and a branch that does both keeps selling.
+7. **The hold and the setting.** A receipt can be received with `hold_for_costing` (chosen when the delivery is received; there is no route to
+   hold it later); it then shows as held until a landed cost allocates to it (released automatically; voiding that landed cost holds it again
+   when no other stands) or an administrator releases it with a reason (`POST /retail/goods-receipts/{id}/release-hold`, `retail.payable.manage`
+   in the receipt's branch, under the receipt's lock, not on a voided receipt). With `require_costing_before_sale` on (a column of the purchasing
+   settings row, `core.settings.manage`, `If-Match`, audited), a transfer out of the receiving branch may not take the quantity a held receipt
+   received: the branch can move out only what it holds beyond it (422 `receipt_not_costed`), so other deliveries of the same product still move.
+   Sales are not blocked: stores do not sell, and a branch that does both keeps selling.
 8. **Permissions.** No new permission: `retail.payable.manage` (administrators) in the branch of every received line and of the invoice,
    consulted only while `purchasing` is on. The cost columns of a line (the parts for inventory and cost of goods sold, the cost before
    and after, the landed amount on a receipt line) are present only with `retail.profit.read` in the line's branch. No maker-checker: the

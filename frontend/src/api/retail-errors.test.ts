@@ -63,6 +63,7 @@ describe('retail problem details in plain words', () => {
     ['credit_exceeds_billed', 422, /more is sent back than the invoice billed/i],
     ['credit_exceeds_billed_value', 422, /more than the invoice charged/i],
     ['credit_exceeds_open', 422, /still has to pay/i],
+    ['credit_exceeds_on_hand', 422, /still in the branch/i],
     ['duplicate_supplier_credit', 409, /already has a credit note/i],
     ['credit_voided', 409, /voided already/i],
     ['credit_stock_moved', 409, /moved on since/i],

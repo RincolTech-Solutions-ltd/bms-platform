@@ -244,7 +244,7 @@ class RetailSupplierCreditIT extends LandedCostTestBase {
         ResponseEntity<JsonNode> sold =
                 creditRaw(creditBody(billId, "goods", "CN-5d", 480, goodsLine(line, "4", null)));
         assertThat(sold.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(code(sold)).isEqualTo("insufficient_stock");
+        assertThat(code(sold)).isEqualTo("credit_exceeds_on_hand");
         assertThat(stockAt(hq, product)).isEqualByComparingTo("2");
         // Two can go back, and then the same number twice is a duplicate.
         credited(creditBody(billId, "goods", "CN-5e", 240, goodsLine(line, "2", null)));
@@ -344,6 +344,8 @@ class RetailSupplierCreditIT extends LandedCostTestBase {
         assertThat(posted("retail.supplier_credit", id).get("cost_of_goods_sold"))
                 .containsExactly(0, 40);
         assertThat(balance("cost_of_goods_sold")).isEqualTo(cogs - 40);
+        // And the daily profit takes it off the cost of sales on the day of the credit note: 400 sold, 40 back.
+        assertThat(costOfSalesOn(TODAY)).isEqualTo(360);
         assertThat(credit.get("lines").get(0).get("to_cogs_minor").asLong()).isEqualTo(40);
         assertBooksBalance();
     }
@@ -403,6 +405,38 @@ class RetailSupplierCreditIT extends LandedCostTestBase {
         // 1200 billed, 200 and 500 credited: 500 is left, and it is what 5 units at 100 are worth.
         assertThat(bill(billId).get("open_minor").asLong()).isEqualTo(500);
         assertBooksBalance();
+    }
+
+    @Test
+    void aReceiptWhoseUnitsWereAllSoldCannotBeSentBackOutOfALaterReceiptsStock() {
+        JsonNode older = receive(hq, product, "10", 100);
+        receive(hq, product, "10", 120);
+        JsonNode bill = billOf("INV-OLD", 100, older);
+        // First in, first out: the ten sold are the older receipt's, so the ten left are the newer one's.
+        assertThat(api.sell(hq, "cash", product, "10").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> refused = creditRaw(
+                creditBody(uuid(bill, "id"), "goods", "CN-OLD", 500, goodsLine(billLine(bill, 0), "5", null)));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("credit_exceeds_on_hand");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("10");
+        assertThat(scalar("SELECT count(*) FROM retail_supplier_credits WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+        assertBooksBalance();
+    }
+
+    @Test
+    void theMovementOfGoodsSentBackCarriesWhatTheLedgerTookOutOfInventory() {
+        JsonNode r = receive(hq, product, "10", 100);
+        JsonNode bill = billOf("INV-MV", 120, r);
+        credited(creditBody(uuid(bill, "id"), "goods", "CN-MV", 480, goodsLine(billLine(bill, 0), "4", null)));
+        // 400 left inventory for four units: 100 a unit, not the product's cost of the day.
+        assertThat(api.editPrices(product, Map.of("cost_minor", 130, "reason", "Test supplier rise"), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        long cost = scalar(
+                "SELECT unit_cost_minor FROM retail_stock_movements WHERE tenant_id = ? AND kind = 'return_to_supplier'",
+                t.tenantId());
+        assertThat(cost).isEqualTo(100);
     }
 
     // ---- voids -------------------------------------------------------------------------------

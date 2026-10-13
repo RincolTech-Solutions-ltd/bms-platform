@@ -156,32 +156,71 @@ class LotRepository {
     }
 
     /**
-     * The stock that came into the branch after the receipt line's own movement and is still counted: positive movements
-     * that are not themselves the undoing of another movement and have not been undone, less what standing supplier credit
-     * notes sent back out of those later receipts (a unit sent back never reached the shelf the earlier receipt's units sit
-     * on). First in, first out reads the balance less this as what is left of the receipt line.
+     * The stock that came in after the receipt line's own movement and is still counted, in one branch or (a null branch) in
+     * every branch: positive movements that are not themselves the undoing of another movement and have not been undone, that
+     * are not a transfer in (the same units arriving, not a later layer) nor a customer return (goods that went out of the
+     * shelf coming back), less what standing supplier credit notes sent back out of those later receipts (a unit sent back
+     * never reached the shelf). First in, first out reads the balance less this as what is left of the receipt line. Read
+     * branch by branch, so that each read is a range of the (tenant, branch, product) index.
      */
-    BigDecimal laterInflow(UUID branchId, UUID productId, MovementKey after) {
+    BigDecimal laterInflow(UUID branchIdOrNull, UUID productId, MovementKey after) {
         return jdbc.sql("""
-                        SELECT coalesce(sum(m.qty - coalesce((SELECT sum(c.qty) FROM retail_supplier_credit_lines c
-                                                                JOIN retail_supplier_credits h ON h.tenant_id = c.tenant_id
-                                                                     AND h.id = c.credit_id AND h.status = 'posted' AND h.kind = 'goods'
-                                                               WHERE c.tenant_id = m.tenant_id AND c.receipt_line_id = m.source_line_id
-                                                                 AND m.source_type = 'retail.goods_receipt'), 0)), 0)
-                          FROM retail_stock_movements m
-                          %s
-                         WHERE m.branch_id = :branch AND m.product_id = :product AND m.qty > 0 AND m.reverses_movement_id IS NULL
-                           AND %s
-                           AND NOT EXISTS (SELECT 1 FROM retail_stock_movements v
-                                            WHERE v.tenant_id = m.tenant_id AND v.reverses_movement_id = m.id)
+                        SELECT coalesce(sum(later.qty), 0) FROM branches br
+                          CROSS JOIN LATERAL (
+                            SELECT m.qty - coalesce((SELECT sum(c.qty) FROM retail_supplier_credit_lines c
+                                                       JOIN retail_supplier_credits h ON h.tenant_id = c.tenant_id
+                                                            AND h.id = c.credit_id AND h.status = 'posted' AND h.kind = 'goods'
+                                                      WHERE c.tenant_id = m.tenant_id AND c.receipt_line_id = m.source_line_id
+                                                        AND m.source_type = 'retail.goods_receipt'), 0) AS qty
+                              FROM retail_stock_movements m
+                              %s
+                             WHERE m.branch_id = br.id AND m.product_id = :product AND m.qty > 0
+                               AND m.reverses_movement_id IS NULL AND m.kind NOT IN ('transfer_in', 'return')
+                               AND %s
+                               AND NOT EXISTS (SELECT 1 FROM retail_stock_movements v
+                                                WHERE v.tenant_id = m.tenant_id AND v.reverses_movement_id = m.id)) later
+                         WHERE (CAST(:branch AS uuid) IS NULL OR br.id = CAST(:branch AS uuid))
                         """.formatted(MOVEMENT_LINE, AFTER))
-                .param("branch", branchId)
+                .param("branch", branchIdOrNull)
                 .param("product", productId)
                 .param("at", after.createdAt())
                 .param("lineNo", after.lineNo())
                 .param("id", after.id())
                 .query(BigDecimal.class)
                 .single();
+    }
+
+    /** What each branch holds of the product now (branches holding none are left out), in branch order. */
+    Map<UUID, BigDecimal> balances(UUID productId) {
+        Map<UUID, BigDecimal> out = new java.util.TreeMap<>();
+        jdbc.sql("SELECT branch_id, qty FROM retail_stock_balances WHERE product_id = ? AND qty > 0")
+                .param(productId)
+                .query(rs -> {
+                    out.put(rs.getObject("branch_id", UUID.class), rs.getBigDecimal("qty"));
+                });
+        return out;
+    }
+
+    /** A line of a receipt held as received and not costed that stands. */
+    record HeldLine(String receiptNo, UUID receiptLineId, UUID productId) {}
+
+    /** The lines of receipts held as not costed that stand in the branch for any of the products, oldest first. */
+    List<HeldLine> heldLines(UUID branchId, java.util.Collection<UUID> productIds) {
+        if (productIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT r.receipt_no, l.id, l.product_id FROM retail_receipt_holds h
+                          JOIN retail_goods_receipts r ON r.tenant_id = h.tenant_id AND r.id = h.receipt_id AND r.status = 'posted'
+                          JOIN retail_goods_receipt_lines l ON l.tenant_id = r.tenant_id AND l.receipt_id = r.id
+                         WHERE h.released_at IS NULL AND r.branch_id = :branch AND l.product_id IN (:products)
+                         ORDER BY r.received_on, r.created_at, l.line_no
+                        """)
+                .param("branch", branchId)
+                .param("products", productIds)
+                .query((rs, n) ->
+                        new HeldLine(rs.getString(1), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class)))
+                .list();
     }
 
     /**

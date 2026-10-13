@@ -536,9 +536,16 @@ class ReceiptsService {
                     "reason", "invalid", "Give a reason of at least " + OrdersService.MIN_REASON + " characters.")));
         }
         // Lifting the hold is the administrator's, not the receiving clerk's, or the hold would stop nothing.
-        Row r = repo.find(id, false)
+        repo.find(id, false)
                 .filter(x -> principal.may(OrdersService.PAYABLE, x.branchId()))
                 .orElseThrow(ApiException::notFound);
+        // Under the receipt's lock, as a void and a landed cost take it, so the hold and the status cannot change
+        // meanwhile.
+        Row r = repo.find(id, true).orElseThrow(ApiException::notFound);
+        if (r.status().equals("voided")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT, "receipt_voided", "Receipt voided", "This receipt has been voided already.");
+        }
         if (repo.release(id, principal.userId(), "waived", reason, null) == 0) {
             throw new ApiException(
                     HttpStatus.CONFLICT,

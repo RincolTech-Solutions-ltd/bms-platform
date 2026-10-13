@@ -48,7 +48,7 @@ export function PurchasingSettingsForm({ settings, busy, error, saved, onSave }:
         <input type="checkbox" checked={costing} onChange={(e) => setCosting(e.target.checked)} aria-describedby="require-costing-hint" />
         <span>Do not move goods out until their landed cost is in</span>
       </label>
-      <p id="require-costing-hint" className="hint">While this is on, goods on a delivery that is held, not costed, cannot be moved to another branch. Add the landed cost, or release the hold, to free them.</p>
+      <p id="require-costing-hint" className="hint">While this is on, the quantity of a delivery that is held, not costed, cannot be moved out of its branch, though other stock of the same item can go. Add the landed cost, or release the hold, to free it.</p>
       {bad && <p role="alert" className="rt-flag">Enter each as a percent from 0 to 100, with at most two decimals, for example 1.5.</p>}
       {settings.order_approval_threshold_minor !== undefined ? (
         <p data-testid="order-threshold">A purchase order worth {money(settings.order_approval_threshold_minor)} or more needs a second person to approve it before it is sent. This limit is set in the business settings.</p>

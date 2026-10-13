@@ -413,7 +413,7 @@ describe('the purchasing settings', () => {
     render(<PurchasingSettingsForm settings={{ bill_tolerance_bp: 100, over_receipt_bp: 0, require_costing_before_sale: false, version: 2 }} onSave={onSave} />);
     const box = screen.getByLabelText(/Do not move goods out until their landed cost is in/) as HTMLInputElement;
     expect(box.checked).toBe(false);
-    expect(screen.getByText(/cannot be moved to another branch/).textContent).toMatch(/held, not costed/);
+    expect(screen.getByText(/cannot be moved out of its branch/).textContent).toMatch(/held, not costed/);
     expect(button('Save purchasing settings').disabled).toBe(true);
     fireEvent.click(box);
     expect(button('Save purchasing settings').disabled).toBe(false);

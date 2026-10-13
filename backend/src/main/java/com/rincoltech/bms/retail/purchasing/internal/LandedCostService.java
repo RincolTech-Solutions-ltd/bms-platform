@@ -156,12 +156,11 @@ class LandedCostService {
         List<Planned> ps = plan.lines();
         UUID home = ps.getFirst().lot().branchId();
 
-        // Lock the products and then the stock balances, in id order, before reading what is on hand.
+        // Lock the products and then the stock balances of every branch that holds them, in id order, before reading
+        // what
+        // is on hand.
         new TreeSet<>(ps.stream().map(p -> p.lot().productId()).toList()).forEach(catalogue::lock);
-        Map<List<UUID>, Boolean> balances = new TreeMap<>(
-                Comparator.<List<UUID>, UUID>comparing(k -> k.get(0)).thenComparing(k -> k.get(1)));
-        ps.forEach(p -> balances.put(List.of(p.lot().branchId(), p.lot().productId()), true));
-        balances.keySet().forEach(k -> stock.lock(k.get(0), k.get(1)));
+        costing.lockStock(ps.stream().map(Planned::lot).toList());
 
         Numbered no = lines.next("LC", "retail_landed_cost_no", home);
         Numbered billNo = lines.next("SB", "retail_supplier_bill_no", home);
@@ -189,10 +188,14 @@ class LandedCostService {
                     e.costAfter(),
                     e.applied(),
                     e.note()));
-            long[] sums = byBranch.computeIfAbsent(p.lot().branchId(), k -> new long[2]);
-            sums[0] = Math.addExact(sums[0], e.inventory());
-            sums[1] = Math.addExact(sums[1], e.gone());
+            for (Map.Entry<UUID, Long> part : e.byBranch().entrySet()) {
+                long[] sums = byBranch.computeIfAbsent(part.getKey(), k -> new long[2]);
+                sums[0] = Math.addExact(sums[0], part.getValue());
+            }
+            long[] receiving = byBranch.computeIfAbsent(p.lot().branchId(), k -> new long[2]);
+            receiving[1] = Math.addExact(receiving[1], e.gone());
         }
+        byBranch.computeIfAbsent(home, k -> new long[2]);
 
         long elsewhere = 0;
         for (Map.Entry<UUID, long[]> e : byBranch.entrySet()) {
@@ -558,12 +561,9 @@ class LandedCostService {
         }
         List<LineRow> ls = repo.lines(List.of(id)).getOrDefault(id, List.of());
         new TreeSet<>(ls.stream().map(LineRow::productId).toList()).forEach(catalogue::lock);
-        Map<List<UUID>, Boolean> balances = new TreeMap<>(
-                Comparator.<List<UUID>, UUID>comparing(k -> k.get(0)).thenComparing(k -> k.get(1)));
-        ls.forEach(l -> balances.put(List.of(l.branchId(), l.productId()), true));
-        balances.keySet().forEach(k -> stock.lock(k.get(0), k.get(1)));
         Map<UUID, Lot> lots =
                 lotRepo.lots(ls.stream().map(LineRow::receiptLineId).toList());
+        costing.lockStock(lots.values());
         for (LineRow l : ls) {
             if (l.toInventoryMinor() > 0
                     && costing.onHand(lots.get(l.receiptLineId())).compareTo(l.onHandQty()) < 0) {
@@ -591,6 +591,13 @@ class LandedCostService {
                     "landed_cost_voided",
                     "Landed cost voided",
                     "This landed cost has been voided already.");
+        }
+        // A receipt this landed cost released from its hold is held again, unless another landed cost still stands on
+        // it.
+        for (UUID receipt : new TreeSet<>(receipts)) {
+            if (!repo.costed(receipt)) {
+                receiptRepo.rehold(receipt);
+            }
         }
         audit.record(new AuditLog.Entry(
                 "retail.landed_cost.voided",
@@ -666,7 +673,11 @@ class LandedCostService {
             charges = repo.charges(List.of(d.id())).getOrDefault(d.id(), List.of()).stream()
                     .map(c -> new Charge(c.lineNo(), c.kind(), c.description(), c.amountMinor()))
                     .toList();
+            // Only the lines of branches the caller may read; a document across branches shows a reader scoped to one
+            // of them
+            // that branch's lines.
             ls = repo.lines(List.of(d.id())).getOrDefault(d.id(), List.of()).stream()
+                    .filter(l -> principal.may(PERMISSION, l.branchId()))
                     .map(l -> line(l, principal.may(PROFIT_READ, l.branchId())))
                     .toList();
         }

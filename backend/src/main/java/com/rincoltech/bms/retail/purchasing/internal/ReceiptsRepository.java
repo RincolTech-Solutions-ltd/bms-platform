@@ -337,25 +337,15 @@ class ReceiptsRepository {
     }
 
     /**
-     * The number of a receipt held as not costed that stands in the branch and has a line of one of the products, if there is
-     * one: the reason a transfer out of the branch is refused while the tenant requires costing.
+     * Puts the hold back on a receipt that a landed cost released, when no landed cost stands on it any more; 0 when the
+     * receipt was not released by a landed cost (a hold released by hand with a reason stays released).
      */
-    Optional<String> heldReceiptWith(UUID branchId, java.util.Collection<UUID> productIds) {
-        if (productIds.isEmpty()) {
-            return Optional.empty();
-        }
+    int rehold(UUID receiptId) {
         return jdbc.sql("""
-                        SELECT r.receipt_no FROM retail_receipt_holds h
-                          JOIN retail_goods_receipts r ON r.tenant_id = h.tenant_id AND r.id = h.receipt_id AND r.status = 'posted'
-                         WHERE h.released_at IS NULL AND r.branch_id = :branch
-                           AND EXISTS (SELECT 1 FROM retail_goods_receipt_lines l
-                                        WHERE l.tenant_id = r.tenant_id AND l.receipt_id = r.id AND l.product_id IN (:products))
-                         ORDER BY r.received_on, r.created_at LIMIT 1
-                        """)
-                .param("branch", branchId)
-                .param("products", productIds)
-                .query(String.class)
-                .optional();
+                        UPDATE retail_receipt_holds SET released_at = NULL, released_by = NULL, release_kind = NULL,
+                               release_reason = NULL, landed_cost_id = NULL
+                         WHERE receipt_id = ? AND release_kind = 'landed_cost'
+                        """).params(receiptId).update();
     }
 
     /** True when a supplier invoice that stands bills any line of the receipt. */

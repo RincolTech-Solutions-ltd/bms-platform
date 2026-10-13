@@ -174,8 +174,9 @@ class TransferService {
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
-        List<UUID> productIds = lines.stream().map(NewLine::productId).toList();
-        guards.orderedStream().forEach(g -> g.check(from, productIds));
+        Map<UUID, java.math.BigDecimal> quantities = new java.util.LinkedHashMap<>();
+        lines.forEach(l -> quantities.put(l.productId(), l.qty()));
+        guards.orderedStream().forEach(g -> g.check(from, quantities));
         UUID id = UUID.randomUUID();
         UUID by = CurrentPrincipal.require().userId();
         String note = r.note() == null || r.note().isBlank() ? null : r.note().trim();

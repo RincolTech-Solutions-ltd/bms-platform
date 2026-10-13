@@ -93,6 +93,7 @@ const BY_CODE: Record<string, string> = {
   credit_total_mismatch: 'The credit total you typed is not the sum of the lines. Check both against the supplier\'s credit note.',
   credit_exceeds_billed: 'More is sent back than the invoice billed and earlier credit notes have not returned. Lower the quantity.',
   credit_exceeds_billed_value: 'The credit for a line is more than the invoice charged for it. Lower the amount.',
+  credit_exceeds_on_hand: 'Only part of that delivery is still in the branch, because the rest was sold, used or moved. Lower the quantity.',
   credit_exceeds_open: 'The credit is more than the invoice still has to pay. Lower the amount.',
   duplicate_supplier_credit: 'This supplier already has a credit note with this number.',
   credit_voided: 'This credit note has been voided already.',

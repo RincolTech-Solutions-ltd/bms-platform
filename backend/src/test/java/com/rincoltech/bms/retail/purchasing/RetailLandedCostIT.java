@@ -271,16 +271,81 @@ class RetailLandedCostIT extends LandedCostTestBase {
     }
 
     @Test
-    void goodsMovedToAnotherBranchAreTreatedAsGone() {
+    void thePartForGoodsAlreadySoldReachesTheDailyProfitOnTheDayOfTheChargeAndLeavesWithTheVoid() {
+        JsonNode a = receive(hq, product, "10", 100);
+        assertThat(api.sell(hq, "cash", product, "4").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(costOfSalesOn(TODAY)).isEqualTo(400);
+        JsonNode doc = landed(freight("FWD-PR", 100, lineId(a)));
+        // 40 of the 100 belongs to the four sold: it is a cost of sales on the day of the charge.
+        assertThat(costOfSalesOn(TODAY)).isEqualTo(440);
+        assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(costOfSalesOn(TODAY)).isEqualTo(400);
+    }
+
+    @Test
+    void goodsMovedToAnotherBranchAreCapitalisedThereAndTheValuationEqualsTheLedger() {
         JsonNode a = receive(hq, product, "10", 100);
         assertThat(transfer(hq, br2, product, "3").getStatusCode()).isEqualTo(HttpStatus.CREATED);
         JsonNode doc = landed(freight("FWD-T3", 100, lineId(a)));
         JsonNode line = doc.get("lines").get(0);
-        // 7 units are left in the receiving branch; the 3 moved are expensed there.
-        assertThat(line.get("on_hand_qty").asString()).isEqualTo("7.000");
-        assertThat(line.get("to_inventory_minor").asLong()).isEqualTo(70);
-        assertThat(line.get("to_cogs_minor").asLong()).isEqualTo(30);
-        assertThat(balance("inventory", br2)).isEqualTo(300);
+        // All 10 units are still on hand, 7 in the receiving branch and 3 in the other: the charge is 10 a unit and
+        // every unit
+        // takes it where it is, so nothing is expensed.
+        assertThat(line.get("on_hand_qty").asString()).isEqualTo("10.000");
+        assertThat(line.get("to_inventory_minor").asLong()).isEqualTo(100);
+        assertThat(line.get("to_cogs_minor").asLong()).isZero();
+        assertThat(balance("inventory", hq)).isEqualTo(770);
+        assertThat(balance("inventory", br2)).isEqualTo(330);
+        assertThat(costOf(product)).isEqualTo(110);
+        // The stock valuation (what each branch holds times the cost) is what the ledger says, branch by branch.
+        assertThat(valuation(hq, product)).isEqualTo(balance("inventory", hq));
+        assertThat(valuation(br2, product)).isEqualTo(balance("inventory", br2));
+        assertBooksBalance();
+    }
+
+    @Test
+    void aChargeUnderOneMinorUnitAUnitIsExpensedAndTheCostDoesNotMove() {
+        JsonNode a = receive(hq, product, "10", 100);
+        JsonNode doc = landed(freight("FWD-TINY", 7, lineId(a)));
+        JsonNode line = doc.get("lines").get(0);
+        assertThat(line.get("to_inventory_minor").asLong()).isZero();
+        assertThat(line.get("to_cogs_minor").asLong()).isEqualTo(7);
+        assertThat(line.get("cost_applied").asBoolean()).isFalse();
+        assertThat(costOf(product)).isEqualTo(100);
+        assertThat(valuation(hq, product)).isEqualTo(balance("inventory", hq));
+    }
+
+    @Test
+    void theCostChangeIsRoundedDownSoNoMoreIsCapitalisedThanWasCharged() {
+        JsonNode a = receive(hq, product, "3", 100);
+        // 100 over 3 units is 33.33 a unit: 33 a unit is capitalised (99) and the 1 left is expensed.
+        JsonNode doc = landed(freight("FWD-R3", 100, lineId(a)));
+        JsonNode line = doc.get("lines").get(0);
+        assertThat(line.get("to_inventory_minor").asLong()).isEqualTo(99);
+        assertThat(line.get("to_cogs_minor").asLong()).isEqualTo(1);
+        assertThat(costOf(product)).isEqualTo(133);
+        assertThat(valuation(hq, product)).isEqualTo(balance("inventory", hq));
+    }
+
+    @Test
+    void landedCostsVoidedInEitherOrderEachTakeBackOnlyTheirOwnChangeOfTheCost() {
+        long expected = 0;
+        for (boolean firstFirst : new boolean[] {true, false}) {
+            expected += 1_000;
+            UUID prod = api.product(firstFirst ? "LC-V1" : "LC-V2", 100, 400);
+            JsonNode a = receive(hq, prod, "10", 100);
+            JsonNode one = landed(freight("FWD-O1" + firstFirst, 500, lineId(a)));
+            JsonNode two = landed(freight("FWD-O2" + firstFirst, 100, lineId(a)));
+            assertThat(costOf(prod)).isEqualTo(160);
+            UUID first = uuid(firstFirst ? one : two, "id");
+            UUID second = uuid(firstFirst ? two : one, "id");
+            assertThat(voidLanded(first).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(costOf(prod)).isEqualTo(firstFirst ? 110 : 150);
+            assertThat(voidLanded(second).getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(costOf(prod)).isEqualTo(100);
+            assertThat(balance("inventory", hq)).isEqualTo(expected);
+        }
+        assertBooksBalance();
     }
 
     @Test
@@ -816,6 +881,134 @@ class RetailLandedCostIT extends LandedCostTestBase {
         assertBooksBalance();
     }
 
+    @Test
+    void aLandedCostAndASaleOnTheSameLotAtOnceLeaveTheValuationEqualToTheLedger() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 6; round++) {
+                UUID prod = api.product("LC-S" + round, 100, 400);
+                JsonNode a = receive(hq, prod, "10", 100);
+                UUID line = lineId(a);
+                CountDownLatch go = new CountDownLatch(1);
+                Future<ResponseEntity<JsonNode>> cost = pool.submit(() -> {
+                    go.await();
+                    return landedRaw(freight("FWD-CS-" + line, 100, line));
+                });
+                Future<ResponseEntity<JsonNode>> sale = pool.submit(() -> {
+                    go.await();
+                    return api.sell(hq, "cash", prod, "4");
+                });
+                go.countDown();
+                JsonNode doc = cost.get(60, TimeUnit.SECONDS).getBody();
+                assertThat(sale.get(60, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+                JsonNode l = doc.get("lines").get(0);
+                // Either order: all 10 units were on hand (100 to inventory) or the 4 were already sold (60 and 40).
+                long onHand = new java.math.BigDecimal(l.get("on_hand_qty").asString()).longValue();
+                assertThat(l.get("to_inventory_minor").asLong()).isEqualTo(onHand * 10);
+                assertThat(l.get("to_inventory_minor").asLong()
+                                + l.get("to_cogs_minor").asLong())
+                        .isEqualTo(100);
+                assertThat(costOf(prod)).isEqualTo(110);
+                assertThat(stockAt(hq, prod)).isEqualByComparingTo("6");
+                // The six left are worth six times the cost now, in the stock and in the ledger.
+                assertThat(valuation(hq, prod)).isEqualTo(660);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertBooksBalance();
+    }
+
+    @Test
+    void aLandedCostAndATransferOfTheSameLotAtOnceLeaveTheTwoBranchesValuedAtTheLedger() throws Exception {
+        List<UUID> prods = new ArrayList<>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 6; round++) {
+                UUID prod = api.product("LC-X" + round, 100, 400);
+                prods.add(prod);
+                JsonNode a = receive(hq, prod, "10", 100);
+                UUID line = lineId(a);
+                CountDownLatch go = new CountDownLatch(1);
+                Future<ResponseEntity<JsonNode>> cost = pool.submit(() -> {
+                    go.await();
+                    return landedRaw(freight("FWD-CX-" + line, 100, line));
+                });
+                Future<ResponseEntity<JsonNode>> moved = pool.submit(() -> {
+                    go.await();
+                    return transfer(hq, br2, prod, "3");
+                });
+                go.countDown();
+                assertThat(cost.get(60, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+                assertThat(moved.get(60, TimeUnit.SECONDS).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+                assertThat(costOf(prod)).isEqualTo(110);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        // Whichever came first, the two branches together are valued at what their inventory accounts say. (A transfer
+        // reads
+        // the product's cost before it takes the balance locks, so one that overlaps a change of the cost can carry the
+        // older cost between the branches; the total does not depend on it.)
+        assertThat(balance("inventory", hq) + balance("inventory", br2))
+                .isEqualTo(prods.stream()
+                        .mapToLong(prod -> valuation(hq, prod) + valuation(br2, prod))
+                        .sum());
+        assertBooksBalance();
+    }
+
+    @Test
+    void goodsSoldAndThenReturnedByACustomerCountAsOnHandAgain() {
+        capability("returns", true);
+        JsonNode a = receive(hq, product, "10", 100);
+        JsonNode sale = api.sell(hq, "cash", product, "4").getBody();
+        UUID saleLine = uuid(
+                api.get("/sales/" + uuid(sale, "id"), ADMIN)
+                        .getBody()
+                        .get("lines")
+                        .get(0),
+                "id");
+        Map<String, Object> back = new LinkedHashMap<>();
+        back.put("sale_line_id", saleLine);
+        back.put("qty", "4");
+        back.put("reason", "defective");
+        back.put("disposition", "restock");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("lines", List.of(back));
+        body.put("refund_method", "cash");
+        ResponseEntity<JsonNode> returned = api.postKeyed(
+                "/sales/" + uuid(sale, "id") + "/returns",
+                body,
+                ADMIN + ",retail.sale.return,retail.cashbook.read",
+                "*",
+                key());
+        assertThat(returned.getStatusCode()).as("%s", returned.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The four came back to the shelf: the ten are on hand again and the charge goes wholly to inventory.
+        JsonNode line = landed(freight("FWD-RET", 100, lineId(a))).get("lines").get(0);
+        assertThat(line.get("on_hand_qty").asString()).isEqualTo("10.000");
+        assertThat(line.get("to_cogs_minor").asLong()).isZero();
+    }
+
+    @Test
+    void aReaderScopedToOneBranchSeesOnlyThatBranchsLinesOfALandedCost() {
+        JsonNode a = receive(hq, product, "10", 100);
+        JsonNode b = receive(br2, product2, "10", 100);
+        JsonNode doc = landed(freight("FWD-SCOPE", 1_000, lineId(a), lineId(b)));
+        UUID home = uuid(doc, "branch_id");
+        UUID other = home.equals(hq) ? br2 : hq;
+        JsonNode seen = api.call(
+                        HttpMethod.GET, "/landed-costs/" + uuid(doc, "id"), null, PAYER, home.toString(), Map.of())
+                .getBody();
+        assertThat(seen.get("lines")).hasSize(1);
+        assertThat(uuid(seen.get("lines").get(0), "branch_id")).isEqualTo(home);
+        // A reader of the other branch alone cannot see the document at all.
+        assertThat(api.call(HttpMethod.GET, "/landed-costs/" + uuid(doc, "id"), null, PAYER, other.toString(), Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(api.get("/landed-costs/" + uuid(doc, "id"), PAYER).getBody().get("lines"))
+                .hasSize(2);
+    }
+
     // ---- the hold on an uncosted receipt ---------------------------------------------------
 
     void requireCosting(boolean on) {
@@ -853,6 +1046,69 @@ class RetailLandedCostIT extends LandedCostTestBase {
                         .asBoolean())
                 .isFalse();
         assertThat(transfer(hq, br2, product, "1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void aHoldReservesOnlyTheHeldReceiptsUnitsNotEveryUnitOfTheProduct() {
+        JsonNode held = receive(hq, product, "10", 100, true);
+        receive(hq, product, "10", 100);
+        requireCosting(true);
+        // 20 are in the branch and the held receipt's 10 are reserved: ten can go, the eleventh cannot.
+        assertThat(transfer(hq, br2, product, "10").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> refused = transfer(hq, br2, product, "1");
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("receipt_not_costed");
+        assertThat(refused.getBody().get("detail").asString()).contains("Only 0");
+        assertThat(keyed(
+                                "/goods-receipts/" + uuid(held, "id") + "/release-hold",
+                                Map.of("reason", "No freight on this one"),
+                                PAYER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(transfer(hq, br2, product, "1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void aVoidedReceiptCannotHaveItsHoldReleasedAndAVoidedLandedCostPutsTheHoldBack() {
+        JsonNode held = receive(hq, product, "10", 100, true);
+        JsonNode gone = receive(hq, product2, "5", 150, true);
+        assertThat(keyed("/goods-receipts/" + uuid(gone, "id") + "/void", Map.of("reason", "Test wrong goods"), BUYER)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> late = keyed(
+                "/goods-receipts/" + uuid(gone, "id") + "/release-hold",
+                Map.of("reason", "No freight on this one"),
+                PAYER);
+        assertThat(late.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(late)).isEqualTo("receipt_voided");
+        // A landed cost releases the hold; voiding it holds the receipt again.
+        JsonNode doc = landed(freight("FWD-RH", 100, lineId(held)));
+        assertThat(api.get("/goods-receipts/" + uuid(held, "id"), PAYER)
+                        .getBody()
+                        .get("held_for_costing")
+                        .asBoolean())
+                .isFalse();
+        assertThat(voidLanded(uuid(doc, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/goods-receipts/" + uuid(held, "id"), PAYER)
+                        .getBody()
+                        .get("held_for_costing")
+                        .asBoolean())
+                .isTrue();
+        // With a second landed cost standing the hold stays released when the first is voided.
+        JsonNode one = landed(freight("FWD-RH1", 100, lineId(held)));
+        JsonNode two = landed(freight("FWD-RH2", 100, lineId(held)));
+        assertThat(voidLanded(uuid(one, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/goods-receipts/" + uuid(held, "id"), PAYER)
+                        .getBody()
+                        .get("held_for_costing")
+                        .asBoolean())
+                .isFalse();
+        assertThat(voidLanded(uuid(two, "id")).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(api.get("/goods-receipts/" + uuid(held, "id"), PAYER)
+                        .getBody()
+                        .get("held_for_costing")
+                        .asBoolean())
+                .isTrue();
     }
 
     @Test

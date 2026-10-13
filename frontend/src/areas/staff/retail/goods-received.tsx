@@ -87,7 +87,7 @@ export function GoodsReceiptView({ receipt, nameOf }: { receipt: GoodsReceipt; n
         {receipt.receipt_no} <StatusBadge words={RECEIPT_STATUS_WORDS[receipt.status ?? ''] ?? (receipt.status ?? '')} warn={receipt.status === 'voided'} />
         {held && <> <StatusBadge words="Held, not costed" warn /></>}
       </h2>
-      {held && <p className="hint" data-testid="receipt-held">Held until the landed cost is in. While the business requires costing before sale, these goods cannot be moved to another branch.</p>}
+      {held && <p className="hint" data-testid="receipt-held">Held until the landed cost is in. While the business requires costing before sale, this quantity cannot be moved out of the branch. Other stock of the same item can still go.</p>}
       <Facts
         rows={[
           ['Supplier', receipt.supplier_name ?? ''],

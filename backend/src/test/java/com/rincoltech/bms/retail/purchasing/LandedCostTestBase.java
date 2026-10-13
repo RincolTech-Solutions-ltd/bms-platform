@@ -278,6 +278,33 @@ abstract class LandedCostTestBase extends IntegrationTest {
         return api.postKeyed("/transfers", body, ADMIN, "*", key());
     }
 
+    /** The cost of sales the daily profit report shows for the head office on a day. */
+    long costOfSalesOn(String day) {
+        JsonNode rows = api.get("/reports/profit/daily?from=" + day + "&to=" + day, ADMIN)
+                .getBody()
+                .get("rows");
+        for (JsonNode r : rows) {
+            if (r.get("branch_id").asString().equals(hq.toString())) {
+                return r.get("cost_of_sales_minor").asLong();
+            }
+        }
+        return 0;
+    }
+
+    /** The stock valuation of a product in a branch: what it holds times the product's cost now. */
+    long valuation(UUID branch, UUID prod) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT coalesce((SELECT sum(b.qty) FROM retail_stock_balances b
+                                          WHERE b.branch_id = ? AND b.product_id = ?), 0) * p.cost_minor
+                          FROM retail_products p WHERE p.id = ?
+                        """)
+                .params(branch, prod, prod)
+                .query(java.math.BigDecimal.class)
+                .single()
+                .longValueExact();
+    }
+
     /** Every trial balance line of the tenant adds to zero: debits equal credits over the whole journal. */
     void assertBooksBalance() {
         assertThat(scalar(

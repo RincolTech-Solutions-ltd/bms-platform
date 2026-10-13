@@ -152,11 +152,13 @@ SELECT bms_grant_app('retail_landed_cost_charges', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_landed_cost_charges');
 
 -- The allocation: one row per received line the total was spread over. allocated_minor is the line's share (exact integers,
--- the shares add to the total). Of it, to_inventory_minor is the part that belongs to goods still on hand in the receiving
--- branch and to_cogs_minor the part that belongs to goods already sold, used or moved out (on_hand_qty of line_qty units were
--- left, by the first-in first-out reading of the issue #199 amendment of ADR-033). The product's cost per base unit rose from
--- cost_before_minor to cost_after_minor when cost_applied, and was left alone, with cost_note saying why, when a newer cost
--- event had set it since.
+-- the shares add to the total). Of it, to_inventory_minor is the part capitalised into the inventory of the branches that hold
+-- the product (in proportion to what each holds) and to_cogs_minor the part posted to cost of goods sold in the receiving
+-- branch, because it belongs to units already sold, used or still in transit. on_hand_qty of line_qty units were left across
+-- all branches when the charge was recorded, by the first-in first-out reading of the issue #199 amendment of ADR-033; the
+-- capitalised part is the cost change per unit times those units, so the stock valuation (balance times cost) rises by what
+-- the ledger's inventory account does. The product's cost per base unit rose from cost_before_minor to cost_after_minor when
+-- cost_applied, and was left alone, with cost_note saying why, when a newer cost event had set it since.
 CREATE TABLE retail_landed_cost_lines (
     id               uuid          NOT NULL PRIMARY KEY,
     tenant_id        uuid          NOT NULL REFERENCES tenants (id),
@@ -237,7 +239,8 @@ CREATE CONSTRAINT TRIGGER retail_landed_costs_check_parts AFTER INSERT ON retail
 -- retail_receipt_holds: a goods received note held "received, not costed" until its landed cost is in. Released by a landed
 -- cost that allocates to any of its lines (release_kind landed_cost) or by hand with a reason (waived: no landed cost will
 -- come). While the setting require_costing_before_sale is on, stock of a held receipt's products cannot be moved out of
--- the receiving branch by a transfer. One row per receipt; only the release changes it, once.
+-- the receiving branch by a transfer. One row per receipt; only the release changes it, once, and the release by a landed
+-- cost is undone when that landed cost is voided.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_receipt_holds (
@@ -269,9 +272,17 @@ BEGIN
     IF session_user = 'bms_owner' AND coalesce(current_setting('bms.allow_mutation', true), '') = 'on' THEN
         RETURN NEW;
     END IF;
+    IF (NEW.tenant_id, NEW.receipt_id, NEW.created_at, NEW.held_by)
+       IS DISTINCT FROM (OLD.tenant_id, OLD.receipt_id, OLD.created_at, OLD.held_by)
+    THEN
+        RAISE EXCEPTION 'retail_receipt_holds: the identity of a hold never changes'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    -- A hold is released once; the one release that is undone is the release by a landed cost, when that landed cost is
+    -- voided and no other stands (the hold is put back).
     IF OLD.released_at IS NOT NULL
-       OR (NEW.tenant_id, NEW.receipt_id, NEW.created_at, NEW.held_by)
-          IS DISTINCT FROM (OLD.tenant_id, OLD.receipt_id, OLD.created_at, OLD.held_by)
+       AND NOT (OLD.release_kind = 'landed_cost' AND NEW.released_at IS NULL AND NEW.released_by IS NULL
+                AND NEW.release_kind IS NULL AND NEW.release_reason IS NULL AND NEW.landed_cost_id IS NULL)
     THEN
         RAISE EXCEPTION 'retail_receipt_holds: a hold can only be released, once'
             USING ERRCODE = 'insufficient_privilege';
@@ -292,9 +303,10 @@ CREATE TRIGGER retail_receipt_holds_reject_delete BEFORE DELETE ON retail_receip
 -- among credit notes that stand. A credit note reduces what the invoice leaves to pay and never more than that (the
 -- application enforces it under the supplier's lock). Only the void changes a row, once.
 -- Per line: line_total_minor is the credit; to_inventory_minor is the part credited to inventory (goods: the carrying value
--- of the units sent back; price: the share that belongs to goods still on hand), to_cogs_minor the part that belongs to goods
--- already sold (price only), variance_minor the rest, posted to purchase price variance (goods only: what the supplier
--- credited above or below what the units were carried at). line_total = inventory + cogs + variance.
+-- of the units sent back; price: the share capitalised for goods still on hand), to_cogs_minor the part that belongs to goods
+-- already sold (price only), variance_minor the rest, posted to purchase price variance (goods: what the supplier credited above
+-- or below what the units were carried at; price: the part that corrects the invoice line's own price variance).
+-- line_total = inventory + cogs + variance.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_supplier_credits (

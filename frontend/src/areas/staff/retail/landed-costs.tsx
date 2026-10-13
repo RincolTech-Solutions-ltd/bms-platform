@@ -81,7 +81,7 @@ export function LandedCostsPage() {
 
 /**
  * The shares of a landed cost, line by line: the item, the share it took and, for a person who may see profit, how much of the share
- * went into the value of the stock still on hand, how much was counted as a cost of what was already sold or moved, and what that
+ * went into the value of the stock still on hand, how much was counted as a cost of what was already sold (or is still on the way), and what that
  * did to the cost of one. Used for a recorded landed cost and for the review before saving.
  */
 export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; total?: number }) {
@@ -100,7 +100,7 @@ export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; tot
             <th className="num">Received</th>
             {shares && <th className="num">Share of the charges</th>}
             {profit && <th className="num">Added to the stock you still have</th>}
-            {profit && <th className="num">Counted against what is already sold or moved</th>}
+            {profit && <th className="num">Counted against what is already sold</th>}
             {profit && <th>What happened to the cost</th>}
           </tr>
         </thead>
