@@ -464,7 +464,10 @@ documents slice is on main). The choices the design left open:
    `approval_thresholds_minor.retail_purchase_order` the send is a maker-checker action (ADR-015): the maker holds
    `retail.purchase.create`, the checker holds the new `retail.purchase.approve` (administrators, a person other than the
    maker), and a request goes stale when the draft is edited meanwhile. With no threshold set there is no checker: the default
-   is open, as for customer returns, and the purchasing settings screen says so. A cancelled order keeps its receipts.
+   is open, as for customer returns, and the purchasing settings screen says so. The checker is none of the people who made the order: the author (`created_by`), the last
+   editor (`updated_by`, recorded on every draft edit and fixed once sent) and the sender; the approvals module excludes the
+   sender and the action's `conflictedDeciders` the other two, so whoever wrote a draft cannot approve it after a colleague
+   sends it. A cancelled order keeps its receipts.
 2. **Numbers.** `PO`, `GR` (receipts), `SB` (supplier invoices) and `SP` (payments), then the branch code, a dash and six
    digits, from the tenant sequences `retail_purchase_order_no:<branch>`, `retail_goods_receipt_no:<branch>`,
    `retail_supplier_bill_no:<branch>` and `retail_supplier_payment_no:<branch>`: gap free (a rolled back document gives its
@@ -477,7 +480,7 @@ documents slice is on main). The choices the design left open:
    and one entry in the receiving branch: debit inventory, credit goods received not invoiced at the amount as entered, the
    pack cost remainder to purchase rounding. A receipt line may not take an order line past the ordered quantity plus the
    tenant's over-receipt tolerance (`over_receipt_bp`, default 0, 422 `receipt_exceeds_order`, checked on the exact base
-   quantities under the order's row lock); less is always allowed. A receipt is voided as a whole by reversal, refused while a
+   quantities under the order's row lock); less is always allowed. A receipt is not dated before its order (422 `before_order`). A receipt is voided as a whole by reversal, refused while a
    standing invoice bills it (409 `receipt_billed`) or its stock has moved (422 `receipt_stock_moved`); the product's cost is
    not put back (latest receipt wins).
 4. **Supplier invoice and the match.** A bill's lines bill a quantity of a received line at the supplier's price (in the
@@ -503,8 +506,12 @@ documents slice is on main). The choices the design left open:
    is open (422 `allocation_total_mismatch`, `allocation_exceeds_open`, `payment_exceeds_open`). Nothing is held as a deposit.
    One entry in the paying branch: credit the account of the method (`cash_on_hand`, `mobile_money` or `bank`, as every
    retail posting) and debit trade creditors for what is owed in that branch and inter-branch clearing for the rest; each
-   other branch that owes part (the branch of an invoice, or of a restock that put stock into one branch) debits trade
-   creditors against clearing in an entry of its own, so the creditor balance of every branch stays what it owes. Reversal is whole, once, with a reason (409 `payment_reversed`), and the allocations then
+   other branch that owes part debits trade creditors against clearing in an entry of its own, so the creditor balance of
+   every branch stays what it owes. An invoice is owed by its own branch. A credit restock credited trade creditors in each
+   branch its stock went into, so what a payment pays on it is split over those branches in proportion to what each still owes,
+   in exact integers (the floor of each proportion, the units left over one each to the largest fractions, the lowest branch id
+   on a tie; `BranchSplit`), which keeps every branch's balance exact through any number of part payments; the split is stored
+   (an allocation row per item and branch) and a reversal puts each branch back. Reversal is whole, once, with a reason (409 `payment_reversed`), and the allocations then
    stop counting. The supplier's row is locked first by every writer of one supplier (invoice, payment, void, reversal), so two
    requests cannot spend the same receipt line or the same open balance.
 6. **The cash book.** A cash payment to a supplier is a cash-out of the paying branch's till on the day it was paid (the
@@ -526,6 +533,21 @@ documents slice is on main). The choices the design left open:
     path is not touched. Flyway runs the file in one transaction, so creating the tables takes share row exclusive on the
     tables they reference (suppliers, products, units, purchases, journal entries) until the commit: writes to them wait for
     the file, reads do not, and the new tables are empty so there is no scan.
+11. **What the order threshold does and does not stop.** The threshold is per order. A buyer who splits one purchase into
+    several orders each below it is not stopped; a cumulative threshold per supplier is not built (a possible later option),
+    and the audit trail of each order is the control for that. What the threshold does bound: with one set, a delivery with no
+    order is refused at or above it (422 `blind_receipt_over_limit`: raise an order, which a second person approves), and a
+    delivery against an order is refused when the value received on it, with this delivery, would pass the order's value plus
+    the over-receipt tolerance (422 `receipt_value_exceeds_order`: a price above the order's is as much an over-receipt as a
+    quantity above it). So the goods received not invoiced that a delivery can raise is bounded by what a second person
+    authorised, order by order. With no threshold set neither limit applies.
+12. **Not yet supported.** Returns of goods to a supplier and the supplier credit note are the next slice (#199). A wrong
+    delivery is undone by voiding it (as a whole, while no invoice bills it and none of it has been sold or moved), and a wrong
+    price by an invoice with a reason.
+13. **The payables report without the capability.** Section 8 says that, for a tenant without `purchasing`, credit restocks
+    are shown from trade creditors by supplier. That view is deferred: the report, like every route of this slice, is 404
+    `capability_not_enabled` while the capability is off, and a tenant that has not switched it on has no payment route for a
+    credit restock either.
 
 ## 8. Reports
 
@@ -537,7 +559,7 @@ All reports are read only, respect branch scope per row, and omit cost, value an
 | Stock by store and shop | `GET /retail/reports/stock-by-location`: per product, the balance in each branch the caller may read, grouped by role (stores, then shops), a subtotal per role and a **combined total**; stock **in transit** (section 9.3) as its own column so the combined total neither double counts nor loses it. Extends `/retail/stock/all-branches`, which stays |
 | Combined total | The sum across all readable branches, quantity and, with profit read, value at cost; the revaluation difference is shown as in valuation |
 | Transfers in flight | `GET /retail/reports/transfers-in-flight` (needs `transfer_receipt`): dispatched and not received, with age, source, destination, lines. Empty by construction when transfers are atomic |
-| Supplier payables | `GET /retail/reports/supplier-payables` (needs `purchasing`): per supplier, open bills by days past due (same buckets as customer ageing), unbilled receipts (goods received not invoiced) and open credit notes. For tenants without `purchasing`, credit restocks are shown from trade creditors by supplier |
+| Supplier payables | `GET /retail/reports/supplier-payables` (needs `purchasing`): per supplier, open bills by days past due (same buckets as customer ageing), unbilled receipts (goods received not invoiced) and open credit notes. For tenants without `purchasing`, credit restocks are shown from trade creditors by supplier (deferred, section 7.4 item 13) |
 | Customer ageing | Section 5.2 |
 
 ## 9. Workflow for the wholesaler
@@ -689,7 +711,7 @@ permission, including `retail.pricelist.use`, goes to administrators only.
 New rows for SDD 6.11.2. Existing rules do not change. All post through `post_entry`, one entry per
 branch, in the transaction of the event, with idempotency keys of the form `retail.<event>:<id>`.
 
-### 12.1 Accounts added (seeded when the capability is first switched on, kept if present)
+### 12.1 Accounts added (seeded with the retail chart, by the migration for existing retail tenants and by the seeder for new ones, kept if present; they stay at zero until the capability is used)
 
 | Code | Name | Type | `system_key` | Used by |
 |---|---|---|---|---|
@@ -805,7 +827,7 @@ Answers written after one pass looking for what breaks.
 | A credit sale names no customer to dodge the limit | With `customer_accounts` on a credit sale requires a customer record |
 | Quotation conversion bypasses the price floor | Conversion runs the normal sale path, including below-cost and override rules |
 | Supplier payables and bills seen by shop staff | `retail.payable.manage` is administrators only; the sales role has none |
-| Self-approval of high purchase orders | Registered as a maker-checker action (ADR-015) when a threshold is set; the database enforces checker is not maker |
+| Self-approval of high purchase orders | Registered as a maker-checker action (ADR-015) when a threshold is set; the database enforces that the checker is not the sender, and the action refuses the order's author and last editor too (built, issue #198). The threshold is per order and an order can be split below it; section 7.4 item 11 says what is and is not bounded |
 | A capability turned on or off silently | Audited with old and new values; administrators only |
 | Idempotency | Every money-moving new route claims an `Idempotency-Key` |
 

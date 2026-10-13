@@ -203,18 +203,25 @@ class PaymentsService {
         UUID id = UUID.randomUUID();
         Numbered no = lines.next("SP", "retail_supplier_payment_no", branch);
         String reference = PurchasingService.blankToNull(r.reference());
-        // The debt sits in the branch of each invoice (the branch of a restock that moved stock into one branch; the
-        // paying
-        // branch for a restock that moved stock into several). The paying branch's entry credits the method's account
-        // for all
-        // of it; for what is owed elsewhere it debits inter-branch clearing, and each such branch debits its trade
-        // creditors
-        // against clearing in an entry of its own, as a transfer does, so no branch is left short or over.
+        // The debt sits in the branch that owes it: an invoice's own branch, and for a credit restock each branch whose
+        // trade creditors it credited, by its part (BranchSplit). The paying branch's entry credits the method's
+        // account
+        // for all of it and debits its own creditors; for what is owed elsewhere it debits inter-branch clearing, and
+        // each
+        // such branch debits its trade creditors against clearing in an entry of its own, as a transfer does, so no
+        // branch
+        // is left short or over.
         Map<UUID, Long> byHome = new TreeMap<>();
+        List<Object[]> rows = new ArrayList<>();
         for (Map.Entry<Target, Long> e : split.entrySet()) {
             Open o = open.get(e.getKey());
-            UUID home = o.branchIds().size() == 1 ? o.branchIds().iterator().next() : branch;
-            byHome.merge(home, e.getValue(), Math::addExact);
+            Map<UUID, Long> parts = o.kind().equals("bill")
+                    ? Map.of(o.branchIds().iterator().next(), e.getValue())
+                    : BranchSplit.split(o.owedBy(), e.getValue());
+            for (Map.Entry<UUID, Long> part : parts.entrySet()) {
+                byHome.merge(part.getKey(), part.getValue(), Math::addExact);
+                rows.add(new Object[] {e.getKey(), part.getKey(), part.getValue()});
+            }
         }
         long here = byHome.getOrDefault(branch, 0L);
         long apart = r.amountMinor() - here;
@@ -267,14 +274,15 @@ class PaymentsService {
                 principal.userId()));
         others.forEach((home, other) -> repo.insertEntry(id, home, other));
         int n = 1;
-        for (Map.Entry<Target, Long> e : split.entrySet()) {
-            Target t = e.getKey();
+        for (Object[] row : rows) {
+            Target t = (Target) row[0];
             repo.insertAllocation(
                     id,
                     n++,
                     t.kind().equals("bill") ? t.id() : null,
                     t.kind().equals("restock") ? t.id() : null,
-                    e.getValue());
+                    (UUID) row[1],
+                    (Long) row[2]);
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("payment_no", no.no());
@@ -442,9 +450,7 @@ class PaymentsService {
     Payment view(Row p, boolean detail) {
         List<Allocation> as = null;
         if (detail) {
-            as = repo.allocations(List.of(p.id())).getOrDefault(p.id(), List.of()).stream()
-                    .map(PaymentsService::allocation)
-                    .toList();
+            as = grouped(repo.allocations(List.of(p.id())).getOrDefault(p.id(), List.of()));
         }
         return new Payment(
                 p.id(),
@@ -470,7 +476,23 @@ class PaymentsService {
                 p.version());
     }
 
-    private static Allocation allocation(AllocationRow a) {
-        return new Allocation(a.billId(), a.billNo(), a.supplierRef(), a.purchaseId(), a.purchaseNo(), a.amountMinor());
+    /** One line per item paid: the rows are per branch, and the payment's view is per invoice or restock. */
+    private static List<Allocation> grouped(List<AllocationRow> rows) {
+        Map<String, Allocation> out = new LinkedHashMap<>();
+        for (AllocationRow a : rows) {
+            String key = a.billId() != null ? "b" + a.billId() : "p" + a.purchaseId();
+            out.merge(
+                    key,
+                    new Allocation(
+                            a.billId(), a.billNo(), a.supplierRef(), a.purchaseId(), a.purchaseNo(), a.amountMinor()),
+                    (x, y) -> new Allocation(
+                            x.billId(),
+                            x.billNo(),
+                            x.supplierRef(),
+                            x.purchaseId(),
+                            x.purchaseNo(),
+                            x.amountMinor() + y.amountMinor()));
+        }
+        return List.copyOf(out.values());
     }
 }

@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -84,6 +85,7 @@ class ReceiptsService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final TenantSettings tenantSettings;
 
     ReceiptsService(
             ReceiptsRepository repo,
@@ -100,7 +102,8 @@ class ReceiptsService {
             RetailCapabilities capabilities,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            TenantSettings tenantSettings) {
         this.repo = repo;
         this.orderRepo = orderRepo;
         this.orders = orders;
@@ -116,6 +119,7 @@ class ReceiptsService {
         this.tenant = tenant;
         this.clock = clock;
         this.audit = audit;
+        this.tenantSettings = tenantSettings;
     }
 
     @Transactional
@@ -159,6 +163,12 @@ class ReceiptsService {
                         "order_closed",
                         "Order closed",
                         "This order was cancelled or has been received in full.");
+            }
+            if (on.isBefore(order.orderedOn())) {
+                problems.add(new FieldProblem(
+                        "received_on",
+                        "before_order",
+                        "A receipt cannot be dated before its order, which is dated " + order.orderedOn() + "."));
             }
             if (r.supplierId() != null && !r.supplierId().equals(order.supplierId())) {
                 problems.add(new FieldProblem("supplier_id", "invalid", "The supplier is the order's supplier."));
@@ -238,6 +248,7 @@ class ReceiptsService {
         if (order != null) {
             overReceipt(order, items, orderLines);
         }
+        limitUnauthorised(order, items);
         new TreeSet<>(items.stream().map(x -> x.planned().product().id()).toList()).forEach(catalogue::lock);
 
         UUID id = UUID.randomUUID();
@@ -330,6 +341,43 @@ class ReceiptsService {
                         .find(ol.productId())
                         .map(p -> p.unitId().equals(unitId))
                         .orElse(false);
+    }
+
+    /**
+     * With an approval threshold set for purchase orders (retail_purchase_order), goods cannot be received past what a second
+     * person authorised, or the threshold would limit nothing: a receipt with no order is refused when it is worth the
+     * threshold or more (raise an order, which a second person approves), and a receipt against an order is refused when the
+     * value received on it, with this receipt, would pass the order's value plus the over-receipt tolerance (a price above the
+     * order's is as much an over-receipt as a quantity above it). With no threshold set neither limit applies.
+     */
+    private void limitUnauthorised(OrderRow order, List<Item> items) {
+        long threshold = tenantSettings.approvalThresholdMinor(PurchaseOrderAction.TYPE);
+        if (threshold <= 0) {
+            return;
+        }
+        long total = items.stream().mapToLong(x -> x.planned().lineTotal()).reduce(0, Math::addExact);
+        if (order == null) {
+            if (total >= threshold) {
+                throw ApiException.rule(
+                        "blind_receipt_over_limit",
+                        "A delivery worth " + total
+                                + " or more needs an order, which a second person approves. The limit is " + threshold
+                                + ".");
+            }
+            return;
+        }
+        int bp = settings.current().overReceiptBp();
+        long limit = order.totalMinor() + Math.multiplyExact(order.totalMinor(), (long) bp) / 10000;
+        long after = Math.addExact(repo.receivedValue(order.id()), total);
+        if (after > limit) {
+            throw ApiException.rule(
+                    "receipt_value_exceeds_order",
+                    "With this delivery " + after + " would have been received on " + order.orderNo()
+                            + ", which was ordered for "
+                            + order.totalMinor()
+                            + (limit > order.totalMinor() ? " (at most " + limit + " with the allowed excess)" : "")
+                            + ". Change the prices, or raise and approve a new order.");
+        }
     }
 
     /**

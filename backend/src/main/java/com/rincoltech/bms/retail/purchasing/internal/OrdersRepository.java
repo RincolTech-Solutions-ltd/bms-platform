@@ -26,7 +26,7 @@ class OrdersRepository {
             SELECT o.id, o.order_no, o.branch_seq, o.branch_id, o.supplier_id, s.name AS supplier_name, o.ordered_on,
                    o.expected_on, o.currency, o.total_minor, o.note, o.status,
                    (SELECT count(*) FROM retail_purchase_order_lines l WHERE l.tenant_id = o.tenant_id AND l.order_id = o.id) AS line_count,
-                   o.created_at, o.created_by, o.sent_at, o.sent_by, o.approval_id, o.approved_by, o.cancelled_at,
+                   o.created_at, o.created_by, o.updated_by, o.sent_at, o.sent_by, o.approval_id, o.approved_by, o.cancelled_at,
                    o.cancelled_by, o.cancel_reason, o.version
               FROM retail_purchase_orders o
               JOIN retail_suppliers s ON s.tenant_id = o.tenant_id AND s.id = o.supplier_id
@@ -57,6 +57,7 @@ class OrdersRepository {
             int lineCount,
             Instant createdAt,
             UUID createdBy,
+            UUID updatedBy,
             Instant sentAt,
             UUID sentBy,
             UUID approvalId,
@@ -168,10 +169,11 @@ class OrdersRepository {
             LocalDate expectedOn,
             long totalMinor,
             String note,
+            UUID by,
             int expectedVersion) {
         return jdbc.sql("""
                         UPDATE retail_purchase_orders SET supplier_id = ?, ordered_on = ?, expected_on = ?, total_minor = ?,
-                               note = ?, updated_at = now(), version = version + 1
+                               note = ?, updated_by = ?, updated_at = now(), version = version + 1
                          WHERE id = ? AND version = ? AND status = 'draft'
                         """)
                 .params(
@@ -180,6 +182,7 @@ class OrdersRepository {
                         expectedOn == null ? null : Date.valueOf(expectedOn),
                         totalMinor,
                         note,
+                        by,
                         id,
                         expectedVersion)
                 .update();
@@ -332,6 +335,7 @@ class OrdersRepository {
                 rs.getInt("line_count"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getObject("created_by", UUID.class),
+                rs.getObject("updated_by", UUID.class),
                 instant(rs, "sent_at"),
                 rs.getObject("sent_by", UUID.class),
                 rs.getObject("approval_id", UUID.class),

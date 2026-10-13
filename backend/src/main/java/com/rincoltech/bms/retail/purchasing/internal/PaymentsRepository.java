@@ -3,7 +3,6 @@ package com.rincoltech.bms.retail.purchasing.internal;
 import static com.rincoltech.bms.retail.purchasing.internal.OrdersRepository.instant;
 
 import com.rincoltech.bms.kernel.Search;
-import java.sql.Array;
 import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -12,7 +11,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +74,7 @@ class PaymentsRepository {
             String supplierRef,
             UUID purchaseId,
             String purchaseNo,
+            UUID branchId,
             long amountMinor) {}
 
     /**
@@ -94,10 +93,23 @@ class PaymentsRepository {
             long totalMinor,
             long paidMinor,
             Instant createdAt,
-            Set<UUID> branchIds) {
+            Map<UUID, Long> shares,
+            Map<UUID, Long> paidBy) {
 
         long openMinor() {
             return totalMinor - paidMinor;
+        }
+
+        /** The branches the item belongs to: the invoice's, or every branch whose creditors the restock credited. */
+        Set<UUID> branchIds() {
+            return shares.keySet();
+        }
+
+        /** What each branch still owes on the item. */
+        Map<UUID, Long> owedBy() {
+            Map<UUID, Long> out = new java.util.TreeMap<>();
+            shares.forEach((b, s) -> out.put(b, s - paidBy.getOrDefault(b, 0L)));
+            return out;
         }
     }
 
@@ -141,12 +153,14 @@ class PaymentsRepository {
                 .update();
     }
 
-    void insertAllocation(UUID paymentId, int lineNo, UUID billId, UUID purchaseId, long amountMinor) {
+    void insertAllocation(UUID paymentId, int lineNo, UUID billId, UUID purchaseId, UUID branchId, long amountMinor) {
         jdbc.sql("""
                         INSERT INTO retail_supplier_payment_allocations (id, tenant_id, payment_id, line_no, bill_id, purchase_id,
-                                                                         amount_minor)
-                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                        """).params(paymentId, lineNo, billId, purchaseId, amountMinor).update();
+                                                                         branch_id, amount_minor)
+                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
+                        """)
+                .params(paymentId, lineNo, billId, purchaseId, branchId, amountMinor)
+                .update();
     }
 
     /** The entries a payment posted in branches other than the paying one, kept so a reversal can reverse each. */
@@ -237,7 +251,7 @@ class PaymentsRepository {
             return out;
         }
         jdbc.sql("""
-                        SELECT a.payment_id, a.bill_id, b.bill_no, b.supplier_ref, a.purchase_id, pu.purchase_no, a.amount_minor
+                        SELECT a.payment_id, a.bill_id, b.bill_no, b.supplier_ref, a.purchase_id, pu.purchase_no, a.branch_id, a.amount_minor
                           FROM retail_supplier_payment_allocations a
                           LEFT JOIN retail_supplier_bills b ON b.tenant_id = a.tenant_id AND b.id = a.bill_id
                           LEFT JOIN retail_purchases pu ON pu.tenant_id = a.tenant_id AND pu.id = a.purchase_id
@@ -251,6 +265,7 @@ class PaymentsRepository {
                             rs.getString("supplier_ref"),
                             rs.getObject("purchase_id", UUID.class),
                             rs.getString("purchase_no"),
+                            rs.getObject("branch_id", UUID.class),
                             rs.getLong("amount_minor")));
         });
         return out;
@@ -296,13 +311,14 @@ class PaymentsRepository {
                             rs.getLong("total_minor"),
                             rs.getLong("paid_minor"),
                             rs.getTimestamp("created_at").toInstant(),
-                            Set.of(rs.getObject("branch_id", UUID.class))));
+                            Map.of(rs.getObject("branch_id", UUID.class), rs.getLong("total_minor")),
+                            Map.of(rs.getObject("branch_id", UUID.class), rs.getLong("paid_minor"))));
                 });
+        List<UUID> restocks = new ArrayList<>();
+        List<Object[]> rows = new ArrayList<>();
         jdbc.sql("""
                         SELECT pu.supplier_id, s.name AS supplier_name, pu.id, pu.purchase_no, pu.purchased_on, pu.total_minor,
-                               %s AS paid_minor, pu.created_at,
-                               (SELECT array_agg(DISTINCT m.branch_id) FROM retail_stock_movements m
-                                 WHERE m.tenant_id = pu.tenant_id AND m.source_type = 'retail.purchase' AND m.source_id = pu.id) AS branches
+                               %s AS paid_minor, pu.created_at
                           FROM retail_purchases pu
                           JOIN retail_suppliers s ON s.tenant_id = pu.tenant_id AND s.id = pu.supplier_id
                          WHERE pu.payment_method = 'credit' AND NOT pu.historical
@@ -312,29 +328,62 @@ class PaymentsRepository {
                         """.formatted(PAID_RESTOCK, PAID_RESTOCK))
                 .param("supplier", supplierId)
                 .query(rs -> {
-                    out.add(new Open(
-                            "restock",
-                            rs.getObject("supplier_id", UUID.class),
-                            rs.getString("supplier_name"),
-                            rs.getObject("id", UUID.class),
-                            rs.getString("purchase_no"),
-                            null,
-                            rs.getDate("purchased_on").toLocalDate(),
-                            rs.getDate("purchased_on").toLocalDate(),
-                            rs.getLong("total_minor"),
-                            rs.getLong("paid_minor"),
-                            rs.getTimestamp("created_at").toInstant(),
-                            branches(rs.getArray("branches"))));
+                    restocks.add(rs.getObject("id", UUID.class));
+                    rows.add(new Object[] {
+                        rs.getObject("supplier_id", UUID.class),
+                        rs.getString("supplier_name"),
+                        rs.getObject("id", UUID.class),
+                        rs.getString("purchase_no"),
+                        rs.getDate("purchased_on").toLocalDate(),
+                        rs.getLong("total_minor"),
+                        rs.getLong("paid_minor"),
+                        rs.getTimestamp("created_at").toInstant()
+                    });
                 });
-        return out;
-    }
-
-    private static Set<UUID> branches(Array array) throws SQLException {
-        Set<UUID> out = new HashSet<>();
-        if (array != null) {
-            for (Object o : (Object[]) array.getArray()) {
-                out.add((UUID) o);
-            }
+        if (restocks.isEmpty()) {
+            return out;
+        }
+        // What each branch's trade creditors were credited by the restock (its entries), and what the payments that
+        // stand
+        // have paid on it per branch.
+        Map<UUID, Map<UUID, Long>> credited = new HashMap<>();
+        jdbc.sql("""
+                        SELECT e.source_id AS purchase_id, e.branch_id, sum(l.credit - l.debit) AS credited
+                          FROM journal_lines l
+                          JOIN journal_entries e ON e.tenant_id = l.tenant_id AND e.id = l.entry_id
+                          JOIN gl_accounts a ON a.tenant_id = l.tenant_id AND a.id = l.account_id AND a.system_key = 'trade_creditors'
+                         WHERE e.source_type = 'retail.purchase' AND e.source_id IN (:ids)
+                         GROUP BY e.source_id, e.branch_id
+                        """).param("ids", restocks).query(rs -> {
+            credited.computeIfAbsent(rs.getObject("purchase_id", UUID.class), k -> new java.util.TreeMap<>())
+                    .put(rs.getObject("branch_id", UUID.class), rs.getLong("credited"));
+        });
+        Map<UUID, Map<UUID, Long>> paidBy = new HashMap<>();
+        jdbc.sql("""
+                        SELECT a.purchase_id, a.branch_id, sum(a.amount_minor) AS paid
+                          FROM retail_supplier_payment_allocations a
+                          JOIN retail_supplier_payments p ON p.tenant_id = a.tenant_id AND p.id = a.payment_id AND p.status = 'posted'
+                         WHERE a.purchase_id IN (:ids) GROUP BY a.purchase_id, a.branch_id
+                        """).param("ids", restocks).query(rs -> {
+            paidBy.computeIfAbsent(rs.getObject("purchase_id", UUID.class), k -> new java.util.TreeMap<>())
+                    .put(rs.getObject("branch_id", UUID.class), rs.getLong("paid"));
+        });
+        for (Object[] r : rows) {
+            UUID id = (UUID) r[2];
+            out.add(new Open(
+                    "restock",
+                    (UUID) r[0],
+                    (String) r[1],
+                    id,
+                    (String) r[3],
+                    null,
+                    (LocalDate) r[4],
+                    (LocalDate) r[4],
+                    (Long) r[5],
+                    (Long) r[6],
+                    (Instant) r[7],
+                    credited.getOrDefault(id, Map.of()),
+                    paidBy.getOrDefault(id, Map.of())));
         }
         return out;
     }

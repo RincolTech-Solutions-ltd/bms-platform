@@ -400,6 +400,12 @@ class BillsService {
         Row seen = repo.find(id)
                 .filter(x -> principal.may(PERMISSION, x.branchId()))
                 .orElseThrow(ApiException::notFound);
+        // As creating it needed the scope of every branch it clears, so does undoing it.
+        for (UUID entryBranch : repo.entryBranches(id)) {
+            if (!principal.may(PERMISSION, entryBranch)) {
+                throw ApiException.notFound();
+            }
+        }
         suppliers.lockSupplier(seen.supplierId());
         Row b = repo.lock(id).orElseThrow(ApiException::notFound);
         if (b.status().equals("voided")) {

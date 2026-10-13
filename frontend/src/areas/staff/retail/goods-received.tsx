@@ -46,6 +46,7 @@ export function GoodsReceivedPage() {
     <Gate screen="goodsReceived" title="Goods received">
       <p className="hint" data-tour="goods-received-help">
         Each delivery from a supplier is recorded here. Receive against an order from the order itself, or record a delivery that came with no order.
+        A wrong delivery is undone by voiding it and receiving it again correctly. Sending goods back to a supplier, and supplier credit notes, are not supported yet.
       </p>
       <p className="cluster">
         <Link className="btn rt-primary" to="/staff/retail/goods-received/new">Receive goods without an order</Link>
@@ -166,7 +167,7 @@ export function GoodsReceiptPage() {
         <ReasonPanel
           openLabel="Void this delivery"
           question="Why is it voided?"
-          hint="The goods come out of stock again. This is refused if the delivery is already on a supplier invoice (void the invoice first), or if some of the goods have been sold, used or moved."
+          hint="This is how a wrong delivery is undone: void it, then receive it again correctly. Sending goods back to a supplier is not supported yet. The goods come out of stock again. This is refused if the delivery is already on a supplier invoice (void the invoice first), or if some of the goods have been sold, used or moved."
           confirmLabel="Void the delivery"
           busy={voided.isPending}
           error={voided.error}

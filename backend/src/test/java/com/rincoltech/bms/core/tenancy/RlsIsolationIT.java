@@ -428,9 +428,12 @@ class RlsIsolationIT {
                 .params(supplierPayment, t.tenantId(), t.headOffice(), supplier, entry, user)
                 .update();
         owner.sql("""
-                        INSERT INTO retail_supplier_payment_allocations (id, tenant_id, payment_id, line_no, bill_id, amount_minor)
-                        VALUES (gen_random_uuid(), ?, ?, 1, ?, 100)
-                        """).params(t.tenantId(), supplierPayment, bill).update();
+                        INSERT INTO retail_supplier_payment_allocations (id, tenant_id, payment_id, line_no, bill_id, branch_id,
+                                                                         amount_minor)
+                        VALUES (gen_random_uuid(), ?, ?, 1, ?, ?, 100)
+                        """)
+                .params(t.tenantId(), supplierPayment, bill, t.headOffice())
+                .update();
         owner.sql(
                         "INSERT INTO retail_supplier_payment_entries (tenant_id, payment_id, branch_id, entry_id) VALUES (?, ?, ?, ?)")
                 .params(t.tenantId(), supplierPayment, t.secondBranch(), entry)

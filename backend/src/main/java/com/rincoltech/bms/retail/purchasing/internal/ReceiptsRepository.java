@@ -299,6 +299,15 @@ class ReceiptsRepository {
         return out;
     }
 
+    /** The value, as entered, of the receipts of an order that stand. */
+    long receivedValue(UUID orderId) {
+        return jdbc.sql(
+                        "SELECT coalesce(sum(total_minor), 0) FROM retail_goods_receipts WHERE order_id = ? AND status = 'posted'")
+                .param(orderId)
+                .query(Long.class)
+                .single();
+    }
+
     /** True when a supplier invoice that stands bills any line of the receipt. */
     boolean billed(UUID receiptId) {
         return jdbc.sql("""

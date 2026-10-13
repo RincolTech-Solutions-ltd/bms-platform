@@ -310,7 +310,7 @@ Notes:
   payments, reverse and void them, read what is owed to suppliers and the payables report) and `retail.purchase.approve` (decide a
   large purchase order), both administrators only and consulted only while the `purchasing` capability is on; orders and receipts
   use the existing `retail.purchase.create`. Their scope is the order's, the receipt's, the invoice's and the payment's branch (an
-  invoice may bill receipts of several branches only when the caller's scope covers all of them), and the maker of an order above
+  invoice may bill receipts of several branches only when the caller's scope covers all of them), and the author, the last editor and the sender of an order above
   the tenant's threshold for `retail_purchase_order` (section 8.4) cannot be its checker. Design only: one more permission,
   `retail.document.issue`.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares

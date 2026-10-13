@@ -208,6 +208,14 @@ class BillsRepository {
                 .list();
     }
 
+    /** The branches a bill posted entries in. */
+    List<UUID> entryBranches(UUID billId) {
+        return jdbc.sql("SELECT branch_id FROM retail_supplier_bill_entries WHERE bill_id = ?")
+                .param(billId)
+                .query(UUID.class)
+                .list();
+    }
+
     int markVoided(UUID id, UUID by, LocalDate on, Instant at, String reason) {
         return jdbc.sql("""
                         UPDATE retail_supplier_bills SET status = 'voided', voided_at = ?, voided_on = ?, voided_by = ?,

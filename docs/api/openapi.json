@@ -9420,6 +9420,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "updated_by" : {
+            "description" : "Who last changed the draft; absent if it was never edited",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "version" : {
             "description" : "Send as If-Match when editing",
             "format" : "int32",

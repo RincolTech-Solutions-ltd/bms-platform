@@ -168,6 +168,7 @@ class OrdersService {
                         r.expectedOn(),
                         d.total(),
                         PurchasingService.blankToNull(r.note()),
+                        CurrentPrincipal.require().userId(),
                         expected)
                 == 0) {
             throw Versions.conflict(repo.find(id, false).map(OrderRow::version).orElse(expected));
@@ -404,6 +405,7 @@ class OrdersService {
                 receipts,
                 o.createdAt(),
                 o.createdBy(),
+                o.updatedBy(),
                 o.sentAt(),
                 o.sentBy(),
                 o.approvalId(),

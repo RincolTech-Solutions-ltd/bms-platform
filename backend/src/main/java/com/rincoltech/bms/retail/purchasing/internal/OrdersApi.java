@@ -132,6 +132,10 @@ final class OrdersApi {
             List<ReceiptRef> receipts,
             Instant createdAt,
             UUID createdBy,
+
+            @Schema(description = "Who last changed the draft; absent if it was never edited")
+            UUID updatedBy,
+
             Instant sentAt,
             UUID sentBy,
             UUID approvalId,

@@ -1,7 +1,10 @@
 package com.rincoltech.bms.retail.purchasing.internal;
 
 import com.rincoltech.bms.core.approvals.ApprovalAction;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -54,6 +57,23 @@ class PurchaseOrderAction implements ApprovalAction {
     @Override
     public Optional<Integer> subjectVersion(UUID subjectId) {
         return repo.find(subjectId, false).map(OrdersRepository.OrderRow::version);
+    }
+
+    /**
+     * The checker is none of the people who made the order: the one who wrote the draft and the one who last edited it, as
+     * well as the one who sent it (the maker, which the approvals module already excludes). Without this, whoever wrote an
+     * order could approve it once a colleague sent it.
+     */
+    @Override
+    public Set<UUID> conflictedDeciders(UUID subjectId, Map<String, Object> payload) {
+        Set<UUID> out = new HashSet<>();
+        repo.find(subjectId, false).ifPresent(o -> {
+            out.add(o.createdBy());
+            if (o.updatedBy() != null) {
+                out.add(o.updatedBy());
+            }
+        });
+        return out;
     }
 
     @Override

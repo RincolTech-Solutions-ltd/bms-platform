@@ -155,6 +155,7 @@ CREATE TABLE retail_purchase_orders (
     status       text         NOT NULL DEFAULT 'draft'
                               CHECK (status IN ('draft', 'sent', 'partly_received', 'received', 'cancelled')),
     created_by   uuid         NOT NULL,
+    updated_by   uuid,
     sent_at      timestamptz,
     sent_by      uuid,
     approval_id  uuid,
@@ -194,9 +195,9 @@ BEGIN
     END IF;
     -- Only a draft is edited.
     IF OLD.status <> 'draft'
-       AND (NEW.supplier_id, NEW.branch_id, NEW.ordered_on, NEW.expected_on, NEW.total_minor, NEW.note)
+       AND (NEW.supplier_id, NEW.branch_id, NEW.ordered_on, NEW.expected_on, NEW.total_minor, NEW.note, NEW.updated_by)
            IS DISTINCT FROM
-           (OLD.supplier_id, OLD.branch_id, OLD.ordered_on, OLD.expected_on, OLD.total_minor, OLD.note)
+           (OLD.supplier_id, OLD.branch_id, OLD.ordered_on, OLD.expected_on, OLD.total_minor, OLD.note, OLD.updated_by)
     THEN
         RAISE EXCEPTION 'retail_purchase_orders: an order that has been sent is not edited'
             USING ERRCODE = 'insufficient_privilege';
@@ -562,7 +563,10 @@ SELECT bms_make_append_only('retail_supplier_bill_entries');
 -- branch, numbered SP + branch code + six digits per tenant and branch. A payment is split, when it is recorded,
 -- over the supplier's open items: supplier bills and credit restocks (retail_purchases paid by credit, which until
 -- now only raised trade creditors and nothing could pay). Every unit of the amount is allocated; nothing is held
--- as a deposit. A payment is never edited: it is reversed as a whole, once, and its allocations then stop counting.
+-- as a deposit. An allocation row is per item and per branch: a credit restock credits trade creditors in each branch its
+-- stock went into, so what a payment pays on it is split over those branches (branch_id) in proportion to what each still
+-- owes, and the payment debits each branch's creditors by its part (a supplier invoice is one row, in the bill's branch).
+-- A payment is never edited: it is reversed as a whole, once, and its allocations then stop counting.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_supplier_payments (
@@ -659,17 +663,19 @@ CREATE TABLE retail_supplier_payment_allocations (
     line_no      smallint    NOT NULL CHECK (line_no >= 1),
     bill_id      uuid,
     purchase_id  uuid,
+    branch_id    uuid        NOT NULL,
     amount_minor bigint      NOT NULL CHECK (amount_minor > 0 AND amount_minor <= 10000000000000),
     UNIQUE (tenant_id, id),
     UNIQUE (payment_id, line_no),
     FOREIGN KEY (tenant_id, payment_id) REFERENCES retail_supplier_payments (tenant_id, id),
     FOREIGN KEY (tenant_id, bill_id) REFERENCES retail_supplier_bills (tenant_id, id),
     FOREIGN KEY (tenant_id, purchase_id) REFERENCES retail_purchases (tenant_id, id),
+    FOREIGN KEY (tenant_id, branch_id) REFERENCES branches (tenant_id, id),
     CHECK ((bill_id IS NULL) <> (purchase_id IS NULL))
 );
-CREATE UNIQUE INDEX retail_supplier_payment_allocations_bill ON retail_supplier_payment_allocations (payment_id, bill_id)
+CREATE UNIQUE INDEX retail_supplier_payment_allocations_bill ON retail_supplier_payment_allocations (payment_id, bill_id, branch_id)
     WHERE bill_id IS NOT NULL;
-CREATE UNIQUE INDEX retail_supplier_payment_allocations_purchase ON retail_supplier_payment_allocations (payment_id, purchase_id)
+CREATE UNIQUE INDEX retail_supplier_payment_allocations_purchase ON retail_supplier_payment_allocations (payment_id, purchase_id, branch_id)
     WHERE purchase_id IS NOT NULL;
 CREATE INDEX retail_supplier_payment_allocations_bill_open ON retail_supplier_payment_allocations (tenant_id, bill_id)
     WHERE bill_id IS NOT NULL;

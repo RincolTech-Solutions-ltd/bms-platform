@@ -1731,4 +1731,229 @@ class RetailTradePurchasingIT extends IntegrationTest {
                         "SELECT coalesce(sum(debit - credit), 0) FROM journal_lines WHERE tenant_id = ?", t.tenantId()))
                 .isZero();
     }
+
+    // ---- review of #255: credit restocks across branches, maker-checker, receipt limits
+    // ---------------------------------
+
+    /** A credit restock of the product into both branches: 10 at head office and 5 at the second branch, at 100. */
+    UUID restockBothBranches() {
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("product_id", product);
+        l.put("cost_minor", 100);
+        l.put("qty_by_branch", List.of(Map.of("branch_id", hq, "qty", "10"), Map.of("branch_id", br2, "qty", "5")));
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("purchased_on", TODAY);
+        b.put("payment_method", "credit");
+        b.put("supplier_id", supplier);
+        b.put("lines", List.of(l));
+        ResponseEntity<JsonNode> r = api.postKeyed("/purchases", b, BUYER, "*", key());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    @Test
+    void aMultiBranchCreditRestockIsPaidDownBranchByBranchInProportionAndExactly() {
+        UUID purchase = restockBothBranches();
+        assertThat(balance("trade_creditors", hq)).isEqualTo(-1_000);
+        assertThat(balance("trade_creditors", br2)).isEqualTo(-500);
+        // A part payment from head office: 700 splits 467 and 233 (the remainder to the larger fraction).
+        JsonNode part = paid(hq, "cash", 700);
+        assertThat(part.get("allocations")).hasSize(1);
+        assertThat(part.get("allocations").get(0).get("amount_minor").asLong()).isEqualTo(700);
+        assertThat(balance("trade_creditors", hq)).isEqualTo(-533);
+        assertThat(balance("trade_creditors", br2)).isEqualTo(-267);
+        assertThat(balance("interbranch_clearing")).isZero();
+        assertThat(balance("cash_on_hand", hq)).isEqualTo(-700);
+        // What is left, paid from the second branch, settles both exactly.
+        JsonNode rest = paid(br2, "bank", 800);
+        assertThat(rest.get("allocations").get(0).get("purchase_id").asString()).isEqualTo(purchase.toString());
+        assertThat(balance("trade_creditors", hq)).isZero();
+        assertThat(balance("trade_creditors", br2)).isZero();
+        assertThat(balance("interbranch_clearing")).isZero();
+        assertThat(api.get("/suppliers/" + supplier + "/open-items", PAYER)
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
+        // Reversing the second payment puts back exactly what it paid in each branch.
+        keyed(
+                "/supplier-payments/" + uuid(rest, "id") + "/reverse",
+                Map.of("reason", "Paid from the wrong till"),
+                PAYER,
+                "*");
+        assertThat(balance("trade_creditors", hq)).isEqualTo(-533);
+        assertThat(balance("trade_creditors", br2)).isEqualTo(-267);
+        assertThat(balance("interbranch_clearing")).isZero();
+    }
+
+    @Test
+    void thePayablesReportAgreesWithTheTradeCreditorsOverallAndBranchByBranch() {
+        // A credit restock into one branch, an invoice of the other and a part payment of each.
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("product_id", product);
+        l.put("cost_minor", 100);
+        l.put("qty_by_branch", List.of(Map.of("branch_id", br2, "qty", "4")));
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("purchased_on", TODAY);
+        b.put("payment_method", "credit");
+        b.put("supplier_id", supplier);
+        b.put("lines", List.of(l));
+        assertThat(api.postKeyed("/purchases", b, BUYER, "*", key()).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        billOf("INV-REC", 900, "2026-11-07");
+        paid(hq, "cash", 300);
+        paid(br2, "bank", 150);
+        long owed = api.get("/reports/supplier-payables", PAYER)
+                .getBody()
+                .get("totals")
+                .get("owed_minor")
+                .asLong();
+        assertThat(owed).isEqualTo(-balance("trade_creditors")).isEqualTo(850);
+        for (UUID branch : List.of(hq, br2)) {
+            ResponseEntity<JsonNode> r =
+                    api.call(HttpMethod.GET, "/reports/supplier-payables", null, PAYER, branch.toString(), Map.of());
+            assertThat(r.getBody().get("totals").get("owed_minor").asLong())
+                    .as("owed in %s", branch)
+                    .isEqualTo(-balance("trade_creditors", branch));
+        }
+        // With a restock across both branches in the mix, the whole still agrees and each branch holds what it owes.
+        restockBothBranches();
+        paid(hq, "bank", 400);
+        long all = api.get("/reports/supplier-payables", PAYER)
+                .getBody()
+                .get("totals")
+                .get("owed_minor")
+                .asLong();
+        assertThat(all).isEqualTo(-balance("trade_creditors"));
+        assertThat(-balance("trade_creditors", hq) + -balance("trade_creditors", br2))
+                .isEqualTo(all);
+    }
+
+    @Test
+    void whoWroteOrEditedAnOrderCannotApproveItEvenWhenAColleagueSendsIt() {
+        threshold(1_000);
+        RetailTestSupport editor = new RetailTestSupport(http, t);
+        RetailTestSupport third = new RetailTestSupport(http, t);
+        String perms = BUYER + ",core.approvals.read";
+        // The first user writes the draft; a second edits it and sends it.
+        JsonNode d = draft(hq, orderLine(product, "10", 100));
+        UUID id = uuid(d, "id");
+        String etag = api.get("/purchase-orders/" + id, BUYER).getHeaders().getETag();
+        ResponseEntity<JsonNode> edited = editor.call(
+                HttpMethod.PUT,
+                "/purchase-orders/" + id,
+                orderBody(supplier, hq, orderLine(product, "11", 100)),
+                BUYER,
+                "*",
+                Map.of("If-Match", etag));
+        assertThat(edited.getStatusCode()).as("%s", edited.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(edited.getBody().get("created_by").asString())
+                .isEqualTo(api.userId().toString());
+        assertThat(edited.getBody().get("updated_by").asString())
+                .isEqualTo(editor.userId().toString());
+        ResponseEntity<JsonNode> asked =
+                editor.postKeyed("/purchase-orders/" + id + "/send", Map.of(), BUYER, "*", key());
+        assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        String approval = asked.getBody().get("approval_id").asString();
+        // Neither the author, nor the editor who sent it, can decide; a third person can.
+        assertThat(decide(approval, api, perms).getStatusCode().is2xxSuccessful())
+                .isFalse();
+        assertThat(decide(approval, editor, perms).getStatusCode().is2xxSuccessful())
+                .isFalse();
+        assertThat(order(id).get("status").asString()).isEqualTo("draft");
+        assertThat(decide(approval, third, perms).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(order(id).get("status").asString()).isEqualTo("sent");
+        // The author alone is a maker too: when someone who only sent it asks, the author still cannot approve.
+        JsonNode d2 = draft(hq, orderLine(product, "20", 100));
+        ResponseEntity<JsonNode> asked2 =
+                editor.postKeyed("/purchase-orders/" + uuid(d2, "id") + "/send", Map.of(), BUYER, "*", key());
+        assertThat(asked2.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(decide(asked2.getBody().get("approval_id").asString(), api, perms)
+                        .getStatusCode()
+                        .is2xxSuccessful())
+                .isFalse();
+    }
+
+    @Test
+    void withAThresholdADeliveryWithNoOrderOrPastTheOrdersValueIsRefused() {
+        // No threshold: a blind receipt of any size is as before.
+        blind(hq, product, "50", 100);
+        threshold(1_000);
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("product_id", product);
+        l.put("qty", "10");
+        l.put("cost_minor", 100);
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("supplier_id", supplier);
+        b.put("branch_id", hq);
+        b.put("lines", List.of(l));
+        ResponseEntity<JsonNode> big = keyed("/goods-receipts", b, BUYER, "*");
+        assertThat(big.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(big)).isEqualTo("blind_receipt_over_limit");
+        l.put("qty", "9");
+        assertThat(keyed("/goods-receipts", b, BUYER, "*").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        // Against an order authorised for 900: a higher price is refused, the order's price is not.
+        JsonNode o = sent(hq, orderLine(product, "9", 100));
+        UUID id = uuid(o, "id");
+        JsonNode line = order(id).get("lines").get(0);
+        Map<String, Object> dear = rline(line, "9");
+        dear.put("cost_minor", 120);
+        ResponseEntity<JsonNode> over = receiveRaw(id, hq, List.of(dear));
+        assertThat(over.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(over)).isEqualTo("receipt_value_exceeds_order");
+        assertThat(stockAt(hq, product)).isEqualByComparingTo("59");
+        received(id, hq, List.of(rline(line, "9")));
+        assertThat(order(id).get("status").asString()).isEqualTo("received");
+        // The tolerance applies to value as well: 25 percent over lets a dearer delivery through.
+        String etag = api.get("/purchasing/settings", SETTINGS).getHeaders().getETag();
+        api.call(
+                HttpMethod.PUT,
+                "/purchasing/settings",
+                Map.of("over_receipt_bp", 2500),
+                SETTINGS,
+                "*",
+                Map.of("If-Match", etag));
+        JsonNode o2 = sent(hq, orderLine(product, "9", 100));
+        Map<String, Object> dearer = rline(order(uuid(o2, "id")).get("lines").get(0), "9");
+        dearer.put("cost_minor", 120);
+        assertThat(receiveRaw(uuid(o2, "id"), hq, List.of(dearer)).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void aReceiptIsNotDatedBeforeItsOrder() {
+        JsonNode o = sent(hq, orderLine(product, "5", 100));
+        JsonNode line = order(uuid(o, "id")).get("lines").get(0);
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("order_id", uuid(o, "id"));
+        b.put("branch_id", hq);
+        b.put("received_on", UTC_DAY);
+        b.put("lines", List.of(rline(line, "5")));
+        ResponseEntity<JsonNode> r = keyed("/goods-receipts", b, BUYER, "*");
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().toString()).contains("before_order");
+        b.put("received_on", TODAY);
+        assertThat(keyed("/goods-receipts", b, BUYER, "*").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void anInvoiceOfSeveralBranchesIsVoidedOnlyByWhoseScopeCoversThemAll() {
+        JsonNode a = blind(hq, product, "10", 100).get("lines").get(0);
+        JsonNode c = blind(br2, product, "5", 100).get("lines").get(0);
+        JsonNode bill = billed("INV-SCOPE", 1_500, "2026-11-07", List.of(bline(a, "10", 100), bline(c, "5", 100)));
+        ResponseEntity<JsonNode> scoped = api.postKeyed(
+                "/supplier-bills/" + uuid(bill, "id") + "/void",
+                Map.of("reason", "Wrong invoice entered"),
+                PAYER,
+                hq.toString(),
+                key());
+        assertThat(scoped.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(bill(uuid(bill, "id")).get("status").asString()).isEqualTo("posted");
+        assertThat(keyed(
+                                "/supplier-bills/" + uuid(bill, "id") + "/void",
+                                Map.of("reason", "Wrong invoice entered"),
+                                PAYER,
+                                "*")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
 }

@@ -8656,6 +8656,11 @@ export interface components {
             /** Format: int64 */
             total_minor?: number;
             /**
+             * Format: uuid
+             * @description Who last changed the draft; absent if it was never edited
+             */
+            updated_by?: string;
+            /**
              * Format: int32
              * @description Send as If-Match when editing
              */
