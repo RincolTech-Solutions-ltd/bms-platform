@@ -37,9 +37,9 @@ class MigrationOrderIT {
     /**
      * The migrations already merged and deployed: their numbers never change and none is removed.
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
-     * came before V42 (the loan pledge guard, #176), which must merge before V43 (payment methods,
-     * #160). MERGED lists 42 and 43 only because they are queued next; nothing here enforces the
-     * order, merge order does.
+     * came before V42 (the loan pledge guard, #176, merged), which came before V43 (payment methods,
+     * #160). MERGED lists 43 only because it is queued next; nothing here enforces the order, merge
+     * order does.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
