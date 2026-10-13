@@ -226,6 +226,7 @@ platform API and holds no tenant permissions.
 | `retail.price.override` | Y | | | | | | | Y |
 | `retail.credit.manage` | Y | | | | | | | |
 | `retail.credit.override` | Y | | | | | | | |
+| `retail.sale.return` | Y | | | | | | | |
 | `retail.document.issue` | Y | | | | | | | |
 
 Notes:
@@ -299,13 +300,17 @@ Notes:
   `retail.credit.manage` (set a buyer's credit limit and payment terms) and `retail.credit.override` (sell on credit above a
   buyer's limit, with a reason of at least five characters, written to the audit trail), both administrators only; payment on
   account needs `retail.sale.create` at the receiving branch and its reversal `retail.sale.void`, so no permission is added for
-  them. Both are consulted only while the `customer_accounts` capability is on. Built with the optional documents (issue #197, migration V46):
+  them. Both are consulted only while the `customer_accounts` capability is on. Built with the customer returns (issue #201,
+  migration V45): `retail.sale.return` (take goods back against a sale, void a return, read the credit notes), administrators
+  only and consulted only while the `returns` capability is on. Its scope is the sale's branch, and a line may be restocked
+  only in a branch inside that scope. A return worth at least the tenant's approval threshold for the action
+  `retail_sale_return` (section 8.4) waits for a second holder of the permission; with no threshold set there is no checker, so
+  a business with one administrator can take goods back.   Built with the optional documents (issue #197, migration V46):
   `retail.document.issue` (issue and reprint an invoice, a delivery note or a quotation, make and convert a quotation, produce a customer statement PDF),
   administrators only, not money-moving, consulted only while the `documents` capability is on, in the branch scope of the permission (the
   source branch for the delivery note of a stock move); converting a quotation also needs `retail.sale.create`, which the sale it makes checks as any
-  sale does, and changing a series prefix needs `core.settings.manage`. The stored PDF of a document is readable through the core download route by
-  whoever holds the permission in the document's branch (FR-DOC-03) and only while the capability is on. Design only: two more permissions,
-  `retail.sale.return` and `retail.payable.manage`.
+  sale does, and changing a series prefix needs `core.settings.manage`; the credit note PDF of a return needs `retail.sale.return` as well, in the return's branch. The stored PDF of a document is readable through the core download route by
+  whoever holds the permission in the document's branch (FR-DOC-03) and only while the capability is on. Design only: `retail.payable.manage`.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares
   the seeded permissions with the matrix; all of them go to administrators only.
   `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales
@@ -423,8 +428,11 @@ CHECK constraint as well as the service.
 | `member_branch_transfer` | `lending.members.update` | `lending.members.transfer_approve` | No |
 | `import_commit` | `core.imports.manage` | `core.imports.approve_commit` | No |
 | `member_credit_refund` | `lending.repayments.create` | `lending.credits.refund_approve` | Yes |
+| `retail_sale_return` | `retail.sale.return` | `retail.sale.return` | Yes, counted over the returns of the sale, and no checker at all while no threshold is set |
+| `retail_sale_return_void` | `retail.sale.return` | `retail.sale.return` | Reads the threshold of `retail_sale_return`: needed for a return that was approved or is worth it alone; none while no threshold is set |
 
-Registered so far: `collateral_release` (#13); `loan_disbursement`, `repayment_reversal` and
+Registered so far: `collateral_release` (#13); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
+action pends only at or above a threshold the tenant sets); `loan_disbursement`, `repayment_reversal` and
 `loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
 and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker
 permissions, `lending.investments.fund_approve` and `lending.investments.reverse_approve` (migration

@@ -92,6 +92,9 @@ const retailAccountsRoute = retailScreen('/accounts', 'Customer accounts').lazy(
 const retailCustomerAgeingRoute = retailScreen('/customer-ageing', 'Customer ageing').lazy(() => import('../areas/staff/retail/customer-ageing').then((m) => m.Route));
 const retailDocumentsRoute = retailScreen('/documents', 'Documents').lazy(() => import('../areas/staff/retail/documents').then((m) => m.Route));
 const retailQuotationsRoute = retailScreen('/quotations', 'Quotations').lazy(() => import('../areas/staff/retail/quotations').then((m) => m.Route));
+const retailReturnsRoute = retailScreen('/returns', 'Customer returns').lazy(() => import('../areas/staff/retail/returns').then((m) => m.Route));
+const retailReturnNewRoute = retailScreen('/returns/new/$saleId', 'Take goods back').lazy(() => import('../areas/staff/retail/return-new').then((m) => m.Route));
+const retailReturnRoute = retailScreen('/returns/$returnId', 'Credit note').lazy(() => import('../areas/staff/retail/credit-note').then((m) => m.Route));
 const retailAccountRoute = retailScreen('/accounts/$customerId', 'Account').lazy(() => import('../areas/staff/retail/account').then((m) => m.Route));
 
 // The living style page (#106): every component and illustration, for development builds and the
@@ -211,6 +214,9 @@ export const router = createRouter({
         retailCustomerAgeingRoute,
         retailDocumentsRoute,
         retailQuotationsRoute,
+        retailReturnsRoute,
+        retailReturnNewRoute,
+        retailReturnRoute,
         retailBankingRoute,
         retailBankingReportRoute,
       ]), staffLendingRoute.addChildren([

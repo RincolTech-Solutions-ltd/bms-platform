@@ -13,7 +13,7 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.Test;
 
 /**
- * The credit note template of the optional documents (ADR-033, issue #197), designed with the numbered series and wired
+ * The credit note template of the optional documents (ADR-033, issue #197), rendered from a return (which numbers it) and with the
  * to the customer returns of issue #201 once they are on main. Until then nothing issues one, so this renders the template
  * with a fabricated model of the shape the returns follow-up will build, to prove the template reads, fits a page and
  * prints the amount credited in figures and words. Every name and amount is invented.
@@ -40,7 +40,7 @@ class CreditNoteTemplateTest {
         ref.put("saleNo", "RS00000001");
         ref.put("date", "8 Oct 2026");
         ref.put("refund", "Cash");
-        ref.put("reason", "Two cartons arrived damaged");
+        ref.put("note", "Two cartons arrived damaged");
         m.put("ref", ref);
         Map<String, Object> line = new java.util.LinkedHashMap<>();
         line.put("no", 1);
@@ -49,7 +49,7 @@ class CreditNoteTemplateTest {
         line.put("qty", "2");
         line.put("unit", "carton");
         line.put("pack", "= 24 piece");
-        line.put("unitPrice", "1,100");
+        line.put("reason", "Damaged");
         line.put("total", "2,200");
         m.put("lines", List.of(line));
         m.put("totals", Map.of("total", "2,200", "words", "Two thousand, two hundred Uganda shillings only"));
@@ -80,11 +80,11 @@ class CreditNoteTemplateTest {
             if (System.getProperty("bms.documents.samples") != null) {
                 Path dir = Path.of("target/document-samples");
                 Files.createDirectories(dir);
-                Files.write(dir.resolve("retail_credit_note.pdf"), pdf);
+                Files.write(dir.resolve("retail_credit_note_template.pdf"), pdf);
                 javax.imageio.ImageIO.write(
                         new PDFRenderer(d).renderImageWithDPI(0, 110),
                         "png",
-                        dir.resolve("retail_credit_note-p1.png").toFile());
+                        dir.resolve("retail_credit_note_template-p1.png").toFile());
             }
         }
     }
@@ -98,7 +98,7 @@ class CreditNoteTemplateTest {
         Map<String, Object> m = model();
         m.put("buyer", Map.of("name", typed + " \u65e5\u672c\u8a9e", "contact", "<script>x</script>"));
         Map<String, Object> ref = new java.util.LinkedHashMap<>((Map<String, Object>) m.get("ref"));
-        ref.put("reason", "Damaged & <wet> \"boxes\"");
+        ref.put("note", "Damaged & <wet> \"boxes\"");
         m.put("ref", ref);
         byte[] pdf = renderer.render("credit_note", m);
         try (PDDocument d = Loader.loadPDF(pdf)) {

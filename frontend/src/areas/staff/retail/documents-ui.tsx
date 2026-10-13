@@ -31,6 +31,38 @@ export async function openDocumentPdf(doc: Pick<RetailDocument, 'id' | 'pdf_docu
 }
 
 /**
+ * Opens the credit note PDF of a return in a new tab, opened before the waiting. The credit note carries the return's own number;
+ * nothing here numbers anything.
+ */
+export async function openCreditNotePdf(returnId: string): Promise<void> {
+  const tab = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('about:blank', '_blank') : null;
+  try {
+    const made = await retail.renderCreditNote(returnId);
+    const url = await retail.documentUrl(made.pdf_document_id ?? '');
+    if (tab) tab.location.href = url;
+    else if (typeof window !== 'undefined') window.location.href = url;
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
+}
+
+/** The button that opens a credit note as a PDF: only while documents are on and the user may issue them at the return's branch. */
+export function CreditNotePdf({ returnId, branchId }: { returnId: string; branchId?: string }) {
+  const { me } = useStaff();
+  const open = useMutation({ mutationFn: () => openCreditNotePdf(returnId) });
+  if (!canIssueDocuments(me) || !holdsAt(me, DOCUMENT_ISSUE, branchId)) return null;
+  return (
+    <p>
+      <button type="button" className="btn-sm" disabled={open.isPending} data-tour="credit-note-pdf" onClick={() => open.mutate()}>
+        {open.isPending ? 'Opening' : 'Open the credit note as a PDF'}
+      </button>
+      <Problem error={open.error} />
+    </p>
+  );
+}
+
+/**
  * Opens a PDF that has to be made first (the customer statement, which is rendered on each request) in a new tab. The tab is opened
  * before the waiting, as {@link openDocumentPdf} does, so a pop-up blocker does not stop it.
  */

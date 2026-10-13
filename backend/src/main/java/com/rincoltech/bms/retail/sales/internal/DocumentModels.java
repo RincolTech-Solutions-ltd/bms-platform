@@ -255,6 +255,8 @@ class DocumentModels {
             case "account_payment" -> "Payment on account" + method;
             case "reversal" -> "Payment reversed";
             case "void" -> "Sale voided";
+            case "return" -> "Goods returned (credit note)";
+            case "return_void" -> "Credit note voided";
             default -> l.kind();
         };
     }

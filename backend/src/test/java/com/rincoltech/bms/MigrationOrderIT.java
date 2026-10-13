@@ -38,11 +38,11 @@ class MigrationOrderIT {
      * The migrations already merged and deployed: their numbers never change and none is removed.
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
      * came before V42 (the loan pledge guard, #176, merged), then V43 (payment methods, #160, merged),
-     * then V44 (the retail customer accounts, #196). Nothing here enforces the order, merge order does.
+     * then V44 (the retail customer accounts, #196), then V45 (customer returns, #201, merged). Nothing here enforces the order, merge order does.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
-            "28", "29", "30", "31", "32", "33", "34", "37", "38", "39", "40", "41", "42", "43", "44");
+            "28", "29", "30", "31", "32", "33", "34", "37", "38", "39", "40", "41", "42", "43", "44", "45");
 
     /** Every migration file on the classpath in numeric order: a new migration only adds its file. */
     static final List<String> VERSIONS = discoveredVersions();
@@ -791,12 +791,121 @@ class MigrationOrderIT {
     }
 
     /**
+     * #201: staging already holds credit sales, some of them part paid, when customer returns arrive. The migration adds two
+     * tables, a helper function, a new body for the sales guard, the account 4110 and one permission, and touches none of
+     * the large tables: the column lists of the sales tables and of the stock movements are unchanged, the sale keeps its paid
+     * amount, both new tables are empty, every new check and foreign key ends validated, the retail tenant gets the contra
+     * account with a debit normal balance, only the administrator gets the permission, and the guard still refuses to lower
+     * a paid amount outside a named reversed receipt or voided return while it lets one rise.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a part paid credit sale across V45.
+     */
+    @Test
+    void customerReturnsMigrationKeepsTheSalesOfADatabaseAtV44() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            verifyCustomerReturnsMigration(postgres.getJdbcUrl());
+        }
+    }
+
+    /** The body of the case above, on any empty database that has the roles of {@code 01-roles.sh}. */
+    static void verifyCustomerReturnsMigration(String url) {
+        assertThat(flyway(url, "44").migrate().targetSchemaVersion).isEqualTo("44");
+        JdbcClient owner =
+                JdbcClient.create(new DriverManagerDataSource(url, "bms_owner", TestDatabase.OWNER_PASSWORD));
+        UUID tenant = UUID.randomUUID();
+        UUID branch = UUID.randomUUID();
+        UUID customer = UUID.randomUUID();
+        UUID sale = UUID.randomUUID();
+        owner.sql(
+                        "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v44r', 'Test Tenant V44R', '00000000-0000-4000-8000-000000000001')")
+                .param(tenant)
+                .update();
+        owner.sql(
+                        "INSERT INTO branches (id, tenant_id, code, name, is_head_office) VALUES (?, ?, 'HQ', 'Head Office', true)")
+                .params(branch, tenant)
+                .update();
+        owner.sql("SELECT platform_set_tenant_modules(?, ?::text[], NULL)")
+                .params(tenant, "{retail}")
+                .query((rs, n) -> 1)
+                .single();
+        owner.sql("INSERT INTO retail_customers (id, tenant_id, name) VALUES (?, ?, 'Test Buyer 01')")
+                .params(customer, tenant)
+                .update();
+        owner.sql("""
+                        INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, customer_id,
+                            due_date, currency, total_minor, cost_total_minor, paid_minor, status, created_by)
+                        VALUES (?, ?, ?, 'RS00000001', DATE '2026-01-15', 'credit', ?, DATE '2026-02-15', 'UGX', 300, 249, 100,
+                            'completed', gen_random_uuid())
+                        """).params(sale, tenant, branch, customer).update();
+        String large = "('retail_sales', 'retail_sale_lines', 'retail_sale_payments', 'retail_stock_movements')";
+        String columns =
+                "SELECT string_agg(table_name || '.' || column_name || ':' || data_type, ',' ORDER BY table_name,"
+                        + " ordinal_position) FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN "
+                        + large;
+        String before = owner.sql(columns).query(String.class).single();
+
+        MigrateResult result = DatabaseMigrator.migrate(url, "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+        assertThat(result.success).isTrue();
+        assertThat(result.migrations.stream().map(m -> m.version).toList())
+                .containsExactlyElementsOf(VERSIONS.subList(VERSIONS.indexOf("44") + 1, VERSIONS.size()));
+        assertThat(owner.sql(columns).query(String.class).single())
+                .as("the large tables keep their shape")
+                .isEqualTo(before);
+        assertThat(owner.sql("SELECT paid_minor FROM retail_sales WHERE id = ?")
+                        .param(sale)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(100);
+        assertThat(owner.sql("""
+                                SELECT (SELECT count(*) FROM retail_sale_returns) + (SELECT count(*) FROM retail_sale_return_lines)
+                                """).query(Long.class).single())
+                .as("a tenant that never records a return writes nothing")
+                .isZero();
+        assertThat(owner.sql("""
+                                SELECT count(*) FROM pg_constraint
+                                 WHERE conrelid IN ('retail_sale_returns'::regclass, 'retail_sale_return_lines'::regclass)
+                                   AND NOT convalidated
+                                """).query(Long.class).single())
+                .as("every constraint ends validated")
+                .isZero();
+        assertThat(owner.sql("""
+                                SELECT account_type || ':' || normal_balance FROM gl_accounts
+                                 WHERE tenant_id = ? AND system_key = 'sales_returns' AND code = '4110'
+                                """).param(tenant).query(String.class).single()).isEqualTo("income:debit");
+        assertThat(owner.sql("""
+                                SELECT string_agg(role_key, ',' ORDER BY role_key) FROM role_permissions
+                                 WHERE permission_key = 'retail.sale.return'
+                                """).query(String.class).single()).isEqualTo("tenant_admin");
+        assertThat(owner.sql("SELECT retail_sale_settled_minor(?, ?)")
+                        .params(tenant, sale)
+                        .query(Long.class)
+                        .single())
+                .as("no payment row and no return backs the paid amount of this sale")
+                .isZero();
+        // The guard still refuses a lowering, with no setting and with a settings value naming nothing, and lets a rise
+        // through.
+        assertThatThrownBy(() -> owner.sql("UPDATE retail_sales SET paid_minor = 40 WHERE id = ?")
+                        .param(sale)
+                        .update())
+                .hasStackTraceContaining("only the paid amount");
+        assertThatThrownBy(() -> owner.sql("UPDATE retail_sales SET paid_minor = 0 WHERE id = ?")
+                        .param(sale)
+                        .update())
+                .hasStackTraceContaining("only the paid amount");
+        assertThat(owner.sql("UPDATE retail_sales SET paid_minor = 150 WHERE id = ?")
+                        .param(sale)
+                        .update())
+                .isEqualTo(1);
+    }
+
+    /**
      * #197: staging already holds sales, transfers and stored receipts when the optional documents arrive. The migration
      * adds five tables and one permission and replaces one CHECK on documents: every sale, transfer and stored file is as
      * it was, the sales tables keep their shape, every new check ends validated, the old stored kinds are still accepted
      * and the new ones are too (an unknown one is not), only the administrator gets the permission, and the database
      * itself refuses a counter that skips, a deleted counter, an edited document and a second change of a quotation.
-     * JUSTIFICATION-A3: a new test case; no existing case migrates a database across V46 (V45 is the returns slice, open).
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a database across V46 (V45, the returns slice, is merged by then).
      */
     @Test
     void documentsMigrationKeepsTheSalesAndFilesOfADatabaseAtV44() {

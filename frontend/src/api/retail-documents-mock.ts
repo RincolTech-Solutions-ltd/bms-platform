@@ -26,7 +26,7 @@ export interface DocumentsEnv {
 export type DocumentsMock = Pick<
   RetailApi,
   | 'listSaleDocuments' | 'issueSaleDocument' | 'issueTransferDocument' | 'listDocuments' | 'renderDocument' | 'documentUrl' | 'documentSeries'
-  | 'setDocumentPrefix' | 'listQuotations' | 'getQuotation' | 'createQuotation' | 'cancelQuotation' | 'convertQuotation' | 'customerStatementPdf'
+  | 'setDocumentPrefix' | 'renderCreditNote' | 'listQuotations' | 'getQuotation' | 'createQuotation' | 'cancelQuotation' | 'convertQuotation' | 'customerStatementPdf'
 >;
 
 const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
@@ -235,6 +235,8 @@ export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
             });
         },
       ),
+
+    renderCreditNote: (returnId) => gate(() => ({ return_id: returnId, credit_note_no: 'CN-MOCK', status: 'issued', pdf_document_id: env.nextId('f'), created: true })),
 
     customerStatementPdf: () => gate(() => new Blob(['%PDF-1.4 mock statement'], { type: 'application/pdf' })),
   };

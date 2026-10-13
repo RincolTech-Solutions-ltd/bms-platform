@@ -539,6 +539,27 @@ the buckets and the days late, the Top number, the shared live search box narrow
 form sends each field as a value or an explicit clear (`clear_credit_limit`, `clear_terms_days`). The
 pure rules (the preview of an allocation, the checks of a payment and of a limit, the words of a statement) are in `account-state.ts`.
 
+## Customer returns (#201, ADR-033)
+
+Three places show it while `/me` lists `returns` (`SCREEN_CAPABILITY`, so none of them is drawn while it is off), and only to whoever holds `retail.sale.return`
+(administrators), so a seller's menu is the same with the feature on and off. **Customer returns** (`/staff/retail/returns`, crumb "Customer returns", tile
+`retail-returns`) lists the credit notes newest first with the shared live search (credit note number, sale number or buyer; the term is never put in the address) and a
+Standing or Voided filter; each row shows the number, the date, the total, the sale and how it was settled, and Open. **Take goods back**
+(`/staff/retail/returns/new/$saleId`, crumb "Take goods back", named after the sale) is reached from **Return goods** on an open sale in All sales or Credit sales (shown
+for a completed sale at a branch where the caller holds the permission, together with a list of the returns already made against it). For each line it shows what was
+sold, what has come back and what can still come back, and a quantity box; once a quantity is typed it asks why (the reason codes), what happens to the goods (put back
+on the shelf at a branch or store, or damaged and written off, which names no branch) and, for a line sold in a pack, whether the quantity is counted in the pack or in
+single units. The credit of each line and the credit note total are shown before saving with the server's maths (`returns-state.ts`: a share of what the line was charged,
+the last piece taking the remainder). **How the customer is repaid** offers cash, mobile money, bank, or "Take it off what they owe" (only for a credit sale that owes; for a
+cash sale, an imported credit sale or one that is paid up the option is shown and cannot be chosen, with the reason beneath); when the credit is more than is owed, the form says how much comes off the balance and asks how the rest is paid out. A "Pay the money out of the till of" box appears when money is paid out and the person may use more than one branch. The
+button waits for a form the server would accept, and the draft and its Idempotency-Key survive a reload (`usePersistedDraft`). A return that takes the sale's returns to the tenant's
+threshold answers "needs a second administrator" instead of a credit note, and so does voiding a return that was approved. **Retail settings** shows a warning
+while returns are on and no approval limit is set. **The credit note** (`/staff/retail/returns/$returnId`, crumb "Credit note", named after
+its number) shows the facts, each line with its reason and where the goods went, the total and how it was settled, and for `retail.sale.return` a Void form that needs a
+reason of at least five characters and says what voiding does (the goods come off the shelf again, the money or balance goes back); the printable credit note is the
+documents slice. The customer statement names a return "Goods returned, credit note" and its void "Credit note voided". `returns` is marked ready in
+`capabilities-state.ts` with its tour (`capability-returns`: an introduction, the tile, the list) and a Help page tour (`page-returns`). The mock
+(`retail-returns-mock.ts`) holds the server's rules in small for development and tests.
 ## Optional documents (#197, ADR-033)
 
 Four places show it while `/me` lists `documents` (`SCREEN_CAPABILITY`, `canIssueDocuments`), and only to a user holding `retail.document.issue` (the
@@ -547,15 +568,15 @@ administrator's), so a seller's menu is the same with the feature on and off and
 search (the number or the buyer), a type filter, Show more, and an Open PDF button on each card (a document whose PDF was never stored is rendered from its snapshot
 first, in a tab opened before the waiting so it is not taken for a pop-up); a document whose sale or quotation was cancelled is marked Void and its PDF is said to stay
 as issued. Under the list **Document numbers** shows each series (the prefix, and per branch the next number and how many were issued); whoever holds
-`core.settings.manage` changes a prefix (capitals and digits, starting with a letter, as the server checks) and later numbers take it; the credit note series is not
-listed until returns arrive. **Quotations** (`/staff/retail/quotations`, crumb "Quotations", tile `retail-quotations`) lists them with a status filter and the same search;
+`core.settings.manage` changes a prefix (capitals and digits, starting with a letter, as the server checks) and later numbers take it; a credit note has no
+series (the return numbers it). **Quotations** (`/staff/retail/quotations`, crumb "Quotations", tile `retail-quotations`) lists them with a status filter and the same search;
 New quotation (one branch chosen at the top; a store is refused by the server) takes the buyer (a credit buyer from the list or a typed name and phone), the last day (thirty
 days ahead by default, never before today), notes and items added with the same picker and line cards as the sale (pack units, a typed price, no stock check because a quotation
 reserves nothing), with one idempotency key per draft kept in the tab like a sale. An open quotation can be cancelled with a reason, or made into a sale (how it is paid, a
 date for credit unless the buyer has terms, keep the quoted prices, also make the invoice) by a user who holds `retail.sale.create` at its branch; an expired one says it cannot be
 converted. **A sale** shows a Documents panel under the saved receipt and under an opened sale (All sales, Credit sales): the documents it has, and Make invoice and Make
 delivery note for those it lacks (a checkbox shows the prices on the delivery note, off by default); a voided sale offers none. **A stock move** shows Make delivery note on its
-detail (quantities only). **A buyer's account** shows "Open the statement as a PDF" under the on-screen statement while `customer_accounts` is also on. `documents` is marked
+detail (quantities only). **A credit note** (Customer returns, #201) shows "Open the credit note as a PDF" while `documents` is also on, for a user who may issue documents at its branch; the PDF carries the return's own number. **A buyer's account** shows "Open the statement as a PDF" under the on-screen statement while `customer_accounts` is also on. `documents` is marked
 ready in `capabilities-state.ts` with its tour (`capability-documents`: an introduction, the tile, where documents are made) and Help page tours (`page-documents`,
 `page-quotations`). The pure rules (the words and state of a document, the documents a sale may still be given, the prefix rule, the quotation form and its request, the
 conversion choices) are in `documents-state.ts`; `retail-documents-mock.ts` is the fabricated server for `VITE_RETAIL_MOCK` and the tests.

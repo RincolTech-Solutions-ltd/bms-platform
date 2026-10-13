@@ -134,6 +134,12 @@ export const icons = {
       <path d="M9 9h6M9 13h3" />
     </Svg>
   ),
+  returns: (
+    <Svg>
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+    </Svg>
+  ),
   customerAgeing: (
     <Svg>
       <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />

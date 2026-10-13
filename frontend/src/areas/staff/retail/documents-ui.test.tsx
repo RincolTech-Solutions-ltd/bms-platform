@@ -8,7 +8,7 @@ import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
 import { StaffContext } from '../context';
 import { DocumentsPage } from './documents';
-import { DocumentCard, DocumentCards, SaleDocuments, SeriesPanel } from './documents-ui';
+import { CreditNotePdf, DocumentCard, DocumentCards, SaleDocuments, SeriesPanel } from './documents-ui';
 import { RetailHome } from './home';
 import { canIssueDocuments, canUse, screensFor } from './permissions';
 import { ConvertPanel, QuotationForm, quotationState, QuotationsPage } from './quotations';
@@ -161,5 +161,15 @@ describe('a quotation', () => {
     expect(html).toContain('data-tour="quotation-items"');
     expect(html).toContain('Save quotation');
     expect(html).toContain('Stock is not reserved');
+  });
+});
+
+describe('the credit note as a PDF', () => {
+  it('is offered only while documents are on, to a user who may issue them at the return branch', () => {
+    expect(page(mockMe('admin'), <CreditNotePdf returnId="r1" branchId={branch} />)).toBe('');
+    expect(page(seller, <CreditNotePdf returnId="r1" branchId={branch} />)).toBe('');
+    const html = page(admin, <CreditNotePdf returnId="r1" branchId={branch} />);
+    expect(html).toContain('Open the credit note as a PDF');
+    expect(html).toContain('data-tour="credit-note-pdf"');
   });
 });

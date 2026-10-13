@@ -212,11 +212,15 @@ class RetailDocumentsIT extends IntegrationTest {
 
     /** The stored PDF of a document, downloaded through the signed URL as the staff user would. */
     byte[] pdf(JsonNode document) {
+        return pdf(document, DOCS);
+    }
+
+    byte[] pdf(JsonNode document, String perms) {
         assertThat(document.has("pdf_document_id")).as("%s", document).isTrue();
         ResponseEntity<JsonNode> url = http.exchange(
                 "/api/v1/documents/" + document.get("pdf_document_id").asString() + "/download-url",
                 HttpMethod.POST,
-                new org.springframework.http.HttpEntity<>(api.headers(DOCS, "*", Map.of())),
+                new org.springframework.http.HttpEntity<>(api.headers(perms, "*", Map.of())),
                 JsonNode.class);
         assertThat(url.getStatusCode()).as("%s", url.getBody()).isEqualTo(HttpStatus.OK);
         HttpHeaders h = new HttpHeaders();
@@ -1448,5 +1452,224 @@ class RetailDocumentsIT extends IntegrationTest {
         }
         pool.shutdown();
         assertThat(count("retail_document_prefixes")).isEqualTo(1);
+    }
+
+    // ---- the credit note PDF (the return numbers it) -------------------------------------------------
+
+    static final String RET = DOCS + ",retail.sale.return";
+
+    JsonNode takeBack(UUID sale, int lineIndex, String qty, UUID unit, String refund) {
+        UUID saleLine = UUID.fromString(api.get("/sales/" + sale, DOCS)
+                .getBody()
+                .get("lines")
+                .get(lineIndex)
+                .get("id")
+                .asString());
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("sale_line_id", saleLine);
+        line.put("qty", qty);
+        if (unit != null) {
+            line.put("unit_id", unit);
+        }
+        line.put("reason", "damaged");
+        line.put("disposition", "write_off");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("lines", List.of(line));
+        body.put("refund_method", refund);
+        if (refund.equals("account")) {
+            body.put("money_method", "cash");
+        }
+        body.put("note", "Two arrived wet");
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/returns", body, RET, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody().get("sale_return");
+    }
+
+    ResponseEntity<JsonNode> creditNote(UUID returnId, String perms, String branches) {
+        return api.call(HttpMethod.POST, "/returns/" + returnId + "/document", Map.of(), perms, branches, Map.of());
+    }
+
+    /** The credit note has the return's own number, totals as the return recorded, stored once, and the invoice it was sold on. */
+    @Test
+    void aCreditNoteCarriesTheReturnsOwnNumberAndTotals() throws Exception {
+        capability("returns", true);
+        UUID s = sale(hq, "cash", "5");
+        JsonNode invoice = issued(s, "invoice");
+        JsonNode ret = takeBack(s, 0, "2", null, "cash");
+        UUID id = UUID.fromString(ret.get("id").asString());
+        ResponseEntity<JsonNode> first = creditNote(id, RET, "*");
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody().get("credit_note_no").asString())
+                .isEqualTo(ret.get("credit_note_no").asString());
+        assertThat(first.getBody().get("status").asString()).isEqualTo("issued");
+        assertThat(first.getBody().get("created").asBoolean()).isTrue();
+        assertThat(first.getHeaders().getCacheControl()).isEqualTo("no-store");
+        byte[] pdf = pdf(first.getBody(), RET);
+        String text = text(pdf);
+        assertThat(text)
+                .contains(
+                        "CREDIT NOTE",
+                        ret.get("credit_note_no").asString(),
+                        "Against invoice",
+                        invoice.get("number").asString())
+                .contains("Test Product DC-1", "Damaged", "Cash", "Two arrived wet")
+                .contains("Two hundred Uganda shillings only", "Received by Cash customer");
+        assertThat(ret.get("total_minor").asLong()).isEqualTo(200);
+        assertThat(pages(pdf)).isEqualTo(1);
+        golden("retail_credit_note", pdf);
+        // Stored once: the same request finds it.
+        ResponseEntity<JsonNode> again = creditNote(id, RET, "*");
+        assertThat(again.getBody().get("pdf_document_id").asString())
+                .isEqualTo(first.getBody().get("pdf_document_id").asString());
+        assertThat(again.getBody().get("created").asBoolean()).isFalse();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM documents WHERE tenant_id = ? AND subject_type = 'retail.credit_note'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        // No second numbered series: nothing of this type is in the series tables.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_document_series WHERE tenant_id = ? AND type = 'credit_note'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(api.get("/document-series", DOCS).getBody().toString()).doesNotContain("credit_note");
+    }
+
+    /** A return of a pack prints the pack and the base units, with the credit the return recorded. */
+    @Test
+    void aCreditNoteShowsPackUnitsAsReturned() throws Exception {
+        capability("returns", true);
+        capability("units", true);
+        UUID carton = api.unit("carton");
+        assertThat(api.post("/products/" + product + "/units", Map.of("unit_id", carton, "factor", "12"), DOCS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "3", "unit_id", carton)));
+        ResponseEntity<JsonNode> sold =
+                api.postKeyed("/sales", body, DOCS, "*", UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode ret = takeBack(RetailTestSupport.id(sold), 0, "1", carton, "cash");
+        assertThat(ret.get("total_minor").asLong())
+                .as("one carton of the three at 1,200")
+                .isEqualTo(1_200);
+        JsonNode doc =
+                creditNote(UUID.fromString(ret.get("id").asString()), RET, "*").getBody();
+        String text = text(pdf(doc, RET));
+        assertThat(text)
+                .contains("1 carton", "= 12 u-dc-1", "1,200", "One thousand, two hundred Uganda shillings only");
+    }
+
+    /** Taken off a credit buyer's balance, and a void keeps the number and is served only with the VOID banner. */
+    @Test
+    void aVoidedReturnsCreditNoteIsServedOnlyWithAVoidBanner() throws Exception {
+        capability("returns", true);
+        UUID s = sale(hq, "credit", "5");
+        JsonNode ret = takeBack(s, 0, "1", null, "account");
+        UUID id = UUID.fromString(ret.get("id").asString());
+        JsonNode clean = creditNote(id, RET, "*").getBody();
+        String cleanPdf = clean.get("pdf_document_id").asString();
+        assertThat(text(pdf(clean, RET))).doesNotContain("VOID");
+        ResponseEntity<JsonNode> voided = api.postKeyed(
+                "/returns/" + id + "/void",
+                Map.of("reason", "Entered by mistake"),
+                RET,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> marked = creditNote(id, RET, "*");
+        assertThat(marked.getBody().get("status").asString()).isEqualTo("void");
+        assertThat(marked.getBody().get("credit_note_no").asString())
+                .isEqualTo(ret.get("credit_note_no").asString());
+        String voidPdf = marked.getBody().get("pdf_document_id").asString();
+        assertThat(voidPdf).isNotEqualTo(cleanPdf);
+        byte[] bytes = pdf(marked.getBody(), RET);
+        assertThat(text(bytes))
+                .contains(
+                        "VOID: this credit note was voided",
+                        ret.get("credit_note_no").asString());
+        sample("retail_credit_note_void", bytes);
+        assertThat(creditNote(id, RET, "*").getBody().get("pdf_document_id").asString())
+                .as("one void version")
+                .isEqualTo(voidPdf);
+        ResponseEntity<JsonNode> link = http.exchange(
+                "/api/v1/documents/" + cleanPdf + "/download-url",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(api.headers(RET, "*", Map.of())),
+                JsonNode.class);
+        assertThat(link.getStatusCode())
+                .as("the copy issued before the void is not served")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /** Scope and permissions: the return's branch, both permissions, both capabilities. */
+    @Test
+    void aCreditNoteFollowsTheScopeThePermissionsAndTheCapabilities() {
+        capability("returns", true);
+        UUID s = sale(hq, "cash", "3");
+        UUID id = UUID.fromString(takeBack(s, 0, "1", null, "cash").get("id").asString());
+        assertThat(creditNote(id, RET, br2.toString()).getStatusCode())
+                .as("another branch's return")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(creditNote(id, DOCS, "*").getStatusCode())
+                .as("no permission to read returns")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(creditNote(id, ADMIN + ",retail.sale.return", "*").getStatusCode())
+                .as("no document permission")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(creditNote(UUID.randomUUID(), RET, "*").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(creditNote(id, RET, "*").getStatusCode()).isEqualTo(HttpStatus.OK);
+        capability("returns", false);
+        ResponseEntity<JsonNode> off = creditNote(id, RET, "*");
+        assertThat(off.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(code(off)).isEqualTo("capability_not_enabled");
+        capability("returns", true);
+        capability("documents", false);
+        assertThat(code(creditNote(id, RET, "*"))).isEqualTo("capability_not_enabled");
+    }
+
+    /** The statement prints the return and its void in words, and the running balance follows them. */
+    @Test
+    void theStatementPrintsReturnsAndTheirVoidsReadably() throws Exception {
+        capability("returns", true);
+        capability("customer_accounts", true);
+        UUID customer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 03"), DOCS));
+        UUID s = creditSale(customer, hq, "2026-10-02", "5");
+        JsonNode ret = takeBack(s, 0, "2", null, "account");
+        String range = "?from=2026-10-01&to=2028-06-30";
+        String before = text(statementPdf(customer, range, DOCS));
+        assertThat(before)
+                .contains(
+                        "Goods returned (credit note)",
+                        ret.get("credit_note_no").asString(),
+                        "Closing balance",
+                        "300");
+        assertThat(before).doesNotContain("Credit note voided");
+        assertThat(api.postKeyed(
+                                "/returns/" + ret.get("id").asString() + "/void",
+                                Map.of("reason", "Entered by mistake"),
+                                RET,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        String after = text(statementPdf(customer, range, DOCS));
+        assertThat(after).contains("Goods returned (credit note)", "Credit note voided", "Closing balance", "500");
+        JsonNode screen =
+                api.get("/customers/" + customer + "/statement" + range, DOCS).getBody();
+        List<String> kinds = new ArrayList<>();
+        for (JsonNode l : screen.get("lines")) {
+            kinds.add(l.get("kind").asString());
+        }
+        assertThat(kinds).contains("return", "return_void");
+        assertThat(screen.get("closing_minor").asLong()).isEqualTo(500);
     }
 }

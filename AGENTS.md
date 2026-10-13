@@ -109,6 +109,15 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   accounts page, the Customer ageing page, the account page (summary, take a payment, payments taken, statement), the Credit buyers and Credit control links
   and the sale screen's limit handling show while `module_capabilities` lists `customer_accounts`, which is marked ready with its own
   tour (`capability-customer-accounts`). The statement as a PDF is the documents slice.
+- **Built (trade 7 of 10, issue #201, ADR-033):** migration `V45` (customer returns): `retail_sale_returns` (the numbered credit note, `CN` + branch code + six digits per tenant
+  and branch) and `retail_sale_return_lines`, `retail_sale_settled_minor`, the chart account 4110 `sales_returns`, the permission `retail.sale.return` (administrators), and a new body
+  for the `retail_sales` guard that also lets `paid_minor` fall inside the void of a named return (`bms.void_sale_return`, by exactly the credit it gave) without loosening the V44
+  binding to a reversed receipt; routes `POST` and `GET /retail/sales/{id}/returns`, `GET /retail/returns`, `GET /retail/returns/{id}` and `POST /retail/returns/{id}/void`; a return
+  of whole or partial lines in any unit (exact conversions), with a reason, restocked into a chosen branch or store or written off, credited at the price charged and costed at the
+  sale line's snapshot, repaid in cash, mobile money or bank, or taken off a credit sale's balance (the rest in money); numbered, idempotent, audited, voidable by reversal, and above the
+  tenant's `retail_sale_return` approval threshold a maker-checker action; the daily profit, the sales analysis, the margins, the dashboard, the evaluation, the cash book and the
+  statement net it on the day of the return. The Customer returns page, the Take goods back form, the credit note view and the Return goods link on an open sale show while
+  `module_capabilities` lists `returns`, which is marked ready with its own tour (`capability-returns`). The credit note PDF is the documents slice.
 - **Built (trade 8 of 10, issue #197, ADR-033):** migration `V46` (optional documents): `retail_document_prefixes`, `retail_document_series`
   (a counter per tenant, type and branch, taken under a row lock in the transaction that writes the document, with a guard so it only
   rises by one), `retail_quotations` and its lines, `retail_documents` (append-only, with the JSON snapshot of everything the document shows),
@@ -264,7 +273,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `retail.manifest` | The retail vertical's registration with the core (ADR-020) | 3.28 | 6.11.1 chart | none |
 | `retail.catalogue` | Categories, units, products, append-only price history | RET-01, RET-02 | 6.11 | 7.11.20 |
 | `retail.stock` | Stock movements and balances, stock-takes, usage and damage, transfers between branches (one step, or dispatch then receive or cancel), branch roles, the stock-by-location and transfers-in-flight reports, reconciliation; retail posting helpers | RET-03, RET-07, RET-08, RET-11, RET-16 | 6.11 | 7.11.20 |
-| `retail.sales` | Sales with snapshots, voids, credit buyers, payments | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
+| `retail.sales` | Sales with snapshots, voids, credit buyers, payments, customer accounts, customer returns and credit notes | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
 | `retail.purchasing` | Suppliers, restocks that set prices atomically | RET-06, RET-11 | 6.11 | 7.11.20 |
 | `retail.reports` | Valuation, revaluation difference, daily profit; the analytics reports of issue #149 (sales analysis, margins, stock health, credit control, business evaluation, owner dashboard), read only | RET-09, RET-10 | 6.11.3 | 7.11.20 |
 | `retail.cashbook` (ADR-022, issue #147, migration `V34`) | Daily savings, cash banked, withdrawals, expenses, advances to owner or company, cash reports | FR-RET-17 to FR-RET-32 | 6.11.5 | 7.11.21 |
