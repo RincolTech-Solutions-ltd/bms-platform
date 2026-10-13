@@ -77,10 +77,10 @@ describe('making a quotation into a sale', () => {
 });
 
 describe('opening a PDF', () => {
-  let tab: { location: { href: string }; close: () => void };
+  let tab: { location: { href: string }; close: () => void; opener: unknown };
 
   beforeEach(() => {
-    tab = { location: { href: '' }, close: vi.fn() };
+    tab = { location: { href: '' }, close: vi.fn(), opener: window };
     vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
   });
 
@@ -92,6 +92,7 @@ describe('opening a PDF', () => {
     await waitFor(() => expect(tab.location.href).toBe('/files/one.pdf'));
     expect(url).toHaveBeenCalledWith('f1');
     expect(renderIt).not.toHaveBeenCalled();
+    expect(tab.opener, 'the new tab cannot reach back into this page').toBeNull();
   });
 
   it('renders a document whose PDF was never stored before opening it', async () => {

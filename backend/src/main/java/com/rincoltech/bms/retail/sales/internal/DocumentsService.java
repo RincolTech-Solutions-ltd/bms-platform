@@ -408,23 +408,37 @@ class DocumentsService {
      * render, one records, and the other gets it back and drops its own upload.
      */
     IssuedDocument withPdf(UUID id, boolean created) {
-        Draft draft = reading.execute(status -> draft(id));
-        UUID pdf = draft.pdfId();
-        if (pdf == null) {
-            byte[] bytes = documents.renderPdf(draft.doc().type(), draft.model());
-            GeneratedObject object = documents.putGenerated(bytes, draft.doc().type());
-            boolean recorded = false;
-            try {
-                pdf = writing.execute(status -> recordPdf(draft.doc(), draft.storedNumber(), object));
-                recorded = pdf.equals(object.id());
-            } finally {
-                if (!recorded) {
-                    documents.discardGenerated(object);
+        // A void that lands between the read and the record is seen under the lock (recordPdf answers null), and the
+        // copy is
+        // made again as the void one: a clean copy of a document that has become void is never stored and returned.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Draft draft = reading.execute(status -> draft(id));
+            UUID pdf = draft.pdfId();
+            if (pdf == null) {
+                byte[] bytes = documents.renderPdf(draft.doc().type(), draft.model());
+                GeneratedObject object =
+                        documents.putGenerated(bytes, draft.doc().type());
+                boolean recorded = false;
+                try {
+                    pdf = writing.execute(status -> recordPdf(draft.doc(), draft.storedNumber(), object));
+                    recorded = pdf != null && pdf.equals(object.id());
+                } finally {
+                    if (!recorded) {
+                        documents.discardGenerated(object);
+                    }
+                }
+                if (pdf == null) {
+                    continue;
                 }
             }
+            UUID stored = pdf;
+            return reading.execute(status -> response(repo.find(id).orElseThrow(), stored, created));
         }
-        UUID stored = pdf;
-        return reading.execute(status -> response(repo.find(id).orElseThrow(), stored, created));
+        throw new ApiException(
+                HttpStatus.CONFLICT,
+                "document_changed",
+                "Document changed",
+                "The document changed while it was being made. Try again.");
     }
 
     private Draft draft(UUID id) {
@@ -448,6 +462,15 @@ class DocumentsService {
                 .param(doc.id())
                 .query()
                 .singleRow();
+        // Share lock on the sale, so a void that has not committed finishes first and one that starts after waits for
+        // this copy.
+        if (doc.saleId() != null) {
+            repo.lockSaleShared(doc.saleId());
+        }
+        Doc current = repo.find(doc.id()).orElseThrow();
+        if (!storedNumber(current).equals(number)) {
+            return null;
+        }
         Optional<Documents.StoredDocument> stored =
                 documents.findGenerated(DocumentsRepository.SUBJECT, doc.id(), doc.type(), number);
         if (stored.isPresent()) {

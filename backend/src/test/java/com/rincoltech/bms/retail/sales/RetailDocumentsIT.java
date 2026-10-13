@@ -1593,9 +1593,7 @@ class RetailDocumentsIT extends IntegrationTest {
         assertThat(voidPdf).isNotEqualTo(cleanPdf);
         byte[] bytes = pdf(marked.getBody(), RET);
         assertThat(text(bytes))
-                .contains(
-                        "VOID: this credit note was voided",
-                        ret.get("credit_note_no").asString());
+                .contains("VOID: voided on", ret.get("credit_note_no").asString());
         sample("retail_credit_note_void", bytes);
         assertThat(creditNote(id, RET, "*").getBody().get("pdf_document_id").asString())
                 .as("one void version")
@@ -1671,5 +1669,154 @@ class RetailDocumentsIT extends IntegrationTest {
         }
         assertThat(kinds).contains("return", "return_void");
         assertThat(screen.get("closing_minor").asLong()).isEqualTo(500);
+    }
+
+    // JUSTIFICATION-A3: the second review follow-up cases of the same new test class (inert markup on all five PDFs,
+    // other tenant,
+    // the facts of a credit note after a void, a void that lands while a PDF is being recorded).
+
+    static final String HOSTILE = "<script>alert(1)</script> & < > \"q\" 'a'";
+
+    /** A buyer named with a literal script tag, ampersand, angle brackets and quotes prints exactly as typed on all five PDFs. */
+    @Test
+    void markupInANamePrintsInertOnTheInvoiceQuotationDeliveryNoteCreditNoteAndStatement() throws Exception {
+        capability("returns", true);
+        capability("customer_accounts", true);
+        UUID customer = RetailTestSupport.id(
+                api.post("/customers", Map.of("name", HOSTILE, "contact", "<b>+256700000009</b>"), DOCS));
+        UUID s = creditSale(customer, hq, "2026-10-02", "4");
+        for (String type : List.of("invoice", "delivery_note")) {
+            assertThat(text(pdf(issued(s, type)))).as(type).contains(HOSTILE);
+        }
+        Map<String, Object> quote = new LinkedHashMap<>();
+        quote.put("branch_id", hq);
+        quote.put("customer_id", customer);
+        quote.put("valid_until", "2026-11-08");
+        quote.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> q = api.postKeyed("/quotations", quote, DOCS, "*", "hostile-quote");
+        assertThat(q.getStatusCode()).as("%s", q.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(text(pdf(q.getBody()))).as("quotation").contains(HOSTILE, "<b>+256700000009</b>");
+        JsonNode ret = takeBack(s, 0, "1", null, "account");
+        JsonNode note =
+                creditNote(UUID.fromString(ret.get("id").asString()), RET, "*").getBody();
+        assertThat(text(pdf(note, RET))).as("credit note").contains(HOSTILE, "<b>+256700000009</b>");
+        String statement = text(statementPdf(customer, "?from=2026-10-01&to=2028-06-30", DOCS));
+        assertThat(statement).as("statement").contains(HOSTILE, "<b>+256700000009</b>");
+    }
+
+    /** Another tenant cannot see a credit note of this one: a plain 404, not a hint that it exists. */
+    @Test
+    void anotherTenantGetsA404ForACreditNote() {
+        capability("returns", true);
+        UUID s = sale(hq, "cash", "2");
+        UUID id = UUID.fromString(takeBack(s, 0, "1", null, "cash").get("id").asString());
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-docs-cn-other", false, true);
+        RetailTestSupport theirs = new RetailTestSupport(http, other);
+        for (String key : List.of("documents", "returns")) {
+            String etag =
+                    theirs.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+            assertThat(theirs.call(
+                                    HttpMethod.PUT,
+                                    "/settings/capabilities",
+                                    Map.of(key, true),
+                                    SETTINGS,
+                                    "*",
+                                    etag == null ? Map.of() : Map.of("If-Match", etag))
+                            .getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+        }
+        ResponseEntity<JsonNode> r =
+                theirs.call(HttpMethod.POST, "/returns/" + id + "/document", Map.of(), RET, "*", Map.of());
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(code(r)).isEqualTo("not_found");
+        assertThat(creditNote(id, RET, "*").getStatusCode())
+                .as("and it is still ours")
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /** The copy marked void keeps the issuer, the issue day and the buyer of the original, and says who voided it and when. */
+    @Test
+    void theVoidCreditNoteKeepsTheOriginalIssuerDayAndBuyer() throws Exception {
+        capability("returns", true);
+        UUID customer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 04"), DOCS));
+        UUID s = creditSale(customer, hq, "2026-10-02", "5");
+        JsonNode ret = takeBack(s, 0, "1", null, "account");
+        UUID id = UUID.fromString(ret.get("id").asString());
+        assertThat(creditNote(id, RET, "*").getStatusCode()).isEqualTo(HttpStatus.OK);
+        // After the issue the buyer is renamed and a different user asks: the void copy must not take either.
+        TestDatabase.owner()
+                .sql("UPDATE retail_customers SET name = 'Renamed Buyer' WHERE id = ?")
+                .param(customer)
+                .update();
+        RetailTestSupport asker = new RetailTestSupport(http, t);
+        TestDatabase.owner()
+                .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                        + " VALUES (?, ?, 'staff', 'Someone Else', 'someone.else@example.test', 'active')")
+                .params(asker.userId(), t.tenantId())
+                .update();
+        assertThat(api.postKeyed(
+                                "/returns/" + id + "/void",
+                                Map.of("reason", "Entered by mistake"),
+                                RET,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> marked =
+                asker.call(HttpMethod.POST, "/returns/" + id + "/document", Map.of(), RET, "*", Map.of());
+        assertThat(marked.getStatusCode()).as("%s", marked.getBody()).isEqualTo(HttpStatus.OK);
+        String text = text(pdf(marked.getBody(), RET));
+        assertThat(text).contains("VOID: voided on", "Entered by mistake", "Test Buyer 04", "Issued by Test Cashier");
+        assertThat(text).doesNotContain("Renamed Buyer", "Issued by Someone Else");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM retail_credit_note_issues WHERE tenant_id = ?")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    /** A void that lands while the PDF is being recorded is seen under the lock: the copy stored and returned is the void one. */
+    @Test
+    void aVoidLandingWhileAPdfIsBeingRecordedYieldsTheVoidCopy() throws Exception {
+        UUID s = sale(hq, "cash", "1");
+        Mockito.doThrow(new ApiException(
+                        HttpStatus.SERVICE_UNAVAILABLE, "documents_busy", "Documents busy", "Try again."))
+                .when(documents)
+                .renderPdf(ArgumentMatchers.any(), ArgumentMatchers.any());
+        ResponseEntity<JsonNode> failed = issue(s, "invoice", DOCS, "*", "race-render-1");
+        assertThat(failed.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        Mockito.reset(documents);
+        JsonNode doc = api.get("/sales/" + s + "/documents", DOCS)
+                .getBody()
+                .get("items")
+                .get(0);
+        try (java.sql.Connection voiding = TestDatabase.ownerDataSource().getConnection()) {
+            voiding.setAutoCommit(false);
+            try (java.sql.PreparedStatement st = voiding.prepareStatement(
+                    "UPDATE retail_sales SET status = 'voided', voided_at = now(), voided_by = gen_random_uuid(),"
+                            + " void_reason = 'Race test', version = version + 1 WHERE id = ?")) {
+                st.setObject(1, s);
+                assertThat(st.executeUpdate()).isEqualTo(1);
+            }
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            Future<ResponseEntity<JsonNode>> rendering =
+                    pool.submit(() -> api.post("/documents/" + doc.get("id").asString() + "/pdf", Map.of(), DOCS));
+            Thread.sleep(700);
+            assertThat(rendering.isDone()).as("recording waits for the void").isFalse();
+            voiding.commit();
+            ResponseEntity<JsonNode> r = rendering.get(30, TimeUnit.SECONDS);
+            pool.shutdown();
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+            assertThat(r.getBody().get("status").asString()).isEqualTo("void");
+            assertThat(text(pdf(r.getBody()))).contains("VOID: its sale was voided");
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM documents WHERE tenant_id = ? AND doc_number = 'INV-HQ-000001'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .as("no clean copy was stored")
+                .isZero();
     }
 }

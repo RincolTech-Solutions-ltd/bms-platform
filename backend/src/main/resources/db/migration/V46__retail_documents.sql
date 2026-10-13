@@ -1,7 +1,7 @@
 -- V46: retail optional documents: quotation, invoice and delivery note with numbered series per tenant and branch (ADR-033, issue #197;
 -- docs/specs/trade-capabilities.md section 6; ADR-034 for the stored PDF).
 --
--- Expand only, safe on a populated database. Five new tables, one new permission, and one replaced CHECK on the
+-- Expand only, safe on a populated database. Six new tables, one new permission, and one replaced CHECK on the
 -- core documents table. Nothing existing is dropped, renamed or rewritten, no tenant is switched on (the documents
 -- capability lives in the tenant settings group retail.capabilities and is off until an administrator turns it on)
 -- and a tenant that never issues a document never writes a row to any of the new tables. A sale, a transfer and a
@@ -132,7 +132,8 @@ CREATE TABLE retail_quotations (
     CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL AND cancelled_by IS NOT NULL
                                      AND cancel_reason IS NOT NULL AND btrim(cancel_reason) <> ''))
 );
-CREATE INDEX retail_quotations_list ON retail_quotations (tenant_id, branch_id, quote_date DESC, id DESC);
+-- The list pages on created_at DESC, id DESC (QuotationsRepository), so the index is on exactly that.
+CREATE INDEX retail_quotations_list ON retail_quotations (tenant_id, branch_id, created_at DESC, id DESC);
 CREATE UNIQUE INDEX retail_quotations_converted_sale ON retail_quotations (tenant_id, converted_sale_id)
     WHERE converted_sale_id IS NOT NULL;
 SELECT bms_apply_tenant_rls('retail_quotations');
@@ -245,6 +246,29 @@ SELECT bms_grant_app('retail_documents', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_documents');
 
 -- ---------------------------------------------------------------------------------------------
+-- retail_credit_note_issues: who issued the credit note PDF of a return, on which business day, and the buyer's name and phone
+-- as they read then. The return's own rows are the record of the goods and the money; this is only the facts of the document that
+-- the return does not keep (the issuer, the issue date, the buyer as named at the time), so that the copy marked void after a void
+-- carries the issuer, the issue date and the buyer of the original and not those of whoever asks later. One row per return,
+-- written with the first PDF, append-only.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE TABLE retail_credit_note_issues (
+    tenant_id     uuid         NOT NULL REFERENCES tenants (id),
+    return_id     uuid         NOT NULL,
+    created_at    timestamptz  NOT NULL DEFAULT now(),
+    issued_by     uuid         NOT NULL,
+    issued_on     date         NOT NULL,
+    buyer_name    varchar(200) NOT NULL,
+    buyer_contact varchar(100),
+    PRIMARY KEY (tenant_id, return_id),
+    FOREIGN KEY (tenant_id, return_id) REFERENCES retail_sale_returns (tenant_id, id)
+);
+SELECT bms_apply_tenant_rls('retail_credit_note_issues');
+SELECT bms_grant_app('retail_credit_note_issues', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_credit_note_issues');
+
+-- ---------------------------------------------------------------------------------------------
 -- The permission (chapter 8 section 8.3.2; SDD matrix equals the seeds). Issuing and reprinting a document, making a
 -- quotation and producing a customer statement PDF. Administrators only, as the spec says (6.2): the sales role gets
 -- it only if an administrator chooses, and there is no per-role switch yet. Converting a quotation also needs
@@ -252,7 +276,7 @@ SELECT bms_make_append_only('retail_documents');
 -- ---------------------------------------------------------------------------------------------
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
-    ('retail.document.issue', 'retail', 'Documents: issue and reprint quotations, invoices and delivery notes, and customer statements', false);
+    ('retail.document.issue', 'retail', 'Documents: issue and reprint quotations, invoices, delivery notes and credit note PDFs, and customer statements', false);
 
 INSERT INTO role_permissions (role_key, permission_key) VALUES
     ('tenant_admin', 'retail.document.issue');

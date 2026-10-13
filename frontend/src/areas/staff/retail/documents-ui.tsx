@@ -14,11 +14,22 @@ import { Problem, money } from './ui';
 // after-step: none of this is in the way of recording a sale, and none of it draws while the capability is off.
 
 /**
+ * A new, empty tab for a PDF that is about to be made, opened before the waiting so a pop-up blocker does not stop it. Its opener is
+ * cut at once, so the page that loads there (a signed file link) can never reach back into this one.
+ */
+function openTab(): Window | null {
+  if (typeof window === 'undefined' || typeof window.open !== 'function') return null;
+  const tab = window.open('about:blank', '_blank');
+  if (tab) tab.opener = null;
+  return tab;
+}
+
+/**
  * Opens the PDF of a document in a new tab. A document whose PDF was never stored (a render failed when it was issued) is rendered
  * from its snapshot first. The tab is opened before the waiting so a browser does not take it for a pop-up.
  */
 export async function openDocumentPdf(doc: Pick<RetailDocument, 'id' | 'pdf_document_id'>): Promise<void> {
-  const tab = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('about:blank', '_blank') : null;
+  const tab = openTab();
   try {
     const stored = doc.pdf_document_id ? doc.pdf_document_id : (await retail.renderDocument(doc.id ?? '')).pdf_document_id;
     const url = await retail.documentUrl(stored ?? '');
@@ -35,7 +46,7 @@ export async function openDocumentPdf(doc: Pick<RetailDocument, 'id' | 'pdf_docu
  * nothing here numbers anything.
  */
 export async function openCreditNotePdf(returnId: string): Promise<void> {
-  const tab = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('about:blank', '_blank') : null;
+  const tab = openTab();
   try {
     const made = await retail.renderCreditNote(returnId);
     const url = await retail.documentUrl(made.pdf_document_id ?? '');
@@ -67,7 +78,7 @@ export function CreditNotePdf({ returnId, branchId }: { returnId: string; branch
  * before the waiting, as {@link openDocumentPdf} does, so a pop-up blocker does not stop it.
  */
 export async function openMadePdf(make: () => Promise<Blob>): Promise<void> {
-  const tab = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('about:blank', '_blank') : null;
+  const tab = openTab();
   try {
     const url = URL.createObjectURL(await make());
     if (tab) tab.location.href = url;

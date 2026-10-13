@@ -335,7 +335,10 @@ never in the sale's path. The choices the design left open:
    note PDF (`credit_note.html`, with the lines returned, the invoice or sale they were sold on, the way the buyer is repaid and the
    amount in figures and words) under that number and stores it once, immutable, in the documents store (subject type
    `retail.credit_note`, `doc_type` `credit_note`); the return's own rows are the record, so no snapshot table is needed. A voided return
-   reads as void and is served only as a second version with the VOID banner, like every document. It needs the `documents` and
+   reads as void and is served only as a second version with the VOID banner, like every document; the banner says when it was voided, by whom
+   and why, and the copy keeps the issuer, the issue day and the buyer's name of the original issue (`retail_credit_note_issues`, one append-only row
+   per return written with the first PDF), not those of whoever asks after the void. A void that lands while a copy is being recorded is seen under
+   a lock on the return (and the sale, for an invoice), and the copy is made again as the void one. It needs the `documents` and
    `returns` capabilities and both `retail.document.issue` and `retail.sale.return` in the return's branch.
 8. **Permission.** One, `retail.document.issue`, administrators only (the spec's rule: the sales role only if an administrator chooses,
    and there is no per-role switch yet), consulted only while the capability is on, in the branch scope of the document. Everything

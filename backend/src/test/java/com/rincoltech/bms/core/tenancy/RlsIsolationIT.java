@@ -367,6 +367,12 @@ class RlsIsolationIT {
                           FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
                          WHERE l.tenant_id = ? LIMIT 1
                         """).params(t.tenantId(), saleReturn, t.tenantId()).update();
+        // The facts of a credit note PDF (ADR-033, #197): issuer, day and buyer as named, for the fixture return.
+        // JUSTIFICATION-A3: a fixture row for the new table; the isolation test needs one row per tenant table.
+        owner.sql("""
+                        INSERT INTO retail_credit_note_issues (tenant_id, return_id, issued_by, issued_on, buyer_name)
+                        VALUES (?, ?, ?, DATE '2026-01-16', 'Test Buyer 01')
+                        """).params(t.tenantId(), saleReturn, user).update();
         // The retail import's source references (migration V20, #55).
         owner.sql("""
                         INSERT INTO retail_import_refs (tenant_id, source_file, source_ref, target_type, source_user)

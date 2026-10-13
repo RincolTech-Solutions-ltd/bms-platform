@@ -7,12 +7,12 @@ import com.rincoltech.bms.kernel.AmountInWords;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
-import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.sales.internal.DocumentSnapshot.Place;
 import com.rincoltech.bms.retail.sales.internal.DocumentsRepository.BranchInfo;
 import com.rincoltech.bms.retail.sales.internal.ReturnsApi.ReturnLine;
 import com.rincoltech.bms.retail.sales.internal.ReturnsApi.SaleReturn;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -89,33 +89,54 @@ class CreditNotes {
     /** The credit note of a return: its number, whether it is void, and the stored PDF. */
     record Issued(UUID returnId, String creditNoteNo, String status, UUID pdfDocumentId, boolean created) {}
 
-    private record Draft(SaleReturn ret, String storedNumber, UUID pdfId, Map<String, Object> model) {}
+    /** The facts of the document the return does not keep: who issued it, on which day, and the buyer as named then. */
+    record Facts(UUID issuedBy, LocalDate issuedOn, String buyerName, String buyerContact) {}
+
+    private record Draft(
+            SaleReturn ret,
+            String storedNumber,
+            UUID pdfId,
+            Facts facts,
+            boolean firstIssue,
+            Map<String, Object> model) {}
 
     /**
      * The credit note PDF of a return: the stored copy when there is one, else rendered now and stored once. Idempotent by return
-     * and number; a return outside the caller's branch scope is a 404, as is one of a capability that is off.
+     * and number; a return outside the caller's branch scope is a 404, as is one of a capability that is off. A void that lands
+     * between reading the return and recording the copy is seen under the lock, and the copy is made again as the void one, so a
+     * clean copy of a voided return is never stored.
      */
     Issued issue(UUID returnId) {
         capabilities.require(RetailCapabilities.DOCUMENTS);
-        Draft draft = reading.execute(status -> draft(returnId));
-        UUID pdf = draft.pdfId();
-        boolean created = false;
-        if (pdf == null) {
-            byte[] bytes = documents.renderPdf(TYPE, draft.model());
-            GeneratedObject object = documents.putGenerated(bytes, TYPE);
-            boolean recorded = false;
-            try {
-                pdf = writing.execute(status -> record(draft, object));
-                recorded = pdf.equals(object.id());
-                created = recorded;
-            } finally {
-                if (!recorded) {
-                    documents.discardGenerated(object);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Draft draft = reading.execute(status -> draft(returnId));
+            UUID pdf = draft.pdfId();
+            boolean created = false;
+            if (pdf == null) {
+                byte[] bytes = documents.renderPdf(TYPE, draft.model());
+                GeneratedObject object = documents.putGenerated(bytes, TYPE);
+                boolean recorded = false;
+                try {
+                    pdf = writing.execute(status -> record(draft, object));
+                    recorded = pdf != null && pdf.equals(object.id());
+                    created = recorded;
+                } finally {
+                    if (!recorded) {
+                        documents.discardGenerated(object);
+                    }
+                }
+                if (pdf == null) {
+                    continue;
                 }
             }
+            boolean voided = draft.ret().status().equals("voided");
+            return new Issued(returnId, draft.ret().creditNoteNo(), voided ? "void" : "issued", pdf, created);
         }
-        boolean voided = draft.ret().status().equals("voided");
-        return new Issued(returnId, draft.ret().creditNoteNo(), voided ? "void" : "issued", pdf, created);
+        throw new ApiException(
+                org.springframework.http.HttpStatus.CONFLICT,
+                "document_changed",
+                "Document changed",
+                "The credit note changed while it was being made. Try again.");
     }
 
     private Draft draft(UUID returnId) {
@@ -129,20 +150,73 @@ class CreditNotes {
         String number = voided ? ret.creditNoteNo() + DocumentsService.VOID_SUFFIX : ret.creditNoteNo();
         Optional<Documents.StoredDocument> stored = documents.findGenerated(SUBJECT, returnId, TYPE, number);
         if (stored.isPresent()) {
-            return new Draft(ret, number, stored.get().id(), null);
+            return new Draft(ret, number, stored.get().id(), null, false, null);
         }
-        return new Draft(ret, number, null, model(ret, voided));
+        // The issuer, the day and the buyer come from the first issue when there was one (the copy marked void is the
+        // original's
+        // facts plus the void), else from now.
+        Optional<Facts> original = facts(returnId);
+        Facts facts = original.orElseGet(() -> currentFacts(ret));
+        return new Draft(ret, number, null, facts, original.isEmpty(), model(ret, voided, facts));
     }
 
+    private Optional<Facts> facts(UUID returnId) {
+        return jdbc.sql(
+                        "SELECT issued_by, issued_on, buyer_name, buyer_contact FROM retail_credit_note_issues WHERE return_id = ?")
+                .param(returnId)
+                .query((rs, n) -> new Facts(
+                        rs.getObject("issued_by", UUID.class),
+                        rs.getDate("issued_on").toLocalDate(),
+                        rs.getString("buyer_name"),
+                        rs.getString("buyer_contact")))
+                .optional();
+    }
+
+    private Facts currentFacts(SaleReturn r) {
+        Optional<DocumentsRepository.BuyerInfo> buyer =
+                r.customerId() == null ? Optional.empty() : docRepo.customer(r.customerId());
+        String name = buyer.map(DocumentsRepository.BuyerInfo::name)
+                .orElse(r.customerName() == null ? "Cash customer" : r.customerName());
+        return new Facts(
+                CurrentPrincipal.require().userId(),
+                clock.today(tenant.profile().timezone()),
+                name,
+                buyer.map(DocumentsRepository.BuyerInfo::contact).orElse(null));
+    }
+
+    /** Under an advisory lock on the return: look again at the status and at the stored copy, then record. */
     private UUID record(Draft draft, GeneratedObject object) {
         jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('retail.credit_note:' || ?::text, 0))")
                 .param(draft.ret().id())
                 .query()
                 .singleRow();
+        // Share lock on the return, so a void that has not committed finishes first and one that starts after waits for
+        // this copy.
+        boolean voidedNow = jdbc.sql("SELECT status = 'voided' FROM retail_sale_returns WHERE id = ? FOR SHARE")
+                .param(draft.ret().id())
+                .query(Boolean.class)
+                .single();
+        if (voidedNow != draft.storedNumber().endsWith(DocumentsService.VOID_SUFFIX)) {
+            return null;
+        }
         Optional<Documents.StoredDocument> stored =
                 documents.findGenerated(SUBJECT, draft.ret().id(), TYPE, draft.storedNumber());
         if (stored.isPresent()) {
             return stored.get().id();
+        }
+        if (draft.firstIssue() && !voidedNow) {
+            jdbc.sql("""
+                            INSERT INTO retail_credit_note_issues (tenant_id, return_id, issued_by, issued_on, buyer_name, buyer_contact)
+                            VALUES (current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                            ON CONFLICT (tenant_id, return_id) DO NOTHING
+                            """)
+                    .params(
+                            draft.ret().id(),
+                            draft.facts().issuedBy(),
+                            java.sql.Date.valueOf(draft.facts().issuedOn()),
+                            draft.facts().buyerName(),
+                            draft.facts().buyerContact())
+                    .update();
         }
         return documents
                 .recordGenerated(
@@ -155,7 +229,7 @@ class CreditNotes {
     }
 
     /** The model the template reads, from the return alone: what was credited is what the return recorded. */
-    Map<String, Object> model(SaleReturn r, boolean voided) {
+    Map<String, Object> model(SaleReturn r, boolean voided, Facts facts) {
         BranchInfo branch = docRepo.branch(r.branchId()).orElseThrow();
         Map<String, Object> m = models.common(
                 new Place(branch.name(), branch.location(), branch.code()),
@@ -167,19 +241,15 @@ class CreditNotes {
             Map<String, Object> doc = (Map<String, Object>) m.get("doc");
             doc.put(
                     "voided",
-                    "VOID: this credit note was voided on " + DocumentModels.date(r.voidedOn())
+                    "VOID: voided on " + DocumentModels.date(r.voidedOn()) + " by " + docRepo.userName(r.voidedBy())
+                            + (r.voidReason() == null ? "" : " (" + r.voidReason() + ")")
                             + ". Do not accept this document.");
         }
         String cur = r.currency();
         m.put("currency", cur);
-        Optional<DocumentsRepository.BuyerInfo> buyer =
-                r.customerId() == null ? Optional.empty() : docRepo.customer(r.customerId());
         Map<String, Object> b = new LinkedHashMap<>();
-        b.put(
-                "name",
-                buyer.map(DocumentsRepository.BuyerInfo::name)
-                        .orElse(r.customerName() == null ? "Cash customer" : r.customerName()));
-        b.put("contact", buyer.map(DocumentsRepository.BuyerInfo::contact).orElse(null));
+        b.put("name", facts.buyerName());
+        b.put("contact", facts.buyerContact());
         m.put("buyer", b);
         Map<String, Object> ref = new LinkedHashMap<>();
         ref.put(
@@ -215,10 +285,9 @@ class CreditNotes {
         totals.put("words", AmountInWords.of(r.totalMinor(), cur));
         m.put("totals", totals);
         m.put("notes", null);
-        Principal principal = CurrentPrincipal.require();
         Map<String, Object> signs = new LinkedHashMap<>();
-        signs.put("issuedBy", docRepo.userName(principal.userId()));
-        signs.put("issuedOn", DocumentModels.date(clock.today(tenant.profile().timezone())));
+        signs.put("issuedBy", docRepo.userName(facts.issuedBy()));
+        signs.put("issuedOn", DocumentModels.date(facts.issuedOn()));
         m.put("signs", signs);
         return m;
     }
