@@ -338,6 +338,19 @@ output changed.
   extracted text and Excel files by cell values on fabricated datasets with hand-computed output, and the pack is cross
   checked against the insights values. Real adapters have sandbox contract tests in a manually triggered CI job. Staging
   refusal tests (SMS `live`, live Pesapal URL) run in `mvn verify`.
+  Built (extras slice D1, issue #214), all on the staging shape of limits (one run at a time, 500 rows a table, a 1 MiB file, a 2
+  second timeout) and a movable clock, so no test depends on the day it runs:
+  `ReportRunsIT` (the tenant switch, the catalogue by module and permission, the life of a run, its parameters and currency echoed on
+  the file, two identical requests giving one run also when they arrive together, the `Idempotency-Key`, the rate limit, tenant and
+  user isolation of runs and files, cancel of a queued and of a running run, expiry and the 410), `ReportRunnerIT` (read only
+  `REPEATABLE READ` with the request limits lifted, the row and size caps at their boundary, the timeout, the platform limit and the
+  one-run-per-tenant rule, a run left running by a dead process, a switched-off tenant, a deactivated requester, a failure keeping
+  only a code with no value in the row, the audit or the log, formulas in the CSV, the audit of a run), `LendingParReportIT` (the
+  worked example of chapter 14 section 14.3 with hand-computed figures, grouping, branch and officer scope, a past date from the
+  snapshot, the cross check with the insights page, a book of 500 loans against independent sums), `InsightsFiguresIT` (the port
+  against the independent recomputation of the insights golden model) and `ReportMemoryIT`, which runs the reports on a
+  seeded book in a child JVM capped at the staging heap of 224 MB. `RlsIsolationIT` covers `report_runs` through its factory row,
+  and `ModularityTest` and `SecurityArchitectureTest` cover the new modules and the one caller of `deleteReportObject`.
 
 ## 15.8 Test data policy
 

@@ -287,23 +287,46 @@ class DocumentService implements Documents {
 
     @Override
     public GeneratedObject putGenerated(byte[] bytes, String docType) {
+        return putFile(bytes, docType, "application/pdf", "pdf");
+    }
+
+    @Override
+    public GeneratedObject putFile(byte[] bytes, String docType, String contentType, String extension) {
         UUID id = UUID.randomUUID();
         ZonedDateTime at = clock.now().atZone(ZoneOffset.UTC);
-        String key = "tenants/%s/%s/%04d/%02d/%s.pdf"
-                .formatted(TenantContext.require(), docType, at.getYear(), at.getMonthValue(), id);
-        storage.put(key, bytes, "application/pdf");
-        return new GeneratedObject(id, key, docType, sha256(bytes), bytes.length);
+        String key = "tenants/%s/%s/%04d/%02d/%s.%s"
+                .formatted(TenantContext.require(), docType, at.getYear(), at.getMonthValue(), id, extension);
+        storage.put(key, bytes, contentType);
+        return new GeneratedObject(id, key, docType, contentType, sha256(bytes), bytes.length);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredDocument recordGenerated(
             GeneratedObject object, String docNumber, String subjectType, UUID subjectId, UUID branchId) {
+        return recordGenerated(
+                object,
+                docNumber,
+                subjectType,
+                subjectId,
+                branchId,
+                CurrentPrincipal.require().userId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredDocument recordGenerated(
+            GeneratedObject object,
+            String docNumber,
+            String subjectType,
+            UUID subjectId,
+            UUID branchId,
+            UUID createdBy) {
         deleteIfRolledBack(object.key());
         jdbc.sql("""
                         INSERT INTO documents (id, tenant_id, branch_id, doc_type, doc_number, subject_type, subject_id,
                                                object_key, content_type, size_bytes, sha256, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, 'application/pdf', ?, ?, ?)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
                 .params(
                         object.id(),
@@ -313,9 +336,10 @@ class DocumentService implements Documents {
                         subjectType,
                         subjectId,
                         object.key(),
+                        object.contentType(),
                         object.sizeBytes(),
                         object.sha256(),
-                        CurrentPrincipal.require().userId())
+                        createdBy)
                 .update();
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("doc_type", object.docType());
@@ -326,6 +350,22 @@ class DocumentService implements Documents {
         after.put("sha256", object.sha256());
         audit.record(AuditLog.Entry.created("core.document.generated", "core.document", object.id(), branchId, after));
         return find(object.id()).orElseThrow();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void deleteReportObject(UUID documentId) {
+        var row = jdbc.sql("SELECT object_key, doc_type FROM documents WHERE id = ?")
+                .param(documentId)
+                .query((rs, n) -> new String[] {rs.getString("object_key"), rs.getString("doc_type")})
+                .optional();
+        if (row.isEmpty()) {
+            return;
+        }
+        if (!"report".equals(row.get()[1])) {
+            throw new IllegalArgumentException("Only the object of a report document may be deleted this way.");
+        }
+        storage.delete(row.get()[0]);
     }
 
     @Override
@@ -388,6 +428,8 @@ class DocumentService implements Documents {
             case "image/jpeg" -> ".jpg";
             case "image/png" -> ".png";
             case "image/webp" -> ".webp";
+            case "text/csv" -> ".csv";
+            case "application/json" -> ".json";
             default -> "";
         };
         return d.docType().replaceAll("[^A-Za-z0-9_-]", "_") + "-" + d.id() + ext;
