@@ -226,8 +226,8 @@ END
 $$;
 
 -- The recent count above reads by time; the table is purged 30 days after sending, so the index is small.
--- CREATE INDEX (not CONCURRENTLY, which cannot run in a migration transaction) blocks writes to the
--- outbox for the few milliseconds the build takes at this size.
+-- CREATE INDEX (not CONCURRENTLY, which cannot run in a migration transaction) adds nothing beyond the
+-- ACCESS EXCLUSIVE lock this transaction already holds on the outbox until commit (see the lock note).
 CREATE INDEX notification_outbox_by_updated ON notification_outbox (updated_at);
 
 -- ---------------------------------------------------------------------------------------------
@@ -278,7 +278,7 @@ BEGIN
            -- must outlive today's): it only ever moves the expiry later, and at most 2 days after the row was queued.
            expires_at = CASE WHEN p_outcome = 'deferred' AND p_expires_at IS NOT NULL AND o.expires_at IS NOT NULL
                                   AND p_expires_at > o.expires_at
-                             THEN least(p_expires_at, o.created_at + interval '2 days')
+                             THEN greatest(o.expires_at, least(p_expires_at, o.created_at + interval '2 days'))
                              ELSE o.expires_at END,
            updated_at = p_now
      WHERE o.id = p_id AND o.status = 'pending'

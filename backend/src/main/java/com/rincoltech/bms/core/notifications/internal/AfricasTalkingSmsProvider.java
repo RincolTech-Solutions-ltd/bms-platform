@@ -175,7 +175,13 @@ final class AfricasTalkingSmsProvider implements SmsProvider {
                         cost.isBlank() || cost.length() > 40 ? null : cost,
                         null);
             }
+            // The provider's per recipient codes, each mapped on purpose. 100 Processed, 101 Sent, 102 Queued: taken.
+            // Refused for good, nothing sent: 401 RiskHold, 402 InvalidSenderId, 403 InvalidPhoneNumber,
+            // 404 UnsupportedNumberType, 406 UserInBlacklist, 407 CouldNotRoute, 502 RejectedByGateway.
             case 401, 402, 403, 404, 406, 407, 502 -> rejected("provider_" + code);
+            // 409 DoNotDisturbRejection: the recipient does not take messages; final, not retried and not unknown.
+            case 409 -> rejected("provider_dnd");
+            // 405 InsufficientBalance: refused before sending; a retry after a top up is safe.
             case 405 -> throw new Transient("provider_insufficient_balance");
             // A gateway error after the request was taken: the message may still go.
             case 500, 501 -> throw new Ambiguous("provider_" + code);

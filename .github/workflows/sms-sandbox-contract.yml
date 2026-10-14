@@ -42,4 +42,4 @@ jobs:
           BMS_SMS_CONTRACT: "true"
           BMS_SMS_AT_API_KEY: ${{ secrets.BMS_SMS_SANDBOX_API_KEY }}
           BMS_SMS_CONTRACT_TO: ${{ vars.BMS_SMS_CONTRACT_TO }}
-        run: mvn -B -Dtest=AfricasTalkingSandboxContractTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -Dtest=AfricasTalkingSandboxContractTest test

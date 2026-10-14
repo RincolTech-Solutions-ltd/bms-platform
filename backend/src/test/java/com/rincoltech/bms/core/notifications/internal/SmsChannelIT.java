@@ -904,6 +904,35 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(at(before.get("expires_at"))).isBefore(start.plus(Duration.ofDays(2)));
     }
 
+    /** A reminder queued three days ahead already expires later than the 2 day bound: a deferral never pulls it earlier. */
+    @Test
+    void aDeferralNeverMovesAnExpiryEarlierEvenForARowQueuedDaysAhead() {
+        Instant start = day(33);
+        TestDatabase.Fixture t = tenant(100);
+        String key = key();
+        raw(t, "reminder", "+256700000216", start, key);
+        Instant farExpiry = start.plus(Duration.ofDays(3)).plus(Duration.ofHours(12));
+        TestDatabase.owner()
+                .sql("UPDATE notification_outbox SET expires_at = ?, attempts = 1 WHERE idempotency_key = ?")
+                .params(Timestamp.from(farExpiry), key)
+                .update();
+        UUID id = TestDatabase.owner()
+                .sql("SELECT id FROM notification_outbox WHERE idempotency_key = ?")
+                .param(key)
+                .query(UUID.class)
+                .single();
+        // Asked for a later time than the current expiry but the 2 day bound is earlier than the current expiry.
+        jdbc.sql("SELECT notification_outbox_record_result(?, 'deferred', NULL, 3, ?, ?, ?)")
+                .params(
+                        id,
+                        Timestamp.from(start.plusSeconds(60)),
+                        Timestamp.from(start),
+                        Timestamp.from(farExpiry.plus(Duration.ofDays(1))))
+                .query(String.class)
+                .single();
+        assertThat(at(outboxRow(key).get("expires_at"))).isEqualTo(farExpiry);
+    }
+
     /** Two senders racing for the same due rows never take one twice (the locked row is re-checked). */
     @Test
     void concurrentClaimersNeverTakeTheSameRow() throws Exception {

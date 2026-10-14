@@ -147,6 +147,13 @@ class AfricasTalkingSmsProviderTest {
             assertThat(outcome.messageId()).isNull();
             stop();
         }
+        // Do Not Disturb arrives as a per recipient code inside a 2xx answer: final, not unknown.
+        URI dndInside = start(e -> reply(e, 201, answer(409, "DoNotDisturbRejection", "None", "None")));
+        Outcome dnd = send(dndInside);
+        assertThat(dnd.status()).isEqualTo(Status.REJECTED);
+        assertThat(dnd.failureReason()).isEqualTo("provider_dnd");
+        assertThat(dnd.messageId()).isNull();
+        stop();
         // No balance: certainly not sent, so a retry is safe.
         URI noBalance = start(e -> reply(e, 201, answer(405, "Failed", "None", "None")));
         assertThatThrownBy(() -> send(noBalance))
