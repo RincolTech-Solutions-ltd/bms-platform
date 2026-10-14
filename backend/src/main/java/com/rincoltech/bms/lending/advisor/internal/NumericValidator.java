@@ -44,7 +44,8 @@ final class NumericValidator {
     /** The most a rounded compact figure may be off, as a share of the fact. */
     private static final BigDecimal TOLERANCE = new BigDecimal("0.05");
 
-    private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}");
+    private static final Pattern EMAIL =
+            Pattern.compile("[A-Za-z0-9._%+\\-]{1,64}@[A-Za-z0-9.\\-]{1,255}\\.[A-Za-z]{2,24}");
     private static final String SEP = "[\\s\\p{Z}./_\\-()]";
     private static final Pattern UGANDA_MOBILE =
             Pattern.compile("(?<!\\d)(?:\\+?256|0)" + SEP + "*7(?:" + SEP + "*\\d){8}(?!\\d)");
@@ -52,8 +53,21 @@ final class NumericValidator {
     private static final Pattern NIN = Pattern.compile("(?<![A-Za-z0-9])[Cc][MFmf][A-Za-z0-9]{12}(?![A-Za-z0-9])");
     private static final Pattern UUID_SHAPE =
             Pattern.compile("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
+    /** The top-level domains a model could turn a bare address into; not every two-letter word, which would block prose. */
+    private static final String TLDS =
+            "com|org|net|edu|gov|mil|int|io|co|ug|ke|tz|rw|app|dev|xyz|info|biz|me|tv|ly|cc|ru|cn|in"
+                    + "|uk|us|de|fr|shop|site|online|top|club|link|click|page|cloud|ai|so|tld|example|test|invalid|local";
+
     private static final Pattern MARKUP =
-            Pattern.compile("(?i)<\\s*[a-z/!]|\\]\\(|https?:|www\\.|ftp:|javascript:|data:text|```|&[a-z]+;|&#");
+            Pattern.compile("(?i)<\\s*[a-z/!]|\\]\\(|https?:|www\\.|ftp:|javascript:|data:text|```"
+                    + "|&[a-z]+;|&#"
+                    // a bare domain or a domain with a path, an IPv4 or IPv6 literal, an @handle
+                    + "|(?<![\\p{L}\\d@.-])(?:[a-z0-9-]{1,63}\\.){1,5}(?:" + TLDS + ")(?![\\p{L}\\d])"
+                    + "|(?<![\\p{L}\\d@.-])[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){1,5}/\\S"
+                    + "|(?<![\\d.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\d.])"
+                    + "|(?<![\\p{L}\\d:])(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}(?![\\p{L}\\d])"
+                    + "|(?<![\\p{L}\\d])::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})+"
+                    + "|(?<![\\p{L}\\d])@[a-z0-9_]{2,}");
     private static final Pattern THRESHOLD = Pattern.compile("(?i)\\b(?:fewer|less)\\s+than\\s+(?:5|five)\\b");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?;](?=\\s|$)|\\n");
     private static final Pattern CLAUSE_END = Pattern.compile(
@@ -61,6 +75,9 @@ final class NumericValidator {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern LOSS_WORD =
             Pattern.compile("(?i)\\b(?:loss|losses|deficit|negative|minus|shortfall|below zero)\\b");
+
+    /** The longest text the screens run on: a summary is at most 400 characters and a point at most 300. */
+    static final int MAX_TEXT = 2000;
 
     private NumericValidator() {}
 
@@ -220,6 +237,11 @@ final class NumericValidator {
      * markup, no personal data shape, and none of the forbidden strings (the system prompt's canary, anything a caller planted).
      */
     static void plainText(String normalised, String where, Context ctx, List<Violation> out) {
+        if (normalised.length() > MAX_TEXT) {
+            // Nothing a summary or a point needs is this long; the pattern screens are not run on it.
+            out.add(new Violation("too_long", where, null));
+            return;
+        }
         if (!Text.onlyLatinLetters(normalised)) {
             out.add(new Violation("unexpected_script", where, null));
         }

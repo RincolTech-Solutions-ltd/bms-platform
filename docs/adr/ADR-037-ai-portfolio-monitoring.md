@@ -244,10 +244,18 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    reviewed resource with a golden test of its contract. The earlier validator remains as a second line of defence over the
    substituted text and for answers written in prose. Cost: honest sentences that need a number are refused and the model is
    told to leave them out; the answers read more mechanically.
+   **What free prose is allowed (round 4).** Around the placeholders, a sentence that holds one may use only connector words
+   (and, while, with, the, of, in, for, is, are, was, were, at, to, by, on, from, as, also, this, that, which, so and a few more,
+   listed in spec 5.13), so it cannot deny or qualify what our code wrote. Any other sentence is general advisory
+   recommendation: no figure in any script or form, no movement or comparison word, no absolute or universal claim, no name
+   that is not an alias. The facts block already carries every movement through our placeholders, so prose has no need to.
+   What a change is compared with is written by our phrase table per kind of figure (a day, a stock, a flow over the range).
 8. **Decision 3, complementary suppression replaces the accepted residual risk.** The first amendment accepted that shown groups
    subtracted from a total give a hidden group's share. The owner's rule is never to expose small counts, so it is closed: when
    the hidden and left-out remainder is one to four loans, the smallest other groups are hidden too until it is five or more,
-   and likewise for the loans more than 30 days late behind a group's PAR 30.
+   and likewise for the loans more than 30 days late behind a group's PAR 30. The same logic covers overlapping windows: a
+   figure over the month and the same figure for today differing by one to four loans hides the larger window (disbursed,
+   collected, expected and the rate), and the PAR levels are treated as a partition of the late loans.
 9. **Decision 10, the harness exists and is offline.** `AdvisorEvaluation` runs a fixed golden set of fabricated fact sets and
    recorded answers, adversarial ones included, through the real chain with the recording client, checks every request before
    it would be sent, and scores by category with a gate of 100 percent. The same cases go to a real provider with

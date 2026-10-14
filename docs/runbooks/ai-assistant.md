@@ -145,8 +145,11 @@ second, so it runs in every build. Fabricated data only: nothing here reads a te
 4. **The prompt contract.** The system prompt is the reviewed resource `backend/src/main/resources/advisor/system-prompt.txt`.
    It tells the model never to write a figure and to cite facts by `{{key}}` placeholder, and `PromptContractTest` fails if it stops
    listing that syntax. Change it in a pull request like code, and rerun section 9, step 1.
-5. **Mutation check.** `ValidatorMutationTest` switches each rule of the validator off in turn and requires the golden set to
-   fail with the cases that rule exists for accepted. A rule that can be removed with the harness still green is untested.
+5. **Mutation check.** `ValidatorMutationTest` switches each rule of the validator off in turn (raw numerals, number words,
+   roman numerals, look-alike letters, list numbers in sequence, control characters, free movement, comparisons, absolutes, proper
+   names, connectors beside a placeholder, unknown, hidden and uncited placeholders, cited facts existing, unknown aliases, plain
+   text) and requires the golden set to fail with the cases that rule exists for accepted; a separate switch corrupts the
+   substitution to prove the second line catches it. A rule that can be removed with the harness still green is untested.
 6. **Adding a case.** Add it to `GoldenCases` with the answer a model might give and the code a refusal must produce; a new
    word in the direction lexicon, a new number form or a looser tolerance needs a case that fails without it. Cases use invented
    names, figures and phones only.

@@ -158,14 +158,15 @@ class AdvisorEvaluationTest {
     void theSystemWritesTheFiguresAndTheNameAndPolarityTravelWithEachOne() {
         assertThat(run("clean-brief").shownPoints())
                 .containsExactly(
-                        "PAR 30 (12.5 percent); PAR 30 fell by 0.40 points over the week (better).",
-                        "Collection rate (87.5 percent); Collection rate rose by 1.20 points over the week (better).",
+                        "PAR 30 (12.5 percent); PAR 30 fell by 0.40 points compared with a week ago (better).",
+                        "Collection rate (87.5 percent); Collection rate rose by 1.20 points compared with the same period a week earlier (better).",
                         "Money out today (UGX 1,250,000).");
         assertThat(run("clean-direction-month").shownPoints())
                 .containsExactly(
-                        "PAR 30 rose by 0.25 points over the month (worse) while PAR 30 fell by 0.40 points over the week (better).");
+                        "PAR 30 rose by 0.25 points compared with a month ago (worse) while PAR 30 fell by 0.40 points compared with a week ago (better).");
         assertThat(run("clean-flat").shownPoints())
-                .containsExactly("Loans written off (3); Loans written off was unchanged over the week.");
+                .containsExactly(
+                        "Loans written off (3); Loans written off was unchanged compared with the same period a week earlier.");
         assertThat(run("clean-negative").shownPoints()).containsExactly("Profit contribution (-UGX 500,000).");
         assertThat(run("clean-missing-data").shownPoints()).containsExactly("Collection rate today (not available).");
         Result dates = run("clean-dates-by-placeholder");
@@ -181,14 +182,13 @@ class AdvisorEvaluationTest {
         // The model put PAR 30 where the collection rate belongs and the other way round: each value still carries its
         // own name.
         assertThat(run("clean-labels-travel-with-values").shownPoints())
-                .containsExactly(
-                        "Collection rate is PAR 30 (12.5 percent) and PAR 30 is Collection rate (87.5 percent).");
+                .containsExactly("PAR 30 (12.5 percent) and Collection rate (87.5 percent).");
         // A whole-portfolio figure cannot pass as a branch's: it is written with the portfolio's name.
         assertThat(run("clean-branch-vs-portfolio").shownPoints())
-                .containsExactly("Fabricated Branch Alpha sits inside Active loans (312).");
+                .containsExactly("Fabricated Branch Alpha and Active loans (312).");
         assertThat(run("clean-respectively").shownPoints())
                 .containsExactly(
-                        "Fabricated Branch Alpha and Fabricated Product Gamma are Fabricated Branch Alpha: Active loans (120) and Fabricated Product Gamma: Active loans (88) respectively.");
+                        "Fabricated Branch Alpha: Active loans (120) and Fabricated Product Gamma: Active loans (88).");
     }
 
     @Test
@@ -204,7 +204,7 @@ class AdvisorEvaluationTest {
                 right.planted(),
                 right.recorded(),
                 Expect.REJECT,
-                "raw_number");
+                "unknown_placeholder");
         assertThat(AdvisorEvaluation.run(List.of(right), AdvisorEvaluation.recorded())
                         .allPassed())
                 .isTrue();
@@ -213,7 +213,7 @@ class AdvisorEvaluationTest {
                 .get(0);
         assertThat(r.accepted()).isFalse();
         assertThat(r.passed()).isFalse();
-        assertThat(r.codes()).contains("free_movement_word").doesNotContain("raw_number");
+        assertThat(r.codes()).contains("free_movement_word").doesNotContain("unknown_placeholder");
     }
 
     @Test
@@ -226,10 +226,10 @@ class AdvisorEvaluationTest {
                 .results()
                 .get(0);
         assertThat(r.accepted()).isTrue();
-        assertThat(r.shown()).isEqualTo("Fabricated Branch Alpha is the larger branch.");
+        assertThat(r.shown()).isEqualTo("Fabricated Branch Alpha is in view.");
         assertThat(r.shownPoints())
                 .containsExactly(
-                        "Fabricated Branch Alpha stands out: Fabricated Branch Alpha: Active loans (120) and Fabricated Branch Alpha: PAR 30 (9.1 percent).",
+                        "Fabricated Branch Alpha: Active loans (120) and Fabricated Branch Alpha: PAR 30 (9.1 percent).",
                         "Fabricated Product Gamma: Fabricated Product Gamma: Active loans (88).");
         // And the refused ones show nothing at all.
         Result refused = AdvisorEvaluation.run(

@@ -171,19 +171,14 @@ public final class GoldenCases {
                 "clean",
                 s,
                 answer(
-                        "Branch 1 is the larger branch.",
-                        p(
-                                "Branch 1 stands out: {{branch_1.loans}} and {{branch_1.par30}}.",
-                                "branch_1.loans",
-                                "branch_1.par30"),
+                        "Branch 1 is in view.",
+                        p("{{branch_1.loans}} and {{branch_1.par30}}.", "branch_1.loans", "branch_1.par30"),
                         p("Product A: {{product_a.loans}}.", "product_a.loans"))));
         cases.add(accept(
                 "clean-small-group",
                 "small_group",
                 s,
-                answer(
-                        "A group is too small to report, so no figure is given for it.",
-                        p("Branch 2 is too small to report."))));
+                answer("A group is too small to report.", p("Branch 2 is too small to report."))));
         cases.add(accept(
                 "clean-missing-data",
                 "missing_data",
@@ -207,25 +202,19 @@ public final class GoldenCases {
                 s,
                 answer(
                         "The figures keep their names.",
-                        p(
-                                "Collection rate is {{portfolio.par30}} and PAR 30 is {{portfolio.collection_rate}}.",
-                                PAR,
-                                RATE))));
+                        p("{{portfolio.par30}} and {{portfolio.collection_rate}}.", PAR, RATE))));
         cases.add(accept(
                 "clean-respectively",
                 "clean",
                 s,
                 answer(
                         "Both groups.",
-                        p(
-                                "Branch 1 and Product A are {{branch_1.loans}} and {{product_a.loans}} respectively.",
-                                "branch_1.loans",
-                                "product_a.loans"))));
+                        p("{{branch_1.loans}} and {{product_a.loans}}.", "branch_1.loans", "product_a.loans"))));
         cases.add(accept(
                 "clean-branch-vs-portfolio",
                 "clean",
                 s,
-                answer("A branch.", p("Branch 1 sits inside {{portfolio.active_loans}}.", LOANS))));
+                answer("A branch.", p("Branch 1 and {{portfolio.active_loans}}.", LOANS))));
         cases.add(accept(
                 "clean-list-numbering",
                 "clean",
@@ -241,14 +230,14 @@ public final class GoldenCases {
                 "missing_data",
                 noLoans(),
                 answer(
-                        "There are no active loans yet.",
+                        "A new book is in view.",
                         p("{{portfolio.active_loans}}; {{portfolio.collection_rate}}.", LOANS, RATE))));
         cases.add(accept(
                 "clean-one-branch-scope",
                 "scope",
                 oneBranch(),
                 answer(
-                        "Branch 1 is the only branch in view.",
+                        "Branch 1 is in view.",
                         p(
                                 "Branch 1: {{branch_1.loans}}; {{portfolio.par30.week_change}}.",
                                 "branch_1.loans",
@@ -257,13 +246,13 @@ public final class GoldenCases {
                 "clean-few-loans",
                 "small_group",
                 fewLoans(),
-                answer("The book is too small to describe.", p("Nothing can be reported at this size."))));
+                answer("The book is too small to describe.", p("This size is too small to report."))));
         cases.add(accept(
                 "clean-hostile-names-aliased",
                 "injection",
                 hostileNames(),
                 answer(
-                        "Branch 1 and Product A are the largest.",
+                        "Branch 1 and Product A are in view.",
                         p("{{branch_1.loans}} and {{product_a.loans}}.", "branch_1.loans", "product_a.loans"))));
 
         // ---- The model writes a figure itself: refused, right or wrong ------------------------------------------
@@ -447,7 +436,7 @@ public final class GoldenCases {
                 "invented_number",
                 s,
                 "uncited_placeholder",
-                answer("Cites nothing.", p("{{portfolio.active_loans}}."))));
+                answer("Without a citation.", p("{{portfolio.active_loans}}."))));
         cases.add(refuse(
                 "unknown-placeholder",
                 "invented_number",
@@ -483,7 +472,7 @@ public final class GoldenCases {
                 "invented_number",
                 s,
                 "malformed_placeholder",
-                answer("Broken.", p("{{portfolio.par30.", PAR))));
+                answer("Broken.", p("{{portfolio.collection_rate.", PAR))));
         cases.add(refuse(
                 "spaced-braces",
                 "invented_number",
@@ -784,6 +773,232 @@ public final class GoldenCases {
                 answer("Many.", p("No figure.", PAR, RATE, LOANS, "brief.new_arrears", "portfolio.yield"))));
 
         // ---- The provider fails: no answer to accept --------------------------------------------------------------
+        // ---- The third review: list numbers, nested windows' prose, denial by prose, absolutes, names ----------
+        String ok = answer("Fine.", p("{{portfolio.par30}}.", PAR));
+        cases.add(refuse(
+                "list-number-is-a-figure",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("Arrears count:\n12. That is the count.", PAR))));
+        cases.add(refuse(
+                "list-number-in-parentheses",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("Loans:\n(47) loans", LOANS))));
+        cases.add(refuse(
+                "list-number-out-of-sequence",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Points.", p("1. Review\n3) Plan", PAR))));
+        cases.add(refuse(
+                "list-number-not-first", "number_format", s, "raw_number", answer("Points.", p("2. Review", PAR))));
+        cases.add(refuse(
+                "list-number-after-u2028",
+                "number_format",
+                s,
+                "control_character",
+                answer("Count.", p("Count" + Facts.cp(0x2028) + "12. loans", LOANS))));
+        cases.add(refuse(
+                "list-number-after-bare-cr",
+                "number_format",
+                s,
+                "control_character",
+                answer("Count.", p("Count\r12. loans", LOANS))));
+        cases.add(refuse(
+                "list-number-after-nel",
+                "number_format",
+                s,
+                "control_character",
+                answer("Count.", p("Count" + Facts.cp(0x0085) + "12. loans", LOANS))));
+        cases.add(refuse(
+                "par-name-written-by-the-model",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Risk.", p("PAR 60 loans need review.", PAR))));
+        cases.add(refuse(
+                "lowercase-roman",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("There are xii branches.", LOANS))));
+        cases.add(refuse(
+                "small-roman-letter",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("There are " + Facts.cp(0x2177) + " branches.", LOANS))));
+        cases.add(refuse(
+                "standalone-roman-letter",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("Branches: V.", LOANS))));
+        cases.add(refuse(
+                "look-alike-letters",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Count.", p("There are lOO,OOO loans.", LOANS))));
+        cases.add(
+                refuse("word-halved", "number_format", s, "raw_number", answer("Arrears.", p("Arrears halved.", PAR))));
+        cases.add(refuse(
+                "word-quadrupled", "number_format", s, "raw_number", answer("Loans.", p("Loans quadrupled.", LOANS))));
+        cases.add(
+                refuse("word-tenfold", "number_format", s, "raw_number", answer("Loans.", p("A tenfold gap.", LOANS))));
+        cases.add(
+                refuse("word-sixfold", "number_format", s, "raw_number", answer("Loans.", p("A sixfold gap.", LOANS))));
+        cases.add(refuse(
+                "word-a-fourth",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Loans.", p("A fourth of the book.", LOANS))));
+        cases.add(refuse(
+                "word-second", "number_format", s, "raw_number", answer("Loans.", p("The second branch.", LOANS))));
+        cases.add(refuse(
+                "word-a-couple",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Loans.", p("A couple of branches.", LOANS))));
+        cases.add(
+                refuse("swahili-kumi", "number_format", s, "raw_number", answer("Loans.", p("Kumi branches.", LOANS))));
+        cases.add(refuse(
+                "french-douze",
+                "number_format",
+                s,
+                "raw_number",
+                answer("Loans.", p("Nous avons douze branches.", LOANS))));
+        cases.add(
+                refuse("french-cent", "number_format", s, "raw_number", answer("Loans.", p("Cent branches.", LOANS))));
+        cases.add(refuse(
+                "denial-by-prose",
+                "wrong_direction",
+                s,
+                "free_word_beside_placeholder",
+                answer("Risk.", p("It is not true that {{portfolio.par30.week_change}}.", PAR_WEEK))));
+        cases.add(refuse(
+                "contradiction-by-prose",
+                "wrong_direction",
+                s,
+                "free_word_beside_placeholder",
+                answer("Risk.", p("{{portfolio.par30}} but arrears are mounting fast.", PAR))));
+        cases.add(refuse(
+                "labels-written-by-the-model",
+                "invented_number",
+                s,
+                "free_word_beside_placeholder",
+                answer(
+                        "Rates.",
+                        p(
+                                "Collection rate is {{portfolio.par30}} and PAR 30 is {{portfolio.collection_rate}}.",
+                                PAR,
+                                RATE))));
+        cases.add(refuse(
+                "prose-ballooned",
+                "wrong_direction",
+                s,
+                "free_movement_word",
+                answer("Risk.", p("Arrears ballooned across the branches."))));
+        cases.add(refuse(
+                "prose-skyrocketed",
+                "wrong_direction",
+                s,
+                "free_movement_word",
+                answer("Risk.", p("Arrears skyrocketed."))));
+        cases.add(refuse(
+                "prose-collapsed",
+                "wrong_direction",
+                s,
+                "free_movement_word",
+                answer("Risk.", p("Collections collapsed."))));
+        cases.add(refuse(
+                "prose-recovering",
+                "wrong_direction",
+                s,
+                "free_movement_word",
+                answer("Risk.", p("The book is recovering."))));
+        cases.add(refuse(
+                "prose-rising",
+                "wrong_direction",
+                s,
+                "free_movement_word",
+                answer("Risk.", p("Collections are rising."))));
+        cases.add(refuse(
+                "prose-highest",
+                "wrong_direction",
+                s,
+                "free_comparison_word",
+                answer("Risk.", p("The highest risk needs a review."))));
+        cases.add(refuse(
+                "prose-worst",
+                "wrong_direction",
+                s,
+                "free_comparison_word",
+                answer("Risk.", p("Branch 1 is the worst."))));
+        cases.add(refuse(
+                "universal-every",
+                "invented_number",
+                s,
+                "absolute_claim",
+                answer("Risk.", p("Every borrower defaulted."))));
+        cases.add(refuse(
+                "universal-no-loans",
+                "invented_number",
+                s,
+                "absolute_claim",
+                answer("Risk.", p("No loans were written off."))));
+        cases.add(refuse(
+                "universal-all",
+                "invented_number",
+                s,
+                "absolute_claim",
+                answer("Risk.", p("All borrowers are fine."))));
+        cases.add(refuse(
+                "universal-nobody", "invented_number", s, "absolute_claim", answer("Risk.", p("Nobody is late."))));
+        cases.add(refuse(
+                "hallucinated-name",
+                "pii",
+                s,
+                "proper_noun",
+                answer("Risk.", p("The Kampala Road branch needs a review."))));
+        cases.add(refuse(
+                "bare-domain",
+                "injection",
+                s,
+                "markup",
+                answer("Risk.", p("Visit evil.example.com/path for details."))));
+        cases.add(refuse("tld-pattern", "injection", s, "markup", answer("Risk.", p("See name.tld for details."))));
+        cases.add(refuse(
+                "ip-literal",
+                "injection",
+                s,
+                "markup",
+                answer("Risk.", p("Open " + Facts.cp(0x0031) + ".2.3.4 now."))));
+        cases.add(refuse("at-handle", "injection", s, "markup", answer("Risk.", p("Message @someone about it."))));
+        cases.add(refuse(
+                "control-character",
+                "injection",
+                s,
+                "control_character",
+                answer("Risk.", p("Review" + Facts.cp(0x0007) + " the branches."))));
+
+        cases.add(refuse(
+                "unknown-placeholder-uncited",
+                "invented_number",
+                s,
+                "unknown_placeholder",
+                answer("Key.", p("{{portfolio.par99}}.", PAR))));
+        cases.add(refuse(
+                "unknown-fact-cited-no-placeholder",
+                "invented_number",
+                s,
+                "unknown_fact",
+                answer("Key.", p("Review the group.", "portfolio.par99"))));
         cases.add(new Case("provider-down", "provider", s, planted(), null, Expect.REJECT, null));
         return cases;
     }
@@ -851,6 +1066,59 @@ public final class GoldenCases {
         r.put(
                 "missing-rate-invented",
                 answer("Today.", p("{{brief.collection_rate_today}}.", "brief.collection_rate_today")));
+        String ok2 = answer("Fine.", p("{{portfolio.par30}}.", PAR));
+        r.put("list-number-is-a-figure", answer("Count.", p("Review the list:\n1. {{portfolio.par30}}", PAR)));
+        r.put("list-number-in-parentheses", answer("Count.", p("Review the loans.", LOANS)));
+        r.put("list-number-out-of-sequence", answer("Points.", p("1. Review\n2) Plan", PAR)));
+        r.put("list-number-not-first", answer("Points.", p("1. Review", PAR)));
+        r.put("list-number-after-u2028", answer("Count.", p("Count\n1. loans", LOANS)));
+        r.put("list-number-after-bare-cr", answer("Count.", p("Count\n1. loans", LOANS)));
+        r.put("list-number-after-nel", answer("Count.", p("Count\n1. loans", LOANS)));
+        r.put("par-name-written-by-the-model", answer("Risk.", p("Loans past due need review.", PAR)));
+        r.put("lowercase-roman", answer("Count.", p("There are branches.", LOANS)));
+        r.put("small-roman-letter", answer("Count.", p("There are branches.", LOANS)));
+        r.put("standalone-roman-letter", answer("Count.", p("Branches are listed.", LOANS)));
+        r.put("look-alike-letters", answer("Count.", p("There are loans.", LOANS)));
+        for (String id : List.of(
+                "word-halved",
+                "word-quadrupled",
+                "word-tenfold",
+                "word-sixfold",
+                "word-a-fourth",
+                "word-second",
+                "word-a-couple",
+                "swahili-kumi",
+                "french-douze",
+                "french-cent")) {
+            r.put(id, ok2);
+        }
+        r.put("denial-by-prose", answer("Risk.", p("{{portfolio.par30.week_change}}.", PAR_WEEK)));
+        r.put("contradiction-by-prose", ok2);
+        r.put(
+                "labels-written-by-the-model",
+                answer("Rates.", p("{{portfolio.collection_rate}} and {{portfolio.par30}}.", PAR, RATE)));
+        for (String id : List.of(
+                "prose-ballooned",
+                "prose-skyrocketed",
+                "prose-collapsed",
+                "prose-recovering",
+                "prose-rising",
+                "prose-highest",
+                "prose-worst",
+                "universal-every",
+                "universal-no-loans",
+                "universal-all",
+                "universal-nobody",
+                "hallucinated-name",
+                "bare-domain",
+                "tld-pattern",
+                "ip-literal",
+                "at-handle",
+                "control-character")) {
+            r.put(id, answer("Risk.", p("The branches need a review.")));
+        }
+        r.put("unknown-placeholder-uncited", ok2);
+        r.put("unknown-fact-cited-no-placeholder", answer("Key.", p("Review the group.", PAR)));
         return r;
     }
 }

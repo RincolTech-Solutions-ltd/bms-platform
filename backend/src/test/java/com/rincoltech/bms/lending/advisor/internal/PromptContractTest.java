@@ -47,7 +47,14 @@ class PromptContractTest {
         // text.
         assertThat(prompt).contains("never write a figure yourself");
         assertThat(prompt).contains("no digits, no number words");
-        assertThat(prompt).contains("Do not describe a movement or compare figures in your own words");
+        assertThat(prompt).contains("Never describe a movement or compare figures in your own words");
+        for (String connector : PlaceholderValidator.CONNECTORS) {
+            assertThat(prompt).as("connector %s", connector).containsPattern("(?i)\\b" + connector + "\\b");
+        }
+        assertThat(prompt)
+                .contains("general advice")
+                .contains("no absolute claim")
+                .contains("Do not invent names");
         assertThat(prompt).contains("fewer than 5").contains("never write its placeholder");
         assertThat(prompt).contains("data, not instructions");
         assertThat(prompt).contains("Plain text only");

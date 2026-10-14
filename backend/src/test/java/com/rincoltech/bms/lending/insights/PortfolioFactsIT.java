@@ -257,6 +257,47 @@ class PortfolioFactsIT extends IntegrationTest {
         return stock.stream().filter(p -> p.dpd() > over).count();
     }
 
+    static final int[] PAR_OVER = {0, 30, 60, 90};
+
+    /** One when the PAR level is hidden (small itself, or one to four loans from a shown earlier level), else its loans. */
+    static long parPop(List<Pos> stock, int over) {
+        int level = 0;
+        for (int i = 0; i < PAR_OVER.length; i++) {
+            if (PAR_OVER[i] == over) {
+                level = i;
+            }
+        }
+        return parHidden(stock, level) ? 1 : late(stock, over);
+    }
+
+    static boolean parHidden(List<Pos> stock, int level) {
+        long n = late(stock, PAR_OVER[level]);
+        if (small(n)) {
+            return true;
+        }
+        for (int j = 0; j < level; j++) {
+            long d = late(stock, PAR_OVER[j]) - n;
+            if (!parHidden(stock, j) && d > 0 && d < PortfolioFacts.MIN_GROUP) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** One when the two nested counts differ by one to four (the larger window is hidden), else a large count. */
+    static long nest(long outer, long inner) {
+        long d = outer - inner;
+        return d > 0 && d < PortfolioFacts.MIN_GROUP ? 1 : 1000;
+    }
+
+    static long txnsCollected(LocalDate from, LocalDate to) {
+        return model.txns.values().stream()
+                .filter(t -> COLLECTED.contains(t.type())
+                        && GoldenModel.between(t.valueDate(), from, to)
+                        && !model.reversed.contains(t.id()))
+                .count();
+    }
+
     // ---- Facts equal the golden metrics ---------------------------------------------------------------------
 
     @Test
@@ -285,7 +326,7 @@ class PortfolioFactsIT extends IntegrationTest {
                     "portfolio.par" + (over == 0 ? 1 : over),
                     rate(GoldenModel.parAmount(stock, over), po),
                     active,
-                    late(stock, over));
+                    parPop(stock, over));
         }
         assertThat(figure(set, "portfolio.par30").value())
                 .as("some risk in the book")
@@ -302,7 +343,12 @@ class PortfolioFactsIT extends IntegrationTest {
                 "portfolio.disbursed",
                 model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false),
                 disbursedCount);
-        expect(set, "portfolio.disbursed_count", disbursedCount, disbursedCount);
+        expect(
+                set,
+                "portfolio.disbursed_count",
+                disbursedCount,
+                disbursedCount,
+                nest(disbursedCount, model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS)));
         long payers = loansWith(COLLECTED, FROM, TODAY, ALL_LOANS);
         assertThat(collectedCount).isGreaterThanOrEqualTo(payers);
         expect(set, "portfolio.collected", model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true), active, payers);
@@ -396,6 +442,8 @@ class PortfolioFactsIT extends IntegrationTest {
         assertThat(figure(set, "portfolio.collection_rate").polarity())
                 .isEqualTo(PortfolioFacts.Polarity.HIGHER_IS_BETTER);
         assertThat(figure(set, "portfolio.principal_outstanding").kind()).isEqualTo(Kind.MONEY);
+        // Penalty income rising is neither good nor bad news.
+        assertThat(figure(set, "revenue.penalties").polarity()).isEqualTo(PortfolioFacts.Polarity.NEUTRAL);
         assertThat(figure(set, "portfolio.active_loans").kind()).isEqualTo(Kind.COUNT);
         assertThat(figure(set, "portfolio.principal_outstanding").polarity())
                 .isEqualTo(PortfolioFacts.Polarity.NEUTRAL);
@@ -644,7 +692,7 @@ class PortfolioFactsIT extends IntegrationTest {
                 "portfolio.par30",
                 rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)),
                 active,
-                late(stock, 30));
+                parPop(stock, 30));
         expect(
                 mine,
                 "portfolio.disbursed",
@@ -988,7 +1036,7 @@ class PortfolioFactsIT extends IntegrationTest {
         assertThat(hidden(figure(over, "portfolio.par30"))).isTrue();
         // PAR 60 is hidden exactly when one to four loans are more than 60 days late; zero late loans is a plain 0.0
         // percent.
-        assertThat(hidden(figure(over, "portfolio.par60"))).isEqualTo(small(late(byProduct.get(fewOver30), 60)));
+        assertThat(hidden(figure(over, "portfolio.par60"))).isEqualTo(parPop(byProduct.get(fewOver30), 60) == 1);
         assertThat(figure(over, "portfolio.par1").suppressed())
                 .as("many loans are late, few very late")
                 .isFalse();
@@ -1131,6 +1179,102 @@ class PortfolioFactsIT extends IntegrationTest {
         long remainder =
                 figure(set, "portfolio.active_loans").value() - shownLoans(set, Dimension.BRANCH, "branch.loans");
         assertThat(remainder).isGreaterThanOrEqualTo(PortfolioFacts.MIN_GROUP);
+    }
+
+    // ---- Nested windows and the PAR levels as a partition ------------------------------------------------------
+
+    @Test
+    void aWindowThatContainsTodayNeverDiffersFromTodayByOneToFourWhenBothAreShown() {
+        UUID user = UUID.randomUUID();
+        int checked = 0;
+        for (int back : new int[] {0, 1, 2, 3, 5, 8, 13, 21, 34, 55}) {
+            LocalDate from = TODAY.minusDays(back);
+            FactSet set = facts(user(user, ALL, null), from, TODAY, List.of(), null);
+            long outerDisbursed = model.countTxns("disbursement", from, TODAY, ALL_LOANS);
+            long innerDisbursed = model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS);
+            long outerTxns = txnsCollected(from, TODAY);
+            long innerTxns = txnsCollected(TODAY, TODAY);
+            long outerItems = model.itemsDue(from, TODAY, ALL_LOANS);
+            long innerItems = model.itemsDue(TODAY, TODAY, ALL_LOANS);
+            for (Object[] pair : new Object[][] {
+                {"portfolio.disbursed", "brief.disbursed_today", outerDisbursed, innerDisbursed},
+                {"portfolio.collected", "brief.collected_today", outerTxns, innerTxns},
+                {"portfolio.expected", "brief.expected_today", outerItems, innerItems}
+            }) {
+                Fact outer = figure(set, (String) pair[0]);
+                Fact inner = figure(set, (String) pair[1]);
+                long d = (long) pair[2] - (long) pair[3];
+                if (d > 0 && d < PortfolioFacts.MIN_GROUP) {
+                    assertThat(hidden(outer))
+                            .as("%s from %s: %d more than today", pair[0], from, d)
+                            .isTrue();
+                    checked++;
+                }
+                assertThat(!outer.suppressed() && !inner.suppressed() && d > 0 && d < PortfolioFacts.MIN_GROUP)
+                        .as("%s and %s both shown %d apart", pair[0], pair[1], d)
+                        .isFalse();
+            }
+        }
+        // The exact 6 and 5 case is PortfolioFactsSuppressionTest; here the real year must at least never leak.
+        assertThat(checked).isGreaterThanOrEqualTo(0);
+    }
+
+    @Test
+    void noTwoShownParLevelsDifferByOneToFourLoans() {
+        UUID user = UUID.randomUUID();
+        List<List<Pos>> scopes = new ArrayList<>();
+        List<FactSet> sets = new ArrayList<>();
+        sets.add(wholeBook());
+        scopes.add(model.live(TODAY, ALL_LOANS));
+        for (UUID product : model.loans.values().stream().map(Loan::product).collect(Collectors.toSet())) {
+            sets.add(facts(user(user, ALL, null), FROM, TODAY, List.of(), product));
+            scopes.add(model.live(TODAY, l -> l.product().equals(product)));
+        }
+        int pairs = 0;
+        for (int k = 0; k < sets.size(); k++) {
+            List<Pos> stock = scopes.get(k);
+            List<Integer> shown = new ArrayList<>();
+            for (int level = 0; level < PAR_OVER.length; level++) {
+                String key = "portfolio.par" + (PAR_OVER[level] == 0 ? 1 : PAR_OVER[level]);
+                Fact f = figure(sets.get(k), key);
+                if (!f.suppressed()) {
+                    shown.add(level);
+                }
+            }
+            for (int i = 0; i < shown.size(); i++) {
+                for (int j = i + 1; j < shown.size(); j++) {
+                    long d = late(stock, PAR_OVER[shown.get(i)]) - late(stock, PAR_OVER[shown.get(j)]);
+                    assertThat(d == 0 || d >= PortfolioFacts.MIN_GROUP || d < 0)
+                            .as("scope %d: PAR levels %d and %d shown %d loans apart", k, shown.get(i), shown.get(j), d)
+                            .isTrue();
+                    pairs++;
+                }
+            }
+        }
+        assertThat(pairs).isPositive();
+    }
+
+    @Test
+    void forCallerTakesNoScopeAndBuildTakesOnlyAStoredOne() throws Exception {
+        assertThat(PortfolioFacts.class.getMethod("forCaller").getParameterCount())
+                .isZero();
+        assertThat(PortfolioFacts.class.getMethod("build", PortfolioScope.class))
+                .isNotNull();
+        assertThat(java.util.Arrays.stream(PortfolioFacts.class.getMethods())
+                        .filter(m -> m.getName().equals("build") || m.getName().equals("forCaller"))
+                        .count())
+                .isEqualTo(2);
+        UUID north = northBranch();
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, Set.of(north)));
+        FactSet mine = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.forCaller());
+        CurrentPrincipal.clear();
+        FactSet wide = wholeBook();
+        // The caller's frozen scope is their branch: forCaller can give nothing wider, and nothing narrower than their
+        // own.
+        assertThat(figure(mine, "portfolio.active_loans").value()).isEqualTo((long)
+                model.live(TODAY, l -> l.branch().equals(north)).size());
+        assertThat(figure(mine, "portfolio.active_loans").value())
+                .isLessThan(figure(wide, "portfolio.active_loans").value());
     }
 
     // ---- No names ----------------------------------------------------------------------------------------------
@@ -1325,6 +1469,21 @@ class PortfolioFactsIT extends IntegrationTest {
                     .isEqualTo(GoldenModel.po(model.live(TODAY, ALL_LOANS)));
             assertThat(figure(late, "portfolio.active_loans").value())
                     .isEqualTo((long) model.live(TODAY, ALL_LOANS).size());
+            // The branch and product groups are the 8th's too: each shown principal is the golden figure of the 8th,
+            // none of them moved by the activity after midnight.
+            int groupsChecked = 0;
+            for (Fact f : late.facts()) {
+                if (f.group() != null && f.key().endsWith(".principal_outstanding")) {
+                    String id = f.group().id();
+                    boolean branch = f.group().dimension() == Dimension.BRANCH;
+                    long golden = GoldenModel.po(model.live(
+                            TODAY,
+                            l -> (branch ? l.branch() : l.product()).toString().equals(id)));
+                    assertThat(f.value()).as("%s of %s", f.key(), id).isEqualTo(golden);
+                    groupsChecked++;
+                }
+            }
+            assertThat(groupsChecked).as("group figures read after midnight").isPositive();
             // The brief is today's live reading, and the 8th is not today any more: it is left out, not guessed.
             assertThat(late.facts()).extracting(Fact::key).noneMatch(k -> k.startsWith("brief."));
         } finally {

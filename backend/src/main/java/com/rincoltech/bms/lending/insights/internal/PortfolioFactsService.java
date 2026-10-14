@@ -64,11 +64,21 @@ class PortfolioFactsService implements PortfolioFacts {
     private static final String ACTIVE = "portfolio.active_loans";
     private static final String PAYERS = "loans.paying";
     private static final String PAYERS_TODAY = "loans.paying_today";
+    // Transactions and schedule items, whose counts nest (today inside the range).
+    private static final String TXN_DAY = "txn.collections_day";
+    private static final String TXN_RANGE = "txn.collections_range";
+    private static final String ITEMS_DAY = "items.due_day";
+    private static final String ITEMS_RANGE = "items.due_range";
+    private static final String DISBURSED_DAY = "brief.disbursed_loans_today";
+    private static final String DISBURSED_RANGE = "portfolio.disbursed_count";
+    static final List<String> PAR_KEYS =
+            List.of("portfolio.par1", "portfolio.par30", "portfolio.par60", "portfolio.par90");
     private static final String RECOVERERS = "loans.recovering";
     private static final String IN_ARREARS = "loans.in_arrears";
     private static final String OVER_30 = "loans.over_30";
     private static final String OVER_60 = "loans.over_60";
     private static final String OVER_90 = "loans.over_90";
+    static final List<String> PAR_LOANS = List.of(IN_ARREARS, OVER_30, OVER_60, OVER_90);
     private static final String REV_INTEREST = "loans.revenue.loan_interest_income";
     private static final String REV_FEES = "loans.revenue.loan_fee_income";
     private static final String REV_PENALTIES = "loans.revenue.loan_penalty_income";
@@ -79,15 +89,32 @@ class PortfolioFactsService implements PortfolioFacts {
      * How a figure is picked: its dictionary key, polarity, whether it has changes, the populations it is computed over,
      * and the other figures that would give it away (or that it would give away) if it were shown alone.
      */
-    private record Spec(
-            String key, Polarity polarity, boolean delta, boolean stock, List<String> populations, List<String> deps) {}
+    record Spec(
+            String key,
+            Polarity polarity,
+            boolean delta,
+            boolean stock,
+            List<String> populations,
+            List<String> deps,
+            String inner,
+            String outer) {}
 
     private static Spec spec(String key, Polarity polarity, boolean delta, boolean stock, String... populations) {
-        return new Spec(key, polarity, delta, stock, List.of(populations), List.of());
+        return new Spec(key, polarity, delta, stock, List.of(populations), List.of(), null, null);
     }
 
     private static Spec with(Spec s, String... deps) {
-        return new Spec(s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), List.of(deps));
+        return new Spec(
+                s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), List.of(deps), s.inner(), s.outer());
+    }
+
+    /**
+     * A figure over a window that contains another window of the same measure (today inside the month): the two populations
+     * are nested, and when the outer holds one to four more than the inner their figures differ by exactly those few, so the
+     * outer (larger window) figure is hidden.
+     */
+    private static Spec nested(Spec s, String inner, String outer) {
+        return new Spec(s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), s.deps(), inner, outer);
     }
 
     private static final Polarity BETTER = Polarity.HIGHER_IS_BETTER;
@@ -99,7 +126,10 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("brief.disbursed_loans_today", BETTER, true, false, "brief.disbursed_loans_today"),
             spec("brief.collected_today", BETTER, true, false, ACTIVE, PAYERS_TODAY),
             spec("brief.expected_today", NEUTRAL, true, false, ACTIVE),
-            with(spec("brief.collection_rate_today", BETTER, true, false, ACTIVE), "brief.collected_today"),
+            with(
+                    spec("brief.collection_rate_today", BETTER, true, false, ACTIVE),
+                    "brief.collected_today",
+                    "brief.expected_today"),
             spec("brief.new_arrears", WORSE, false, false, "brief.new_arrears"),
             spec("brief.new_arrears_amount", WORSE, false, false, "brief.new_arrears"),
             spec("brief.going_bad", WORSE, false, false, "brief.going_bad"),
@@ -114,11 +144,17 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("portfolio.par30", WORSE, true, true, ACTIVE, OVER_30),
             spec("portfolio.par60", WORSE, true, true, ACTIVE, OVER_60),
             spec("portfolio.par90", WORSE, true, true, ACTIVE, OVER_90),
-            spec("portfolio.disbursed", BETTER, true, false, "portfolio.disbursed_count"),
-            spec("portfolio.disbursed_count", BETTER, true, false, "portfolio.disbursed_count"),
-            spec("portfolio.collected", BETTER, true, false, ACTIVE, PAYERS),
-            spec("portfolio.expected", NEUTRAL, true, false, ACTIVE),
-            with(spec("portfolio.collection_rate", BETTER, true, false, ACTIVE), "portfolio.collected"),
+            nested(spec("portfolio.disbursed", BETTER, true, false, DISBURSED_RANGE), DISBURSED_DAY, DISBURSED_RANGE),
+            nested(
+                    spec("portfolio.disbursed_count", BETTER, true, false, DISBURSED_RANGE),
+                    DISBURSED_DAY,
+                    DISBURSED_RANGE),
+            nested(spec("portfolio.collected", BETTER, true, false, ACTIVE, PAYERS), TXN_DAY, TXN_RANGE),
+            nested(spec("portfolio.expected", NEUTRAL, true, false, ACTIVE), ITEMS_DAY, ITEMS_RANGE),
+            with(
+                    spec("portfolio.collection_rate", BETTER, true, false, ACTIVE),
+                    "portfolio.collected",
+                    "portfolio.expected"),
             spec("portfolio.forecast_7", NEUTRAL, false, false, ACTIVE),
             spec("portfolio.forecast_30", NEUTRAL, false, false, ACTIVE),
             with(
@@ -132,7 +168,7 @@ class PortfolioFactsService implements PortfolioFacts {
     private static final List<Spec> REVENUE = List.of(
             spec("revenue.interest", BETTER, true, false, REV_INTEREST),
             spec("revenue.fees", BETTER, true, false, REV_FEES),
-            spec("revenue.penalties", BETTER, true, false, REV_PENALTIES),
+            spec("revenue.penalties", NEUTRAL, true, false, REV_PENALTIES),
             spec("revenue.recovered", BETTER, true, false, RECOVERERS, REV_RECOVERED),
             with(spec("revenue.write_off_expense", WORSE, true, false, REV_WRITE_OFF), "portfolio.written_off_count"),
             with(
@@ -151,7 +187,7 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("members.median_decision_hours", WORSE, true, false, "members.approved"),
             spec("members.dormant", WORSE, false, false, "members.dormant"));
 
-    private static final Map<String, Spec> BY_KEY = new LinkedHashMap<>();
+    static final Map<String, Spec> BY_KEY = new LinkedHashMap<>();
 
     static {
         for (List<Spec> section : List.of(BRIEF, PORTFOLIO, REVENUE, MEMBERS)) {
@@ -186,7 +222,7 @@ class PortfolioFactsService implements PortfolioFacts {
     }
 
     /** One window of figures: every value by dictionary key, and whether the stock figures could be read. */
-    private static final class Window {
+    static final class Window {
         final Map<String, Long> values = new HashMap<>();
         final Set<String> present = new HashSet<>();
         boolean stockKnown = true;
@@ -200,6 +236,35 @@ class PortfolioFactsService implements PortfolioFacts {
             return present.contains(s.key()) && (!s.stock() || stockKnown);
         }
 
+        /** True when the two counts differ by one to four: the figures over them differ by exactly those few. */
+        static boolean diffSmall(long outer, long inner) {
+            long d = outer - inner;
+            return d > 0 && d < MIN_GROUP;
+        }
+
+        private long loans(int level) {
+            Long n = values.get(PAR_LOANS.get(level));
+            return n == null ? 0 : n;
+        }
+
+        /**
+         * The PAR levels are a partition of the late loans (1 to 30 days, 31 to 60, 61 to 90, over 90): the difference of two
+         * shown levels times the principal is the principal of the loans between them. A level is hidden when it is small
+         * itself, or when a shown level before it differs from it by one to four loans.
+         */
+        boolean parHidden(int level) {
+            long n = loans(level);
+            if (n > 0 && n < MIN_GROUP) {
+                return true;
+            }
+            for (int j = 0; j < level; j++) {
+                if (!parHidden(j) && diffSmall(loans(j), n)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /** True when a population of this figure, or of a figure it would give away, is one to four. */
         boolean small(Spec s) {
             for (String p : s.populations()) {
@@ -207,6 +272,17 @@ class PortfolioFactsService implements PortfolioFacts {
                 if (n != null && n > 0 && n < MIN_GROUP) {
                     return true;
                 }
+            }
+            if (s.outer() != null) {
+                Long outer = values.get(s.outer());
+                Long inner = values.get(s.inner());
+                if (outer != null && inner != null && diffSmall(outer, inner)) {
+                    return true;
+                }
+            }
+            int level = PAR_KEYS.indexOf(s.key());
+            if (level >= 0 && parHidden(level)) {
+                return true;
             }
             for (String dep : s.deps()) {
                 Spec d = BY_KEY.get(dep);
@@ -233,9 +309,18 @@ class PortfolioFactsService implements PortfolioFacts {
             for (Metric m : insights.brief(day).metrics()) {
                 w.put(m.key(), m.value());
             }
+            Scope dayOnly = day.withRange(day.to(), day.to());
+            w.put(PAYERS_TODAY, queries.loansWithTransactions(dayOnly, InsightsQueries.COLLECTED_TYPES));
             w.put(
-                    PAYERS_TODAY,
-                    queries.loansWithTransactions(day.withRange(day.to(), day.to()), InsightsQueries.COLLECTED_TYPES));
+                    TXN_DAY,
+                    queries.collectedByDay(dayOnly, InsightsQueries.COLLECTED_TYPES).stream()
+                            .mapToLong(InsightsQueries.DayTotal::count)
+                            .sum());
+            w.put(
+                    ITEMS_DAY,
+                    queries.expectedByDay(dayOnly).stream()
+                            .mapToLong(InsightsQueries.DayTotal::count)
+                            .sum());
         }
         InsightsApi.PortfolioResponse portfolio = insights.portfolio(scope, null);
         for (Metric m : portfolio.metrics()) {
@@ -285,6 +370,16 @@ class PortfolioFactsService implements PortfolioFacts {
             w.put(m.key(), m.value());
         }
         w.put(PAYERS, queries.loansWithTransactions(scope, InsightsQueries.COLLECTED_TYPES));
+        w.put(
+                TXN_RANGE,
+                queries.collectedByDay(scope, InsightsQueries.COLLECTED_TYPES).stream()
+                        .mapToLong(InsightsQueries.DayTotal::count)
+                        .sum());
+        w.put(
+                ITEMS_RANGE,
+                queries.expectedByDay(scope).stream()
+                        .mapToLong(InsightsQueries.DayTotal::count)
+                        .sum());
         w.put(RECOVERERS, queries.loansWithTransactions(scope, "('recovery')"));
         return w;
     }

@@ -772,7 +772,13 @@ Where the build differs from, or sharpens, the text above:
   yield. A change is hidden with its figure, and when the earlier figure was hidden, because current minus change would give
   it back. Zero is not small: nothing is described. A branch or product of fewer than five loans is the single fact
   `branch.loans` or `product.loans` with the display `fewer than 5`, and no other fact; a group's PAR 30 is hidden when fewer
-  than five of its loans are more than 30 days late. **Complementary suppression** (owner's rule: never expose small counts): the groups partition the book, so the total less
+  than five of its loans are more than 30 days late. **Nested windows and the PAR levels** (round 4): today sits inside the month, so the month less today is the other days'
+  figure; when the month's population exceeds today's by one to four (6 and 5) the larger window's figure is hidden, for
+  disbursed and their count (loans), collected (transactions), expected (schedule items) and the collection rate that follows;
+  the earlier windows of a change are checked the same way. The PAR levels are a partition of the late loans (1 to 30, 31 to 60,
+  61 to 90, over 90 days): the difference of two shown levels times the book is the principal of the loans between them, so a
+  level is hidden when it is small itself or when a shown earlier level differs from it by one to four loans, and the ratios
+  derived from them go with it. **Complementary suppression** (owner's rule: never expose small counts): the groups partition the book, so the total less
   the groups shown is the hidden and left-out remainder; when that is one to four loans it is a small group's exact count,
   principal and risk by subtraction, so the smallest other groups are hidden too until the remainder is five loans or more (or
   nothing); the same is done for the loans more than 30 days late behind the PAR 30 of the groups shown. Groups beyond the
@@ -811,6 +817,29 @@ Where the build differs from, or sharpens, the text above:
   that is not a real key. As a second line of defence the older validator, described in the next bullets, re-derives every
   number the substitution wrote from the facts it came from. Each rule has a test switch, and `ValidatorMutationTest` turns
   each off in turn and requires the golden evaluation to fail with the cases that rule exists for accepted.
+- **What free prose may be (round 4).** A sentence that holds a placeholder may hold only placeholders, punctuation, aliases and
+  the connector words `and, while, with, the, of, in, for, is, are, was, were, at, to, by, on, from, as, also, this, that, which,
+  so, a, an, over, across, within, these, those, its, it, has, have, had, be, been, currently, overall`, so it cannot deny,
+  qualify or contradict the sentence our code writes (`It is not true that {{x}}`, `{{x}} but arrears are mounting`).
+  Every other sentence is general advice for the owner, and in it the validator refuses: any numeral (digits of any script,
+  roman numerals in any case and a lone roman letter, look-alike letters in a digit-like run such as `lOO,OOO`, number words,
+  ordinals, multiplicative words such as `halved`, `quadrupled`, `tenfold`, `a couple`, and the common Swahili and French number
+  words); any movement word (a broad list of verbs and stems: `rising`, `mounting`, `ballooned`, `skyrocketed`, `collapsed`,
+  `recovering`, `improving` and so on, and `up to`, `above`, `below`); any comparison or superlative (`more`, `highest`, `worst`,
+  `than`); any absolute or universal claim (`every`, `all`, `none`, `no`, `nobody`, `never`, `always`, `whole`); and any
+  capitalised name that is not an alias and not the first word of a sentence (a hallucinated `Kampala Road branch`; a name at
+  the start of a sentence is the residual risk). A statement with no numeral ("No loans were written off", "Every borrower
+  defaulted") is therefore refused as an absolute claim. The model's own `PAR 30` is a figure like any other: the measure names
+  are written only by our substitution. A list may be numbered only as the next number in sequence (`1.`, then `2)`) at the start
+  of a line after a line feed, followed by a space and a letter or a placeholder; the other line and paragraph separators
+  (U+2028, U+2029, NEL, a bare carriage return) and other control characters are refused outright because they render inline.
+  Plain-text screens also refuse bare domains and domains with a path, IP literals and `@handles`, run only on texts of at most
+  2,000 characters, and use bounded patterns. Residual risk: a number word in a language not listed, and a hallucinated name
+  at the start of a sentence.
+- **What a change is compared with.** Our phrase table says it per kind of figure: a brief figure with `the same day last
+  week` or `last month`, a stock (outstanding, loans, borrowers, arrears, PAR) with `a week ago` or `a month ago`, a flow over
+  the range (disbursed, collected, expected, revenue, the rates) with `the same period a week earlier` or `a month earlier`;
+  never `over the week` for a month-to-date figure. Penalty income has no polarity: rising is neither better nor worse.
 - **What a number may be (the older validator, now the second line and the check of any answer written in prose).** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
   decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words
   (`twenty-five`, `one hundred and twenty`, `two million`, `twelve point five`, grammar-checked: `nineteen and ninety` is two

@@ -6,6 +6,7 @@ import com.rincoltech.bms.lending.advisor.Facts;
 import com.rincoltech.bms.lending.advisor.internal.NumericValidator.Context;
 import com.rincoltech.bms.lending.advisor.internal.NumericValidator.Result;
 import com.rincoltech.bms.lending.advisor.internal.NumericValidator.Violation;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.FactSet;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -80,25 +81,27 @@ class PlaceholderValidatorTest {
     void aFactIsWrittenWithItsNameItsValueAndForAChangeItsMovementItsPeriodAndItsPolarity() {
         assertThat(shown("{{portfolio.par30}}.", PAR)).isEqualTo("PAR 30 (12.5 percent).");
         assertThat(shown("{{portfolio.par30.week_change}}.", PAR_WEEK))
-                .isEqualTo("PAR 30 fell by 0.40 points over the week (better).");
+                .isEqualTo("PAR 30 fell by 0.40 points compared with a week ago (better).");
         assertThat(shown("{{portfolio.par30.month_change}}.", PAR_MONTH))
-                .isEqualTo("PAR 30 rose by 0.25 points over the month (worse).");
+                .isEqualTo("PAR 30 rose by 0.25 points compared with a month ago (worse).");
         // The polarity is the metric's: a collection rate that falls is worse, one that rises is better.
         assertThat(shown("{{portfolio.collection_rate.week_change}}.", RATE_WEEK))
-                .isEqualTo("Collection rate rose by 1.20 points over the week (better).");
+                .isEqualTo(
+                        "Collection rate rose by 1.20 points compared with the same period a week earlier (better).");
         assertThat(shown("{{portfolio.collection_rate.month_change}}.", RATE_MONTH))
-                .isEqualTo("Collection rate fell by 3.00 points over the month (worse).");
+                .isEqualTo(
+                        "Collection rate fell by 3.00 points compared with the same period a month earlier (worse).");
         // A neutral metric says what moved and nothing about good or bad.
         assertThat(shown("{{portfolio.active_loans.week_change}}.", LOANS_WEEK))
-                .isEqualTo("Active loans rose by 4 over the week.");
+                .isEqualTo("Active loans rose by 4 compared with a week ago.");
         assertThat(shown("{{portfolio.written_off_count.week_change}}.", "portfolio.written_off_count.week_change"))
-                .isEqualTo("Loans written off was unchanged over the week.");
+                .isEqualTo("Loans written off was unchanged compared with the same period a week earlier.");
         assertThat(shown("{{revenue.contribution}}.", "revenue.contribution"))
                 .isEqualTo("Profit contribution (-UGX 500,000).");
         assertThat(shown("{{brief.collection_rate_today}}.", "brief.collection_rate_today"))
                 .isEqualTo("Collection rate today (not available).");
         assertThat(shown("{{brief.disbursed_today.week_change}}.", "brief.disbursed_today.week_change"))
-                .isEqualTo("Money out today rose by UGX 250,000 over the week (better).");
+                .isEqualTo("Money out today rose by UGX 250,000 compared with the same day last week (better).");
         assertThat(shown("As of {{asof}}, over {{range}}."))
                 .isEqualTo("As of 14 October 2026, over 1 October 2026 to 14 October 2026.");
     }
@@ -122,21 +125,27 @@ class PlaceholderValidatorTest {
 
     @Test
     void swappedPlaceholdersCannotSwapFigures() {
-        assertThat(shown(
-                        "Collection rate is {{portfolio.par30}} and PAR 30 is {{portfolio.collection_rate}}.",
-                        PAR,
-                        RATE))
-                .isEqualTo("Collection rate is PAR 30 (12.5 percent) and PAR 30 is Collection rate (87.5 percent).");
+        // Each value is written with its own name, so the order the model cites them in swaps nothing.
+        assertThat(shown("{{portfolio.par30}} and {{portfolio.collection_rate}}.", PAR, RATE))
+                .isEqualTo("PAR 30 (12.5 percent) and Collection rate (87.5 percent).");
+        assertThat(shown("{{portfolio.collection_rate}} and {{portfolio.par30}}.", PAR, RATE))
+                .isEqualTo("Collection rate (87.5 percent) and PAR 30 (12.5 percent).");
+        // The model writing the names itself is what lets a swap read as true: it may not.
+        refused(
+                "free_word_beside_placeholder",
+                "Collection rate is {{portfolio.par30}} and PAR 30 is {{portfolio.collection_rate}}.",
+                PAR,
+                RATE);
     }
 
     @Test
     void theSummaryMayUseTheFactsAnyPointCites() {
         Result ok = PlaceholderValidator.validate(
-                json("{{portfolio.par30}}.", "Money: {{brief.disbursed_today}}.", PAR, OUT), CTX);
+                json("{{portfolio.par30}}.", "{{brief.disbursed_today}}.", PAR, OUT), CTX);
         assertThat(ok.violations()).isEmpty();
         assertThat(ok.answer().summary()).isEqualTo("PAR 30 (12.5 percent).");
-        Result bad = PlaceholderValidator.validate(
-                json("{{portfolio.par30}}.", "Money: {{brief.disbursed_today}}.", OUT), CTX);
+        Result bad =
+                PlaceholderValidator.validate(json("{{portfolio.par30}}.", "{{brief.disbursed_today}}.", OUT), CTX);
         assertThat(bad.violations()).extracting(Violation::code).contains("uncited_placeholder");
         assertThat(bad.violations()).extracting(Violation::where).contains("summary");
     }
@@ -204,7 +213,6 @@ class PlaceholderValidatorTest {
         for (String text : List.of(
                 "Someone should look at this.",
                 "The stone is cast.",
-                "None are late.",
                 "A phone call is needed.",
                 "Tenants and money.",
                 "Often.")) {
@@ -213,21 +221,64 @@ class PlaceholderValidatorTest {
     }
 
     @Test
-    void theMeasuresNamedParAreNotFiguresAndAliasesAreNotFigures() {
-        assertThat(check("PAR 30 and PAR 90 are the measures of risk; Branch 1 and Product A are groups.")
-                        .violations())
-                .isEmpty();
-        refused("raw_number", "PAR 45 is a measure.");
+    void theMeasureNamesAreOurLabelsNeverTheModelsAndAliasesAreNotFigures() {
+        // PAR 30 written by the model is a figure like any other: our label comes from the substitution.
+        for (String text : List.of(
+                "PAR 30 and PAR 90 are the measures of risk.",
+                "PAR 60 loans need review.",
+                "Par30 needs a review.",
+                "PAR-90 needs a review.",
+                "PAR 1 needs a review.",
+                "PAR 45 is a measure.")) {
+            refused("raw_number", text);
+        }
+        assertThat(check("Branch 1 and Product A are groups.").violations()).isEmpty();
         refused("unknown_alias", "Branch 3 is a group.");
         refused("unknown_alias", "Product B is a group.");
+        // The labels we write are in the rendering, with their digits, and the second line accepts them.
+        assertThat(shown("{{portfolio.par30}}.", PAR)).isEqualTo("PAR 30 (12.5 percent).");
     }
 
     @Test
-    void aListMayBeNumberedAtTheStartOfALineAndNowhereElse() {
+    void aListMayBeNumberedAtTheStartOfALineInSequenceAndNowhereElse() {
         assertThat(shown("1. {{portfolio.par30}}\n2) {{portfolio.collection_rate}}", PAR, RATE))
                 .isEqualTo("1. PAR 30 (12.5 percent)\n2) Collection rate (87.5 percent)");
+        assertThat(check("1. Review the branches\n2. Plan a visit\n3) Report back")
+                        .violations())
+                .isEmpty();
         refused("raw_number", "First point 1. Second point 2.", PAR);
         refused("raw_number", "See point 1. {{portfolio.par30}}", PAR);
+    }
+
+    @Test
+    void aListNumberIsNeverAWayToWriteAFigure() {
+        for (String text : List.of(
+                "Arrears count:\n12. That is the count.",
+                "Loans:\n(47) loans",
+                "1. Review\n3) Plan",
+                "2. Review",
+                "0. Review",
+                "1. Review\n1. Plan",
+                "1.Review",
+                "1. 12 loans",
+                "Loans\n 1. Review",
+                "1.\nReview",
+                "1. Review\n12) Plan")) {
+            Result r = check(text);
+            assertThat(r.valid()).as(text).isFalse();
+            assertThat(codes(r)).as(text).contains("raw_number");
+        }
+    }
+
+    @Test
+    void lineAndParagraphSeparatorsThatRenderInlineAreRefusedNotTreatedAsLineStarts() {
+        for (int separator : new int[] {0x2028, 0x2029, 0x0085, 0x000D, 0x000B, 0x000C, 0x0007}) {
+            Result r = check("Count" + Facts.cp(separator) + "12. loans");
+            assertThat(r.valid()).as("U+%04X", separator).isFalse();
+            assertThat(codes(r)).as("U+%04X", separator).contains("control_character");
+        }
+        // A plain line feed and a tab are fine.
+        assertThat(check("Review the branches.\n\tPlan a visit.").violations()).isEmpty();
     }
 
     // ---- A movement, a period or a comparison written by the model is refused -------------------------------
@@ -268,13 +319,161 @@ class PlaceholderValidatorTest {
     }
 
     @Test
-    void aComparisonIsRefusedBesideAPlaceholderAndAllowedInPlainProse() {
+    void aComparisonIsRefusedEverywhereAndPlainAdviceIsAllowed() {
         refused("free_comparison_word", "{{portfolio.par30}} is more than {{portfolio.collection_rate}}.", PAR, RATE);
         refused("free_comparison_word", "{{portfolio.par30}} compared with the rest.", PAR);
-        assertThat(check("More attention is needed on the smaller branches.").violations())
-                .isEmpty();
+        refused("free_comparison_word", "More attention is needed on the smaller branches.");
+        refused("free_comparison_word", "The highest risk needs a review.");
+        refused("free_comparison_word", "Branch 1 is the worst.");
         assertThat(check("Follow up with the branches; set up a review of the breakdown.")
                         .violations())
+                .isEmpty();
+        assertThat(check("Review the branches that need attention.").violations())
+                .isEmpty();
+    }
+
+    @Test
+    void aSentenceWithAPlaceholderHoldsOnlyPlaceholdersPunctuationAliasesAndConnectors() {
+        for (String text : List.of(
+                "It is not true that {{portfolio.par30.week_change}}.",
+                "{{portfolio.par30}} but arrears are mounting fast.",
+                "{{portfolio.par30}} which is concerning.",
+                "{{portfolio.par30}} and nobody knows why.",
+                "Surprisingly, {{portfolio.par30}}.",
+                "{{portfolio.par30}}, however.",
+                "Note that {{portfolio.par30}} is fine.",
+                "{{portfolio.par30}} is not what it was.",
+                "{{portfolio.par30}} is bad.")) {
+            Result r = check(text, PAR, PAR_WEEK);
+            assertThat(r.valid()).as(text).isFalse();
+            assertThat(codes(r)).as(text).contains("free_word_beside_placeholder");
+        }
+        // Connectors, aliases and punctuation are the whole vocabulary.
+        assertThat(check("{{portfolio.par30}} and it has been {{portfolio.collection_rate}} overall.", PAR, RATE)
+                        .violations())
+                .isEmpty();
+        assertThat(check("Branch 1 is {{branch_1.loans}} overall.", "branch_1.loans")
+                        .violations())
+                .isEmpty();
+        // The same words in a sentence with no placeholder are plain advice.
+        assertThat(check("Surprisingly, the picture is concerning.").violations())
+                .isEmpty();
+        assertThat(PlaceholderValidator.CONNECTORS)
+                .contains("and", "while", "with", "the", "of", "in", "for", "is", "are");
+        assertThat(PlaceholderValidator.CONNECTORS).doesNotContain("not", "no", "but", "never", "more", "than");
+    }
+
+    @Test
+    void absoluteAndUniversalClaimsAreRefusedWithOrWithoutANumeral() {
+        for (String text : List.of(
+                "Every borrower defaulted.",
+                "No loans were written off.",
+                "All borrowers are fine.",
+                "Nobody is late.",
+                "Nothing is wrong.",
+                "Collections never fail.",
+                "Repayments always arrive.",
+                "The whole book is healthy.",
+                "None of the branches are late.",
+                "There is no risk.")) {
+            refused("absolute_claim", text);
+        }
+        assertThat(check("Review the branches that need attention.").violations())
+                .isEmpty();
+    }
+
+    @Test
+    void movementWordsOfTheBroadFamilyAreRefusedInPlainAdviceToo() {
+        for (String text : List.of(
+                "Arrears ballooned across the branches.",
+                "Arrears skyrocketed.",
+                "Collections collapsed.",
+                "The book is recovering.",
+                "Collections are rising.",
+                "Risk is mounting.",
+                "Risk is deteriorating.",
+                "The book is growing.",
+                "The book is shrinking.",
+                "Arrears are surging.",
+                "Collections are worsening.",
+                "Arrears spiralled.")) {
+            refused("free_movement_word", text);
+        }
+    }
+
+    @Test
+    void aNameThatIsNotOneOfOurAliasesIsRefused() {
+        refused("proper_noun", "The Kampala Road branch needs a review.");
+        refused("proper_noun", "Please call Mr Smith.");
+        refused("proper_noun", "Review the Nairobi office.");
+        // The first word of a sentence is capitalised by grammar; the aliases are ours.
+        assertThat(check("Branch 1 needs a review.").violations()).isEmpty();
+        assertThat(check("Review the branches. Plan a visit.").violations()).isEmpty();
+    }
+
+    @Test
+    void addressesAndHandlesAreRefusedAsMarkup() {
+        for (String text : List.of(
+                "Visit evil.example.com/x for details.",
+                "See name.tld for details.",
+                "Go to my-site.org now.",
+                "Open files.shop/path now.",
+                "Ping 192.168.1.1 now.",
+                "Message @someone about it.",
+                "Reach ::ffff:c0a8:0101 now.")) {
+            Result r = check(text);
+            assertThat(r.valid()).as(text).isFalse();
+            assertThat(codes(r)).as(text).contains("markup");
+        }
+        assertThat(codes(check("Review loans.next steps follow.")))
+                .as("a missing space is not a domain")
+                .doesNotContain("markup");
+    }
+
+    @Test
+    void aVeryLongTextIsRefusedBeforeTheScreensRunOnIt() {
+        String longText = "a".repeat(7950);
+        long start = System.nanoTime();
+        Result r = PlaceholderValidator.validate(
+                "{\"summary\":\"" + longText + "\",\"points\":[{\"text\":\"Review.\",\"facts\":[]}]}", CTX);
+        assertThat(r.valid()).isFalse();
+        assertThat(codes(r)).contains("too_long");
+        assertThat((System.nanoTime() - start) / 1_000_000).as("milliseconds").isLessThan(200);
+        // And the email screen itself is bounded: a long run of local-part characters with no at sign is linear.
+        long begin = System.nanoTime();
+        assertThat(NumericValidator.looksPersonal("a".repeat(7950))).isFalse();
+        assertThat((System.nanoTime() - begin) / 1_000_000).as("milliseconds").isLessThan(200);
+    }
+
+    @Test
+    void lowerCaseRomanLookAlikeAndForeignNumberWordsAreNumbers() {
+        for (String text : List.of(
+                "There are xii branches.",
+                "There are " + Facts.cp(0x2177) + " branches.",
+                "Branches: V.",
+                "Branches: x.",
+                "There are lOO,OOO loans.",
+                "There are IO loans.",
+                "Arrears halved.",
+                "Loans quadrupled.",
+                "A tenfold gap.",
+                "A sixfold gap.",
+                "A fourth of the book.",
+                "The second branch.",
+                "A couple of branches.",
+                "Kumi branches.",
+                "Nous avons douze branches.",
+                "Cent branches.",
+                "A score of loans.",
+                "A pair of branches.",
+                "Once more.",
+                "The third quarter.")) {
+            Result r = check(text);
+            assertThat(r.valid()).as(text).isFalse();
+            assertThat(codes(r)).as(text).contains("raw_number");
+        }
+        // The pronoun and the words that merely look roman are fine.
+        assertThat(check("I recommend a review of the mix of products.").violations())
                 .isEmpty();
     }
 
@@ -290,7 +489,7 @@ class PlaceholderValidatorTest {
         // Both changes cited, the model says nothing of periods or directions: each is written with its own period.
         assertThat(shown("{{portfolio.par30.month_change}}, and {{portfolio.par30.week_change}}.", PAR_WEEK, PAR_MONTH))
                 .isEqualTo(
-                        "PAR 30 rose by 0.25 points over the month (worse), and PAR 30 fell by 0.40 points over the week (better).");
+                        "PAR 30 rose by 0.25 points compared with a month ago (worse), and PAR 30 fell by 0.40 points compared with a week ago (better).");
         // The honest sentence the first version refused, written with placeholders.
         refused("free_movement_word", "Over the month PAR 30 rose, and over the week it fell.", PAR_WEEK, PAR_MONTH);
     }
@@ -316,6 +515,66 @@ class PlaceholderValidatorTest {
         refused("raw_number", "Branch 2 has fewer than 5 active loans, namely 3.", "branch_2.loans");
         assertThat(check("Branch 2 is too small to report.", "branch_2.loans").violations())
                 .isEmpty();
+    }
+
+    // ---- What a change is compared with, by the kind of figure -----------------------------------------------
+
+    @Test
+    void eachKindOfFigureSaysWhatItsChangeIsComparedWith() {
+        // A day (the brief): the same day a week or a month earlier.
+        assertThat(PlaceholderValidator.comparedWith("brief.disbursed_today", "week"))
+                .isEqualTo("the same day last week");
+        assertThat(PlaceholderValidator.comparedWith("brief.collection_rate_today", "month"))
+                .isEqualTo("the same day last month");
+        // A stock: its value a week or a month ago.
+        for (String stock : PlaceholderValidator.STOCKS) {
+            assertThat(PlaceholderValidator.comparedWith(stock, "week"))
+                    .as(stock)
+                    .isEqualTo("a week ago");
+            assertThat(PlaceholderValidator.comparedWith(stock, "month"))
+                    .as(stock)
+                    .isEqualTo("a month ago");
+        }
+        // A flow over the range (month to date and the like): the same range a week or a month earlier, never "over the
+        // week".
+        for (String flow : List.of(
+                "portfolio.disbursed",
+                "portfolio.collected",
+                "portfolio.expected",
+                "portfolio.collection_rate",
+                "portfolio.written_off_count",
+                "revenue.interest",
+                "revenue.contribution",
+                "members.new_members")) {
+            assertThat(PlaceholderValidator.comparedWith(flow, "week"))
+                    .as(flow)
+                    .isEqualTo("the same period a week earlier");
+            assertThat(PlaceholderValidator.comparedWith(flow, "month"))
+                    .as(flow)
+                    .isEqualTo("the same period a month earlier");
+        }
+        // And in the rendering: a month-to-date flow is not said to have moved "over the week".
+        String out = shown("{{portfolio.collection_rate.week_change}}.", RATE_WEEK);
+        assertThat(out).contains("the same period a week earlier").doesNotContain("over the week");
+    }
+
+    @Test
+    void penaltyIncomeIsNeitherBetterNorWorse() {
+        FactSet set = Facts.asOf("2026-10-14")
+                .money(
+                        "revenue.penalties",
+                        "Penalties earned",
+                        com.rincoltech.bms.lending.insights.PortfolioFacts.Polarity.NEUTRAL,
+                        100_000,
+                        20_000L,
+                        null)
+                .build();
+        Context ctx = Context.of(AliasedFacts.of(set), List.of());
+        Result r = PlaceholderValidator.validate(
+                json("Fine.", "{{revenue.penalties.week_change}}.", "revenue.penalties.week_change"), ctx);
+        assertThat(r.valid()).isTrue();
+        assertThat(r.answer().points().get(0).text())
+                .isEqualTo("Penalties earned rose by UGX 20,000 compared with the same period a week earlier.");
     }
 
     // ---- Plain text, size, shape -------------------------------------------------------------------------------
@@ -351,7 +610,8 @@ class PlaceholderValidatorTest {
         for (Violation v : r.violations()) {
             assertThat(v.code()).matches("[a-z_]+");
             if (v.token() != null) {
-                assertThat(v.token()).doesNotContain("Secret").doesNotContain("sentence");
+                assertThat(v.token().split(" ")).hasSizeLessThanOrEqualTo(2);
+                assertThat(v.token()).hasSizeLessThanOrEqualTo(60);
             }
         }
         assertThat(r.violations().toString()).doesNotContain("Secret sentence");
