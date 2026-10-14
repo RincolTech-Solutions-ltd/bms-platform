@@ -42,12 +42,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * A tick claims and returns at once; the run itself executes on a worker thread, so a ten minute run does not hold
  * the scheduler or delay the claim of another tenant's run.
  *
- * <p><b>A run knows who holds it.</b> A claim stamps the run with this process ({@code host/instance}), and every
- * {@code heartbeat} the process beats for each run it is executing. A run is failed as {@code interrupted} when its
- * heartbeat is older than {@code heartbeat-stale} (a killed process stops beating), or at once, on the first tick, when
- * it was claimed by an earlier process of this same host (this process is the replacement, so the earlier one is
- * dead). On a clean stop the workers are interrupted, given a few seconds to close their runs as {@code interrupted}
- * themselves, and any run still open is failed here, so a deploy does not leave the single staging place blocked.
+ * <p><b>A run knows who holds it.</b> A claim stamps the run with this process ({@code host/instance}, for the log and
+ * the audit), and every {@code heartbeat} the process beats for each run it is executing. A run is failed as
+ * {@code interrupted} when its heartbeat is older than {@code heartbeat-stale} (a killed process stops beating); on the
+ * first tick of a new process the limit is two beats instead, because whoever was beating before it started is dead
+ * (a recreated container has a new host name, so the rule does not look at who owned the run). On a clean stop the
+ * workers are interrupted, given {@link #STOP_WAIT} to close their runs as {@code interrupted} themselves, and any run
+ * still open is failed (and audited) here; the containers allow 30 seconds to stop, so a deploy neither blocks the
+ * single staging place nor is killed halfway.
  */
 @Component
 class ReportRunner {
@@ -56,6 +58,9 @@ class ReportRunner {
 
     /** How long a clean stop waits for the workers to close their runs. */
     static final Duration STOP_WAIT = Duration.ofSeconds(15);
+
+    // The api containers set stop_grace_period 30s (deploy/compose.yml, deploy/compose.pi-staging.yml): STOP_WAIT stays
+    // below it.
 
     private final TenantJobs tenantJobs;
     private final RunStore store;
@@ -67,7 +72,6 @@ class ReportRunner {
     private final TransactionTemplate plain;
     private final ThreadPoolExecutor workers;
     private final ScheduledExecutorService beat;
-    private final String host;
     private final String owner;
     private final AtomicBoolean firstTick = new AtomicBoolean(true);
     private final AtomicBoolean stopped = new AtomicBoolean();
@@ -93,8 +97,7 @@ class ReportRunner {
         this.limits = limits;
         this.audit = audit;
         this.plain = new TransactionTemplate(transactions);
-        this.host = hostName();
-        this.owner = host + "/" + UUID.randomUUID().toString().substring(0, 8);
+        this.owner = hostName() + "/" + UUID.randomUUID().toString().substring(0, 8);
         AtomicInteger n = new AtomicInteger();
         this.workers = new ThreadPoolExecutor(
                 limits.maxConcurrentRuns,
@@ -198,21 +201,21 @@ class ReportRunner {
     }
 
     /**
-     * Fails the runs whose process is gone, per tenant, audited: no heartbeat for {@code heartbeat-stale}, and on the
-     * first tick the runs an earlier process of this host left.
+     * Fails the runs whose process is gone, per tenant, audited: no heartbeat for {@code heartbeat-stale}, or, on the
+     * first tick of this process, for two beats.
      */
     private void sweepAbandoned() {
-        Instant cutoff = clock.now().minus(limits.heartbeatStale);
-        String hostPrefix = firstTick.getAndSet(false) ? host : null;
-        List<UUID> tenants = jdbc.sql("SELECT app_tenants_with_stale_report_runs(?, ?, ?)")
-                .params(java.sql.Timestamp.from(cutoff), hostPrefix, owner)
+        Duration allowed = firstTick.getAndSet(false) ? limits.heartbeat.multipliedBy(2) : limits.heartbeatStale;
+        Instant cutoff = clock.now().minus(allowed);
+        List<UUID> tenants = jdbc.sql("SELECT app_tenants_with_stale_report_runs(?)")
+                .param(java.sql.Timestamp.from(cutoff))
                 .query(UUID.class)
                 .list();
         for (UUID tenantId : tenants) {
             tenantJobs.callAs(tenantId, () -> {
                 plain.executeWithoutResult(s -> {
                     Instant now = clock.now();
-                    for (UUID id : store.failStale(cutoff, hostPrefix, owner, now)) {
+                    for (UUID id : store.failStale(cutoff, now)) {
                         audit.record(
                                 AuditLog.Entry.created(
                                         RunExecutor.AUDIT_FAILED,
@@ -233,7 +236,7 @@ class ReportRunner {
     boolean awaitIdle(Duration timeout) throws InterruptedException {
         long end = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < end) {
-            if (workers.getActiveCount() == 0 && workers.getQueue().isEmpty()) {
+            if (active.isEmpty()) {
                 return true;
             }
             Thread.sleep(20);
@@ -262,7 +265,19 @@ class ReportRunner {
         for (Map.Entry<UUID, UUID> e : Map.copyOf(active).entrySet()) {
             try {
                 tenantJobs.callAs(e.getValue(), () -> {
-                    plain.executeWithoutResult(s -> store.failInterrupted(e.getKey(), clock.now()));
+                    plain.executeWithoutResult(s -> {
+                        if (store.failInterrupted(e.getKey(), clock.now())) {
+                            audit.record(
+                                    AuditLog.Entry.created(
+                                            RunExecutor.AUDIT_FAILED,
+                                            RunService.ENTITY,
+                                            e.getKey(),
+                                            null,
+                                            Map.of("error", "interrupted")),
+                                    null,
+                                    "system");
+                        }
+                    });
                     return null;
                 });
             } catch (RuntimeException ex) {

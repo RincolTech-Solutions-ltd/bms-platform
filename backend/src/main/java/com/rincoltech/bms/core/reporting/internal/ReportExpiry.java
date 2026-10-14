@@ -61,8 +61,10 @@ class ReportExpiry {
     int expireDue() {
         Instant now = clock.now();
         int done = 0;
+        int attempted = 0;
         Set<UUID> skipped = new HashSet<>();
-        while (done < PER_NIGHT) {
+        // Attempts count toward the night's limit, successful or not: a storage outage must not walk the whole backlog.
+        while (attempted < PER_NIGHT) {
             // Runs whose object could not be deleted stay first in the list, so ask for that many more.
             List<Expired> due = transaction.execute(s -> store.expired(now, BATCH + skipped.size()));
             List<Expired> fresh =
@@ -71,6 +73,9 @@ class ReportExpiry {
                 break;
             }
             for (Expired e : fresh) {
+                if (attempted++ >= PER_NIGHT) {
+                    return done;
+                }
                 try {
                     documents.deleteReportObject(e.documentId());
                 } catch (RuntimeException ex) {

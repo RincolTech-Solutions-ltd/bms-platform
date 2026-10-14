@@ -9,7 +9,7 @@
 @ApplicationModule(
         id = "lending.reports",
         displayName = "Lending: Reports",
-        allowedDependencies = {"kernel", "core.reporting", "core.tenancy", "lending.insights"})
+        allowedDependencies = {"kernel", "core.reporting", "lending.insights"})
 package com.rincoltech.bms.lending.reports;
 
 import org.springframework.modulith.ApplicationModule;

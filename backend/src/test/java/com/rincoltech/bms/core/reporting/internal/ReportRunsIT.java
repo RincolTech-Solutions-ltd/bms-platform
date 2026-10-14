@@ -76,6 +76,14 @@ class ReportRunsIT extends ReportsItSupport {
                         .getStatusCode()
                         .value())
                 .isEqualTo(404);
+        // Every other run route answers the same while the switch is off: a run, its status and a cancel.
+        UUID someRun = UUID.randomUUID();
+        for (ResponseEntity<JsonNode> answer : List.of(
+                call(HttpMethod.GET, "/api/v1/report-runs/" + someRun, t, user, PORTFOLIO),
+                call(HttpMethod.POST, "/api/v1/report-runs/" + someRun + "/cancel", t, user, PORTFOLIO))) {
+            assertThat(answer.getStatusCode().value()).isEqualTo(404);
+            assertThat(answer.getBody().get("code").asString()).isEqualTo("reports_not_enabled");
+        }
         JsonNode problem =
                 post(t, user, PORTFOLIO, "test.rows", Map.of(), "json").getBody();
         assertThat(problem.get("code").asString()).isEqualTo("reports_not_enabled");

@@ -9,8 +9,13 @@
 -- Locks, said plainly. The table is created empty. The only locks are the ones CREATE TABLE ... REFERENCES takes on
 -- the tables it points at: SHARE ROW EXCLUSIVE on tenants and documents until the commit, which blocks writes to
 -- those two tables, but not reads, for the few milliseconds the file takes; no row is scanned and nothing is
--- rewritten. The functions only add catalogue rows.
+-- rewritten. The functions only add catalogue rows. Flyway runs this file in one transaction, so those locks are held
+-- to the commit, and a long transaction on tenants or documents would make this wait with every writer queued behind it:
+-- the first statement sets lock_timeout to five seconds (as V26 and V48 do), so if a lock cannot be had at once the
+-- migration fails and is retried, and the application is never held behind it.
 -- Flyway runs with outOfOrder off, so the number is assigned at merge time above the highest one on main.
+
+SET LOCAL lock_timeout = '5s';
 
 -- ---------------------------------------------------------------------------------------------
 -- report_runs: one row per requested run (FR-RPT-04, FR-RPT-08). The request is a row and the runner is a job: the row
@@ -38,8 +43,7 @@ CREATE TABLE report_runs (
     snapshot_at         timestamptz,
     started_at          timestamptz,
     -- The process that claimed the run ("host/instance") and the last time it said it was alive: a run whose
-    -- process died is failed by the next runner tick that sees no heartbeat, or at once when a new process starts on
-    -- the same host.
+    -- process died is failed by the next runner tick that sees no heartbeat (a few beats old at a process start).
     owner               text,
     heartbeat_at        timestamptz,
     finished_at         timestamptz,
@@ -99,20 +103,17 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 
 -- Active tenants with a run whose process is gone: no heartbeat since the cutoff (a run that never beat is judged by its
--- start), or claimed by an earlier process of the host named by p_host_prefix (the caller is a new process there, so the
--- earlier one is dead).
-CREATE FUNCTION app_tenants_with_stale_report_runs(p_cutoff timestamptz, p_host_prefix text, p_owner text)
-RETURNS SETOF uuid
+-- start). The caller chooses the cutoff: a few beats for a process that has just started (the old one cannot be beating),
+-- longer in steady state.
+CREATE FUNCTION app_tenants_with_stale_report_runs(p_cutoff timestamptz) RETURNS SETOF uuid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT DISTINCT r.tenant_id FROM report_runs r JOIN tenants t ON t.id = r.tenant_id
-     WHERE r.status = 'running' AND t.status = 'active'
-       AND (coalesce(r.heartbeat_at, r.started_at) < p_cutoff
-            OR (p_host_prefix IS NOT NULL AND r.owner LIKE p_host_prefix || '/%' AND r.owner <> p_owner))
+     WHERE r.status = 'running' AND t.status = 'active' AND coalesce(r.heartbeat_at, r.started_at) < p_cutoff
 $$;
 
 REVOKE ALL ON FUNCTION app_count_running_report_runs() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_tenants_with_queued_report_runs() FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_tenants_with_stale_report_runs(timestamptz, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_tenants_with_stale_report_runs(timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_count_running_report_runs() TO bms_app;
 GRANT EXECUTE ON FUNCTION app_tenants_with_queued_report_runs() TO bms_app;
-GRANT EXECUTE ON FUNCTION app_tenants_with_stale_report_runs(timestamptz, text, text) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_tenants_with_stale_report_runs(timestamptz) TO bms_app;

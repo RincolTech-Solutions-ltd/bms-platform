@@ -523,6 +523,76 @@ class LendingParReportIT extends ReportsItSupport {
         throw new AssertionError("no metric " + key);
     }
 
+    // ---- a book past the checkpoint block --------------------------------------------------------
+
+    @Autowired
+    com.rincoltech.bms.lending.insights.InsightsFigures figures;
+
+    // JUSTIFICATION-A3: new case; every other book in this suite is under the 1,000 loans of the port's checkpoint
+    // block.
+    /**
+     * 2,600 loans in three statements (members, loans, schedule items), one per loan, 1,000,000 each, due 0 to 99 days ago.
+     * The port reads them in blocks and calls its checkpoint every 1,000 loans: twice mid-stream, besides the start and the
+     * end. A checkpoint that throws on the first mid-stream call stops the read there (the end is never reached), which is
+     * how a cancelled or timed out run stops.
+     */
+    @Test
+    void theCheckpointFiresMidStreamOnABookOfThousandsAndAThrowStopsTheRead() {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        UUID product = product(t, user);
+        int n = 2_600;
+        var owner = TestDatabase.owner();
+        owner.sql("""
+                        INSERT INTO lending_members (id, tenant_id, branch_id, member_no, full_name, phone_e164, id_type,
+                                                     national_id, currency, kyc_status, status, source)
+                        SELECT md5('m' || g)::uuid, ?, ?, 'MB' || g, 'Test Borrower ' || g, '+256700000001', 'nin',
+                               'CMTEST' || lpad(g::text, 8, '0'), 'UGX', 'incomplete', 'active', 'staff'
+                          FROM generate_series(1, ?) g
+                        """).params(t.tenantId(), t.headOffice(), n).update();
+        owner.sql("""
+                        INSERT INTO lending_loans (id, tenant_id, branch_id, loan_no, member_id, product_version_id,
+                            officer_user_id, status, channel, purpose_category, currency, requested_principal_minor,
+                            requested_term_count, term_unit, interest_method, interest_rate_bp, rate_unit, repayment_pattern,
+                            disbursed_on, principal_disbursed_minor, principal_outstanding_minor, maturity_date)
+                        SELECT md5('l' || g)::uuid, ?, ?, 'LB' || g, md5('m' || g)::uuid, v.id, ?, 'active', 'staff', 'business',
+                               'UGX', 1000000, 1, 'month', 'flat', 1000, 'per_term', 'bullet', DATE '2026-01-05', 1000000,
+                               1000000, DATE '2026-12-31'
+                          FROM generate_series(1, ?) g
+                          JOIN lending_loan_product_versions v ON v.product_id = ?
+                        """).params(t.tenantId(), t.headOffice(), user, n, product).update();
+        owner.sql("""
+                        INSERT INTO lending_schedule_items (id, tenant_id, loan_id, item_no, due_date, principal_due_minor,
+                                                            interest_due_minor, fees_due_minor, status)
+                        SELECT md5('i' || g)::uuid, ?, md5('l' || g)::uuid, 1, DATE '2026-10-08' - (g % 100)::int, 1000000, 0, 0,
+                               'due'
+                          FROM generate_series(1, ?) g
+                        """).params(t.tenantId(), n).update();
+
+        var scope = new com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioScope(
+                TODAY, TODAY, TODAY, null, null, null);
+        var none = com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy.NONE;
+        int[] calls = {0};
+        var figuresRead = tenantJobs.callAs(t.tenantId(), () -> figures.par(scope, none, () -> calls[0]++));
+        assertThat(figuresRead.total().loans()).isEqualTo(n);
+        assertThat(figuresRead.total().principalOutstandingMinor()).isEqualTo(n * 1_000_000L);
+        assertThat(calls[0]).as("start, 1,000th loan, 2,000th loan, end").isEqualTo(4);
+
+        // A throw on the first mid-stream call (the second call overall) ends the read at 1,000 loans: the end is not
+        // reached.
+        int[] seen = {0};
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> tenantJobs.callAs(
+                        t.tenantId(),
+                        () -> figures.par(scope, none, () -> {
+                            if (++seen[0] == 2) {
+                                throw new IllegalStateException("cancelled mid-stream");
+                            }
+                        })))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("cancelled mid-stream");
+        assertThat(seen[0]).as("no call after the throw").isEqualTo(2);
+    }
+
     // ---- a book of 500 loans ---------------------------------------------------------------------
 
     /**

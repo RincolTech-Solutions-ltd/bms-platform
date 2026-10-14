@@ -425,10 +425,6 @@ class ReportRunnerIT extends ReportsItSupport {
         return new ReportRunner(tenantJobs, store, runExecutor, jdbc, businessClock, limits, auditLog, transactions);
     }
 
-    private static String thisHost() throws java.io.IOException {
-        return java.net.InetAddress.getLocalHost().getHostName();
-    }
-
     private void setHeartbeat(UUID run, java.time.Instant at) {
         TestDatabase.owner()
                 .sql("UPDATE report_runs SET heartbeat_at = ?, owner = 'other-host/aaaa0001' WHERE id = ?")
@@ -454,7 +450,7 @@ class ReportRunnerIT extends ReportsItSupport {
                 .sql("UPDATE report_runs SET started_at = ? WHERE id = ?")
                 .params(java.sql.Timestamp.from(TestReports.START.minus(Duration.ofHours(1))), run)
                 .update();
-        setHeartbeat(run, TestReports.START.minusSeconds(5));
+        setHeartbeat(run, TestReports.START);
         runner.tick();
         assertThat(statusOf(run)).isEqualTo("running:");
 
@@ -465,32 +461,33 @@ class ReportRunnerIT extends ReportsItSupport {
     }
 
     @Test
-    void aNewProcessOnTheSameHostFailsTheRunsOfTheEarlierOneAtOnce() throws Exception {
+    void aNewProcessFailsRunsThatStoppedBeatingAfterTwoBeatsAndLaterTicksWaitAMinute() throws Exception {
         TestDatabase.Fixture t = tenant(true);
         UUID user = UUID.randomUUID();
-        UUID mine = insertRun(t, user, "running");
-        // Claimed by an earlier process of this host a moment ago; the process that replaced it is the one calling.
-        TestDatabase.owner()
-                .sql("UPDATE report_runs SET owner = ?, heartbeat_at = ? WHERE id = ?")
-                .params(thisHost() + "/deadbeef", java.sql.Timestamp.from(TestReports.START), mine)
-                .update();
+        // The old process stopped beating 30 seconds ago, under another host name (a recreated container has a new
+        // one).
+        UUID dead = insertRun(t, user, "running");
+        setHeartbeat(dead, TestReports.START.minusSeconds(30));
         TestDatabase.Fixture u = tenant(true);
-        UUID elsewhere = insertRun(u, user, "running");
-        setHeartbeat(elsewhere, TestReports.START);
+        UUID alive = insertRun(u, user, "running");
+        setHeartbeat(alive, TestReports.START);
 
         ReportRunner replacement = anotherProcess();
         try {
             replacement.tick();
-            assertThat(statusOf(mine)).as("no wait for a heartbeat to go stale").isEqualTo("failed:interrupted");
-            assertThat(statusOf(elsewhere))
-                    .as("another host's live run is untouched")
-                    .isEqualTo("running:");
-            // Only the first tick does this: a later one trusts the heartbeats.
-            UUID later = insertRun(t, user, "queued");
-            TestDatabase.owner()
-                    .sql("UPDATE report_runs SET status = 'cancelled', finished_at = now() WHERE id = ?")
-                    .param(later)
-                    .update();
+            assertThat(statusOf(dead))
+                    .as("30 s without a beat is dead to a process that has just started (two beats)")
+                    .isEqualTo("failed:interrupted");
+            assertThat(statusOf(alive)).as("a run that is beating is untouched").isEqualTo("running:");
+            // Only that first tick is quick: afterwards a run may be quiet for the stale limit (a minute) before it is
+            // failed.
+            UUID quiet = insertRun(t, user, "running");
+            setHeartbeat(quiet, TestReports.START.minusSeconds(30));
+            replacement.tick();
+            assertThat(statusOf(quiet)).as("30 s is not a minute").isEqualTo("running:");
+            setHeartbeat(quiet, TestReports.START.minus(Duration.ofMinutes(2)));
+            replacement.tick();
+            assertThat(statusOf(quiet)).isEqualTo("failed:interrupted");
         } finally {
             replacement.stop();
         }
@@ -557,6 +554,14 @@ class ReportRunnerIT extends ReportsItSupport {
                 .isLessThan(Duration.ofSeconds(20));
 
         assertThat(statusOf(UUID.fromString(id))).isEqualTo("failed:interrupted");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*)::int FROM audit_log WHERE tenant_id = ? AND entity_id = ? AND action = 'core.reports.run_failed'")
+                        .params(t.tenantId(), UUID.fromString(id))
+                        .query(Integer.class)
+                        .single())
+                .as("the run closed at stop is audited")
+                .isEqualTo(1);
         // Another run of the tenant is not held behind it.
         assertThat(process.tick()).as("a stopped process claims nothing").isZero();
         assertThat(runToTheEnd(t, user, "test.rows", Map.of("n", 1), "json")
@@ -618,10 +623,12 @@ class ReportRunnerIT extends ReportsItSupport {
         assertThat(ready.get("status").asString()).isEqualTo("ready");
         assertThat(ready.get("size_bytes").asLong()).isGreaterThan(50 * 360);
         String seen = com.rincoltech.bms.core.documents.internal.WatchedStorage.UPLOAD.get();
-        assertThat(seen).as("the upload hook ran").startsWith("tx=false");
-        // At most a background poller (the scheduler) holds a connection; the run itself holds none.
-        int pool = Integer.parseInt(seen.substring(seen.indexOf("pool=") + 5));
-        assertThat(pool).isLessThanOrEqualTo(1);
+        // On the uploading thread: no transaction is open and no pooled connection is bound to it.
+        assertThat(seen).as("the upload hook ran").isEqualTo("tx=false conn=false");
+        // The file was taken in blocks, never read as a whole (the test file is a few kilobytes: the block is the
+        // limit).
+        assertThat(com.rincoltech.bms.core.documents.internal.WatchedStorage.MAX_READ.get())
+                .isLessThanOrEqualTo(64 * 1024);
         // And the stored object is the file, whole: the checksum recorded for the document is the object's own.
         assertThat(TestDatabase.owner()
                         .sql("SELECT size_bytes FROM documents WHERE id = ?")

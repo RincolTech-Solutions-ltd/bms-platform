@@ -126,7 +126,7 @@ lending.insights      -> core.tenancy, core.audit, core.jobs, core.notifications
                          lending.savings (SavingsMetrics), lending.investments (InvestmentMetrics)
                          (reads the lending and ledger tables with SQL, read-only, under RLS; ADR-030)
 lending.collections   -> lending.loans, lending.members
-lending.reports       -> core.reporting, core.tenancy, lending.insights (the public InsightsFigures port, ADR-038)
+lending.reports       -> core.reporting, lending.insights (the public InsightsFigures port, ADR-038)
 lending.advisor       -> core.ai, core.tenancy, core.audit, core.jobs, lending.insights (PortfolioFacts)
                          (never reads member rows; sends aggregates and aliases only; ADR-037)
 lending.savings       -> lending.members (member lookup, the receipt SMS phone; ADR-032)

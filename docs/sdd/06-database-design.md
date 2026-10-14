@@ -567,8 +567,9 @@ run per tenant (`report_runs_one_running`) and one open run per tenant, requeste
 `bms_app` holds SELECT, INSERT and UPDATE; a row is never deleted. Slice D2 adds `pdf_document_id` and `xlsx_document_id` for
 the pack. Three read-only `SECURITY DEFINER` functions let the runner see across tenants without reading any run's content:
 `app_count_running_report_runs()`, `app_tenants_with_queued_report_runs()` and
-`app_tenants_with_stale_report_runs(cutoff, host_prefix, owner)`, which names the tenants with a running run whose heartbeat
-(or start, if it never beat) is older than the cutoff, or which an earlier process of the same host claimed.
+`app_tenants_with_stale_report_runs(cutoff)`, which names the tenants with a running run whose heartbeat (or start, if it never
+beat) is older than the cutoff. The migration sets `lock_timeout` to five seconds before it takes its brief locks on `tenants` and
+`documents`.
 
 ### `payment_methods` (RLS)
 

@@ -49,14 +49,37 @@ class InsightsFiguresIT extends IntegrationTest {
     static final Instant NOW = Instant.parse("2026-10-08T10:00:00Z");
     static final LocalDate TODAY = LocalDate.of(2026, 10, 8);
 
+    /** A clock the tests can move: pinned at 2026-10-08 (Kampala) unless a test moves it. */
+    static final class MovableClock extends Clock {
+        private volatile Instant now = NOW;
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
     @TestConfiguration
     static class FixedClock {
         @Bean
         @Primary
-        Clock fixedClock() {
-            return Clock.fixed(NOW, ZoneOffset.UTC);
+        MovableClock fixedClock() {
+            return new MovableClock();
         }
     }
+
+    @Autowired
+    MovableClock clock;
 
     static TestDatabase.Fixture a;
     static GoldenModel model;
@@ -72,6 +95,7 @@ class InsightsFiguresIT extends IntegrationTest {
 
     @BeforeEach
     void seededOnce() {
+        clock.now = NOW;
         if (a != null) {
             return;
         }
@@ -310,17 +334,27 @@ class InsightsFiguresIT extends IntegrationTest {
 
     @Test
     void aScopeIsReadOnTheBusinessDateItWasResolvedOn() {
-        // Resolved on 2026-10-08 and read much later: still "today" for that scope, so the live tables, not a snapshot.
         CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
         PortfolioScope scope =
                 tenantJobs.callAs(a.tenantId(), () -> inTx(() -> figures.scope(null, null, List.of(), null, null)));
         CurrentPrincipal.clear();
         assertThat(scope.today()).isEqualTo(TODAY);
         assertThat(scope.to()).isEqualTo(TODAY);
+
+        // The run is executed after midnight: the clock is now on 2026-10-09 in Kampala, and tonight's snapshot of the
+        // 8th
+        // has not been written. The scope still reads the 8th from the loan tables, as the day it was asked on.
+        clock.now = Instant.parse("2026-10-08T21:00:30Z");
         assertThat(tenantJobs
                         .callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {}))
                         .source())
                 .isEqualTo("live");
+        // Resolved after midnight instead, the same date is a past date and has no snapshot: that is what the frozen
+        // date avoids.
+        PortfolioScope late = new PortfolioScope(TODAY, TODAY, TODAY.plusDays(1), null, null, null);
+        assertThatThrownBy(() -> tenantJobs.callAs(a.tenantId(), () -> figures.par(late, ParGroupBy.NONE, () -> {})))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
     }
 
     @Test

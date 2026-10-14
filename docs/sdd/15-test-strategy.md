@@ -353,9 +353,11 @@ output changed.
   worked example of chapter 14 section 14.3 with hand-computed figures, grouping, branch and officer scope, a past date from the
   snapshot, the cross check with the insights page, a book of 500 loans against independent sums), `InsightsFiguresIT` (the port
   against the independent recomputation of the insights golden model) and `ReportMemoryIT`, which runs the reports on a
-  seeded book, and files of 7.4 MB (the staging cap is 8 MiB) in both formats, in a child JVM capped at the staging heap of 224 MB;
+  seeded book, and files of 7.4 MB (the staging cap is 8 MiB) in both formats, in a child JVM capped at the staging heap of 224 MB,
+  with a storage double that fails the test if a file is read in blocks larger than 64 KiB and an assertion on the old generation's peak;
+  a 2,600 loan book proving the port's checkpoint fires mid-stream and a throw stops the read;
   `SpoolTest` (bytes, not characters, row cap per table, a guard check on every row); and, in `ReportRunnerIT`, the heartbeat, a
-  replacement process on the same host, a clean stop, two reads of one run seeing one snapshot while a write lands between them,
+  a replacement process failing runs that stopped beating, a clean stop, two reads of one run seeing one snapshot while a write lands between them,
   the upload from disk with no transaction and no connection held, and the expiry in batches; in `LendingParReportIT`, a run queued at
   23:59 and executed after midnight, and a download refused after the requester's branches narrowed; in `ReportRunsIT`, the rate limit
   under concurrent requests and an identical repeat past the limit. `RlsIsolationIT` covers `report_runs` through its factory row,

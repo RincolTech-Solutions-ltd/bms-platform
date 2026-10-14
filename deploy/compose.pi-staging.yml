@@ -163,6 +163,8 @@ services:
         -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/urandom
       SERVER_TOMCAT_THREADS_MAX: "24"
     mem_limit: 448m
+    # Report runs (ADR-038): a stop interrupts the running reports and gives them 15 seconds to close; Docker would kill at 10.
+    stop_grace_period: 30s
     cpus: 2.0
     depends_on:
       postgres:

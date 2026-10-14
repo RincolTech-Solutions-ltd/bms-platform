@@ -221,7 +221,6 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.ai -> bms.db "Call log without personal data, token counters"
         bms.api.lendingReports -> bms.api.insights "Reads figures through the public InsightsFigures port with a public PortfolioScope (cross checked by test)"
         bms.api.lendingReports -> bms.api.reporting "Registers its reports (lending.par today; the seven and the pack follow)"
-        bms.api.lendingReports -> bms.api.tenancy "Reads the tenant's time zone for the business date"
         bms.api.lendingReports -> bms.db "Reads loans, schedules, transactions, collateral and snapshots under RLS"
         bms.api.reporting -> bms.api.documents "Stores run files (PDF, Excel); expiry deletes the object"
         bms.api.reporting -> bms.api.jobs "Runs the report runner (every 15 seconds) and the nightly file expiry; the runner acts as a tenant found through three read-only definer functions"

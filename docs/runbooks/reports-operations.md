@@ -75,11 +75,15 @@ SELECT error, count(*), max(finished_at) FROM report_runs
 | `run_failed` | An unexpected error | Find the line `report run <id> failed:` in the API log: it names the exception classes, the first application frame and, for a database error, the SQLSTATE, never a message or a value. Fix the cause; the user can ask again |
 
 Every run is stamped with the process that holds it (`report_runs.owner`, `host/instance`) and beaten every 10 seconds
-(`heartbeat_at`). A run with no beat for a minute is not being worked on: the next runner tick fails it as `interrupted` and frees the
-tenant, and the first tick of a process on a host fails at once the runs an earlier process of that host left, so a deploy on the
-staging Pi does not block its one place for the length of a timeout. A clean stop (a restart) interrupts the workers, gives them 15
-seconds to close their runs, and fails the rest itself. The properties are `bms.reports.heartbeat` (PT10S) and
-`bms.reports.heartbeat-stale` (PT1M); one API process per host is assumed. To stop a healthy run, the requester cancels it in the Reports page (or `POST /report-runs/{id}/cancel`); the worker notices at
+(`heartbeat_at`). What happens on a deploy, exactly: the compose files give the api container `stop_grace_period: 30s`; on the stop
+the runner refuses new claims, interrupts the workers, waits up to 15 seconds for them to close their runs as `interrupted` (each is
+audited as `core.reports.run_failed`), and fails and audits any run still open itself. If the process is killed instead (an out of memory
+error, a power cut) nothing is closed, and the runs are judged by their heartbeat: a recreated container has a new host name, so who
+owned a run does not matter, only whether it still beats. The first runner tick of a new process fails every running run whose last beat
+is more than two beats (20 seconds) old, since whatever was beating before the process started is dead (a startup takes about a minute on
+the staging Pi, so the old runs are well past it); from then on a run is failed when its beat is a minute old, so a live run of another
+instance is never touched. Either way the single staging place is free again within about a minute of the new process starting. The
+properties are `bms.reports.heartbeat` (PT10S) and `bms.reports.heartbeat-stale` (PT1M). To stop a healthy run, the requester cancels it in the Reports page (or `POST /report-runs/{id}/cancel`); the worker notices at
 its next checkpoint, within a few seconds. An operator who must end one now can do it as the owner:
 
 ```sql

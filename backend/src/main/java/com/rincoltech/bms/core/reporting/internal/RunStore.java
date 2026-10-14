@@ -280,19 +280,14 @@ class RunStore {
                 == 1;
     }
 
-    /**
-     * Fails every run of this tenant whose process is gone: no heartbeat since the cutoff, or claimed by an earlier
-     * process of this host (see {@code app_tenants_with_stale_report_runs}); returns their ids.
-     */
-    List<UUID> failStale(Instant cutoff, String hostPrefix, String owner, Instant now) {
+    /** Fails every run of this tenant whose process is gone: no heartbeat since the cutoff; returns their ids. */
+    List<UUID> failStale(Instant cutoff, Instant now) {
         return jdbc.sql("""
                         UPDATE report_runs SET status = 'failed', error = 'interrupted', finished_at = ?, updated_at = ?
-                         WHERE status = 'running'
-                           AND (coalesce(heartbeat_at, started_at) < ?
-                                OR (CAST(? AS text) IS NOT NULL AND owner LIKE CAST(? AS text) || '/%' AND owner <> ?))
+                         WHERE status = 'running' AND coalesce(heartbeat_at, started_at) < ?
                         RETURNING id
                         """)
-                .params(ts(now), ts(now), ts(cutoff), hostPrefix, hostPrefix, owner)
+                .params(ts(now), ts(now), ts(cutoff))
                 .query(UUID.class)
                 .list();
     }

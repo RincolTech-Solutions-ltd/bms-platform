@@ -65,6 +65,30 @@ class ReportMemoryIT extends IntegrationTest {
                 java.util.regex.Pattern.compile("MEMORY maxHeapMb=(\\d+)").matcher(output);
         assertThat(heap.find()).as(output).isTrue();
         assertThat(Integer.parseInt(heap.group(1))).isBetween(190, 224);
+        // The upload streams: files of megabytes were taken in blocks of at most 64 KiB, never as a whole.
+        java.util.regex.Matcher up = java.util.regex.Pattern.compile(
+                        "MEMORY upload maxReadBytes=(\\d+) largestFileBytes=(\\d+) totalBytes=(\\d+)")
+                .matcher(output);
+        assertThat(up.find()).as(output).isTrue();
+        assertThat(Long.parseLong(up.group(1))).as("largest single read").isLessThanOrEqualTo(64 * 1024);
+        assertThat(Long.parseLong(up.group(2))).as("largest file").isGreaterThan(7_000_000L);
+        assertThat(Long.parseLong(up.group(3))).as("all files").isGreaterThan(15_000_000L);
+        // The old generation's peak stays clear of the heap limit with a tenth spare
+        // (promoted garbage counts in the peak, so this is a ceiling, not the live set; an out of memory error would
+        // have ended the child).
+        java.util.regex.Matcher heapUse = java.util.regex.Pattern.compile("oldPeakMb=(\\d+) oldMaxMb=(\\d+)")
+                .matcher(output);
+        java.util.regex.Matcher base =
+                java.util.regex.Pattern.compile("MEMORY oldBaselineMb=(\\d+)").matcher(output);
+        assertThat(heapUse.find() && base.find()).as(output).isTrue();
+        long peak = Long.parseLong(heapUse.group(1));
+        long max = Long.parseLong(heapUse.group(2));
+        long baseline = Long.parseLong(base.group(1));
+        assertThat(peak * 100)
+                .as(
+                        "old generation peak against its limit (%s, the application alone holds %s after a collection)",
+                        heapUse.group(0), baseline)
+                .isLessThanOrEqualTo(max * 90);
         assertThat(output.lines().filter(l -> l.startsWith("MEMORY run ")).toList())
                 .as(lines)
                 .hasSize(7)

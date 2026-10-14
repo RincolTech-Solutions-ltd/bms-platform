@@ -23,7 +23,7 @@ class ReportsProperties {
      */
     final int tableRowCap;
 
-    /** Bytes in one output file ({@code BMS_REPORTS_MAX_FILE_BYTES}); a file is held in memory once to store it. */
+    /** Bytes in one output file ({@code BMS_REPORTS_MAX_FILE_BYTES}); the file is uploaded from disk, never held in memory. */
     final long maxFileBytes;
 
     /** A run that takes longer is failed with {@code timeout} (10 minutes). */

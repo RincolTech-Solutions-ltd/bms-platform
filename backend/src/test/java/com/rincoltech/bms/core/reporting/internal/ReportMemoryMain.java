@@ -47,6 +47,19 @@ public final class ReportMemoryMain {
         };
         int failures = 0;
         try (ConfigurableApplicationContext ctx = app.run(settings)) {
+            // The storage double keeps nothing of an uploaded file, so what is measured is the code under test, not the
+            // double.
+            com.rincoltech.bms.core.documents.internal.WatchedStorage.discard = true;
+            // What the application itself holds once started, after a collection: the reports are measured against it.
+            System.gc();
+            long baseline = 0;
+            for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+                if (pool.getType() == MemoryType.HEAP
+                        && (pool.getName().contains("Tenured") || pool.getName().contains("Old"))) {
+                    baseline = pool.getUsage().getUsed();
+                }
+            }
+            System.out.println("MEMORY oldBaselineMb=" + baseline / 1024 / 1024);
             TenantJobs jobs = ctx.getBean(TenantJobs.class);
             RunService runs = ctx.getBean(RunService.class);
             ReportRunner runner = ctx.getBean(ReportRunner.class);
@@ -104,13 +117,25 @@ public final class ReportMemoryMain {
                                 + (view.error() == null ? "" : " error=" + view.error()));
             }
             long peak = 0;
+            long oldPeak = 0;
+            long oldMax = 0;
             for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
                 if (pool.getType() == MemoryType.HEAP) {
                     peak += pool.getPeakUsage().getUsed();
+                    // The old generation holds what survived collections: the live data of the process, which is what
+                    // an out of memory error is made of (the young generation fills with garbage and proves nothing).
+                    if (pool.getName().contains("Tenured") || pool.getName().contains("Old")) {
+                        oldPeak = pool.getPeakUsage().getUsed();
+                        oldMax = pool.getUsage().getMax();
+                    }
                 }
             }
             System.out.println("MEMORY maxHeapMb=" + Runtime.getRuntime().maxMemory() / 1024 / 1024 + " peakHeapMb="
-                    + peak / 1024 / 1024);
+                    + peak / 1024 / 1024 + " oldPeakMb=" + oldPeak / 1024 / 1024 + " oldMaxMb=" + oldMax / 1024 / 1024);
+            System.out.println("MEMORY upload maxReadBytes="
+                    + com.rincoltech.bms.core.documents.internal.WatchedStorage.MAX_READ.get() + " largestFileBytes="
+                    + com.rincoltech.bms.core.documents.internal.WatchedStorage.LARGEST.get() + " totalBytes="
+                    + com.rincoltech.bms.core.documents.internal.WatchedStorage.TOTAL.get());
         }
         System.exit(failures == 0 ? 0 : 1);
     }

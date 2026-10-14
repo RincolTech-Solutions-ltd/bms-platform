@@ -5,8 +5,6 @@ import com.rincoltech.bms.core.reporting.ReportOutput;
 import com.rincoltech.bms.core.reporting.ReportOutput.Column;
 import com.rincoltech.bms.core.reporting.ReportOutput.Kind;
 import com.rincoltech.bms.core.reporting.ReportParams;
-import com.rincoltech.bms.core.tenancy.CurrentTenant;
-import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.lending.insights.InsightsFigures;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParBucket;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParFigures;
@@ -54,14 +52,10 @@ class ParReport implements ReportDefinition {
             "over_90", "Over 90 days late");
 
     private final InsightsFigures figures;
-    private final CurrentTenant tenant;
-    private final BusinessClock clock;
     private final ObjectMapper mapper;
 
-    ParReport(InsightsFigures figures, CurrentTenant tenant, BusinessClock clock, ObjectMapper mapper) {
+    ParReport(InsightsFigures figures, ObjectMapper mapper) {
         this.figures = figures;
-        this.tenant = tenant;
-        this.clock = clock;
         this.mapper = mapper;
     }
 
@@ -118,11 +112,15 @@ class ParReport implements ReportDefinition {
 
     @Override
     public Prepared prepare(Map<String, Object> params) {
-        LocalDate today = clock.today(tenant.profile().timezone());
-        LocalDate asAt = ReportParams.date(params, "as_at", today);
+        LocalDate asked = ReportParams.date(params, "as_at", null);
         List<UUID> branches = ReportParams.uuids(params, "branch_id");
         String groupBy = ReportParams.choice(params, "group_by", GROUPS, "none");
-        PortfolioScope scope = figures.scope(asAt, asAt, branches, null, null);
+        // One reading of the business date, taken by the port: an absent date is that day, and the scope keeps it, so a
+        // request made as midnight passes cannot ask for yesterday with today's rules.
+        PortfolioScope resolved = figures.scope(asked, asked, branches, null, null);
+        LocalDate asAt = resolved.to();
+        PortfolioScope scope = new PortfolioScope(
+                asAt, asAt, resolved.today(), resolved.branchIds(), resolved.officerId(), resolved.productId());
         Map<String, Object> normalised = new LinkedHashMap<>();
         normalised.put("as_at", asAt.toString());
         if (!branches.isEmpty()) {
