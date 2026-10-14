@@ -143,6 +143,17 @@ services:
       BMS_MAIL_FROM: ${BMS_MAIL_FROM:-}
       BMS_TELEGRAM_BOT_TOKEN: ${BMS_TELEGRAM_BOT_TOKEN:-}
       BMS_TELEGRAM_OPERATOR_CHAT_ID: ${BMS_TELEGRAM_OPERATOR_CHAT_ID:-}
+      # SMS (ADR-036, docs/runbooks/sms-setup.md). Off unless a mode and a provider are set; staging
+      # defaults to the sink, which texts nobody. BMS_ENVIRONMENT decides what the startup guard allows:
+      # the staging file fixes it to staging, so a missing or wrong value in .env cannot turn the guard off.
+      BMS_ENVIRONMENT: staging
+      BMS_SMS_PROVIDER: ${BMS_SMS_PROVIDER:-}
+      BMS_SMS_MODE: ${BMS_SMS_MODE:-}
+      BMS_SMS_ALLOWLIST: ${BMS_SMS_ALLOWLIST:-}
+      BMS_SMS_PLATFORM_DAILY_CAP: ${BMS_SMS_PLATFORM_DAILY_CAP:-2000}
+      BMS_SMS_AT_BASE_URL: ${BMS_SMS_AT_BASE_URL:-}
+      BMS_SMS_AT_USERNAME: ${BMS_SMS_AT_USERNAME:-}
+      BMS_SMS_AT_API_KEY: ${BMS_SMS_AT_API_KEY:-}
       # Language model gateway (ADR-037). Off unless BMS_AI_PROVIDER is openai_compatible and the base URL,
       # key and model are set; the allow-list names the tenants that may switch the assistant on.
       BMS_AI_PROVIDER: ${BMS_AI_PROVIDER:-off}
