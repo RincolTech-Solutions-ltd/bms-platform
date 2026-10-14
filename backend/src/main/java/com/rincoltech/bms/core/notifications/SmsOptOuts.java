@@ -48,6 +48,11 @@ public interface SmsOptOuts {
      */
     Entry optOut(UUID memberId, String phoneE164, Scope scope);
 
-    /** Lifts the member's active opt-out; false when there was none. */
-    boolean lift(UUID memberId);
+    /**
+     * Lifts the member's active opt-out; false when there was none. Only the tenant administrator may (the opt-out is the
+     * member's protection against being pestered, so a field officer cannot undo it): 403 {@code permission_denied}
+     * otherwise, and a reason of 3 to 200 characters is required (422 {@code reason_required}) and goes into the audit row.
+     * Narrowing {@code ALL} to {@code REMINDERS} through {@link #optOut} is a lift of part of it and needs the same standing.
+     */
+    boolean lift(UUID memberId, String reason);
 }

@@ -114,6 +114,8 @@ export interface SmsTemplate {
   override: { text: string; version: number; updated_at: string } | null;
   sample_text: string;
   measure: SmsMeasure;
+  /** Set when the sample is the default words because the business name is too long for the wording */
+  note: string | null;
   max_chars: number;
   max_worst_case_segments: number;
 }
@@ -121,6 +123,8 @@ export interface SmsTemplate {
 export interface SmsPreview {
   text: string;
   measure: SmsMeasure;
+  /** Set when the text shown is the default words, not the ones previewed */
+  note: string | null;
 }
 
 export interface SmsTestResult {
@@ -230,8 +234,12 @@ export const sms = {
     ) as SmsImportResult;
   },
 
-  async removeOptOut(id: string): Promise<void> {
-    const result = await api.DELETE('/api/v1/sms/opt-outs/{opt_out_id}', { params: { path: { opt_out_id: id } } });
+  /** Lifting needs a reason (3 to 200 characters, kept in the audit row) and is the tenant administrator's. */
+  async removeOptOut(id: string, reason: string): Promise<void> {
+    const result = await api.DELETE('/api/v1/sms/opt-outs/{opt_out_id}', {
+      params: { path: { opt_out_id: id } },
+      body: { reason },
+    });
     if (!result.response.ok) fail(result.error, result.response.status, 'Could not lift the opt-out.');
   },
 
@@ -294,9 +302,12 @@ export const sms = {
     ) as MemberSmsOptOut;
   },
 
-  async liftMemberOptOut(memberId: string): Promise<MemberSmsOptOut> {
+  async liftMemberOptOut(memberId: string, reason: string): Promise<MemberSmsOptOut> {
     return unwrap(
-      await api.DELETE('/api/v1/lending/members/{member_id}/sms-opt-out', { params: { path: { member_id: memberId } } }),
+      await api.DELETE('/api/v1/lending/members/{member_id}/sms-opt-out', {
+        params: { path: { member_id: memberId } },
+        body: { reason },
+      }),
       'Could not lift the opt-out.',
     ) as MemberSmsOptOut;
   },

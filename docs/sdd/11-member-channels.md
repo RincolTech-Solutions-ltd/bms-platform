@@ -158,7 +158,7 @@ within one 160 character GSM-7 segment where possible:
   tenant administrator from that list and checked again on every message; else the provider's shared sender (ADR-036).
 - Cost: segments are counted per tenant (FR-NTF-07) and the provider's cost per message is recorded (FR-NTF-15).
 - Opt-out: a member can be opted out of reminders and arrears messages, or of all non-security SMS (FR-NTF-14), by staff on
-  the member's page (the choice follows the member to any number) or by an administrator adding or pasting numbers.
+  the member's page (the choice follows the member to any number) or by an administrator adding or pasting numbers; only the administrator lifts or narrows one, with a reason kept in the audit.
 - Staging never sends a real SMS (FR-NTF-12). Receipts and payment links are not held by the sending window; reminders
   and arrears notices are.
 - A message goes only to a number read without guessing (FR-NTF-19); SMS is off for a tenant until the operator switches it

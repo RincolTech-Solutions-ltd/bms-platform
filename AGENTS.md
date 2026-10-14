@@ -243,9 +243,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `/platform/tenants/{tenant_id}/sms/sender-ids`), the window (Africa/Kampala, 60 minutes at least, inside 06:00 to 21:00),
   daily and monthly caps that can be lowered under the operator's and never raised (0 means stop), and the balance switch (the
   old flat `sms_*` keys left `PATCH /settings`); the opt-out list (`/sms/opt-outs`: member rows from the member's page and
-  number rows, masked, a pasted list checked first); the tenant's own wording per event in a placeholder language with no
+  number rows, masked, a pasted list checked first; lifting or narrowing one is the tenant administrator's, with a reason in the
+  audit row); the tenant's own wording per event in a placeholder language with no
   expressions (`/notification-templates`, previews with segments and a cost estimate from the tenant's own history) and a test
-  message that reaches only the sink or the allow-list (`/sms/test-message`); the staff screens under `/staff/sms` and the
+  message that reaches only the sink or the allow-list and obeys the same switches, opt-outs and caps (`/sms/test-message`); the staff screens under `/staff/sms` and the
   member page's text-message choice; no new permission.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a

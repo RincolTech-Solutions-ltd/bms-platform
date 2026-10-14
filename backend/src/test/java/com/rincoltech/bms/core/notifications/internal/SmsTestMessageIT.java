@@ -9,9 +9,11 @@ import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.notifications.internal.SmsConfiguration.SmsProviderRef;
 import com.rincoltech.bms.core.notifications.internal.SmsTestService.Result;
 import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.TenantContext;
+import com.rincoltech.bms.testsupport.SmsTenants;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -43,6 +45,32 @@ class SmsTestMessageIT extends IntegrationTest {
 
     @Autowired
     PlatformTransactionManager transactionManager;
+
+    @Autowired
+    SmsTenantConfig tenantConfig;
+
+    @Autowired
+    SmsRecipientHash hasher;
+
+    @Autowired
+    BusinessClock clock;
+
+    // JUSTIFICATION-A3: the gating cases of review finding 1 need a ready tenant and a delivery count in this class.
+    /** A tenant whose SMS is on at both switches with a generous cap: the state in which a real test send may go. */
+    TestDatabase.Fixture readyTenant() {
+        TestDatabase.Fixture t = TestDatabase.tenant("sms-test", true);
+        SmsTenants.operator(t.tenantId(), true, 1000);
+        SmsTenants.enable(t.tenantId());
+        return t;
+    }
+
+    long deliveries(TestDatabase.Fixture t) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM sms_deliveries WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
 
     @AfterEach
     void clear() {
@@ -85,7 +113,10 @@ class SmsTestMessageIT extends IntegrationTest {
                 templates,
                 jdbc,
                 audit,
-                transactionManager);
+                transactionManager,
+                tenantConfig,
+                hasher,
+                clock);
         CurrentPrincipal.set(Principal.uniform(
                 UUID.randomUUID(), "staff", Set.of("core.notification_templates.manage"), true, Set.of()));
         return TenantContext.callAs(t.tenantId(), () -> service.send("savings.deposit", text, to));
@@ -127,7 +158,7 @@ class SmsTestMessageIT extends IntegrationTest {
 
     @Test
     void inAllowlistModeOnlyAListedNumberReachesTheProviderAndAnyOtherIsSunk() {
-        TestDatabase.Fixture t = TestDatabase.tenant("sms-test", true);
+        TestDatabase.Fixture t = readyTenant();
         RecordingSmsProvider real = new RecordingSmsProvider();
         Set<String> allow = Set.of(ALLOWED);
 
@@ -161,7 +192,10 @@ class SmsTestMessageIT extends IntegrationTest {
                 templates,
                 jdbc,
                 audit,
-                transactionManager);
+                transactionManager,
+                tenantConfig,
+                hasher,
+                clock);
         CurrentPrincipal.set(Principal.uniform(UUID.randomUUID(), "staff", Set.of(), true, Set.of()));
         Result r = TenantContext.callAs(t.tenantId(), () -> service.send("savings.deposit", null, "0700000698"));
         assertThat(r.outcome()).isEqualTo("sunk");

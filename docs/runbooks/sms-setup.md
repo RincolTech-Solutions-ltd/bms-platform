@@ -107,9 +107,12 @@ Staff area, SMS (`/staff/sms`; the tenant administrator, who holds `core.setting
 - **Wording** (`/staff/sms/wording`): their own words per event from a fixed list of placeholders, previewed with sample
   data (encoding, segments, a cost estimate from their own last 30 days). A **test message** goes only to the sink or to
   a number on `BMS_SMS_ALLOWLIST`: in `live` mode none is sent (the preview is the test), in `off` none, in `sink` it is
-  recorded, in `allowlist` only a listed number gets it. A test is not part of the cap.
+  recorded, in `allowlist` only a listed number gets it, and only while SMS is on for the platform and the business, the number
+  is not on the opt-out list and the caps are not reached; such a test is written to the delivery log and counts against the caps.
 - **Opt-outs** (`/staff/sms/opt-outs`, and on a member's own page): numbers shown masked, add one, paste up to 2000
-  (checked first), lift one. A member's opt-out follows the member to any number; a number added here blocks that number
+  (checked first), lift one. Lifting is the business administrator's: it asks for a reason (3 to 200 characters, kept in the
+  audit row) and a confirmation, and so does narrowing a member's "every message" to "reminders"; other staff can only stop
+  more. A member's opt-out follows the member to any number; a number added here blocks that number
   whoever the message is about.
 
 The old flat settings `sms_sender_name`, `sms_window_start`, `sms_window_end` and `sms_include_balance` of

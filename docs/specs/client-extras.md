@@ -556,15 +556,21 @@ findings 4, 6 and 8 hold). Where the build differs from, or sharpens, the text a
 - **Opt-out (4.9).** Two kinds of row: about a member (from the member's page, `PUT /lending/members/{id}/sms-opt-out`; it holds
   no number and follows the member to any number) and about a number alone (the administrator adds one or pastes up to 2000;
   matched by the keyed hash, blocking the number whoever the message is about; a pasted list never weakens a block). Numbers are
-  shown masked and never stored. The list searches as you type (ADR-039) and pages by cursor.
+  shown masked and never stored. Stopping more is any permitted user's; lifting a row or narrowing `all` to `reminders` is the tenant
+  administrator's, needs a reason of 3 to 200 characters kept in the audit row, and the screens ask for a confirmation first. The
+  list searches as you type (ADR-039) and pages by cursor.
 - **Templates (4.10).** Overrides for the two savings receipts (the events the application sends today); each later event brings its
   placeholder list. The language is `{name}` placeholders and plain text only. Limits: 320 characters, at most 4 segments in the
-  worst case, no invisible or direction-changing characters, required placeholders, and no balance in any override. The preview
+  worst case (counted in UTF-16 units), no invisible or direction-changing characters, required placeholders, and no balance in any
+  override. A value longer than its placeholder allows is refused (`value_too_long`), never cut. The preview
   shows fabricated data with the tenant's own business name, the encoding and segments, and a cost estimate that is the average
   cost per segment of the tenant's own sent messages in the last 30 days (none without history). The test message reaches only the
-  sink or the environment's allow-list and never a number in a live mode.
+  sink or the environment's allow-list and never a number in a live mode; one that would really go out obeys the operator's switch,
+  the tenant's switch, the opt-out list and the caps, and is logged as a delivery.
 - **Settings moved.** `sms_sender_name`, `sms_window_start`, `sms_window_end` and `sms_include_balance` left `PATCH /settings` for
-  the group; `V52` copies the window and balance values once.
+  the group; `V52` copies the window and balance values once (a window that fails the limits is not copied). A window stored
+  outside 06:00 to 21:00 or under 60 minutes is replaced by the default on read. A row queued before the switch-on is refused by
+  the channel as `backlog_dropped`, including one already claimed when the switch was turned on.
 - **Not in this slice.** Per-event wording for the loan and investment events and the reminders (they join when their slices queue
   them), delivery reports and the per-message history screen (#215), the operator's screen for sender ids (the routes and the runbook
   exist), inbound STOP.

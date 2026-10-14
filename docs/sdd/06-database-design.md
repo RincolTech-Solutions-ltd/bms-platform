@@ -340,7 +340,8 @@ last minute), then by due time, and locks the best twenty candidates in that ord
   audit log keeps what it said.
 - `sms_tenant_switched_on(now)` (definer, `V52`): marks the bound tenant's pending SMS outbox rows `failed` with
   `backlog_dropped` when the tenant switches SMS on; `notification_outbox_enqueue` also writes no SMS row while the tenant's own
-  switch (`module_groups.sms.enabled`) is off.
+  switch (`module_groups.sms.enabled`) is off. It marks only rows still pending; the channel also refuses, as `backlog_dropped`,
+  any row queued before the group's `acknowledged_at`, so a row already claimed at the switch-on cannot be sent either.
 
 ### `unmatched_gateway_callbacks` (`bms_platform` and `bms_app` INSERT; `bms_platform` SELECT)
 

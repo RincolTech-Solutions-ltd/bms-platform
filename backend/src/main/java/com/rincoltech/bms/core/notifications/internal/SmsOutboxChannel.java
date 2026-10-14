@@ -228,6 +228,14 @@ final class SmsOutboxChannel implements OutboxChannel {
         if (!config.enabled()) {
             return Prepared.done(Result.refused("tenant_sms_off"), alerts);
         }
+        // A row queued before the moment the tenant last switched on is the backlog of ADR-036 decision 14, even when
+        // it
+        // was claimed before that switch-on committed (the drop at the switch-on only reaches rows still pending).
+        if (config.enabledSince() != null
+                && row.queuedAt() != null
+                && row.queuedAt().isBefore(config.enabledSince())) {
+            return Prepared.done(Result.refused("backlog_dropped"), alerts);
+        }
 
         Optional<Existing> existing = jdbc.sql(
                         "SELECT id, status, failure_reason FROM sms_deliveries WHERE outbox_id = ?")

@@ -1581,7 +1581,7 @@ export interface paths {
         /** Opt a member out of reminders or of all SMS, or change the scope; audited (FR-NTF-14) */
         put: operations["setMemberSmsOptOut"];
         post?: never;
-        /** Lift a member's SMS opt-out; audited (FR-NTF-14) */
+        /** Lift a member's SMS opt-out with a reason; audited (FR-NTF-14, the tenant administrator only) */
         delete: operations["liftMemberSmsOptOut"];
         options?: never;
         head?: never;
@@ -4877,7 +4877,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Lift one SMS opt-out, audited */
+        /** Lift one SMS opt-out with a reason, audited (the tenant administrator only) */
         delete: operations["removeSmsOptOut"];
         options?: never;
         head?: never;
@@ -6283,6 +6283,14 @@ export interface components {
             decision: string;
             /** @description Required when rejected */
             note?: string;
+        };
+        LiftMemberSmsOptOutRequest: {
+            /** @description Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers */
+            reason: string;
+        };
+        LiftSmsOptOutRequest: {
+            /** @description Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers */
+            reason: string;
         };
         Loan: {
             /** Format: uuid */
@@ -12307,6 +12315,8 @@ export interface components {
             /** Format: int32 */
             max_worst_case_segments?: number;
             measure?: components["schemas"]["SmsTemplateMeasure"];
+            /** @description Set when the sample is the default words because the business name is too long for the wording */
+            note?: string;
             override?: components["schemas"]["SmsTemplateOverride"];
             placeholders?: components["schemas"]["SmsTemplatePlaceholder"][];
             /** @description The wording in force with sample data: the override, else the default */
@@ -12352,6 +12362,8 @@ export interface components {
         };
         SmsTemplatePreview: {
             measure?: components["schemas"]["SmsTemplateMeasure"];
+            /** @description Set when the text shown is the default words, not the ones previewed (a business name too long for the wording) */
+            note?: string;
             text?: string;
         };
         SmsTestMessageRequest: {
@@ -12366,7 +12378,7 @@ export interface components {
             mode?: string;
             /** @description sunk (recorded, nothing left the platform), sent, or not_sent */
             outcome?: string;
-            /** @description For not_sent: channel_off, live_mode_preview_only or the provider's reason */
+            /** @description For not_sent: channel_off, live_mode_preview_only, operator_sms_off, tenant_sms_off, blocked_optout, cap_reached or the provider's reason */
             reason?: string;
             recipient_masked?: string;
             /** @description True when a provider accepted the message for a real phone (allowlist mode, a listed number) */
@@ -15507,7 +15519,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiftMemberSmsOptOutRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -21504,7 +21520,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiftSmsOptOutRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

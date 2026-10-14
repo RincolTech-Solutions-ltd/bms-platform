@@ -276,12 +276,27 @@ UPDATE tenant_settings ts
                 ELSE jsonb_set(ts.settings, '{module_groups}', '{}'::jsonb) END,
            '{module_groups,sms}',
            jsonb_strip_nulls(jsonb_build_object(
-               'window_start', ts.settings -> 'sms_window_start',
-               'window_end', ts.settings -> 'sms_window_end',
+               'window_start', CASE WHEN w.touched AND w.ok THEN to_jsonb(w.s) END,
+               'window_end', CASE WHEN w.touched AND w.ok THEN to_jsonb(w.e) END,
                'include_balance', ts.settings -> 'sms_include_balance')))
- WHERE (ts.settings -> 'sms_window_start' IS NOT NULL
-        OR ts.settings -> 'sms_window_end' IS NOT NULL
-        OR ts.settings -> 'sms_include_balance' IS NOT NULL)
+  FROM (
+      -- The legacy window is clamped to the hard limits of the new screen (06:00 to 21:00, at least 60 minutes) while it
+      -- is copied: a value outside them is pulled in, and what is left of a window that is not one is not copied at all,
+      -- so the default (08:00 to 20:00) applies. A value that is not HH:MM is the default for its side.
+      SELECT q.id, q.touched, q.s, q.e,
+             (q.s < q.e AND (q.e::time - q.s::time) >= interval '60 minutes') AS ok
+        FROM (
+            SELECT t.id,
+                   (t.settings -> 'sms_window_start' IS NOT NULL OR t.settings -> 'sms_window_end' IS NOT NULL) AS touched,
+                   greatest(coalesce(CASE WHEN t.settings ->> 'sms_window_start' ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+                                          THEN t.settings ->> 'sms_window_start' END, '08:00') COLLATE "C",
+                            '06:00' COLLATE "C") AS s,
+                   least(coalesce(CASE WHEN t.settings ->> 'sms_window_end' ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+                                       THEN t.settings ->> 'sms_window_end' END, '20:00') COLLATE "C",
+                         '21:00' COLLATE "C") AS e
+              FROM tenant_settings t) q) w
+ WHERE ts.id = w.id
+   AND (w.touched OR ts.settings -> 'sms_include_balance' IS NOT NULL)
    AND ts.settings #> '{module_groups,sms}' IS NULL;
 -- legacy-copy:end
 

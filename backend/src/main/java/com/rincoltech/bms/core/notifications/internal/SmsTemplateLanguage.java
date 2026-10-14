@@ -33,7 +33,10 @@ import java.util.regex.Pattern;
  *
  * Rendering is one pass over the template: a value is inserted as it is and never read for placeholders again, so a
  * business name that contains {@code {amount}} stays that text. A value loses its control characters (a line feed
- * becomes a space, so a value cannot add a line) and is cut to the placeholder's length. Nothing is HTML escaped:
+ * becomes a space, so a value cannot add a line). A value longer than the placeholder's length, counted in UTF-16 units as
+ * the segment counter counts them (an emoji is two), is never cut: the render is refused ({@code value_too_long}) and the
+ * caller sends the default text, so a shortened amount or name can never reach a member in a receipt. Because the length
+ * is in the same units as the segment count, the worst case below holds for every value the render accepts. Nothing is HTML escaped:
  * an SMS is plain text, and the screens show the result as text, never as markup. Pure, so the golden tests pin it.
  */
 final class SmsTemplateLanguage {
@@ -123,7 +126,13 @@ final class SmsTemplateLanguage {
                     if (value == null) {
                         throw new Problem("missing_value", "No value for {" + hole.name() + "}.");
                     }
-                    out.append(clean(value, event.placeholder(hole.name()).maxLength()));
+                    String cleaned = clean(value);
+                    int max = event.placeholder(hole.name()).maxLength();
+                    if (cleaned.length() > max) {
+                        throw new Problem(
+                                "value_too_long", "The value of {" + hole.name() + "} is longer than " + max + ".");
+                    }
+                    out.append(cleaned);
                 }
             }
         }
@@ -139,27 +148,24 @@ final class SmsTemplateLanguage {
         return values;
     }
 
-    /** Removes control characters (a line feed becomes a space) and the disguising characters; cuts to {@code max} characters. */
-    static String clean(String value, int max) {
+    /** Removes control characters (a line feed becomes a space) and the disguising characters; never shortens a value otherwise. */
+    static String clean(String value) {
         StringBuilder out = new StringBuilder();
-        int[] points = value.codePoints().toArray();
-        int kept = 0;
-        for (int cp : points) {
-            if (kept >= max) {
-                break;
-            }
+        value.codePoints().forEach(cp -> {
             if (cp == '\n' || cp == '\r' || cp == '\t') {
                 out.append(' ');
-                kept++;
             } else if (!forbidden(cp, false)) {
                 out.appendCodePoint(cp);
-                kept++;
             }
-        }
+        });
         return out.toString().strip();
     }
 
-    /** The longest the message can be: every placeholder at its longest, in a letter outside the SMS alphabet. */
+    /**
+     * The longest the message can be: every placeholder at its longest (in UTF-16 units, which is how the render limits a
+     * value), in a letter outside the SMS alphabet, so the whole text is UCS-2 at one unit a letter. A value of emoji, two
+     * units each, reaches the same unit count with fewer letters, so it cannot exceed this.
+     */
     static String worstCase(Event event, String text) {
         StringBuilder out = new StringBuilder();
         for (Part part : parse(event, text)) {

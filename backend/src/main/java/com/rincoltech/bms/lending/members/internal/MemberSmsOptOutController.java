@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -94,13 +95,28 @@ class MemberSmsOptOutController {
         return ResponseEntity.ok(Response.of(optOuts.status(memberId)));
     }
 
-    @DeleteMapping
-    @RequiresPermission("lending.members.update")
-    @Operation(summary = "Lift a member's SMS opt-out; audited (FR-NTF-14)", operationId = "liftMemberSmsOptOut")
+    @Schema(name = "LiftMemberSmsOptOutRequest")
+    record LiftRequest(
+            @NotBlank
+            @Size(min = 3, max = 200)
+            @Schema(
+                    description =
+                            "Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers")
+            String reason) {}
+
+    /**
+     * Lifting is the tenant administrator's (a field officer holds {@code lending.members.update} and must not be able to
+     * undo the member's protection with one click, spec 4.14), needs a reason, and is audited with it.
+     */
+    @DeleteMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    @RequiresPermission("core.settings.manage")
+    @Operation(
+            summary = "Lift a member's SMS opt-out with a reason; audited (FR-NTF-14, the tenant administrator only)",
+            operationId = "liftMemberSmsOptOut")
     @Transactional
-    public Response lift(@PathVariable("member_id") UUID memberId) {
-        member(memberId, "lending.members.update");
-        optOuts.lift(memberId);
+    public Response lift(@PathVariable("member_id") UUID memberId, @Valid @RequestBody LiftRequest request) {
+        member(memberId, "core.settings.manage");
+        optOuts.lift(memberId, request.reason());
         return Response.of(optOuts.status(memberId));
     }
 

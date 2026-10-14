@@ -231,6 +231,7 @@ const template = (over: Partial<SmsTemplate> = {}): SmsTemplate => ({
   override: null,
   sample_text: 'Sunrise Savers: Deposit of UGX 50,000 on account SV000123. Receipt RC-0042.',
   measure,
+  note: null,
   max_chars: 320,
   max_worst_case_segments: 4,
   ...over,
@@ -252,6 +253,14 @@ describe('the wording', () => {
     expect(screen.getByText(/33 characters: 1 text message/)).toBeTruthy();
     expect(screen.getByText(/up to 3 if a name is long/)).toBeTruthy();
     expect(screen.getByText('About UGX 32 for this message, from what your messages cost in the last 30 days.')).toBeTruthy();
+  });
+
+  it('says so when the preview shows the default words because a value is too long for the wording', async () => {
+    api.templates.mockResolvedValue([template({ note: 'The business name is too long for this wording, so the default words are shown.' })]);
+    api.previewTemplate.mockResolvedValue({ text: 'Default words', measure, note: 'The business name is too long for this wording, so the default words are shown.' });
+    shell(<WordingScreen />);
+    expect(await screen.findByText(/business name is too long for this wording/)).toBeTruthy();
+    expect(screen.getByRole('note').textContent).toMatch(/default words are shown/);
   });
 
   it('says there is no estimate when there is no history, and never invents one', async () => {
@@ -412,7 +421,15 @@ describe('the opt-out list', () => {
     api.removeOptOut.mockResolvedValue(undefined);
     shell(<OptOutsScreen />);
     fireEvent.click(await screen.findByRole('button', { name: 'Lift the opt-out for +256*****0601' }));
-    await waitFor(() => expect(api.removeOptOut).toHaveBeenCalledWith(row().id));
+    // The first click only opens the confirmation: nothing is sent until a reason is given and it is confirmed.
+    const confirm = await screen.findByRole('button', { name: 'Lift the opt-out' });
+    expect(api.removeOptOut).not.toHaveBeenCalled();
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Why is it lifted?'), { target: { value: 'ab' } });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Why is it lifted?'), { target: { value: 'Member asked at the counter' } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(api.removeOptOut).toHaveBeenCalledWith(row().id, 'Member asked at the counter'));
     cleanup();
     shell(<OptOutsScreen />, ['core.notifications.read']);
     await screen.findByText('+256*****0601');
@@ -436,8 +453,24 @@ describe('the member\'s text-message choice', () => {
     expect(screen.queryByRole('button', { name: 'Stop reminders' })).toBeNull();
     api.liftMemberOptOut.mockResolvedValue({ opted_out: false, scope: null, recipient_masked: null, since: null });
     fireEvent.click(screen.getByRole('button', { name: 'Allow text messages again' }));
-    await waitFor(() => expect(api.liftMemberOptOut).toHaveBeenCalledWith('m1'));
+    expect(api.liftMemberOptOut).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Why is it lifted?'), { target: { value: 'Member asked at the counter' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Lift the opt-out' }));
+    await waitFor(() => expect(api.liftMemberOptOut).toHaveBeenCalledWith('m1', 'Member asked at the counter'));
     expect(await screen.findByText('This member gets text messages.')).toBeTruthy();
+  });
+
+  it('lets an officer stop more, but offers neither narrowing nor lifting', async () => {
+    const officer = ['lending.members.read', 'lending.members.update'];
+    api.memberOptOut.mockResolvedValue({ opted_out: true, scope: 'all', recipient_masked: null, since: '2031-03-10T07:00:00Z' });
+    shell(<MemberSmsControl memberId="m1" />, officer);
+    expect(await screen.findByText(/No text message at all is sent/)).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    cleanup();
+    api.memberOptOut.mockResolvedValue({ opted_out: true, scope: 'reminders', recipient_masked: null, since: '2031-03-10T07:00:00Z' });
+    shell(<MemberSmsControl memberId="m1" />, officer);
+    expect(await screen.findByRole('button', { name: 'Change to: stop every text message' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Allow text messages again' })).toBeNull();
   });
 
   it('shows the choice but no buttons to someone who may not change it, and nothing without permission to read', async () => {

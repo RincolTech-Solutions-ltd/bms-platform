@@ -276,6 +276,32 @@ class SmsTemplatesIT extends LoanFixtures {
         assertThat(raw.getBody()).doesNotContain("&amp;").doesNotContain("&lt;").doesNotContain("\\u003c");
     }
 
+    // JUSTIFICATION-A3: review finding 4 reaches the preview; no existing test has a business name over the limit.
+    @Test
+    void aBusinessNameTooLongForTheWordingIsNeverCutSoThePreviewShowsTheDefaultWordsAndSaysWhy() {
+        String longName = "A".repeat(101);
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET name = ? WHERE id = ?")
+                .params(longName, t.tenantId())
+                .update();
+        assertThat(save("Paid {amount} on {account_no} to {tenant_name}", "0").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> r = preview(null);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // What would be sent: the default words with the whole name, and the reason the saved words are not used.
+        assertThat(r.getBody().get("text").asString()).startsWith(longName + ": Deposit of UGX 50,000");
+        assertThat(r.getBody().get("note").asString()).contains("longer than the place the wording has for it");
+        assertThat(deposit().get("note").asString()).contains("default words are sent");
+        // A name that fits is used as it is, and there is no note.
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET name = ? WHERE id = ?")
+                .params("A".repeat(100), t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> fits = preview(null);
+        assertThat(fits.getBody().get("text").asString()).isEqualTo("Paid 50,000 on SV000123 to " + "A".repeat(100));
+        assertThat(fits.getBody().get("note").isNull()).isTrue();
+    }
+
     @Test
     void theCostEstimateIsFromTheTenantsOwnSentMessagesOverTheLastThirtyDaysAndNeverInvented() {
         // 4 sent segments for 128 minor units: 32 a segment.

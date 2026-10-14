@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.notifications.internal;
 
 import com.rincoltech.bms.core.tenancy.ModuleSettings;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -25,7 +26,8 @@ class SmsTenantConfig {
             LocalTime windowEnd,
             Integer dailyCap,
             Integer monthlyCap,
-            boolean includeBalance) {}
+            boolean includeBalance,
+            Instant enabledSince) {}
 
     private final ModuleSettings settings;
 
@@ -42,6 +44,11 @@ class SmsTenantConfig {
                 LocalTime.parse((String) g.get(SmsSettingsGroup.WINDOW_END)),
                 SmsSettingsGroup.whole(g.get(SmsSettingsGroup.DAILY_CAP)).orElse(null),
                 SmsSettingsGroup.whole(g.get(SmsSettingsGroup.MONTHLY_CAP)).orElse(null),
-                Boolean.TRUE.equals(g.get(SmsSettingsGroup.INCLUDE_BALANCE)));
+                Boolean.TRUE.equals(g.get(SmsSettingsGroup.INCLUDE_BALANCE)),
+                // The acknowledgement is stamped at the moment of the last switch-on, so it is also the moment before
+                // which
+                // a queued row is old news: the channel refuses it even if it was claimed before the switch-on
+                // committed.
+                g.get(SmsSettingsGroup.ACK_AT) instanceof String at ? Instant.parse(at) : null);
     }
 }

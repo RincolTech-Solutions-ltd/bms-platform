@@ -1859,4 +1859,69 @@ class SmsChannelIT extends IntegrationTest {
         assertThat(rig.dispatch(10)).isEqualTo(1);
         assertThat(rig.provider.sent().get(3).body()).startsWith("Test Lender: Deposit of");
     }
+
+    // JUSTIFICATION-A3: tests for review findings 3, 4 and 6 need this class's Rig and helpers.
+
+    /** Finding 6: a row queued before the switch-on is old news even when it was claimed before the switch-on committed. */
+    @Test
+    void aRowQueuedBeforeTheMomentOfTheSwitchOnIsRefusedEvenThoughTheTenantIsOnWhenItIsRead() {
+        Rig rig = live(day(80));
+        TestDatabase.Fixture t = tenant(100);
+        String old = receipt(rig, t, "+256700000521");
+        // The tenant switches on a minute after the row was queued (the stamp is the acknowledgement's time), and the
+        // channel reads the settings after that commit.
+        Instant switchedOn = rig.clock.now.plus(Duration.ofMinutes(1));
+        SmsTenants.set(t.tenantId(), Map.of("enabled", true, "acknowledged_at", switchedOn.toString()));
+        rig.advance(Duration.ofMinutes(2));
+        String fresh = receipt(rig, t, "+256700000522");
+        assertThat(rig.dispatch(10)).isEqualTo(2);
+        assertThat(outboxRow(old).get("status")).isEqualTo("failed");
+        assertThat(outboxRow(old).get("last_error")).isEqualTo("backlog_dropped");
+        assertThat(hasDelivery(old)).isFalse();
+        assertThat(outboxRow(fresh).get("status")).isEqualTo("sent");
+        assertThat(rig.provider.sent())
+                .extracting(RecordingSmsProvider.Sent::to)
+                .containsExactly("+256700000522");
+    }
+
+    /** Finding 3: a window stored outside the hard limits (an old value copied or written by hand) is clamped on read. */
+    @Test
+    void aWindowStoredOutsideTheHardLimitsIsClampedWhenTheChannelReadsIt() {
+        Rig rig = live(kampala(day(81), 5, 30));
+        TestDatabase.Fixture t = tenant(100);
+        SmsTenants.set(t.tenantId(), Map.of("window_start", "05:00", "window_end", "23:00"));
+        String early = key();
+        raw(t, "reminder", "+256700000531", rig.clock.now.minus(Duration.ofMinutes(5)), early);
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        // 05:30 is before 06:00, the hard limit, though the stored window opened at 05:00: it waits for 06:00.
+        assertThat(outboxRow(early).get("status")).isEqualTo("pending");
+        assertThat(at(outboxRow(early).get("next_attempt_at"))).isEqualTo(kampala(day(81), 6, 0));
+        rig.at(kampala(day(81), 6, 0));
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        assertThat(outboxRow(early).get("status")).isEqualTo("sent");
+
+        // 21:00 is after the hard limit though the stored window ran to 23:00: held for the next morning.
+        rig.at(kampala(day(81), 21, 0));
+        String late = key();
+        raw(t, "reminder", "+256700000532", rig.clock.now.minus(Duration.ofMinutes(5)), late);
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        assertThat(outboxRow(late).get("status")).isEqualTo("pending");
+        assertThat(at(outboxRow(late).get("next_attempt_at"))).isEqualTo(kampala(day(82), 6, 0));
+        assertThat(rig.provider.sent()).hasSize(1);
+    }
+
+    /** Finding 4: a value too long for its place is never shortened; the default wording goes, whole. */
+    @Test
+    void aValueTooLongForTheOverrideSendsTheDefaultWordingWholeAndNeverACutNumber() {
+        Rig rig = live(day(83));
+        TestDatabase.Fixture t = tenant(100);
+        override(t, "savings.deposit", "Received {amount} on {account_no}");
+        String amount = "1".repeat(25);
+        Map<String, String> params = new java.util.HashMap<>(PARAMS);
+        params.put("amount", amount);
+        assertThat(enqueueWith(rig, t, "+256700000541", params, key())).isTrue();
+        assertThat(rig.dispatch(10)).isEqualTo(1);
+        String body = rig.provider.sent().getFirst().body();
+        assertThat(body).contains(amount).startsWith("Test Lender: Deposit of UGX " + amount);
+    }
 }

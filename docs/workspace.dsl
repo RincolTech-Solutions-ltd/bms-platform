@@ -208,7 +208,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.notifications -> smsAggregator "Sends SMS from the outbox: sink on staging, tenant window and opt-out applied (ADR-036)" "HTTPS"
         bms.api.notifications -> bms.db "Writes the tenant SMS delivery log"
         bms.api.notifications -> bms.api.tenancy "Registers the SMS settings group (switch, sender id, window, caps, balance) and reads it per message"
-        bms.api.members -> bms.api.notifications "Member screen: opts a member out of SMS reminders or of all SMS, and lifts it (SmsOptOuts)"
+        bms.api.members -> bms.api.notifications "Member screen: opts a member out of SMS reminders or of all SMS; the administrator alone lifts or narrows it, with a reason (SmsOptOuts)"
         bms.api.notifications -> bms.api.jobs "Binds the tenant a stored outbox row names for the SMS steps (TenantJobs.callForTenant)"
         bms.api.payments    -> bms.api.savings "Books succeeded deposits through the registered purpose handler (registry, no code dependency)"
         bms.api.payments    -> bms.api.notifications "Queues the payment link and receipts through the outbox"

@@ -253,7 +253,10 @@ Building the tenant side changed or sharpened these decisions; the numbers refer
 - **Decision 14, no backlog from a switch-on.** Switching the tenant on calls `sms_tenant_switched_on` in the same transaction as
   the settings change: every SMS row of that tenant still pending is marked `failed` with `backlog_dropped` and its parameters
   cleared. Together with the refusal above, nothing queued before a switch-on can be released by it, and one tenant's switch
-  never touches another's rows (the function reads the bound tenant, never a parameter).
+  never touches another's rows (the function reads the bound tenant, never a parameter). The function marks only rows still
+  pending, so a row the channel had already claimed would escape it; the channel therefore also reads the time of the
+  acknowledgement (`acknowledged_at`, stamped by the server on every switch-on) and refuses, as `backlog_dropped`, any SMS row
+  queued before it.
 - **Decision 10, the sender id is a platform allow-list, not a setting.** The `approved` flag is replaced by the table
   `platform_sms_sender_ids` (no grant to the application role; definer functions that refuse a transaction bound to a tenant),
   one row per tenant and sender id, withdrawn rather than deleted. A sender id is 3 to 11 ASCII letters and digits with at least
@@ -273,13 +276,20 @@ Building the tenant side changed or sharpened these decisions; the numbers refer
   cap, and a receipt may go to twice the cap and is then held.
 - **Decision 5, the window has hard limits.** The tenant's window is on the Africa/Kampala clock, must start before it ends, be at
   least 60 minutes wide and lie between 06:00 and 21:00: a limit a tenant cannot set aside, to protect members from a message at
-  night (spec 4.14, collection harassment).
+  night (spec 4.14, collection harassment). The limits are held on **read** too: a stored window that is not `HH:mm`, not
+  inside 06:00 to 21:00, or shorter than 60 minutes (a flat legacy value copied by `V52`, or a hand edit) is replaced by the
+  default 08:00 to 20:00 by the settings screen and by the channel alike, and `V52` copies a legacy window only when it passes
+  the same rule.
 - **Decision 8, two kinds of opt-out row.** A row about a **member** (staff on the member's page, or the member's own request
   later) holds no number: it blocks the member whatever number a message goes to, and does not block someone else who later has
   the same number. A row about a **number** alone (an administrator adds one, or pastes a list) blocks that number whoever the
   message is about, matched by the keyed hash; a pasted list never weakens a block that is already there. Scope `all` blocks
   every SMS including receipts (the member's right, stated in the screen); scope `reminders` blocks reminders and arrears
-  notices. At most one active row per member and per number; a removal sets `removed_at` and the history stays. A number is
+  notices. At most one active row per member and per number; a removal sets `removed_at` and the history stays. **Stopping more
+  is any permitted user's; stopping less is the administrator's.** Lifting a row, and narrowing a member's `all` to `reminders`,
+  need `core.settings.manage`; a lift needs a reason of 3 to 200 characters (422 `reason_required`) that goes into the audit row,
+  and the screens ask for it and for a confirmation before anything is sent. Two staff members racing to add the same row end
+  with one row (the loser retries, then 409 `try_again`). A number is
   shown masked (`+256*****1234`) and is never stored; every change is audited with the masked number only (the audit writer
   masks it further).
 - **Decision 9, the placeholder language and the overrides.** An override is plain text with `{name}` placeholders from a
@@ -288,8 +298,10 @@ Building the tenant side changed or sharpened these decisions; the numbers refer
   needs are required (`missing_required_placeholder`); invisible and direction-changing characters and control characters are
   refused (`invalid_character`); the text is at most 320 characters (`too_long`) and, **in the worst case** (every placeholder at
   its longest and written outside the SMS alphabet, so UCS-2), at most 4 segments (`too_many_segments`). Rendering is one pass: a
-  value is inserted as it is and never read for placeholders again, loses its control characters and is cut to the placeholder's
-  length; nothing is HTML escaped, because an SMS is plain text and the screens show it as text. **An override never carries a
+  value is inserted as it is and never read for placeholders again and loses its control characters; **a value longer than its
+  placeholder's length is refused (`value_too_long`), never cut**, because a cut business name or receipt number is a wrong
+  message (the preview and the list then show the default words with a note saying why). Lengths are in UTF-16 units, as the
+  segment count is, so one emoji counts as two; nothing is HTML escaped, because an SMS is plain text and the screens show it as text. **An override never carries a
   balance**: the balance is not on any whitelist. The events offered are those the application sends today (the two savings
   receipts); each later slice adds its events with their own whitelist. Overrides live in `sms_template_overrides` (row-level
   security), saved and removed under `If-Match` on the override's own version (0 while there is none), audited with the old
@@ -297,19 +309,25 @@ Building the tenant side changed or sharpened these decisions; the numbers refer
   lost to a stale wording. The preview shows the text with fabricated data and the tenant's own business name, its encoding,
   its segments and the worst case, and a **cost estimate that is the average cost per segment of the tenant's own sent messages
   of the last 30 days** (none when there is no history or two currencies): no price list is kept anywhere.
-- **The test message cannot reach a real person.** It is independent of the channel: mode `off` sends nothing; `sink` records it;
-  `allowlist` sends only to a number on the environment's allow-list (the service checks the list itself and hands any other
-  number to a fresh sink, whatever the provider is); `live` never sends one (the preview is the test). It starts with `TEST: `,
-  is not an outbox row or a delivery row (so it uses none of the cap), is limited to 10 an hour per business and is audited with
-  the masked number and the outcome. The staging guard of decision 4 is untouched.
+- **The test message cannot reach a real person, and obeys the same gates as a real one.** It is independent of the channel:
+  mode `off` sends nothing; `sink` records it; `allowlist` sends only to a number on the environment's allow-list (the service
+  checks the list itself and hands any other number to a fresh sink, whatever the provider is); `live` never sends one (the
+  preview is the test). A test that would really go out (`allowlist`, a listed number) first passes the operator's switch, the
+  tenant's switch, the opt-out list and the caps (not sent, with the reasons `operator_sms_off`, `tenant_sms_off`,
+  `blocked_optout`, `cap_reached`), and is then written to the delivery log with the template key `test.<event>` so it counts
+  against the cap and the cost record; a sink recording is not logged. It starts with `TEST: `, is not an outbox row, is limited
+  to 10 an hour per business and is audited with the masked number and the outcome. The staging guard of decision 4 is
+  untouched.
 - **Decision 14, `sms_include_balance` moved.** It is `include_balance` in the group `sms`, with the window, and the three flat
   keys are no longer accepted by `PATCH /settings`. Migration `V52` copies a tenant's flat window and balance values into its
-  group once, for a tenant that has no group yet (the flat keys stay in place, so the containers of the previous release keep
+  group once, for a tenant that has no group yet (a window that fails the rule of decision 5 is not copied, so the default
+  applies; the flat keys stay in place, so the containers of the previous release keep
   working until the switch).
 - **Permissions: no new row.** The group is read with `core.settings.read` and changed with `core.settings.manage` (the tenant
   administrator only, which also covers the switch and the sender choice); wording and the test message need
   `core.notification_templates.manage`; the opt-out list and the wording are read with `core.notifications.read`; a member's
-  opt-out is `lending.members.update` in the member's branch scope. The matrix of chapter 8 and the seeds are unchanged.
+  opt-out is added with `lending.members.update` in the member's branch scope, and narrowed or lifted with
+  `core.settings.manage` and a reason. The matrix of chapter 8 and the seeds are unchanged.
 
 ### Consequences of the amendment
 

@@ -3196,6 +3196,28 @@
         },
         "required" : [ "decision" ]
       },
+      "LiftMemberSmsOptOutRequest" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers",
+            "maxLength" : 200,
+            "minLength" : 3,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "LiftSmsOptOutRequest" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers",
+            "maxLength" : 200,
+            "minLength" : 3,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
       "Loan" : {
         "properties" : {
           "appraised_by" : {
@@ -15508,6 +15530,10 @@
           "measure" : {
             "$ref" : "#/components/schemas/SmsTemplateMeasure"
           },
+          "note" : {
+            "description" : "Set when the sample is the default words because the business name is too long for the wording",
+            "type" : "string"
+          },
           "override" : {
             "$ref" : "#/components/schemas/SmsTemplateOverride"
           },
@@ -15603,6 +15629,10 @@
           "measure" : {
             "$ref" : "#/components/schemas/SmsTemplateMeasure"
           },
+          "note" : {
+            "description" : "Set when the text shown is the default words, not the ones previewed (a business name too long for the wording)",
+            "type" : "string"
+          },
           "text" : {
             "type" : "string"
           }
@@ -15643,7 +15673,7 @@
             "type" : "string"
           },
           "reason" : {
-            "description" : "For not_sent: channel_off, live_mode_preview_only or the provider's reason",
+            "description" : "For not_sent: channel_off, live_mode_preview_only, operator_sms_off, tenant_sms_off, blocked_optout, cap_reached or the provider's reason",
             "type" : "string"
           },
           "recipient_masked" : {
@@ -20645,6 +20675,16 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LiftMemberSmsOptOutRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -20657,7 +20697,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Lift a member's SMS opt-out; audited (FR-NTF-14)",
+        "summary" : "Lift a member's SMS opt-out with a reason; audited (FR-NTF-14, the tenant administrator only)",
         "tags" : [ "lending-members" ]
       },
       "get" : {
@@ -30184,12 +30224,22 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LiftSmsOptOutRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "description" : "OK"
           }
         },
-        "summary" : "Lift one SMS opt-out, audited",
+        "summary" : "Lift one SMS opt-out with a reason, audited (the tenant administrator only)",
         "tags" : [ "notifications" ]
       }
     },

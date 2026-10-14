@@ -27,6 +27,9 @@ class SmsOptOutIT extends LoanFixtures {
 
     static final String OPT_OUTS = "/api/v1/sms/opt-outs";
 
+    /** What lifting needs: a reason, kept in the audit row. */
+    static final Map<String, String> LIFT = Map.of("reason", "Checked with the person");
+
     final UUID admin = UUID.randomUUID();
 
     ResponseEntity<JsonNode> add(String phone, String scope) {
@@ -143,6 +146,19 @@ class SmsOptOutIT extends LoanFixtures {
                         .query(Long.class)
                         .single())
                 .isEqualTo(1);
+
+        // Review finding 7: adding and lifting the same number at once never ends in a 500 (a row lifted between the
+        // insert finding it and the read is tried again), whichever way the requests interleave.
+        String contested = add("0700000612", "all").getBody().get("id").asString();
+        java.util.concurrent.atomic.AtomicInteger turn = new java.util.concurrent.atomic.AtomicInteger();
+        List<org.springframework.http.HttpStatusCode> mixed = com.rincoltech.bms.testsupport.Api.race(8, () -> {
+            if (turn.getAndIncrement() % 2 == 0) {
+                return add("0700000612", "all");
+            }
+            return send(HttpMethod.DELETE, OPT_OUTS + "/" + contested, as(admin, adminPerms, "*", null), LIFT);
+        });
+        assertThat(mixed).noneMatch(s -> s.is5xxServerError());
+        assertThat(mixed).allMatch(s -> s.value() == 200 || s.value() == 201 || s.value() == 204 || s.value() == 404);
     }
 
     @Test
@@ -166,9 +182,16 @@ class SmsOptOutIT extends LoanFixtures {
     @Test
     void theListIsPagedNewestFirstAndFilteredAndSearchedByTheDigitsOfAMaskedNumber() throws Exception {
         for (int i = 1; i <= 5; i++) {
-            assertThat(add("070000070" + i, i % 2 == 0 ? "all" : "reminders").getStatusCode())
-                    .isEqualTo(HttpStatus.CREATED);
-            Thread.sleep(5);
+            ResponseEntity<JsonNode> added = add("070000070" + i, i % 2 == 0 ? "all" : "reminders");
+            assertThat(added.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            // The order does not depend on how fast the requests were: each row gets a fixed time, a minute apart.
+            TestDatabase.owner()
+                    .sql("UPDATE sms_opt_outs SET created_at = ? WHERE id = ?::uuid")
+                    .params(
+                            java.sql.Timestamp.from(java.time.Instant.parse("2031-03-10T07:00:00Z")
+                                    .plusSeconds(60L * i)),
+                            added.getBody().get("id").asString())
+                    .update();
         }
         // Newest first, paged by cursor: every row once, none twice.
         List<String> all = new ArrayList<>();
@@ -287,7 +310,7 @@ class SmsOptOutIT extends LoanFixtures {
     void liftingARowRemovesItFromTheListKeepsTheHistoryAndIsAudited() {
         String id = add("0700000901", "all").getBody().get("id").asString();
         ResponseEntity<JsonNode> removed =
-                send(HttpMethod.DELETE, OPT_OUTS + "/" + id, as(admin, adminPerms, "*", null), null);
+                send(HttpMethod.DELETE, OPT_OUTS + "/" + id, as(admin, adminPerms, "*", null), LIFT);
         assertThat(removed.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(masked(list("").getBody())).isEmpty();
         assertThat(audits("core.sms.opt_out.removed")).isEqualTo(1);
@@ -300,10 +323,10 @@ class SmsOptOutIT extends LoanFixtures {
         assertThat(row.get("removed")).isEqualTo(true);
         assertThat(row.get("removed_by")).isEqualTo(admin);
         // Lifting twice, or something that never existed, is 404.
-        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + id, as(admin, adminPerms, "*", null), null)
+        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + id, as(admin, adminPerms, "*", null), LIFT)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + UUID.randomUUID(), as(admin, adminPerms, "*", null), null)
+        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + UUID.randomUUID(), as(admin, adminPerms, "*", null), LIFT)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
         // Adding it again makes a new row.
@@ -330,7 +353,7 @@ class SmsOptOutIT extends LoanFixtures {
             assertThat(send(HttpMethod.POST, OPT_OUTS + "/import", h, Map.of("numbers", "0700001003", "scope", "all"))
                             .getStatusCode())
                     .isEqualTo(HttpStatus.FORBIDDEN);
-            assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + id, h, null).getStatusCode())
+            assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + id, h, LIFT).getStatusCode())
                     .isEqualTo(HttpStatus.FORBIDDEN);
         }
         assertThat(send(HttpMethod.GET, OPT_OUTS, as(manager, managerPerms, "*", null), null)
@@ -363,7 +386,7 @@ class SmsOptOutIT extends LoanFixtures {
                 .getBody();
         assertThat(theirs.get("items")).isEmpty();
         ResponseEntity<JsonNode> lift = http.exchange(
-                OPT_OUTS + "/" + id, HttpMethod.DELETE, new HttpEntity<>(null, otherAdmin(other)), JsonNode.class);
+                OPT_OUTS + "/" + id, HttpMethod.DELETE, new HttpEntity<>(LIFT, otherAdmin(other)), JsonNode.class);
         assertThat(lift.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(active()).as("our row is still active").isEqualTo(1);
         // The same number on their list is their own row.
@@ -423,17 +446,92 @@ class SmsOptOutIT extends LoanFixtures {
                 .as("a member row follows the member to any number")
                 .isTrue();
 
-        ResponseEntity<JsonNode> in = send(HttpMethod.DELETE, memberPath(member), asOfficer, null);
+        // Lifting is the tenant administrator's, with a reason: here the administrator does it.
+        HttpHeaders asAdmin = as(admin, adminPerms, "*", null);
+        ResponseEntity<JsonNode> in = send(HttpMethod.DELETE, memberPath(member), asAdmin, LIFT);
         assertThat(in.getBody().get("opted_out").asBoolean()).isFalse();
         assertThat(audits("core.sms.opt_out.removed")).isEqualTo(1);
         assertThat(active()).isZero();
         // Lifting what is not there is not an error, and writes nothing more.
-        assertThat(send(HttpMethod.DELETE, memberPath(member), asOfficer, null).getStatusCode())
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asAdmin, LIFT).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(audits("core.sms.opt_out.removed")).isEqualTo(1);
         assertThat(send(HttpMethod.PUT, memberPath(member), asOfficer, Map.of("scope", "nonsense"))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    // JUSTIFICATION-A3: a new test for review finding 2 (who may lift an opt-out); no existing test covers a refusal.
+    /** The opt-out protects the member from being pestered; one click by a field officer must not undo it. */
+    @Test
+    void aLoanOfficerCannotLiftOrNarrowAnOptOutAndTheAdministratorNeedsAReasonThatIsAudited() {
+        String member = member("Test Member Three", "+256700001401", t.headOffice(), false);
+        HttpHeaders asOfficer = as(officer, officerPerms, "*", null);
+        assertThat(send(HttpMethod.PUT, memberPath(member), asOfficer, Map.of("scope", "all"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        // The officer cannot lift it (403 on the route), nor narrow it from every message to reminders only.
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asOfficer, LIFT).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        ResponseEntity<JsonNode> narrow =
+                send(HttpMethod.PUT, memberPath(member), asOfficer, Map.of("scope", "reminders"));
+        assertThat(narrow.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(narrow.getBody().get("code").asString()).isEqualTo("permission_denied");
+        assertThat(send(HttpMethod.GET, memberPath(member), asOfficer, null)
+                        .getBody()
+                        .get("scope")
+                        .asString())
+                .isEqualTo("all");
+        assertThat(audits("core.sms.opt_out.removed")).isZero();
+        assertThat(audits("core.sms.opt_out.changed")).isZero();
+        // Making it wider, the other way, is allowed for the officer: reminders to all.
+        String other = member("Test Member Four", "+256700001402", t.headOffice(), false);
+        send(HttpMethod.PUT, memberPath(other), asOfficer, Map.of("scope", "reminders"));
+        assertThat(send(HttpMethod.PUT, memberPath(other), asOfficer, Map.of("scope", "all"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        // The administrator must say why: a blank, a too short one and a missing one are refused and nothing is lifted.
+        HttpHeaders asAdmin = as(admin, adminPerms, "*", null);
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asAdmin, Map.of("reason", "  "))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asAdmin, Map.of("reason", "ok"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asAdmin, Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(active()).isEqualTo(2);
+
+        // With a reason the administrator lifts it, and the reason is in the audit row.
+        assertThat(send(HttpMethod.DELETE, memberPath(member), asAdmin, Map.of("reason", "The member asked in person"))
+                        .getBody()
+                        .get("opted_out")
+                        .asBoolean())
+                .isFalse();
+        String data = TestDatabase.owner()
+                .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'core.sms.opt_out.removed'")
+                .param(t.tenantId())
+                .query(String.class)
+                .single();
+        assertThat(data).contains("The member asked in person");
+        // The administrator may also narrow one.
+        assertThat(send(HttpMethod.PUT, memberPath(other), asAdmin, Map.of("scope", "reminders"))
+                        .getBody()
+                        .get("scope")
+                        .asString())
+                .isEqualTo("reminders");
+
+        // The list's own lift (a number row) follows the same rule: a reason, and the administrator only.
+        String numberRow = add("0700001403", "all").getBody().get("id").asString();
+        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + numberRow, asAdmin, Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(send(HttpMethod.DELETE, OPT_OUTS + "/" + numberRow, asAdmin, Map.of("reason", "Wrong number typed"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     @Test
@@ -448,7 +546,11 @@ class SmsOptOutIT extends LoanFixtures {
         assertThat(send(HttpMethod.PUT, memberPath(member), elsewhere, Map.of("scope", "all"))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(send(HttpMethod.DELETE, memberPath(member), elsewhere, null).getStatusCode())
+        // Lifting is the administrator's; an administrator of the second branch only does not see this member either.
+        HttpHeaders adminElsewhere =
+                as(UUID.randomUUID(), adminPerms, t.secondBranch().toString(), null);
+        assertThat(send(HttpMethod.DELETE, memberPath(member), adminElsewhere, LIFT)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
         // A cashier may look at a member (lending.members.read) but not change the opt-out (lending.members.update).
         HttpHeaders cashier = as(UUID.randomUUID(), permissionsOf("cashier"), "*", null);
@@ -457,7 +559,7 @@ class SmsOptOutIT extends LoanFixtures {
         assertThat(send(HttpMethod.PUT, memberPath(member), cashier, Map.of("scope", "all"))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(send(HttpMethod.DELETE, memberPath(member), cashier, null).getStatusCode())
+        assertThat(send(HttpMethod.DELETE, memberPath(member), cashier, LIFT).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         // A member that does not exist, or belongs to another business, is not found.
         assertThat(send(

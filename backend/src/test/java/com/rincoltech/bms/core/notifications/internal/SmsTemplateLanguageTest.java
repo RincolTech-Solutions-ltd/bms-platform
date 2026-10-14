@@ -171,7 +171,7 @@ class SmsTemplateLanguageTest {
     }
 
     @Test
-    void aValueLosesItsLineBreaksAndInvisibleCharactersAndIsCutToTheLimit() {
+    void aValueLosesItsLineBreaksAndInvisibleCharacters() {
         Map<String, String> values = new LinkedHashMap<>(VALUES);
         values.put("tenant_name", "Line one\nLine two\r\nLine\tthree​‮tail");
         String out = SmsTemplateLanguage.render(DEPOSIT, "{tenant_name}|{amount}|{account_no}", values);
@@ -181,19 +181,60 @@ class SmsTemplateLanguageTest {
                 .doesNotContain("\t")
                 .doesNotContain("​");
         assertThat(out).startsWith("Line one Line two  Line three").contains("tail|5,000|SV000001");
-        // Cut to the placeholder's longest value (40 characters for a name), by whole characters, not mid pair.
+    }
+
+    /** Review finding 4: a value is never shortened. A longer one refuses the render, so the default text is sent instead. */
+    @Test
+    void aValueOverItsLimitRefusesTheRenderAndIsNeverCutShort() {
+        Map<String, String> values = new LinkedHashMap<>(VALUES);
+        String template = "{tenant_name}|{amount}|{account_no}";
+        // At the limit (100 units for a name) it is inserted whole; one over is refused.
         values.put("tenant_name", "x".repeat(100));
-        assertThat(SmsTemplateLanguage.render(DEPOSIT, "{tenant_name}|{amount}|{account_no}", values))
-                .isEqualTo("x".repeat(40) + "|5,000|SV000001");
-        values.put("tenant_name", "😀".repeat(60));
-        String emoji = SmsTemplateLanguage.render(DEPOSIT, "{tenant_name}|{amount}|{account_no}", values);
-        assertThat(emoji.split("\\|")[0].codePointCount(0, emoji.split("\\|")[0].length()))
-                .isEqualTo(40);
-        // No half of a surrogate pair is left behind: the text survives a round trip through UTF-8.
-        assertThat(new String(
-                        emoji.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                        java.nio.charset.StandardCharsets.UTF_8))
-                .isEqualTo(emoji);
+        assertThat(SmsTemplateLanguage.render(DEPOSIT, template, values))
+                .isEqualTo("x".repeat(100) + "|5,000|SV000001");
+        values.put("tenant_name", "x".repeat(101));
+        assertThat(codeOf(() -> SmsTemplateLanguage.render(DEPOSIT, template, values)))
+                .isEqualTo("value_too_long");
+        // An amount is the figure that matters most: 24 characters fit, 25 do not, and no digit is ever dropped.
+        values.put("tenant_name", "Test Lender");
+        values.put("amount", "1".repeat(24));
+        assertThat(SmsTemplateLanguage.render(DEPOSIT, template, values)).contains("1".repeat(24) + "|");
+        values.put("amount", "1".repeat(25));
+        assertThat(codeOf(() -> SmsTemplateLanguage.render(DEPOSIT, template, values)))
+                .isEqualTo("value_too_long");
+    }
+
+    /** Review finding 5: the limit is in UTF-16 units, as the segment counter counts, so an emoji (two units) cannot get past it. */
+    @Test
+    void theWorstCaseHoldsForAnEmojiNameBecauseTheLimitCountsUtf16Units() {
+        Map<String, String> values = new LinkedHashMap<>(VALUES);
+        String template = "{tenant_name}: paid {currency} {amount} on {account_no}. Ref {receipt_no}";
+        // 50 emoji are 100 units: the limit, accepted, and not a segment more than the worst case says.
+        values.put("tenant_name", "😀".repeat(50));
+        String ok = SmsTemplateLanguage.render(DEPOSIT, template, values);
+        assertThat(ok).startsWith("😀".repeat(50));
+        assertThat(SmsSegments.count(ok).encoding()).isEqualTo(SmsSegments.Encoding.UCS2);
+        assertThat(SmsSegments.count(ok).segments())
+                .isLessThanOrEqualTo(SmsSegments.count(SmsTemplateLanguage.worstCase(DEPOSIT, template))
+                        .segments())
+                .isLessThanOrEqualTo(SmsTemplateLanguage.MAX_WORST_SEGMENTS);
+        // 51 emoji are 102 units: refused. (By code points, 51 looks under 100; by units it is over.)
+        values.put("tenant_name", "😀".repeat(51));
+        assertThat(codeOf(() -> SmsTemplateLanguage.render(DEPOSIT, template, values)))
+                .isEqualTo("value_too_long");
+        // And the longest every placeholder may be, with an emoji name, fits the segments the default is validated for.
+        for (Event event : SmsTemplateEvents.ALL) {
+            Map<String, String> longest = new LinkedHashMap<>();
+            event.placeholders().forEach(p -> longest.put(p.name(), "😀".repeat(p.maxLength() / 2)));
+            String sent = SmsTemplateLanguage.render(event, event.defaultText(), longest);
+            assertThat(SmsSegments.count(sent).segments())
+                    .as(event.key())
+                    .isLessThanOrEqualTo(SmsTemplateLanguage.MAX_WORST_SEGMENTS);
+        }
+    }
+
+    private static String codeOf(Runnable render) {
+        return ((Problem) catchThrowable(render)).code();
     }
 
     @Test

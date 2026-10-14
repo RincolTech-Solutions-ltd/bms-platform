@@ -5,6 +5,7 @@ import { SmsError, sms, type SmsImportResult, type SmsOptOut } from '../../../ap
 import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useStaff } from '../context';
+import { LiftConfirm } from './lift';
 import { mayManageSettings, mayReadNotifications } from './state';
 
 // The SMS opt-out list (extras slice B3, issue #218; ADR-036 decision 8): who is not to be texted. A row is about a member
@@ -190,7 +191,16 @@ export function OptOutsScreen() {
     retry: false,
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sms', 'opt-outs'] });
-  const lift = useMutation({ mutationFn: (item: SmsOptOut) => sms.removeOptOut(item.id), onSuccess: refresh, onError: refresh });
+  // Lifting is two steps: "Lift" opens the confirmation with the reason; only its button sends anything.
+  const [lifting, setLifting] = useState<SmsOptOut | null>(null);
+  const lift = useMutation({
+    mutationFn: (v: { item: SmsOptOut; reason: string }) => sms.removeOptOut(v.item.id, v.reason),
+    onSuccess: () => {
+      setLifting(null);
+      return refresh();
+    },
+    onError: refresh,
+  });
   if (!allowed) return <p className="empty-state">You do not have access to the opt-out list.</p>;
   const canManage = mayManageSettings(me);
   const items = (pages.data?.pages ?? []).flatMap((p) => p.items);
@@ -218,13 +228,21 @@ export function OptOutsScreen() {
       </form>
       {pages.isPending && <p className="loading">Loading the list</p>}
       {pages.error instanceof Error && <p role="alert" className="alert alert-danger">{pages.error.message}</p>}
-      {lift.error instanceof Error && <p role="alert" className="alert alert-danger">{lift.error.message}</p>}
+      {lifting && (
+        <LiftConfirm
+          what={lifting.recipient_masked ?? 'this member'}
+          busy={lift.isPending}
+          error={lift.error instanceof Error ? lift.error.message : null}
+          onConfirm={(reason) => lift.mutate({ item: lifting, reason })}
+          onCancel={() => { setLifting(null); lift.reset(); }}
+        />
+      )}
       {pages.data && (
         <SearchResults fetching={fetching}>
           {items.length === 0 && search.term ? (
             <NoResults term={search.term} onClear={search.clear} noun="numbers" />
           ) : (
-            <OptOutRows items={items} term={search.term} canManage={canManage} busy={lift.isPending} onRemove={(i) => lift.mutate(i)} />
+            <OptOutRows items={items} term={search.term} canManage={canManage} busy={lift.isPending} onRemove={(i) => { lift.reset(); setLifting(i); }} />
           )}
         </SearchResults>
       )}

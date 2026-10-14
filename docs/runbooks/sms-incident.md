@@ -44,7 +44,7 @@ A tenant says its members get no text. Read `GET /api/v1/platform/tenants/{tenan
    and receipts at twice the cap. The tenant's settings page shows both caps and the use today and this month.
 4. **The window** holds reminders and arrears notices outside it; receipts are not held by it.
 5. **The sender id was withdrawn**: messages still go, from the shared sender.
-6. **The member or the number is on the opt-out list** (`blocked_optout`): lift it from the member's page or the opt-out list.
+6. **The member or the number is on the opt-out list** (`blocked_optout`): the business administrator lifts it from the member's page or the opt-out list, giving a reason; do it only when the person asked.
 
 ## A provider outage
 

@@ -77,18 +77,40 @@ class SmsTemplateService {
             String sampleText,
 
             Measure measure,
+
+            @Schema(
+                    description =
+                            "Set when the sample is the default words because the business name is too long for the wording")
+            String note,
+
             int maxChars,
             int maxWorstCaseSegments) {}
 
     @Schema(name = "SmsTemplatePreview")
-    record Preview(String text, Measure measure) {}
+    record Preview(
+            String text,
+            Measure measure,
+
+            @Schema(
+                    description =
+                            "Set when the text shown is the default words, not the ones previewed (a business name too long for the wording)")
+            String note) {}
+
+    /** The text of a sample, and a note when it is not the wording asked for. */
+    record Sampled(String text, String note) {}
+
+    static final String NOTE_LONG_VALUE = "Your business name is longer than the place the wording has for it, so your"
+            + " own wording cannot be used for it and the default words are sent. Shorten the business name in the set-up.";
 
     private final JdbcClient jdbc;
     private final BusinessClock clock;
     private final AuditLog audit;
     private final CurrentTenant tenant;
+    private final OutboxTemplates defaults;
 
-    SmsTemplateService(JdbcClient jdbc, BusinessClock clock, AuditLog audit, CurrentTenant tenant) {
+    SmsTemplateService(
+            JdbcClient jdbc, BusinessClock clock, AuditLog audit, CurrentTenant tenant, OutboxTemplates defaults) {
+        this.defaults = defaults;
         this.jdbc = jdbc;
         this.clock = clock;
         this.audit = audit;
@@ -198,15 +220,33 @@ class SmsTemplateService {
         String text = rawText == null
                 ? override(eventKey).map(OverrideView::text).orElse(event.defaultText())
                 : check(event, rawText);
-        return new Preview(sample(event, text), measure(event, text, costRate()));
+        Sampled sampled = sampled(event, text);
+        return new Preview(sampled.text(), measure(event, text, costRate()), sampled.note());
     }
 
-    /** The rendered sample of a text with fabricated values and the tenant's own business name. */
+    /**
+     * The rendered sample of a text with fabricated values and the tenant's own business name. A business name too long
+     * for the wording is never cut, so the wording cannot be used for it and the default is what is sent: that is what
+     * is shown, with the reason.
+     */
+    Sampled sampled(Event event, String text) {
+        Map<String, String> values =
+                SmsTemplateLanguage.sampleValues(event, tenant.profile().name());
+        try {
+            return new Sampled(SmsTemplateLanguage.render(event, text, values), null);
+        } catch (Problem p) {
+            if (!"value_too_long".equals(p.code())) {
+                throw p;
+            }
+            return new Sampled(
+                    defaults.render(SmsTemplateEvents.CHANNEL, event.key(), values)
+                            .text(),
+                    NOTE_LONG_VALUE);
+        }
+    }
+
     String sample(Event event, String text) {
-        return SmsTemplateLanguage.render(
-                event,
-                text,
-                SmsTemplateLanguage.sampleValues(event, tenant.profile().name()));
+        return sampled(event, text).text();
     }
 
     Event event(String eventKey) {
@@ -254,8 +294,9 @@ class SmsTemplateService {
                         .map(p -> new PlaceholderView(p.name(), p.description(), p.sample(), p.maxLength()))
                         .toList(),
                 override,
-                sample(event, effective),
+                sampled(event, effective).text(),
                 measure(event, effective, rate),
+                sampled(event, effective).note(),
                 SmsTemplateLanguage.MAX_CHARS,
                 SmsTemplateLanguage.MAX_WORST_SEGMENTS);
     }

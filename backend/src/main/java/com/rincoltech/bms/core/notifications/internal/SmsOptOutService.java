@@ -42,6 +42,11 @@ class SmsOptOutService implements SmsOptOuts {
     static final int MAX_IMPORT_CHARS = 200_000;
     static final int DEFAULT_LIMIT = 50;
     static final int MAX_LIMIT = 200;
+    /** The one permission that may lift or narrow an opt-out (the tenant administrator's; no new row is seeded). */
+    static final String LIFT_PERMISSION = "core.settings.manage";
+
+    static final int MIN_REASON = 3;
+    static final int MAX_REASON = 200;
     private static final Pattern SEPARATORS = Pattern.compile("[\\r\\n,;\\t]+");
     private static final Search.Fields SEARCH = Search.Fields.of().phones("o.recipient_masked");
 
@@ -102,6 +107,22 @@ class SmsOptOutService implements SmsOptOuts {
     @Override
     @Transactional
     public Entry optOut(UUID memberId, String phoneE164, Scope scope) {
+        // Another person may lift the row between our insert finding it and our reading it; then the insert is tried
+        // again.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Optional<Entry> done = tryOptOut(memberId, phoneE164, scope);
+            if (done.isPresent()) {
+                return done.get();
+            }
+        }
+        throw new ApiException(
+                HttpStatus.CONFLICT,
+                "try_again",
+                "Try again",
+                "The opt-out changed while it was being saved. Try again.");
+    }
+
+    private Optional<Entry> tryOptOut(UUID memberId, String phoneE164, Scope scope) {
         String masked = phoneE164 == null
                 ? null
                 : PhoneNumbers.forSms(phoneE164).map(SmsOutboxChannel::maskE164).orElse(null);
@@ -119,12 +140,20 @@ class SmsOptOutService implements SmsOptOuts {
             audit("core.sms.opt_out.added", created, Map.of(), state("member", memberId, scope.key(), "staff", masked));
         } else {
             // Someone (or an earlier click) holds the active row: change its scope if it differs.
-            Map<String, Object> was = jdbc.sql("SELECT id, scope, recipient_masked FROM sms_opt_outs"
+            Optional<Map<String, Object>> found = jdbc
+                    .sql("SELECT id, scope, recipient_masked FROM sms_opt_outs"
                             + " WHERE member_id = ? AND removed_at IS NULL FOR UPDATE")
                     .param(memberId)
                     .query()
-                    .singleRow();
+                    .listOfRows()
+                    .stream()
+                    .findFirst();
+            if (found.isEmpty()) {
+                return Optional.empty();
+            }
+            Map<String, Object> was = found.get();
             if (!scope.key().equals(was.get("scope"))) {
+                requireMayWeaken(Scope.of((String) was.get("scope")).orElseThrow(), scope);
                 jdbc.sql("UPDATE sms_opt_outs SET scope = ? WHERE id = ?")
                         .params(scope.key(), was.get("id"))
                         .update();
@@ -136,12 +165,45 @@ class SmsOptOutService implements SmsOptOuts {
                         state("member", memberId, scope.key(), "staff", (String) was.get("recipient_masked")));
             }
         }
-        return status(memberId).orElseThrow();
+        return status(memberId);
+    }
+
+    /**
+     * A block can be made wider by anyone who may set one, but narrowed (every message down to reminders only) or lifted
+     * only by the tenant administrator: the opt-out is the member's protection against being pestered (spec 4.14), so a
+     * single click by a field officer must not undo it.
+     */
+    private static void requireMayWeaken(Scope was, Scope now) {
+        if (Scope.ALL == was && Scope.REMINDERS == now) {
+            requireAdministrator();
+        }
+    }
+
+    private static void requireAdministrator() {
+        if (!CurrentPrincipal.require().hasPermission(LIFT_PERMISSION)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "Only a business administrator can lift or narrow an opt-out.");
+        }
+    }
+
+    /** The reason is part of the audit row; it is words about why, kept short, and it is not for names or numbers. */
+    private static String requireReason(String reason) {
+        String r = reason == null ? "" : reason.strip();
+        if (r.length() < MIN_REASON || r.length() > MAX_REASON) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "reason", "reason_required", "Say why, in " + MIN_REASON + " to " + MAX_REASON + " characters.")));
+        }
+        return r;
     }
 
     @Override
     @Transactional
-    public boolean lift(UUID memberId) {
+    public boolean lift(UUID memberId, String reason) {
+        requireAdministrator();
+        String why = requireReason(reason);
         Optional<Map<String, Object>> was = jdbc
                 .sql("UPDATE sms_opt_outs SET removed_at = ?, removed_by = ?"
                         + " WHERE member_id = ? AND removed_at IS NULL RETURNING id, scope, source, recipient_masked")
@@ -155,7 +217,7 @@ class SmsOptOutService implements SmsOptOuts {
                 (UUID) row.get("id"),
                 state("member", memberId, (String) row.get("scope"), (String) row.get("source"), (String)
                         row.get("recipient_masked")),
-                Map.of()));
+                Map.of("reason", why)));
         return was.isPresent();
     }
 
@@ -253,6 +315,19 @@ class SmsOptOutService implements SmsOptOuts {
      * pasted list must not lift a block an administrator set to {@code all}.
      */
     private Upserted upsertNumber(String e164, Scope scope, boolean strongerOnly, String source) {
+        // Another person may lift the row between our insert finding it and our reading it; then the insert is tried
+        // again.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Optional<Upserted> done = tryUpsertNumber(e164, scope, strongerOnly, source);
+            if (done.isPresent()) {
+                return done.get();
+            }
+        }
+        throw new ApiException(
+                HttpStatus.CONFLICT, "try_again", "Try again", "The list changed while it was being saved. Try again.");
+    }
+
+    private Optional<Upserted> tryUpsertNumber(String e164, Scope scope, boolean strongerOnly, String source) {
         String hash = hasher.of(e164);
         String masked = SmsOutboxChannel.maskE164(e164);
         UUID created = jdbc.sql("INSERT INTO sms_opt_outs (id, tenant_id, created_at, member_id, recipient_hash,"
@@ -266,13 +341,20 @@ class SmsOptOutService implements SmsOptOuts {
                 .orElse(null);
         if (created != null) {
             audit("core.sms.opt_out.added", created, Map.of(), state("number", null, scope.key(), source, masked));
-            return new Upserted(created, "added");
+            return Optional.of(new Upserted(created, "added"));
         }
-        Map<String, Object> was = jdbc.sql("SELECT id, scope FROM sms_opt_outs"
+        Optional<Map<String, Object>> found = jdbc
+                .sql("SELECT id, scope FROM sms_opt_outs"
                         + " WHERE member_id IS NULL AND recipient_hash = ? AND removed_at IS NULL FOR UPDATE")
                 .param(hash)
                 .query()
-                .singleRow();
+                .listOfRows()
+                .stream()
+                .findFirst();
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, Object> was = found.get();
         UUID id = (UUID) was.get("id");
         String had = (String) was.get("scope");
         boolean stronger = Scope.ALL == scope && "reminders".equals(had);
@@ -286,14 +368,19 @@ class SmsOptOutService implements SmsOptOuts {
                     id,
                     state("number", null, had, source, masked),
                     state("number", null, scope.key(), source, masked));
-            return new Upserted(id, "changed");
+            return Optional.of(new Upserted(id, "changed"));
         }
-        return new Upserted(id, "unchanged");
+        return Optional.of(new Upserted(id, "unchanged"));
     }
 
-    /** Lifts one row of the list, whoever it is about. 404 when it is not an active row of this tenant. */
+    /**
+     * Lifts one row of the list, whoever it is about, with the reason, for the tenant administrator only. 404 when it is
+     * not an active row of this tenant.
+     */
     @Transactional
-    void remove(UUID id) {
+    void remove(UUID id, String reason) {
+        requireAdministrator();
+        String why = requireReason(reason);
         Map<String, Object> row = jdbc
                 .sql("UPDATE sms_opt_outs SET removed_at = ?, removed_by = ?"
                         + " WHERE id = ? AND removed_at IS NULL RETURNING member_id, scope, source, recipient_masked")
@@ -313,7 +400,7 @@ class SmsOptOutService implements SmsOptOuts {
                         (String) row.get("scope"),
                         (String) row.get("source"),
                         (String) row.get("recipient_masked")),
-                Map.of());
+                Map.of("reason", why));
     }
 
     /**

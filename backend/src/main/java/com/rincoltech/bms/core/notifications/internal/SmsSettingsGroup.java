@@ -117,8 +117,11 @@ class SmsSettingsGroup implements ModuleSettingsGroup {
         if (current.get(SENDER_ID) instanceof String s && !s.isBlank()) {
             out.put(SENDER_ID, s);
         }
-        out.put(WINDOW_START, clock(current.get(WINDOW_START), SmsWindow.DEFAULT_START));
-        out.put(WINDOW_END, clock(current.get(WINDOW_END), SmsWindow.DEFAULT_END));
+        // Whatever is stored, the window read back is inside the hard limits: a value written past the screen's
+        // validation (an older flat key copied by migration, a row edited by hand) is clamped, never used as it is.
+        LocalTime[] safe = safeWindow(current.get(WINDOW_START), current.get(WINDOW_END));
+        out.put(WINDOW_START, safe[0].toString());
+        out.put(WINDOW_END, safe[1].toString());
         whole(current.get(DAILY_CAP)).ifPresent(v -> out.put(DAILY_CAP, v));
         whole(current.get(MONTHLY_CAP)).ifPresent(v -> out.put(MONTHLY_CAP, v));
         out.put(INCLUDE_BALANCE, Boolean.TRUE.equals(current.get(INCLUDE_BALANCE)));
@@ -303,6 +306,28 @@ class SmsSettingsGroup implements ModuleSettingsGroup {
             return java.util.Optional.of(n.intValue());
         }
         return java.util.Optional.empty();
+    }
+
+    // JUSTIFICATION-A3: review finding 3 needs one read-side clamp; no existing code bounds a stored window.
+    /**
+     * The stored window inside the hard limits: the start raised to {@value #EARLIEST} and the end lowered to
+     * {@value #LATEST} when they lie outside, and the default window when what is left is not a window (it does not
+     * start before it ends, or is under {@value #MIN_WINDOW_MINUTES} minutes). Anything that is not a time is the
+     * default for that side. {@code [start, end]}.
+     */
+    static LocalTime[] safeWindow(Object storedStart, Object storedEnd) {
+        LocalTime start = LocalTime.parse(clock(storedStart, SmsWindow.DEFAULT_START));
+        LocalTime end = LocalTime.parse(clock(storedEnd, SmsWindow.DEFAULT_END));
+        if (start.isBefore(EARLIEST_START)) {
+            start = EARLIEST_START;
+        }
+        if (end.isAfter(LATEST_END)) {
+            end = LATEST_END;
+        }
+        if (!start.isBefore(end) || Duration.between(start, end).toMinutes() < MIN_WINDOW_MINUTES) {
+            return new LocalTime[] {SmsWindow.DEFAULT_START, SmsWindow.DEFAULT_END};
+        }
+        return new LocalTime[] {start, end};
     }
 
     private static String clock(Object stored, LocalTime fallback) {

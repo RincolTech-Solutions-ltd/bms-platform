@@ -145,11 +145,22 @@ class SmsOptOutController {
                 request.numbers(), scope(request.scope()), !Boolean.FALSE.equals(request.dryRun()));
     }
 
-    @DeleteMapping("/{opt_out_id}")
+    @Schema(name = "LiftSmsOptOutRequest")
+    record LiftRequest(
+            @NotBlank
+            @Size(min = 3, max = 200)
+            @Schema(
+                    description =
+                            "Why it is lifted, 3 to 200 characters, kept in the audit row. Not for names or numbers")
+            String reason) {}
+
+    @DeleteMapping(path = "/{opt_out_id}", consumes = MediaType.APPLICATION_JSON_VALUE)
     @RequiresPermission("core.settings.manage")
-    @Operation(summary = "Lift one SMS opt-out, audited", operationId = "removeSmsOptOut")
-    ResponseEntity<Void> remove(@PathVariable("opt_out_id") UUID id) {
-        service.remove(id);
+    @Operation(
+            summary = "Lift one SMS opt-out with a reason, audited (the tenant administrator only)",
+            operationId = "removeSmsOptOut")
+    ResponseEntity<Void> remove(@PathVariable("opt_out_id") UUID id, @Valid @RequestBody LiftRequest request) {
+        service.remove(id, request.reason());
         return ResponseEntity.noContent().build();
     }
 

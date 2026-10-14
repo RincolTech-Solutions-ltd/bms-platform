@@ -585,9 +585,43 @@ class SmsSettingsIT extends LoanFixtures {
                 partial,
                 "{\"sms_include_balance\": false, \"module_groups\": {\"retail.capabilities\": {\"units\": true}}}");
 
-        TestDatabase.owner().sql(copy).update();
+        // JUSTIFICATION-A3: review findings 3 and 8: the clamp cases and the run scoped to this test's own tenants.
+        // Wide, short, late and malformed legacy windows: clamped or left out, never copied as they are.
+        TestDatabase.Fixture wide = TestDatabase.tenant("sms-wide", true);
+        TestDatabase.Fixture tooShort = TestDatabase.tenant("sms-short", true);
+        TestDatabase.Fixture lateOnly = TestDatabase.tenant("sms-late", true);
+        TestDatabase.Fixture malformed = TestDatabase.tenant("sms-bad", true);
+        arrange(wide, "{\"sms_window_start\": \"05:00\", \"sms_window_end\": \"23:00\"}");
+        arrange(tooShort, "{\"sms_window_start\": \"20:00\", \"sms_window_end\": \"20:30\"}");
+        arrange(lateOnly, "{\"sms_window_start\": \"21:30\", \"sms_window_end\": \"22:00\"}");
+        arrange(malformed, "{\"sms_window_start\": \"8am\", \"sms_window_end\": \"23:59\"}");
+
+        // Only this test's own tenants are touched: the shared test database holds other tests' rows.
+        String own = java.util.stream.Stream.of(legacy, grouped, plain, partial, wide, tooShort, lateOnly, malformed)
+                .map(f -> "'" + f.tenantId() + "'")
+                .collect(java.util.stream.Collectors.joining(", "));
+        String scoped = copy.replace("WHERE ts.id = w.id", "WHERE ts.id = w.id AND ts.tenant_id IN (" + own + ")");
+        assertThat(scoped).isNotEqualTo(copy);
+        TestDatabase.owner().sql(scoped).update();
         // Run again: the second run changes nothing.
-        TestDatabase.owner().sql(copy).update();
+        TestDatabase.owner().sql(scoped).update();
+
+        JsonNode wideGroup = settingsOf(wide).get("module_groups").get("sms");
+        assertThat(wideGroup.get("window_start").asString()).isEqualTo("06:00");
+        assertThat(wideGroup.get("window_end").asString()).isEqualTo("21:00");
+        // Not a window once clamped (under an hour, or beginning after the latest end): nothing copied, the default
+        // applies.
+        for (TestDatabase.Fixture notAWindow : List.of(tooShort, lateOnly)) {
+            assertThat(settingsOf(notAWindow).get("module_groups").get("sms").has("window_start"))
+                    .isFalse();
+            assertThat(settingsOf(notAWindow).get("module_groups").get("sms").has("window_end"))
+                    .isFalse();
+        }
+
+        // A side that is not a time is the default for that side: 08:00 to the end clamped to 21:00.
+        JsonNode badGroup = settingsOf(malformed).get("module_groups").get("sms");
+        assertThat(badGroup.get("window_start").asString()).isEqualTo("08:00");
+        assertThat(badGroup.get("window_end").asString()).isEqualTo("21:00");
 
         JsonNode l = settingsOf(legacy);
         assertThat(l.get("module_groups").get("sms").get("window_start").asString())

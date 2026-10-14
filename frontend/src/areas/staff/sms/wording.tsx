@@ -60,6 +60,10 @@ const REASONS: Record<string, string | undefined> = {
   channel_off: 'SMS is switched off on this system, so nothing was sent.',
   live_mode_preview_only:
     'This system sends real messages, so test messages are not sent from here. The preview above is the test.',
+  operator_sms_off: 'The platform has switched SMS off, so nothing was sent.',
+  tenant_sms_off: 'SMS is switched off for your business, so nothing was sent.',
+  blocked_optout: 'That number is on the opt-out list, so nothing was sent.',
+  cap_reached: 'A daily or monthly limit has been reached, so nothing was sent.',
 };
 
 /** What happened to a test message, in words. */
@@ -151,7 +155,7 @@ export function TemplateEditor({ template, canManage, onNotice }: { template: Sm
     retry: false,
   });
   // Read-only viewers see the saved wording as the list measured it.
-  const shown = canManage ? preview.data : { text: template.sample_text, measure: template.measure };
+  const shown = canManage ? preview.data : { text: template.sample_text, measure: template.measure, note: template.note };
   const previewError = preview.error instanceof SmsError ? (preview.error.fields.text ?? preview.error.message) : null;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sms', 'templates'] });
@@ -208,6 +212,7 @@ export function TemplateEditor({ template, canManage, onNotice }: { template: Sm
           <h3>Preview</h3>
           <p className="field-hint">Made with sample figures and your business name.</p>
           <p className="rt-card pre-line wrap-anywhere" data-testid="sms-preview-text">{shown.text}</p>
+          {shown.note && <p role="note" className="alert alert-warning">{shown.note}</p>}
           <MeasureView measure={shown.measure} />
         </div>
       )}

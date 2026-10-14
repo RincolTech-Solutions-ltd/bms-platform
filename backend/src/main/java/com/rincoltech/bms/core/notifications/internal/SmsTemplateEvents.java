@@ -22,11 +22,11 @@ final class SmsTemplateEvents {
     static final String CHANNEL = "sms";
 
     private static final List<Placeholder> RECEIPT = List.of(
-            new Placeholder("tenant_name", "Your business name", "Sunrise Savers", 40),
+            new Placeholder("tenant_name", "Your business name", "Sunrise Savers", 100),
             new Placeholder("currency", "The currency code", "UGX", 3),
-            new Placeholder("amount", "The amount of this transaction", "50,000", 15),
-            new Placeholder("account_no", "The savings account number", "SV000123", 20),
-            new Placeholder("receipt_no", "The receipt or voucher number", "RC-0042", 20));
+            new Placeholder("amount", "The amount of this transaction", "50,000", 24),
+            new Placeholder("account_no", "The savings account number", "SV000123", 30),
+            new Placeholder("receipt_no", "The receipt or voucher number", "RC-0042", 30));
 
     private static final Set<String> RECEIPT_REQUIRED = Set.of("amount", "account_no");
 
