@@ -418,10 +418,12 @@ class InsightsQueries {
                   FROM decided
                  WHERE decided_at >= :fromTs AND decided_at < :toTs AND decided_at >= submitted_at
                 """;
-        return jdbc.sql(sql)
+        // The median of nothing is NULL, which single() refuses: a range with no decisions has no median.
+        List<Long> hours = jdbc.sql(sql)
                 .params(p)
                 .query((rs, n) -> (Long) rs.getObject("hours", Long.class))
-                .single();
+                .list();
+        return hours.isEmpty() ? null : hours.get(0);
     }
 
     /** Active members by KYC status. */

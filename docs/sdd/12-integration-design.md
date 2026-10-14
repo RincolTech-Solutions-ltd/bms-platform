@@ -163,7 +163,11 @@ fails after its request was sent keeps its reservation against the day, and the 
 its generation, so a late result cannot close it or free the probe slot. `BMS_AI_PROVIDER` is `off` by default; a provider with a
 missing URL, key or model, a key with whitespace, or a non-https URL is off with a warning; the recording stub is refused
 outside the dev and test profiles. Only the advisor module calls it, and only with the typed fact list and aliases (spec
-section 5.4).
+section 5.4). Built in #223 (the call itself arrives with #226): the advisor builds the request from `PortfolioFacts`
+through an alias-only structure (grouped figures, so no run of six digits reaches the input screen), and every answer passes
+its `NumericValidator` before anything is shown (spec 5.13): the shape, every number derivable from a fact the point cites, the
+sign and direction words against the change facts, plain text only, no personal data shape, no real name and no repeat of
+the system prompt. An offline evaluation harness runs a golden set of recorded answers through the same chain.
 
 ## 12.5 Object storage (Cloudflare R2)
 

@@ -381,6 +381,20 @@ output changed.
   through the gateway, the log column list and a planted canary absent from every row, the update and delete guards and the
   housekeeping for suspended tenants); the
   isolation suite covers `ai_calls` through its factory row.
+  The advisor's facts, aliases, validator and harness (#223) are covered by `PortfolioFactsIT` (the facts equal the independent
+  recomputation of the insights golden model, in their display forms, with the week-on-week and month-on-month changes; a branch
+  manager's and a loan officer's facts equal the insights endpoints' figures for the same caller metric by metric; a branch or
+  product under five loans is one suppressed fact whose real figures appear nowhere; a change is left out when the earlier
+  population was small; no name of a branch, product or staff member is in any fact; no officer dimension; the Kampala date at the
+  20:59 and 21:01 UTC edge; a scope read after midnight; an empty tenant), `AdvisorCanaryIT` (a book whose branches and products
+  are named with canaries goes through the real gateway with the recording client: no canary in the request the client received,
+  in the call log or in the facts, and the gateway's input screen lets the prompt through), `NumericValidatorTest` (amounts,
+  rates, changes, number words, dates, ordinals, aliases, units and signs each with a near miss that must fail; direction words
+  against the sign and the polarity; unicode digits, zero-width characters and look-alike letters; personal data shapes, markup,
+  names and the repeated prompt; the shape and limits of the answer; property tests with fixed seeds), `NumberExtractorTest`,
+  `AliasesTest` (a round-trip property over random groups), `PromptBuilderTest`, `FactDisplayTest` and `AdvisorEvaluationTest`
+  (the golden set offline at 100 percent in every category, a flipped set failing every case, a wrong code failing a refused
+  case, no planted string in any request).
 
 ## 15.8 Test data policy
 

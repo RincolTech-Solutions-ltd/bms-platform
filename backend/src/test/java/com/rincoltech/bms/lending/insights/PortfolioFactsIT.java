@@ -1,0 +1,996 @@
+package com.rincoltech.bms.lending.insights;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.jobs.TenantJobs;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.lending.insights.GoldenModel.Loan;
+import com.rincoltech.bms.lending.insights.GoldenModel.Pos;
+import com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioScope;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Dimension;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Fact;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.FactSet;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Group;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Kind;
+import com.rincoltech.bms.lending.seed.internal.LendingSeeder;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * The public {@code PortfolioFacts} port (extras slice C2, issue #223; ADR-037 decision 3; spec 5.4) against the
+ * independent recomputation of the insights golden model: raw rows of a fabricated year summed with plain loops, none of
+ * the code under test. Proves that the facts equal the golden metrics with their display forms and their week-on-week
+ * and month-on-month changes, that a branch manager's or a loan officer's facts are exactly the insights endpoints'
+ * figures for the same caller, that a group of fewer than five loans is one suppressed fact, that no name of a branch,
+ * product or staff member is in any fact, and that the business date is Kampala's at the 21:00 UTC edge. The clock is
+ * pinned at 2026-10-08 (Kampala), so the fabricated year is the same on every day the suite runs.
+ */
+@Import(PortfolioFactsIT.FixedClock.class)
+class PortfolioFactsIT extends IntegrationTest {
+
+    static final Instant NOW = Instant.parse("2026-10-08T10:00:00Z");
+    static final LocalDate TODAY = LocalDate.of(2026, 10, 8);
+    static final LocalDate FROM = TODAY.withDayOfMonth(1);
+    static final Predicate<Loan> ALL_LOANS = l -> true;
+    static final String ALL_PERMISSIONS = "lending.insights.read,lending.insights.all_officers,lending.members.read";
+
+    static final class MovableClock extends Clock {
+        private volatile Instant now = NOW;
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    @TestConfiguration
+    static class FixedClock {
+        @Bean
+        @Primary
+        MovableClock fixedClock() {
+            return new MovableClock();
+        }
+    }
+
+    static TestDatabase.Fixture a;
+    static GoldenModel model;
+    static final List<String> PLANTED_BRANCHES = new ArrayList<>();
+    static final List<String> PLANTED_PRODUCTS = new ArrayList<>();
+
+    @Autowired
+    MovableClock clock;
+
+    @Autowired
+    LendingSeeder seeder;
+
+    @Autowired
+    PortfolioFacts portfolioFacts;
+
+    @Autowired
+    InsightsFigures figures;
+
+    @Autowired
+    TenantJobs tenantJobs;
+
+    @Autowired
+    TestRestTemplate http;
+
+    @Autowired
+    org.springframework.transaction.PlatformTransactionManager txManager;
+
+    @BeforeEach
+    void seededOnce() {
+        clock.now = NOW;
+        if (a != null) {
+            return;
+        }
+        a = TestDatabase.tenant("facts", true);
+        seeder.seed(a.slug(), new LendingSeeder.Options(true, 1));
+        model = GoldenModel.load(a.tenantId());
+        // Fabricated names that must appear in no fact: every branch and product is renamed to a canary.
+        int i = 0;
+        for (UUID id : TestDatabase.owner()
+                .sql("SELECT id FROM branches WHERE tenant_id = ? ORDER BY id")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .list()) {
+            String name = "Canary Branch Zq" + (++i);
+            PLANTED_BRANCHES.add(name);
+            TestDatabase.owner()
+                    .sql("UPDATE branches SET name = ? WHERE id = ?")
+                    .params(name, id)
+                    .update();
+        }
+        i = 0;
+        for (UUID id : TestDatabase.owner()
+                .sql("SELECT id FROM lending_loan_products WHERE tenant_id = ? ORDER BY id")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .list()) {
+            String name = "Canary Product Zq" + (++i);
+            PLANTED_PRODUCTS.add(name);
+            TestDatabase.owner()
+                    .sql("UPDATE lending_loan_products SET name = ? WHERE id = ?")
+                    .params(name, id)
+                    .update();
+        }
+    }
+
+    @AfterEach
+    void signOut() {
+        CurrentPrincipal.clear();
+    }
+
+    // ---- Helpers ----------------------------------------------------------------------------------------------
+
+    static Principal user(UUID id, Set<String> permissions, Set<UUID> branches) {
+        return Principal.uniform(id, "staff", permissions, branches == null, branches == null ? Set.of() : branches);
+    }
+
+    static final Set<String> ALL = Set.of("lending.insights.read", "lending.insights.all_officers");
+
+    <T> T inTx(java.util.function.Supplier<T> work) {
+        return new org.springframework.transaction.support.TransactionTemplate(txManager).execute(s -> work.get());
+    }
+
+    PortfolioScope scope(Principal who, LocalDate from, LocalDate to, List<UUID> branches, UUID product) {
+        CurrentPrincipal.set(who);
+        try {
+            return tenantJobs.callAs(a.tenantId(), () -> inTx(() -> figures.scope(from, to, branches, null, product)));
+        } finally {
+            CurrentPrincipal.clear();
+        }
+    }
+
+    /** The facts for a scope resolved for the principal in the request and read later without one. */
+    FactSet facts(Principal who, LocalDate from, LocalDate to, List<UUID> branches, UUID product) {
+        PortfolioScope scope = scope(who, from, to, branches, product);
+        return tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
+    }
+
+    FactSet wholeBook() {
+        return facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), null);
+    }
+
+    static Fact figure(FactSet set, String key) {
+        List<Fact> found = set.facts().stream()
+                .filter(f -> f.key().equals(key) && f.group() == null)
+                .toList();
+        assertThat(found).as("fact %s", key).hasSize(1);
+        return found.get(0);
+    }
+
+    static boolean small(long population) {
+        return population > 0 && population < PortfolioFacts.MIN_GROUP;
+    }
+
+    /** The fact is the golden figure in its display form, or one suppressed fact when its population is one to four. */
+    static void expect(FactSet set, String key, Long golden, long... populations) {
+        Fact f = figure(set, key);
+        boolean suppressed = false;
+        for (long p : populations) {
+            suppressed |= small(p);
+        }
+        if (suppressed) {
+            assertThat(f.suppressed()).as("%s is over a small population", key).isTrue();
+            assertThat(f.display()).isEqualTo("fewer than 5");
+            assertThat(f.value()).isNull();
+            assertThat(f.weekOnWeek()).isNull();
+            assertThat(f.monthOnMonth()).isNull();
+            return;
+        }
+        assertThat(f.suppressed()).as(key).isFalse();
+        assertThat(f.value()).as(key).isEqualTo(golden);
+        assertThat(f.display())
+                .as(key)
+                .isEqualTo(golden == null ? "not available" : FactDisplay.of(f.kind(), golden, "UGX"));
+    }
+
+    static Long rate(long part, long whole) {
+        return whole == 0 ? null : GoldenModel.bp(part, whole);
+    }
+
+    static final Set<String> COLLECTED = Set.of("repayment", "recovery");
+
+    // ---- Facts equal the golden metrics ---------------------------------------------------------------------
+
+    @Test
+    void theFactsOfTheWholeBookEqualTheGoldenMetricsInTheirDisplayForms() {
+        FactSet set = wholeBook();
+        assertThat(set.asOf()).isEqualTo(TODAY);
+        assertThat(set.from()).isEqualTo(FROM);
+        assertThat(set.to()).isEqualTo(TODAY);
+        assertThat(set.currency()).isEqualTo("UGX");
+
+        List<Pos> stock = model.live(TODAY, ALL_LOANS);
+        long active = stock.size();
+        assertThat(active).as("the fabricated year has a book").isGreaterThan(50);
+        long po = GoldenModel.po(stock);
+        long borrowers = stock.stream()
+                .map(p -> model.loans.get(p.loan()).member())
+                .distinct()
+                .count();
+        expect(set, "portfolio.principal_outstanding", po, active);
+        expect(set, "portfolio.active_loans", active, active);
+        expect(set, "portfolio.borrowers", borrowers, borrowers);
+        expect(set, "portfolio.arrears", stock.stream().mapToLong(Pos::arrears).sum(), active);
+        for (int over : new int[] {0, 30, 60, 90}) {
+            expect(set, "portfolio.par" + (over == 0 ? 1 : over), rate(GoldenModel.parAmount(stock, over), po), active);
+        }
+        assertThat(figure(set, "portfolio.par30").value())
+                .as("some risk in the book")
+                .isPositive();
+
+        long disbursedCount = model.countTxns("disbursement", FROM, TODAY, ALL_LOANS);
+        long collectedCount = model.txns.values().stream()
+                .filter(t -> COLLECTED.contains(t.type()) && GoldenModel.between(t.valueDate(), FROM, TODAY))
+                .count();
+        long expected = model.expected(FROM, TODAY, ALL_LOANS);
+        long onDue = model.collectedOnDue(FROM, TODAY, ALL_LOANS);
+        expect(
+                set,
+                "portfolio.disbursed",
+                model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false),
+                disbursedCount);
+        expect(set, "portfolio.disbursed_count", disbursedCount, disbursedCount);
+        expect(
+                set,
+                "portfolio.collected",
+                model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true),
+                active,
+                collectedCount);
+        expect(set, "portfolio.expected", expected, active);
+        expect(set, "portfolio.collection_rate", rate(onDue, expected), active);
+        long writeOffs = model.countTxns("write_off", FROM, TODAY, ALL_LOANS);
+        expect(set, "portfolio.written_off_count", writeOffs, writeOffs);
+        expect(
+                set,
+                "portfolio.written_off",
+                model.sumTxns(Set.of("write_off"), FROM, TODAY, ALL_LOANS, false),
+                writeOffs);
+        expect(set, "portfolio.forecast_7", model.forecast(TODAY, 7, ALL_LOANS), active);
+        expect(set, "portfolio.forecast_30", model.forecast(TODAY, 30, ALL_LOANS), active);
+        long[] repeat = model.repeat(FROM, TODAY, ALL_LOANS);
+        expect(set, "portfolio.repeat_share", rate(repeat[1], repeat[0]), repeat[0]);
+
+        long[] revenue = model.revenue(FROM, TODAY, ALL_LOANS);
+        expect(set, "revenue.interest", revenue[0], active);
+        expect(set, "revenue.fees", revenue[1], active);
+        expect(set, "revenue.penalties", revenue[2], active);
+        expect(set, "revenue.recovered", revenue[3], active);
+        expect(set, "revenue.write_off_expense", revenue[4], active);
+        expect(set, "revenue.contribution", revenue[5], active);
+
+        // The brief is today's.
+        long disbursedToday = model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS);
+        long collectedToday = model.txns.values().stream()
+                .filter(t -> COLLECTED.contains(t.type()) && t.valueDate().equals(TODAY))
+                .count();
+        expect(
+                set,
+                "brief.disbursed_today",
+                model.sumTxns(Set.of("disbursement"), TODAY, TODAY, ALL_LOANS, false),
+                disbursedToday);
+        expect(set, "brief.disbursed_loans_today", disbursedToday, disbursedToday);
+        expect(
+                set,
+                "brief.collected_today",
+                model.sumTxns(COLLECTED, TODAY, TODAY, ALL_LOANS, true),
+                active,
+                collectedToday);
+        long fresh = stock.stream().filter(p -> p.dpd() == 1).count();
+        long goingBad =
+                stock.stream().filter(p -> p.dpd() >= 24 && p.dpd() <= 30).count();
+        expect(set, "brief.new_arrears", fresh, fresh);
+        expect(
+                set,
+                "brief.new_arrears_amount",
+                stock.stream().filter(p -> p.dpd() == 1).mapToLong(Pos::arrears).sum(),
+                fresh);
+        expect(set, "brief.going_bad", goingBad, goingBad);
+        expect(
+                set,
+                "brief.going_bad_principal",
+                stock.stream()
+                        .filter(p -> p.dpd() >= 24 && p.dpd() <= 30)
+                        .mapToLong(Pos::po)
+                        .sum(),
+                goingBad);
+    }
+
+    @Test
+    void everyFactCarriesItsKindPolarityAndLabelFromTheDictionary() {
+        FactSet set = wholeBook();
+        Fact par = figure(set, "portfolio.par30");
+        assertThat(par.kind()).isEqualTo(Kind.BASIS_POINTS);
+        assertThat(par.polarity()).isEqualTo(PortfolioFacts.Polarity.HIGHER_IS_WORSE);
+        assertThat(par.label()).isEqualTo("PAR 30");
+        assertThat(figure(set, "portfolio.collection_rate").polarity())
+                .isEqualTo(PortfolioFacts.Polarity.HIGHER_IS_BETTER);
+        assertThat(figure(set, "portfolio.principal_outstanding").kind()).isEqualTo(Kind.MONEY);
+        assertThat(figure(set, "portfolio.active_loans").kind()).isEqualTo(Kind.COUNT);
+        assertThat(figure(set, "portfolio.principal_outstanding").polarity())
+                .isEqualTo(PortfolioFacts.Polarity.NEUTRAL);
+        assertThat(set.facts()).extracting(Fact::label).doesNotContainNull().allMatch(l -> !l.isBlank());
+        // A key appears once per group: no duplicate whole-book facts.
+        List<String> keys = set.facts().stream()
+                .filter(f -> f.group() == null)
+                .map(Fact::key)
+                .toList();
+        assertThat(keys).doesNotHaveDuplicates();
+    }
+
+    // ---- Changes: week on week and month on month --------------------------------------------------------------
+
+    @Test
+    void theChangesEqualTheGoldenFiguresOfTheEarlierRanges() {
+        FactSet set = wholeBook();
+        for (int[] shift : new int[][] {{7, 0}, {0, 1}}) {
+            boolean week = shift[0] == 7;
+            LocalDate from = week ? FROM.minusDays(7) : FROM.minusMonths(1);
+            LocalDate to = week ? TODAY.minusDays(7) : TODAY.minusMonths(1);
+            // Stocks are read from the snapshot of the earlier end date.
+            List<Pos> then = List.copyOf(model.asOf(to).values());
+            List<Pos> now = model.live(TODAY, ALL_LOANS);
+            long poThen = GoldenModel.po(then);
+            long poNow = GoldenModel.po(now);
+            assertThat(then).as("a book on %s", to).hasSizeGreaterThan(50);
+            assertChange(figure(set, "portfolio.principal_outstanding"), week, poNow - poThen, then.size());
+            assertChange(figure(set, "portfolio.active_loans"), week, (long) now.size() - then.size(), then.size());
+            assertChange(
+                    figure(set, "portfolio.par30"),
+                    week,
+                    rate(GoldenModel.parAmount(now, 30), poNow) - rate(GoldenModel.parAmount(then, 30), poThen),
+                    then.size());
+            assertChange(
+                    figure(set, "portfolio.arrears"),
+                    week,
+                    now.stream().mapToLong(Pos::arrears).sum()
+                            - then.stream().mapToLong(Pos::arrears).sum(),
+                    then.size());
+            // Flows are the transactions of the earlier range.
+            long disbursedNow = model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false);
+            long disbursedThen = model.sumTxns(Set.of("disbursement"), from, to, ALL_LOANS, false);
+            assertChange(
+                    figure(set, "portfolio.disbursed"),
+                    week,
+                    disbursedNow - disbursedThen,
+                    model.countTxns("disbursement", from, to, ALL_LOANS));
+            long collectedNow = model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true);
+            long collectedThen = model.sumTxns(COLLECTED, from, to, ALL_LOANS, true);
+            assertChange(
+                    figure(set, "portfolio.collected"),
+                    week,
+                    collectedNow - collectedThen,
+                    then.size(),
+                    model.txns.values().stream()
+                            .filter(t -> COLLECTED.contains(t.type()) && GoldenModel.between(t.valueDate(), from, to))
+                            .count());
+            long expectedNow = model.expected(FROM, TODAY, ALL_LOANS);
+            long expectedThen = model.expected(from, to, ALL_LOANS);
+            assertChange(
+                    figure(set, "portfolio.collection_rate"),
+                    week,
+                    rate(model.collectedOnDue(FROM, TODAY, ALL_LOANS), expectedNow)
+                            - rate(model.collectedOnDue(from, to, ALL_LOANS), expectedThen),
+                    then.size());
+            assertChange(
+                    figure(set, "revenue.interest"),
+                    week,
+                    model.revenue(FROM, TODAY, ALL_LOANS)[0] - model.revenue(from, to, ALL_LOANS)[0],
+                    then.size());
+            assertChange(
+                    figure(set, "brief.disbursed_today"),
+                    week,
+                    model.sumTxns(Set.of("disbursement"), TODAY, TODAY, ALL_LOANS, false)
+                            - model.sumTxns(Set.of("disbursement"), to, to, ALL_LOANS, false),
+                    model.countTxns("disbursement", to, to, ALL_LOANS));
+        }
+        // Figures with no earlier comparison have no change facts.
+        assertThat(figure(set, "brief.new_arrears").weekOnWeek()).isNull();
+        assertThat(figure(set, "brief.going_bad").monthOnMonth()).isNull();
+        assertThat(figure(set, "portfolio.forecast_7").weekOnWeek()).isNull();
+    }
+
+    /** The change is the golden difference, in the figure's units, with the display form of its sign. */
+    static void assertChange(Fact f, boolean week, long golden, long... populationsBefore) {
+        PortfolioFacts.Delta d = week ? f.weekOnWeek() : f.monthOnMonth();
+        boolean earlierSmall = false;
+        for (long p : populationsBefore) {
+            earlierSmall |= small(p);
+        }
+        if (f.suppressed() || earlierSmall) {
+            // Current minus the change would give back a figure over fewer than five loans: there is no change.
+            assertThat(d)
+                    .as("%s %s change over a small population", f.key(), week ? "week" : "month")
+                    .isNull();
+            return;
+        }
+        assertThat(d).as("%s %s change", f.key(), week ? "week" : "month").isNotNull();
+        assertThat(d.change()).as("%s %s", f.key(), week ? "week" : "month").isEqualTo(golden);
+        assertThat(d.display()).isEqualTo(FactDisplay.change(f.kind(), golden, "UGX"));
+        if (golden != 0) {
+            assertThat(d.display()).startsWith(golden > 0 ? "+" : "-");
+        }
+    }
+
+    @Test
+    void aChangeIsLeftOutWhenTheEarlierRangeHeldFewerThanFiveLoansEvenThoughTheCurrentOneDid() {
+        // Scan the fabricated year for a range with five or more disbursements whose week earlier had one to four, and
+        // one
+        // whose week earlier had five or more: the first must give no change (current minus change would give the small
+        // figure back), the second must give one.
+        LocalDate smallEarlier = null;
+        LocalDate bigEarlier = null;
+        int length = 14;
+        for (int back = 0; back < 150 && (smallEarlier == null || bigEarlier == null); back++) {
+            LocalDate to = TODAY.minusDays(back);
+            LocalDate from = to.minusDays(length - 1);
+            long now = model.countTxns("disbursement", from, to, ALL_LOANS);
+            long before = model.countTxns("disbursement", from.minusDays(7), to.minusDays(7), ALL_LOANS);
+            if (now >= PortfolioFacts.MIN_GROUP && small(before) && smallEarlier == null) {
+                smallEarlier = to;
+            }
+            if (now >= PortfolioFacts.MIN_GROUP && before >= PortfolioFacts.MIN_GROUP && bigEarlier == null) {
+                bigEarlier = to;
+            }
+        }
+        assertThat(smallEarlier).as("a range after a quiet week").isNotNull();
+        assertThat(bigEarlier).as("a range after a busy week").isNotNull();
+
+        UUID user = UUID.randomUUID();
+        FactSet quiet = facts(user(user, ALL, null), smallEarlier.minusDays(length - 1), smallEarlier, List.of(), null);
+        Fact count = figure(quiet, "portfolio.disbursed_count");
+        assertThat(count.suppressed()).isFalse();
+        assertThat(count.value()).isGreaterThanOrEqualTo(PortfolioFacts.MIN_GROUP);
+        assertThat(count.weekOnWeek()).as("the earlier week held one to four").isNull();
+        assertThat(figure(quiet, "portfolio.disbursed").weekOnWeek()).isNull();
+
+        FactSet busy = facts(user(user, ALL, null), bigEarlier.minusDays(length - 1), bigEarlier, List.of(), null);
+        long beforeCount = model.countTxns(
+                "disbursement", bigEarlier.minusDays(length - 1 + 7), bigEarlier.minusDays(7), ALL_LOANS);
+        assertChange(
+                figure(busy, "portfolio.disbursed_count"),
+                true,
+                figure(busy, "portfolio.disbursed_count").value() - beforeCount,
+                beforeCount);
+        assertThat(figure(busy, "portfolio.disbursed_count").weekOnWeek()).isNotNull();
+    }
+
+    @Test
+    void theFabricatedYearHasChangesOfBothSignsSoTheDirectionChecksHaveSomethingToCheck() {
+        FactSet set = wholeBook();
+        List<Long> changes = new ArrayList<>();
+        for (Fact f : set.facts()) {
+            if (f.group() == null && f.weekOnWeek() != null) {
+                changes.add(f.weekOnWeek().change());
+            }
+            if (f.group() == null && f.monthOnMonth() != null) {
+                changes.add(f.monthOnMonth().change());
+            }
+        }
+        assertThat(changes).anyMatch(c -> c > 0).anyMatch(c -> c < 0);
+    }
+
+    // ---- Scope: the facts are the insights endpoints' figures for the same caller ---------------------------
+
+    static HttpHeaders headers(UUID user, String permissions, String branches) {
+        HttpHeaders h = new HttpHeaders();
+        h.add("X-Tenant", a.slug());
+        h.add("X-Dev-User-Id", user.toString());
+        h.add("X-Dev-Permissions", permissions);
+        h.add("X-Dev-Branch-Ids", branches);
+        return h;
+    }
+
+    JsonNode endpoint(String path, HttpHeaders h) {
+        ResponseEntity<JsonNode> r =
+                http.exchange("/api/v1/lending/insights" + path, HttpMethod.GET, new HttpEntity<>(h), JsonNode.class);
+        assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.OK);
+        return r.getBody();
+    }
+
+    static Long metric(JsonNode body, String key) {
+        for (JsonNode m : body.get("metrics")) {
+            if (m.get("key").asString().equals(key)) {
+                return m.get("value").isNull() ? null : m.get("value").asLong();
+            }
+        }
+        throw new AssertionError("no metric " + key);
+    }
+
+    /** Every unsuppressed fact equals the same-named metric of the endpoint the page reads, for the same caller. */
+    void factsEqualTheEndpoints(FactSet set, UUID user, String permissions, String branches) {
+        HttpHeaders h = headers(user, permissions, branches);
+        String range = "from=" + FROM + "&to=" + TODAY;
+        JsonNode portfolio = endpoint("/portfolio?" + range, h);
+        JsonNode revenue = endpoint("/revenue?" + range, h);
+        JsonNode members = endpoint("/members?" + range, h);
+        JsonNode brief = endpoint("/brief", h);
+        int compared = 0;
+        for (Fact f : set.facts()) {
+            if (f.group() != null || f.suppressed()) {
+                continue;
+            }
+            JsonNode source = f.key().startsWith("portfolio.")
+                    ? portfolio
+                    : f.key().startsWith("revenue.") ? revenue : f.key().startsWith("members.") ? members : brief;
+            assertThat(f.value()).as(f.key()).isEqualTo(metric(source, f.key()));
+            compared++;
+        }
+        assertThat(compared).as("figures compared with the endpoints").isGreaterThan(25);
+    }
+
+    @Test
+    void theWholeBooksFactsEqualTheInsightsEndpoints() {
+        UUID user = UUID.randomUUID();
+        factsEqualTheEndpoints(facts(user(user, ALL, null), FROM, TODAY, List.of(), null), user, ALL_PERMISSIONS, "*");
+    }
+
+    private UUID northBranch() {
+        return model.loans.values().stream()
+                .map(Loan::branch)
+                .distinct()
+                .filter(b -> !b.equals(a.headOffice()))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Test
+    void aBranchManagersFactsAreOnlyTheirBranchAndEqualTheEndpointsForThem() {
+        UUID north = northBranch();
+        UUID user = UUID.randomUUID();
+        FactSet mine = facts(user(user, ALL, Set.of(north)), FROM, TODAY, List.of(), null);
+        FactSet everything = wholeBook();
+
+        Predicate<Loan> inNorth = l -> l.branch().equals(north);
+        List<Pos> stock = model.live(TODAY, inNorth);
+        long active = stock.size();
+        assertThat(active)
+                .isGreaterThan(4)
+                .isLessThan(model.live(TODAY, ALL_LOANS).size());
+        expect(mine, "portfolio.active_loans", active, active);
+        expect(mine, "portfolio.principal_outstanding", GoldenModel.po(stock), active);
+        expect(mine, "portfolio.par30", rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)), active);
+        expect(
+                mine,
+                "portfolio.disbursed",
+                model.sumTxns(Set.of("disbursement"), FROM, TODAY, inNorth, false),
+                model.countTxns("disbursement", FROM, TODAY, inNorth));
+        // The same caller's figures are the endpoints' figures, and not the whole book's.
+        factsEqualTheEndpoints(mine, user, ALL_PERMISSIONS, north.toString());
+        assertThat(figure(mine, "portfolio.principal_outstanding").value())
+                .isNotEqualTo(
+                        figure(everything, "portfolio.principal_outstanding").value());
+        // Only their branch appears as a group, and only products with loans in it.
+        Set<String> branchIds = mine.names().stream()
+                .filter(n -> n.group().dimension() == Dimension.BRANCH)
+                .map(n -> n.group().id())
+                .collect(Collectors.toSet());
+        assertThat(branchIds).containsExactly(north.toString());
+        Set<String> productsInNorth = stock.stream()
+                .map(p -> model.loans.get(p.loan()).product().toString())
+                .collect(Collectors.toSet());
+        assertThat(mine.names().stream()
+                        .filter(n -> n.group().dimension() == Dimension.PRODUCT)
+                        .map(n -> n.group().id()))
+                .isSubsetOf(productsInNorth);
+        // Whatever the manager asks for, they get their branch or nothing.
+        FactSet asksForAll = facts(user(user, ALL, Set.of(north)), FROM, TODAY, List.of(), null);
+        assertThat(figure(asksForAll, "portfolio.principal_outstanding").value())
+                .isEqualTo(GoldenModel.po(stock));
+        FactSet asksForOther = facts(user(user, ALL, Set.of(north)), FROM, TODAY, List.of(a.headOffice()), null);
+        assertThat(figure(asksForOther, "portfolio.active_loans").value())
+                .as("no loans in view")
+                .isZero();
+        assertThat(figure(asksForOther, "portfolio.principal_outstanding").value())
+                .isZero();
+        assertThat(figure(asksForOther, "portfolio.par30").display()).isEqualTo("not available");
+        assertThat(asksForOther.names()).isEmpty();
+    }
+
+    @Test
+    void aCallerWithNoBranchesGetsEmptyFactsNotTheWholeBook() {
+        FactSet nobody = facts(user(UUID.randomUUID(), ALL, Set.of()), FROM, TODAY, List.of(), null);
+        // Held at no branch: the scope is empty, as the endpoints answer.
+        assertThat(figure(nobody, "portfolio.active_loans").value()).isZero();
+        assertThat(figure(nobody, "portfolio.principal_outstanding").value()).isZero();
+        assertThat(nobody.names()).isEmpty();
+    }
+
+    @Test
+    void aLoanOfficerWithoutAllOfficersGetsTheirOwnLoansOnlyAndSmallBooksAreSuppressed() {
+        UUID officer = model.loans.values().stream()
+                .filter(l -> l.status().equals("active"))
+                .map(Loan::officer)
+                .findFirst()
+                .orElseThrow();
+        Predicate<Loan> own = l -> officer.equals(l.officer());
+        FactSet mine = facts(user(officer, Set.of("lending.insights.read"), null), FROM, TODAY, List.of(), null);
+        List<Pos> stock = model.live(TODAY, own);
+        expect(mine, "portfolio.active_loans", (long) stock.size(), stock.size());
+        expect(mine, "portfolio.principal_outstanding", GoldenModel.po(stock), stock.size());
+        factsEqualTheEndpoints(mine, officer, "lending.insights.read", "*");
+        assertThat(figure(mine, "portfolio.active_loans").suppressed()).isFalse();
+
+        // An officer looking at one product in which they hold one to four active loans: every figure is "fewer than
+        // 5".
+        Map<List<UUID>, Long> perOfficerAndProduct = model.live(TODAY, ALL_LOANS).stream()
+                .map(p -> model.loans.get(p.loan()))
+                .collect(Collectors.groupingBy(l -> List.of(l.officer(), l.product()), Collectors.counting()));
+        List<UUID> narrow = perOfficerAndProduct.entrySet().stream()
+                .filter(e -> small(e.getValue()))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+        assertThat(narrow)
+                .as("an officer with one to four active loans in a product")
+                .isNotNull();
+        FactSet few = facts(
+                user(narrow.get(0), Set.of("lending.insights.read"), null), FROM, TODAY, List.of(), narrow.get(1));
+        List<Pos> held = model.live(
+                TODAY, l -> narrow.get(0).equals(l.officer()) && l.product().equals(narrow.get(1)));
+        assertThat(held).hasSizeBetween(1, 4);
+        for (String key : List.of(
+                "portfolio.active_loans", "portfolio.principal_outstanding", "portfolio.arrears", "portfolio.par30")) {
+            assertThat(figure(few, key).suppressed()).as(key).isTrue();
+            assertThat(figure(few, key).display()).isEqualTo("fewer than 5");
+            assertThat(figure(few, key).value()).as(key).isNull();
+        }
+        assertThat(few.facts()).noneMatch(f -> f.display().contains(FactDisplay.money(GoldenModel.po(held), "UGX")));
+    }
+
+    // ---- Small groups ------------------------------------------------------------------------------------------
+
+    /** A product in which some branch has one to four active loans and another has five or more. */
+    private UUID productWithASmallBranch() {
+        List<Pos> stock = model.live(TODAY, ALL_LOANS);
+        Map<UUID, Map<UUID, Long>> byProduct = stock.stream()
+                .map(p -> model.loans.get(p.loan()))
+                .collect(Collectors.groupingBy(
+                        Loan::product, Collectors.groupingBy(Loan::branch, Collectors.counting())));
+        return byProduct.entrySet().stream()
+                .filter(e -> e.getValue().values().stream().anyMatch(PortfolioFactsIT::small)
+                        && e.getValue().values().stream().anyMatch(c -> c >= PortfolioFacts.MIN_GROUP))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Test
+    void aBranchWithFewerThanFiveLoansIsOneSuppressedFactAndNothingElse() {
+        UUID product = productWithASmallBranch();
+        assertThat(product)
+                .as("the fabricated year has a product with a small branch")
+                .isNotNull();
+        FactSet set = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), product);
+        Predicate<Loan> inProduct = l -> l.product().equals(product);
+        Map<UUID, Long> perBranch = model.live(TODAY, inProduct).stream()
+                .map(p -> model.loans.get(p.loan()))
+                .collect(Collectors.groupingBy(Loan::branch, Collectors.counting()));
+
+        int small = 0;
+        int shown = 0;
+        for (Map.Entry<UUID, Long> e : perBranch.entrySet()) {
+            Group group = new Group(Dimension.BRANCH, e.getKey().toString());
+            List<Fact> of =
+                    set.facts().stream().filter(f -> group.equals(f.group())).toList();
+            assertThat(set.names())
+                    .as("named for the alias mapping")
+                    .anyMatch(n -> n.group().equals(group));
+            if (small(e.getValue())) {
+                small++;
+                assertThat(of).as("a branch of %d loans", e.getValue()).hasSize(1);
+                Fact f = of.get(0);
+                assertThat(f.key()).isEqualTo("branch.loans");
+                assertThat(f.suppressed()).isTrue();
+                assertThat(f.value()).isNull();
+                assertThat(f.display()).isEqualTo("fewer than 5");
+                // Its real figures are nowhere in the facts, in any form.
+                long po = GoldenModel.po(
+                        model.live(TODAY, inProduct.and(l -> l.branch().equals(e.getKey()))));
+                String grouped = FactDisplay.money(po, "UGX");
+                assertThat(set.facts())
+                        .noneMatch(x -> x.display().equals(grouped) && group.equals(x.group()))
+                        .noneMatch(x -> group.equals(x.group()) && x.value() != null);
+            } else if (e.getValue() >= PortfolioFacts.MIN_GROUP) {
+                shown++;
+                assertThat(of)
+                        .extracting(Fact::key)
+                        .containsExactly("branch.loans", "branch.principal_outstanding", "branch.par30");
+                assertThat(of.get(0).value()).isEqualTo(e.getValue());
+                long po = GoldenModel.po(
+                        model.live(TODAY, inProduct.and(l -> l.branch().equals(e.getKey()))));
+                assertThat(of.get(1).value()).isEqualTo(po);
+            }
+        }
+        assertThat(small).isGreaterThan(0);
+        assertThat(shown).isGreaterThan(0);
+    }
+
+    @Test
+    void aSmallBookIsSuppressedWhereverItsPopulationIsSmall() {
+        // A product-and-branch narrow enough to hold one to four loans: the whole book of that scope is small.
+        List<Pos> stock = model.live(TODAY, ALL_LOANS);
+        Map<List<UUID>, Long> counts = stock.stream()
+                .map(p -> model.loans.get(p.loan()))
+                .collect(Collectors.groupingBy(l -> List.of(l.branch(), l.product()), Collectors.counting()));
+        List<UUID> narrow = counts.entrySet().stream()
+                .filter(e -> small(e.getValue()))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+        assertThat(narrow).as("a branch and product with one to four loans").isNotNull();
+        FactSet set = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(narrow.get(0)), narrow.get(1));
+        for (String key : List.of(
+                "portfolio.active_loans",
+                "portfolio.principal_outstanding",
+                "portfolio.arrears",
+                "portfolio.par1",
+                "portfolio.par30",
+                "portfolio.collected",
+                "portfolio.expected",
+                "revenue.interest",
+                "revenue.contribution")) {
+            Fact f = figure(set, key);
+            assertThat(f.suppressed()).as(key).isTrue();
+            assertThat(f.value()).as(key).isNull();
+            assertThat(f.display()).as(key).isEqualTo("fewer than 5");
+            assertThat(f.weekOnWeek()).as(key).isNull();
+        }
+        // No digit of the real principal appears in any fact's display.
+        long po = GoldenModel.po(model.live(
+                TODAY, l -> l.branch().equals(narrow.get(0)) && l.product().equals(narrow.get(1))));
+        assertThat(set.facts()).noneMatch(f -> f.display().contains(FactDisplay.money(po, "UGX")));
+    }
+
+    // ---- No names ----------------------------------------------------------------------------------------------
+
+    @Test
+    void noFactHoldsAnyNameOfABranchProductOrStaffMember() {
+        FactSet set = wholeBook();
+        List<String> secrets = new ArrayList<>(PLANTED_BRANCHES);
+        secrets.addAll(PLANTED_PRODUCTS);
+        List<String> staff = TestDatabase.owner()
+                .sql("SELECT full_name FROM users WHERE tenant_id = ?")
+                .param(a.tenantId())
+                .query(String.class)
+                .list();
+        secrets.addAll(staff);
+        assertThat(secrets).hasSizeGreaterThan(4);
+        for (Fact f : set.facts()) {
+            String all = String.join(
+                    "|",
+                    f.key(),
+                    f.label(),
+                    f.display(),
+                    String.valueOf(f.group()),
+                    String.valueOf(f.weekOnWeek()),
+                    String.valueOf(f.monthOnMonth()));
+            for (String secret : secrets) {
+                assertThat(all).as("fact %s", f.key()).doesNotContainIgnoringCase(secret);
+            }
+        }
+        // The names travel apart, for the mapping back, and print nowhere.
+        assertThat(set.names()).extracting(n -> n.name()).containsAnyElementsOf(PLANTED_BRANCHES);
+        assertThat(set.toString()).doesNotContain("Canary");
+        assertThat(set.names().toString()).doesNotContain("Canary");
+        assertThat(set.facts().toString()).doesNotContain("Canary");
+    }
+
+    @Test
+    void thereIsNoOfficerDimension() {
+        FactSet set = wholeBook();
+        assertThat(Dimension.values()).containsExactlyInAnyOrder(Dimension.BRANCH, Dimension.PRODUCT);
+        assertThat(set.facts()).extracting(Fact::key).noneMatch(k -> k.contains("officer") || k.contains("staff"));
+        assertThat(set.facts())
+                .filteredOn(f -> f.group() != null)
+                .extracting(f -> f.group().dimension())
+                .containsOnly(Dimension.BRANCH, Dimension.PRODUCT);
+        // Every group of the facts is a branch or a product of the tenant, not a user.
+        Set<String> branchIds = TestDatabase.owner()
+                .sql("SELECT id FROM branches WHERE tenant_id = ?")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .list()
+                .stream()
+                .map(UUID::toString)
+                .collect(Collectors.toSet());
+        Set<String> productIds = TestDatabase.owner()
+                .sql("SELECT id FROM lending_loan_products WHERE tenant_id = ?")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .list()
+                .stream()
+                .map(UUID::toString)
+                .collect(Collectors.toSet());
+        for (Fact f : set.facts()) {
+            if (f.group() != null) {
+                assertThat(f.group().dimension() == Dimension.BRANCH ? branchIds : productIds)
+                        .contains(f.group().id());
+            }
+        }
+        assertThat(set.facts().stream().filter(f -> f.group() != null)).isNotEmpty();
+    }
+
+    @Test
+    void theGroupFactsAreTheGoldenFiguresOfEachBranchAndProduct() {
+        FactSet set = wholeBook();
+        for (Dimension dimension : Dimension.values()) {
+            Set<String> seen = set.facts().stream()
+                    .filter(f -> f.group() != null && f.group().dimension() == dimension)
+                    .map(f -> f.group().id())
+                    .collect(Collectors.toSet());
+            assertThat(seen).as("%s groups", dimension).isNotEmpty();
+            for (String id : seen) {
+                Predicate<Loan> in = l -> (dimension == Dimension.BRANCH ? l.branch() : l.product())
+                        .toString()
+                        .equals(id);
+                List<Pos> stock = model.live(TODAY, in);
+                String prefix = dimension == Dimension.BRANCH ? "branch" : "product";
+                Group g = new Group(dimension, id);
+                Map<String, Fact> byKey = set.facts().stream()
+                        .filter(f -> g.equals(f.group()))
+                        .collect(Collectors.toMap(Fact::key, f -> f));
+                if (small(stock.size())) {
+                    assertThat(byKey.keySet()).containsExactly(prefix + ".loans");
+                    continue;
+                }
+                assertThat(byKey.get(prefix + ".loans").value()).isEqualTo((long) stock.size());
+                assertThat(byKey.get(prefix + ".principal_outstanding").value()).isEqualTo(GoldenModel.po(stock));
+                assertThat(byKey.get(prefix + ".par30").value())
+                        .isEqualTo(rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)));
+                assertThat(byKey.get(prefix + ".par30").display())
+                        .isEqualTo(
+                                FactDisplay.percent(byKey.get(prefix + ".par30").value()));
+            }
+        }
+    }
+
+    // ---- Dates, the clock and the missing --------------------------------------------------------------------
+
+    @Test
+    void theBusinessDateIsKampalasAtTheTwentyOneHundredEdge() {
+        UUID user = UUID.randomUUID();
+        // 23:59:59 in Kampala on the 8th.
+        clock.now = Instant.parse("2026-10-08T20:59:59Z");
+        FactSet before = facts(user(user, ALL, null), null, null, List.of(), null);
+        assertThat(before.asOf()).isEqualTo(LocalDate.of(2026, 10, 8));
+        assertThat(before.to()).isEqualTo(LocalDate.of(2026, 10, 8));
+        assertThat(before.from()).isEqualTo(LocalDate.of(2026, 10, 1));
+        assertThat(figure(before, "brief.disbursed_today").value())
+                .isEqualTo(model.sumTxns(Set.of("disbursement"), TODAY, TODAY, ALL_LOANS, false));
+        // 00:00:01 in Kampala on the 9th.
+        clock.now = Instant.parse("2026-10-08T21:00:01Z");
+        FactSet after = facts(user(user, ALL, null), null, null, List.of(), null);
+        assertThat(after.asOf()).isEqualTo(LocalDate.of(2026, 10, 9));
+        assertThat(after.to()).isEqualTo(LocalDate.of(2026, 10, 9));
+        assertThat(after.from()).isEqualTo(LocalDate.of(2026, 10, 1));
+        assertThat(figure(after, "brief.disbursed_today").value())
+                .as("nothing was disbursed on the 9th yet")
+                .isZero();
+    }
+
+    @Test
+    void aScopeResolvedBeforeMidnightIsStillReadOnThatDay() {
+        UUID user = UUID.randomUUID();
+        clock.now = Instant.parse("2026-10-08T20:59:59Z");
+        PortfolioScope scope = scope(user(user, ALL, null), null, null, List.of(), null);
+        assertThat(scope.today()).isEqualTo(TODAY);
+        // A job runs it after midnight, when the clock says the 9th and the 8th has no snapshot yet.
+        clock.now = Instant.parse("2026-10-08T21:00:30Z");
+        FactSet late = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
+        assertThat(late.asOf()).isEqualTo(TODAY);
+        assertThat(figure(late, "portfolio.active_loans").value())
+                .isEqualTo((long) model.live(TODAY, ALL_LOANS).size());
+        assertThat(figure(late, "brief.disbursed_today")).isNotNull();
+    }
+
+    @Test
+    void forCallerResolvesTheSignedInCallersOwnScope() {
+        UUID north = northBranch();
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, Set.of(north)));
+        FactSet mine = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.forCaller());
+        CurrentPrincipal.clear();
+        assertThat(figure(mine, "portfolio.active_loans").value()).isEqualTo((long)
+                model.live(TODAY, l -> l.branch().equals(north)).size());
+        assertThat(mine.from()).isEqualTo(FROM);
+        assertThat(mine.to()).isEqualTo(TODAY);
+        // No insights permission: refused, as on the page.
+        CurrentPrincipal.set(user(UUID.randomUUID(), Set.of("lending.reports.portfolio"), null));
+        assertThatThrownBy(() -> tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.forCaller()))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("permission_denied"));
+    }
+
+    @Test
+    void aTenantWithNoBookHasZerosMissingRatesAndNoStockChanges() {
+        TestDatabase.Fixture empty = TestDatabase.tenant("facts-empty", true);
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
+        PortfolioScope scope = tenantJobs.callAs(
+                empty.tenantId(), () -> inTx(() -> figures.scope(FROM, TODAY, List.of(), null, null)));
+        CurrentPrincipal.clear();
+        FactSet set = tenantJobs.callAs(empty.tenantId(), () -> portfolioFacts.build(scope));
+        assertThat(figure(set, "portfolio.active_loans").value()).isZero();
+        assertThat(figure(set, "portfolio.active_loans").suppressed()).isFalse();
+        assertThat(figure(set, "portfolio.principal_outstanding").display()).isEqualTo("UGX 0");
+        assertThat(figure(set, "portfolio.par30").value()).isNull();
+        assertThat(figure(set, "portfolio.par30").display()).isEqualTo("not available");
+        assertThat(figure(set, "portfolio.par30").weekOnWeek()).isNull();
+        assertThat(figure(set, "portfolio.collection_rate").display()).isEqualTo("not available");
+        // No snapshot exists for the earlier dates, so a stock has no change; a flow has a change of nothing.
+        assertThat(figure(set, "portfolio.principal_outstanding").weekOnWeek()).isNull();
+        assertThat(figure(set, "portfolio.principal_outstanding").monthOnMonth())
+                .isNull();
+        assertThat(figure(set, "portfolio.disbursed").weekOnWeek().change()).isZero();
+        assertThat(figure(set, "portfolio.disbursed").weekOnWeek().display()).isEqualTo("no change");
+        assertThat(set.names()).isEmpty();
+    }
+
+    @Test
+    void aPastDateWithoutASnapshotHasNoGroupsAndNoBrief() {
+        TestDatabase.Fixture empty = TestDatabase.tenant("facts-past", true);
+        LocalDate past = TODAY.minusDays(3);
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
+        PortfolioScope scope = tenantJobs.callAs(
+                empty.tenantId(), () -> inTx(() -> figures.scope(past.minusDays(6), past, List.of(), null, null)));
+        CurrentPrincipal.clear();
+        FactSet set = tenantJobs.callAs(empty.tenantId(), () -> portfolioFacts.build(scope));
+        assertThat(set.asOf()).isEqualTo(past);
+        assertThat(set.facts()).extracting(Fact::key).noneMatch(k -> k.startsWith("brief."));
+        assertThat(set.facts()).noneMatch(f -> f.group() != null);
+        assertThat(figure(set, "portfolio.disbursed").display()).isEqualTo("UGX 0");
+    }
+
+    @Test
+    void buildReadsNoPrincipalSoAJobCannotWidenAScope() {
+        UUID north = northBranch();
+        PortfolioScope scope = scope(user(UUID.randomUUID(), ALL, Set.of(north)), FROM, TODAY, List.of(), null);
+        assertThat(scope.branchIds()).containsExactly(north);
+        // A different, wider principal is signed in when it runs: the scope, not the principal, decides.
+        CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
+        FactSet set = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
+        CurrentPrincipal.clear();
+        assertThat(figure(set, "portfolio.active_loans").value()).isEqualTo((long)
+                model.live(TODAY, l -> l.branch().equals(north)).size());
+    }
+}

@@ -736,6 +736,96 @@ review is a go-live condition.
 | Key theft | Environment only, rotation runbook, alert on 401, spend cap at the provider if available |
 | Provider changes terms or model silently | Model name pinned in configuration; the evaluation suite reruns on any change; terms re-checked each quarter |
 
+### 5.13 As built in slice #223 (differences from, and sharpenings of, the design above)
+
+The facts, the aliases, the validator and the offline evaluation harness are built (pull request for issue #223; ADR-037
+carries the Amendment). Nothing here calls a model, adds a route, a permission, a setting or a table: there is **no migration**.
+Where the build differs from, or sharpens, the text above:
+
+- **Where the code is.** `lending.insights` publishes `PortfolioFacts` and `FactDisplay` (the one place where an amount, a rate
+  or a change is turned into text). `PortfolioFactsService` calls the insights code the endpoints call (`brief`, `portfolio`,
+  `revenue`, `members`) and the public `InsightsFigures.par` for the branch and product groups, so there is one implementation
+  of every number. `lending.advisor` is a new module (it may use the kernel, `core.ai` and `lending.insights`) that holds
+  `Aliases`, `AliasedFacts`, `PromptBuilder`, `NumberExtractor`, `Directions`, `NumericValidator` and the public
+  `AdvisorEvaluation`. The job, the stored brief, the endpoints and the screens are slices #226 and #230.
+- **Scope is the endpoints' scope.** `PortfolioFacts.forCaller()` resolves the signed-in caller's scope with
+  `InsightsFigures.scope` (permission `lending.insights.read`, the permitted branches, only the caller's own loans without
+  `lending.insights.all_officers`), and `build(PortfolioScope)` reads only that stored scope and never the principal, so a job
+  cannot widen it. A branch manager's facts are their branch's figures, equal to the endpoints' for the same caller (a test
+  compares them metric by metric); the groups listed are only the branches and products in their scope.
+- **Which facts.** Forty-one figures: the brief (only when the range ends on the business date), the portfolio, revenue and
+  member-activity figures of the dictionary that a brief needs, and, per branch and product (the ten largest by loans), the
+  loans, principal outstanding and PAR 30. Each has its key, label, kind, display form, polarity and, where defined, a
+  week-on-week and a month-on-month change.
+- **Changes.** A change is the same figure read again for the range a week earlier and a month earlier (both ends shifted),
+  and the difference taken in the figure's own units (basis points for a rate, shown as points to two decimals, which is
+  exact). A stock (outstanding, PAR, arrears, loans, borrowers) is read from the nightly snapshot of the earlier end date, a
+  flow from the transactions of the earlier range. There is no change when the earlier figure cannot be known (no snapshot
+  for that date), and none for figures that are live only (new arrears, going bad, the forecasts, dormant members).
+- **Small counts.** Every figure has a population: the count it is computed over, from the dictionary where it has one
+  (`brief.new_arrears` for the new-arrears amount), else the active loans in scope, and for money in the number of
+  repayment transactions in the window (or on the day). A population of one to four makes the figure `fewer than 5`, and its
+  changes with it; a change is also left out when the **earlier** population was one to four, because current minus change would
+  give that figure back. Zero is not small: nothing is described. A branch or product of fewer than five loans is the single
+  fact `branch.loans` or `product.loans` with the display `fewer than 5`, and no other fact. Residual risk, stated in the
+  acknowledgement: when some groups are suppressed and others shown, the suppressed ones' share is the total minus the shown
+  groups; the same figures are on the insights page for the people allowed to see them, and the provider is not an adversary
+  that knows the tenant.
+- **Cost.** A set of facts is twelve reads of the insights code (brief, portfolio, revenue and members, for the range and for
+  the two earlier ranges) and two of the PAR port; it is built once per brief and once per question, so the daily brief and the
+  per user question limit bound it.
+- **Names stay out.** A group is an id in the facts and its name travels apart in `FactSet.names()`, which prints nothing.
+  `Aliases` assigns `Branch 1`, `Product A` (then `AA`) in the order of the ids, so an alias tells nothing about a name or a size.
+  Group keys become `branch_1.par30`. A group the fact set does not name is left out, never sent under its id. The prompt is
+  built from `AliasedFacts` alone.
+- **What a number may be.** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
+  decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words (`twenty-five`,
+  `one hundred and twenty`, `two million`, grammar-checked: `nineteen and ninety` is two numbers), fractions (`half`, `a third`,
+  `three quarters`) and factors (`double`, `twice`). It is derivable when it equals the display or the plain form of a cited fact,
+  or is that figure correctly rounded to the precision the writer shows, for a compact amount or a rate only (never a count) and by
+  no more than five percent (`1.3m` for 1,250,000 passes, `1m` does not); a rate to one decimal is the display itself and always
+  passes. A fraction word matches a rate within five percent; a factor matches only a fact of that value. `1.200` has two
+  readings (1.2 and 1200) and either may match. The unit must agree: percent only for a rate, a currency only for an amount (a
+  shilling for UGX, KES or TZS), `days` and `hours` for those kinds; a bare number may rest on any kind. The sign must agree with
+  a change (`+0.4` for a fall fails); a plus sign on a figure fails; a negative figure needs a minus sign or a word for a loss.
+- **Not figures.** The dates given (the as-of date, the range, and both earlier ranges) in any written form, a year of those
+  dates, list markers and ordinals, `PAR 1` to `PAR 90`, the names of the facts, aliases, and a number glued to letters (`Q3`).
+  `Branch 7` when there are three is an `unknown_alias` violation, not ignored. `one` counts as a number only before something
+  counted (`one loan`, not `no one`).
+- **Direction.** The lexicon is up, rose, grew, higher, increase, climbed, gained, jumped, surged (and the verb forms); down, fell,
+  dropped, lower, decrease, declined, dipped, slipped, shrank, reduced; flat, unchanged, steady, stable, stayed the same; better,
+  improved, strengthened, stronger; worse, worsened, deteriorated, weaker. Which fact a word speaks of is read from the sentence:
+  the metric names in it and the alias of a branch or product pick the facts, the nearest one wins, and `last week` or `last month`
+  near the word picks the change; when the sentence names no metric, any cited change that supports the word is enough. A word
+  with no change fact cited at all is `direction_without_delta`. Not movements and so not checked: `up to`, `set up`,
+  `breakdown`, `down payment`, `follow up`, and a comparison of groups (`higher than Branch 2`, `lower than the portfolio`).
+  Residual risk: a movement worded outside the lexicon is not checked, and `higher than the average` is read as a comparison of
+  groups even when it means a time; the evaluation measures both.
+- **Plain text only, and nothing else in it.** An answer is also refused for a link or markup (`markup`), a phone number, an email,
+  an ID number shape or a UUID (`pii_shape`), a letter outside the Latin alphabet, which could disguise a direction word or a
+  number word (`unexpected_script`), the real name of any group or any planted string, or the system prompt's canary phrase
+  (`forbidden_text`). Digits of other scripts, invisible characters and the minus sign and its lookalikes are normalised before
+  anything is checked, and an accepted answer is shown with digits as ASCII and the invisible characters removed.
+- **Closed codes.** `not_json`, `schema`, `too_long`, `too_many_facts`, `unknown_fact`, `invented_number`, `unit_mismatch`,
+  `sign_mismatch`, `unknown_alias`, `direction_contradiction`, `direction_without_delta`, `both_directions`, `markup`,
+  `pii_shape`, `unexpected_script`, `forbidden_text`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
+  figure or a lexicon word, never a sentence of the model's. The summary may rest on the facts that any point cites.
+- **The harness.** `AdvisorEvaluation.run(cases, source)` takes cases (a fabricated fact set, an answer, the verdict expected and
+  the code a refusal must give) and a source: `recorded()` answers each from the recording client, `with(client)` sends the same
+  cases to a real client. Before the call it checks the request that would leave the platform (no real name, no planted
+  string, no phone, email, ID or UUID shape, no run of six digits, no figure for a group that has a suppressed fact) and never
+  sends one that fails. The golden set (`GoldenCases`: clean answers, invented, derived and mis-formatted numbers, wrong
+  directions and signs, injection through a fake field and through the model, personal data, small groups, missing data, scope,
+  shape, a failing provider) must pass 100 percent in every category; the report is plain text with codes and counts, never a
+  sentence, and costs nothing. The canary test (`AdvisorCanaryIT`) runs the real gateway with the recording client over a seeded
+  book whose branches and products are named with canaries and asserts that none is in the request the client got, in the call log
+  or in the facts, and that the gateway's own input screen let the prompt through.
+- **Fixed on the way.** `members.median_decision_hours` made the members endpoint answer 500 for a range with no decisions
+  (the median of nothing is NULL); it is now an empty figure, as the dictionary says.
+- **Not in this slice.** Retry with a stricter reminder and the fallback (#226), the question scrub and the box (#230), the
+  endpoints, the daily job and the stored brief (#226), the screens, and the run against a real provider and the comparison of
+  models (#232).
+
 ## 6. The reports pack (ADR-038)
 
 ### 6.1 Summary
@@ -962,7 +1052,7 @@ runbook. Order is the recommended build order; slices of different areas can run
 | 10 | #220 | C1 `core.ai` port, adapter, caps, call log | none |
 | 11 | #221 | B4 Loan event SMS | B1, B3, increment 5 (#108) |
 | 12 | #222 | D3 Collections, disbursements, officer performance | D2 |
-| 13 | #223 | C2 `PortfolioFacts` (scope aware, polarity and deltas), aliasing, small-count suppression, numeric and direction validator, evaluation harness | C1 |
+| 13 | #223 | C2 `PortfolioFacts` (scope aware, polarity and deltas), aliasing, small-count suppression, numeric and direction validator, evaluation harness (**built**, no migration; see 5.13) | C1 |
 | 14 | #224 | A5 Unallocated receipts queue and allocation screen, reversals, reconciliation, statement upload | A3 (which already posts unallocated receipts) |
 | 15 | #225 | D4 Collateral register and regulator summary | D2 |
 | 16 | #226 | C3 Daily AI brief | C2 |
