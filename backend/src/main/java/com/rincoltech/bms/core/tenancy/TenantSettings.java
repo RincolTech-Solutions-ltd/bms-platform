@@ -42,4 +42,11 @@ public interface TenantSettings {
      * (default false: on a phone a household shares, a balance tells everyone what a member holds).
      */
     boolean smsIncludeBalance();
+
+    /**
+     * Whether the report runs of ADR-038 are switched on for this tenant (extras slice D1, issue #214).
+     * Off by default: a tenant administrator turns it on in the settings, and nothing is queued, run or
+     * listed until then.
+     */
+    boolean reportsEnabled();
 }

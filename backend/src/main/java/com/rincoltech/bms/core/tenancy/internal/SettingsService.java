@@ -226,6 +226,12 @@ class SettingsService implements TenantSettings, ModuleSettings {
         return current().maxActiveLoansPerMember();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean reportsEnabled() {
+        return current().reportsEnabled();
+    }
+
     // ---- module settings groups (ADR-033) ---------------------------------------------------
 
     @Override
@@ -373,6 +379,7 @@ class SettingsService implements TenantSettings, ModuleSettings {
                 (String) s.get("theme_primary"),
                 s.containsKey("display_name"),
                 (Boolean) s.getOrDefault("setup_dismissed", false),
+                (Boolean) s.getOrDefault("reports_enabled", false),
                 version);
     }
 }
