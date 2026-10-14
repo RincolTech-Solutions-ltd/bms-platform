@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -53,6 +54,11 @@ final class NumericValidator {
             Pattern.compile("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
     private static final Pattern MARKUP =
             Pattern.compile("(?i)<\\s*[a-z/!]|\\]\\(|https?:|www\\.|ftp:|javascript:|data:text|```|&[a-z]+;|&#");
+    private static final Pattern THRESHOLD = Pattern.compile("(?i)\\b(?:fewer|less)\\s+than\\s+(?:5|five)\\b");
+    private static final Pattern SENTENCE_END = Pattern.compile("[.!?;](?=\\s|$)|\\n");
+    private static final Pattern CLAUSE_END = Pattern.compile(
+            "[.!?;](?=\\s|$)|,(?=\\s)|\\n|(?<![\\p{L}])(?:and|but|while|whereas|whilst|yet|then|although)(?![\\p{L}])",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern LOSS_WORD =
             Pattern.compile("(?i)\\b(?:loss|losses|deficit|negative|minus|shortfall|below zero)\\b");
 
@@ -61,10 +67,14 @@ final class NumericValidator {
     /** What the validator needs to know about the prompt the answer belongs to. */
     record Context(AliasedFacts facts, Set<String> forbidden) {
 
-        /** The prompt's facts, plus the names that must never come back and the system prompt's canary. */
+        /**
+         * The prompt's facts, plus the strings that must never come back (a caller may plant some, as the evaluation does
+         * with its fabricated names and injection texts) and the system prompt's canary. The real names of groups are not
+         * matched in an answer: they were never in the prompt, and a branch called Main would otherwise block every answer
+         * that uses the word.
+         */
         static Context of(AliasedFacts facts, Collection<String> alsoForbidden) {
-            Set<String> forbidden = new LinkedHashSet<>(facts.aliases().names());
-            forbidden.addAll(alsoForbidden);
+            Set<String> forbidden = new LinkedHashSet<>(alsoForbidden);
             forbidden.add(PromptBuilder.CANARY);
             forbidden.removeIf(s -> s == null || s.strip().length() < 3);
             return new Context(facts, forbidden);
@@ -159,8 +169,12 @@ final class NumericValidator {
             names.add(f.label());
             names.add(f.metric());
         });
-        NumberExtractor.Extraction found =
-                NumberExtractor.extract(n, ctx.facts().dates(), ctx.facts().aliases(), names);
+        // "fewer than 5" names the threshold, not a figure; with a suppressed fact cited it is set aside, so that any
+        // other 5 is a number nobody gave.
+        String forExtraction =
+                cited.stream().anyMatch(PromptFact::suppressed) ? NumberExtractor.blank(THRESHOLD, n) : n;
+        NumberExtractor.Extraction found = NumberExtractor.extract(
+                forExtraction, ctx.facts().dates(), ctx.facts().aliases(), names);
         found.unknownAliases().forEach(a -> out.add(new Violation("unknown_alias", where, a)));
         boolean loss = LOSS_WORD.matcher(n).find();
         for (Token t : found.tokens()) {
@@ -168,11 +182,14 @@ final class NumericValidator {
                 continue;
             }
             String code = verdict(t, cited, ctx.facts().currency(), loss);
+            if (code == null) {
+                code = binding(t, n, cited, ctx.facts(), loss);
+            }
             if (code != null) {
                 out.add(new Violation(code, where, tokenText(t)));
             }
         }
-        out.addAll(Directions.check(n, where, cited));
+        out.addAll(Directions.check(n, where, cited, found.tokens(), ctx.facts().currency()));
         return out;
     }
 
@@ -208,6 +225,100 @@ final class NumericValidator {
         return sign ? "sign_mismatch" : unit ? "unit_mismatch" : "invented_number";
     }
 
+    /** True when the token is a figure of this fact, whatever its sign or unit: used to tell which change a sentence quotes. */
+    static boolean speaksOf(Token t, PromptFact f, String currency) {
+        return match(t, f, currency, true) != Match.NO;
+    }
+
+    /** The figure and its changes are one family. */
+    private static String family(PromptFact f) {
+        return f.isChange() ? f.deltaOf() : f.key();
+    }
+
+    private record Mention(int start, int end, String metric) {}
+
+    /**
+     * A number belongs to the metric it sits beside (review item 2): the nearest metric name in its clause, with the alias of
+     * a branch or product in the sentence. The token must be a figure of a cited fact of that metric, else the figures are
+     * swapped or it is a figure of a metric nobody cited ({@code metric_mismatch}). With no metric named in the clause, a
+     * number with no unit may only be a count; a compact amount ({@code 250k}), a fraction and a factor carry their own
+     * meaning.
+     */
+    private static String binding(Token t, String n, List<PromptFact> cited, AliasedFacts all, boolean loss) {
+        if (t.fraction() || t.multiplier()) {
+            return null;
+        }
+        List<PromptFact> matched = new ArrayList<>();
+        for (PromptFact f : cited) {
+            if (match(t, f, all.currency(), loss) == Match.OK) {
+                matched.add(f);
+            }
+        }
+        String lower = n.toLowerCase(Locale.ROOT);
+        int clauseStart = 0;
+        int clauseEnd = n.length();
+        Matcher clause = CLAUSE_END.matcher(n);
+        while (clause.find()) {
+            if (clause.end() <= t.start()) {
+                clauseStart = clause.end();
+            } else if (clause.start() >= t.end()) {
+                clauseEnd = clause.start();
+                break;
+            }
+        }
+        int sentenceStart = 0;
+        int sentenceEnd = n.length();
+        Matcher sentence = SENTENCE_END.matcher(n);
+        while (sentence.find()) {
+            if (sentence.end() <= t.start()) {
+                sentenceStart = sentence.end();
+            } else if (sentence.start() >= t.end()) {
+                sentenceEnd = sentence.start();
+                break;
+            }
+        }
+        String clauseText = lower.substring(clauseStart, Math.max(clauseStart, clauseEnd));
+        String sentenceText = lower.substring(sentenceStart, Math.max(sentenceStart, sentenceEnd));
+
+        List<Mention> mentions = new ArrayList<>();
+        Set<String> metrics = new LinkedHashSet<>();
+        all.facts().forEach(f -> metrics.add(f.metric()));
+        for (String metric : metrics) {
+            String m = metric.toLowerCase(Locale.ROOT);
+            for (int at = clauseText.indexOf(m); at >= 0; at = clauseText.indexOf(m, at + 1)) {
+                mentions.add(new Mention(clauseStart + at, clauseStart + at + m.length(), metric));
+            }
+        }
+        // A name inside a longer name that is also there ("Collected" in "Collected on due") is the longer one.
+        mentions.removeIf(a -> mentions.stream()
+                .anyMatch(b -> b != a
+                        && b.start() <= a.start()
+                        && b.end() >= a.end()
+                        && b.end() - b.start() > a.end() - a.start()));
+        Mention nearest = null;
+        int best = Integer.MAX_VALUE;
+        for (Mention m : mentions) {
+            int d = m.start() >= t.end() ? m.start() - t.end() : t.start() >= m.end() ? t.start() - m.end() : 0;
+            if (d < best) {
+                best = d;
+                nearest = m;
+            }
+        }
+        if (nearest == null) {
+            boolean count = matched.stream().anyMatch(f -> f.kind() == PortfolioFacts.Kind.COUNT);
+            return t.unit() == Unit.NONE && !t.compact() && !count ? "unit_mismatch" : null;
+        }
+        String metric = nearest.metric();
+        Set<String> families = new LinkedHashSet<>();
+        for (PromptFact f : all.facts()) {
+            if (f.metric().equals(metric)
+                    && (f.alias() == null || sentenceText.contains(f.alias().toLowerCase(Locale.ROOT)))) {
+                families.add(family(f));
+            }
+        }
+        return matched.stream().anyMatch(f -> families.contains(family(f))) ? null : "metric_mismatch";
+    }
+
     enum Match {
         OK,
         UNIT,
@@ -217,13 +328,8 @@ final class NumericValidator {
 
     static Match match(Token t, PromptFact f, String currency, boolean lossWord) {
         if (f.suppressed()) {
-            // "fewer than 5": the threshold is the only number there is.
-            return t.unit() == Unit.NONE
-                            && !t.fraction()
-                            && !t.multiplier()
-                            && anyReading(t, v -> v.compareTo(BigDecimal.valueOf(PortfolioFacts.MIN_GROUP)) == 0)
-                    ? Match.OK
-                    : Match.NO;
+            // A hidden figure has no number to state: "exactly 5" is a number nobody gave.
+            return Match.NO;
         }
         if (f.value() == null) {
             return Match.NO;
@@ -312,6 +418,7 @@ final class NumericValidator {
             case NONE -> true;
             case MONEY -> f.kind() == PortfolioFacts.Kind.MONEY && currencyFits(t.currency(), currency);
             case PERCENT, BASIS_POINTS -> f.kind() == PortfolioFacts.Kind.BASIS_POINTS;
+            case COUNT -> f.kind() == PortfolioFacts.Kind.COUNT;
             case DAYS -> f.kind() == PortfolioFacts.Kind.DAYS;
             case HOURS -> f.kind() == PortfolioFacts.Kind.HOURS;
         };

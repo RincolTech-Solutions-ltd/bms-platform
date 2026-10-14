@@ -391,10 +391,15 @@ output changed.
   in the call log or in the facts, and the gateway's input screen lets the prompt through), `NumericValidatorTest` (amounts,
   rates, changes, number words, dates, ordinals, aliases, units and signs each with a near miss that must fail; direction words
   against the sign and the polarity; unicode digits, zero-width characters and look-alike letters; personal data shapes, markup,
-  names and the repeated prompt; the shape and limits of the answer; property tests with fixed seeds), `NumberExtractorTest`,
+  names and the repeated prompt; the shape and limits of the answer; property tests with fixed seeds), `NumericValidatorReviewTest` (the
+  hostile answers of the second independent review: a direction word tied to the change whose figure the sentence quotes, figures
+  swapped between metrics, bare numbers, `went up to`, `soared`, `eased`, negation, a hidden group's `exactly 5`, a year as a count,
+  roman numerals, vulgar fractions, `twelve point five`, a group named `Main`), `NumberExtractorTest`,
   `AliasesTest` (a round-trip property over random groups), `PromptBuilderTest`, `FactDisplayTest` and `AdvisorEvaluationTest`
   (the golden set offline at 100 percent in every category, a flipped set failing every case, a wrong code failing a refused
-  case, no planted string in any request).
+  case, every refusal paired with a repaired twin that is accepted, no planted string in any request). `PortfolioFactsIT` also
+  covers one to four write-offs, recoveries, loans in arrears and loans over 30 days late hiding every related figure, and a
+  scope read after midnight reading the snapshot of its day.
 
 ## 15.8 Test data policy
 

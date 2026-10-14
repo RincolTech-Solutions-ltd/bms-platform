@@ -79,7 +79,7 @@ public final class EvaluationSupport {
         }
         Set<String> small = new HashSet<>();
         for (PromptFact f : facts.facts()) {
-            if (f.alias() != null && f.suppressed()) {
+            if (f.alias() != null && f.suppressed() && f.key().endsWith(".loans")) {
                 small.add(f.alias());
             }
         }

@@ -231,6 +231,32 @@ class PortfolioFactsIT extends IntegrationTest {
 
     static final Set<String> COLLECTED = Set.of("repayment", "recovery");
 
+    /** The distinct loans with a transaction of these types in the range, a reversed one excluded. */
+    static long loansWith(Set<String> types, LocalDate from, LocalDate to, Predicate<Loan> filter) {
+        return model.txns.values().stream()
+                .filter(t -> types.contains(t.type())
+                        && GoldenModel.between(t.valueDate(), from, to)
+                        && !model.reversed.contains(t.id())
+                        && filter.test(model.loans.get(t.loan())))
+                .map(GoldenModel.Txn::loan)
+                .distinct()
+                .count();
+    }
+
+    /** The distinct loans behind the posted lines of a revenue account in the range. */
+    static long loansBehind(String account, LocalDate from, LocalDate to, Predicate<Loan> filter) {
+        return model.lines.stream()
+                .filter(l -> l.key().equals(account) && GoldenModel.between(l.date(), from, to))
+                .map(l -> model.txns.get(l.sourceTxn()).loan())
+                .filter(loan -> filter.test(model.loans.get(loan)))
+                .distinct()
+                .count();
+    }
+
+    static long late(List<Pos> stock, int over) {
+        return stock.stream().filter(p -> p.dpd() > over).count();
+    }
+
     // ---- Facts equal the golden metrics ---------------------------------------------------------------------
 
     @Test
@@ -252,9 +278,14 @@ class PortfolioFactsIT extends IntegrationTest {
         expect(set, "portfolio.principal_outstanding", po, active);
         expect(set, "portfolio.active_loans", active, active);
         expect(set, "portfolio.borrowers", borrowers, borrowers);
-        expect(set, "portfolio.arrears", stock.stream().mapToLong(Pos::arrears).sum(), active);
+        expect(set, "portfolio.arrears", stock.stream().mapToLong(Pos::arrears).sum(), late(stock, 0));
         for (int over : new int[] {0, 30, 60, 90}) {
-            expect(set, "portfolio.par" + (over == 0 ? 1 : over), rate(GoldenModel.parAmount(stock, over), po), active);
+            expect(
+                    set,
+                    "portfolio.par" + (over == 0 ? 1 : over),
+                    rate(GoldenModel.parAmount(stock, over), po),
+                    active,
+                    late(stock, over));
         }
         assertThat(figure(set, "portfolio.par30").value())
                 .as("some risk in the book")
@@ -272,33 +303,49 @@ class PortfolioFactsIT extends IntegrationTest {
                 model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false),
                 disbursedCount);
         expect(set, "portfolio.disbursed_count", disbursedCount, disbursedCount);
-        expect(
-                set,
-                "portfolio.collected",
-                model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true),
-                active,
-                collectedCount);
+        long payers = loansWith(COLLECTED, FROM, TODAY, ALL_LOANS);
+        assertThat(collectedCount).isGreaterThanOrEqualTo(payers);
+        expect(set, "portfolio.collected", model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true), active, payers);
         expect(set, "portfolio.expected", expected, active);
-        expect(set, "portfolio.collection_rate", rate(onDue, expected), active);
+        expect(set, "portfolio.collection_rate", rate(onDue, expected), active, payers);
         long writeOffs = model.countTxns("write_off", FROM, TODAY, ALL_LOANS);
+        long behindWriteOff = loansBehind("loan_write_off_expense", FROM, TODAY, ALL_LOANS);
         expect(set, "portfolio.written_off_count", writeOffs, writeOffs);
         expect(
                 set,
                 "portfolio.written_off",
                 model.sumTxns(Set.of("write_off"), FROM, TODAY, ALL_LOANS, false),
-                writeOffs);
+                writeOffs,
+                behindWriteOff);
         expect(set, "portfolio.forecast_7", model.forecast(TODAY, 7, ALL_LOANS), active);
         expect(set, "portfolio.forecast_30", model.forecast(TODAY, 30, ALL_LOANS), active);
         long[] repeat = model.repeat(FROM, TODAY, ALL_LOANS);
         expect(set, "portfolio.repeat_share", rate(repeat[1], repeat[0]), repeat[0]);
 
         long[] revenue = model.revenue(FROM, TODAY, ALL_LOANS);
-        expect(set, "revenue.interest", revenue[0], active);
-        expect(set, "revenue.fees", revenue[1], active);
-        expect(set, "revenue.penalties", revenue[2], active);
-        expect(set, "revenue.recovered", revenue[3], active);
-        expect(set, "revenue.write_off_expense", revenue[4], active);
-        expect(set, "revenue.contribution", revenue[5], active);
+        long behindInterest = loansBehind("loan_interest_income", FROM, TODAY, ALL_LOANS);
+        long behindFees = loansBehind("loan_fee_income", FROM, TODAY, ALL_LOANS);
+        long behindPenalties = loansBehind("loan_penalty_income", FROM, TODAY, ALL_LOANS);
+        long behindRecovered = loansBehind("bad_debt_recovered", FROM, TODAY, ALL_LOANS);
+        long recoverers = loansWith(Set.of("recovery"), FROM, TODAY, ALL_LOANS);
+        expect(set, "revenue.interest", revenue[0], behindInterest);
+        expect(set, "revenue.fees", revenue[1], behindFees);
+        expect(set, "revenue.penalties", revenue[2], behindPenalties);
+        expect(set, "revenue.recovered", revenue[3], recoverers, behindRecovered);
+        expect(set, "revenue.write_off_expense", revenue[4], behindWriteOff, writeOffs);
+        // The contribution is hidden with any component it would give back.
+        expect(
+                set,
+                "revenue.contribution",
+                revenue[5],
+                active,
+                behindInterest,
+                behindFees,
+                behindPenalties,
+                recoverers,
+                behindRecovered,
+                behindWriteOff,
+                writeOffs);
 
         // The brief is today's.
         long disbursedToday = model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS);
@@ -311,12 +358,14 @@ class PortfolioFactsIT extends IntegrationTest {
                 model.sumTxns(Set.of("disbursement"), TODAY, TODAY, ALL_LOANS, false),
                 disbursedToday);
         expect(set, "brief.disbursed_loans_today", disbursedToday, disbursedToday);
+        long payersToday = loansWith(COLLECTED, TODAY, TODAY, ALL_LOANS);
+        assertThat(collectedToday).isGreaterThanOrEqualTo(payersToday);
         expect(
                 set,
                 "brief.collected_today",
                 model.sumTxns(COLLECTED, TODAY, TODAY, ALL_LOANS, true),
                 active,
-                collectedToday);
+                payersToday);
         long fresh = stock.stream().filter(p -> p.dpd() == 1).count();
         long goingBad =
                 stock.stream().filter(p -> p.dpd() >= 24 && p.dpd() <= 30).count();
@@ -557,7 +606,7 @@ class PortfolioFactsIT extends IntegrationTest {
             assertThat(f.value()).as(f.key()).isEqualTo(metric(source, f.key()));
             compared++;
         }
-        assertThat(compared).as("figures compared with the endpoints").isGreaterThan(25);
+        assertThat(compared).as("figures compared with the endpoints").isGreaterThan(15);
     }
 
     @Test
@@ -590,7 +639,12 @@ class PortfolioFactsIT extends IntegrationTest {
                 .isLessThan(model.live(TODAY, ALL_LOANS).size());
         expect(mine, "portfolio.active_loans", active, active);
         expect(mine, "portfolio.principal_outstanding", GoldenModel.po(stock), active);
-        expect(mine, "portfolio.par30", rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)), active);
+        expect(
+                mine,
+                "portfolio.par30",
+                rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)),
+                active,
+                late(stock, 30));
         expect(
                 mine,
                 "portfolio.disbursed",
@@ -764,12 +818,10 @@ class PortfolioFactsIT extends IntegrationTest {
         for (String key : List.of(
                 "portfolio.active_loans",
                 "portfolio.principal_outstanding",
-                "portfolio.arrears",
                 "portfolio.par1",
                 "portfolio.par30",
                 "portfolio.collected",
                 "portfolio.expected",
-                "revenue.interest",
                 "revenue.contribution")) {
             Fact f = figure(set, key);
             assertThat(f.suppressed()).as(key).isTrue();
@@ -781,6 +833,183 @@ class PortfolioFactsIT extends IntegrationTest {
         long po = GoldenModel.po(model.live(
                 TODAY, l -> l.branch().equals(narrow.get(0)) && l.product().equals(narrow.get(1))));
         assertThat(set.facts()).noneMatch(f -> f.display().contains(FactDisplay.money(po, "UGX")));
+    }
+
+    // ---- Related figures are hidden together (review item 3) ---------------------------------------------------
+
+    private static boolean hidden(Fact f) {
+        return f.suppressed() && f.value() == null && f.weekOnWeek() == null && f.monthOnMonth() == null;
+    }
+
+    /** No fact of the set shows this amount, in any display form, as a figure or as a change. */
+    private static void showsNowhere(FactSet set, long amount) {
+        if (amount == 0) {
+            return;
+        }
+        String shown = FactDisplay.money(Math.abs(amount), "UGX");
+        for (Fact f : set.facts()) {
+            assertThat(f.display()).as("%s", f.key()).isNotEqualTo(shown).isNotEqualTo("-" + shown);
+            assertThat(f.value() == null || Math.abs(f.value()) != Math.abs(amount))
+                    .as("%s", f.key())
+                    .isTrue();
+            for (PortfolioFacts.Delta d : new PortfolioFacts.Delta[] {f.weekOnWeek(), f.monthOnMonth()}) {
+                if (d != null) {
+                    assertThat(Math.abs(d.change())).as("%s change", f.key()).isNotEqualTo(Math.abs(amount));
+                    assertThat(d.display())
+                            .as("%s change", f.key())
+                            .isNotEqualTo("+" + shown)
+                            .isNotEqualTo("-" + shown);
+                }
+            }
+        }
+    }
+
+    @Test
+    void oneToFourWriteOffsHideEveryFigureThatWouldShowThem() {
+        LocalDate to = null;
+        LocalDate from = null;
+        for (int back = 0; back < 200 && to == null; back++) {
+            LocalDate end = TODAY.minusDays(back);
+            LocalDate start = end.minusDays(29);
+            if (model.countTxns("write_off", start, end, ALL_LOANS) >= 1
+                    && model.countTxns("write_off", start, end, ALL_LOANS) <= 4
+                    && model.live(TODAY, ALL_LOANS).size() >= PortfolioFacts.MIN_GROUP) {
+                to = end;
+                from = start;
+            }
+        }
+        assertThat(to).as("a month with one to four write-offs").isNotNull();
+        long writtenOff = model.sumTxns(Set.of("write_off"), from, to, ALL_LOANS, false);
+        long[] revenue = model.revenue(from, to, ALL_LOANS);
+        FactSet set = facts(user(UUID.randomUUID(), ALL, null), from, to, List.of(), null);
+
+        for (String key : List.of(
+                "portfolio.written_off_count",
+                "portfolio.written_off",
+                "revenue.write_off_expense",
+                "revenue.contribution")) {
+            assertThat(hidden(figure(set, key)))
+                    .as("%s is hidden with the write-offs", key)
+                    .isTrue();
+            assertThat(figure(set, key).display()).isEqualTo("fewer than 5");
+        }
+        // Neither the written-off principal nor the expense nor the contribution, in any fact, figure or change.
+        showsNowhere(set, writtenOff);
+        showsNowhere(set, revenue[4]);
+        showsNowhere(set, revenue[5]);
+        // What does not describe those loans stays: the book, and the interest earned over many loans.
+        assertThat(figure(set, "portfolio.principal_outstanding").suppressed()).isFalse();
+        LocalDate windowStart = from;
+        LocalDate windowEnd = to;
+        long interestLoans = model.lines.stream()
+                .filter(l ->
+                        l.key().equals("loan_interest_income") && GoldenModel.between(l.date(), windowStart, windowEnd))
+                .map(l -> model.txns.get(l.sourceTxn()).loan())
+                .distinct()
+                .count();
+        assertThat(figure(set, "revenue.interest").suppressed()).isEqualTo(small(interestLoans));
+    }
+
+    @Test
+    void oneToFourRecoveriesHideTheRecoveredFiguresAndTheContribution() {
+        LocalDate to = null;
+        LocalDate from = null;
+        for (int back = 0; back < 200 && to == null; back++) {
+            LocalDate end = TODAY.minusDays(back);
+            LocalDate start = end.minusDays(29);
+            long loans = model.txns.values().stream()
+                    .filter(t -> t.type().equals("recovery")
+                            && GoldenModel.between(t.valueDate(), start, end)
+                            && !model.reversed.contains(t.id()))
+                    .map(GoldenModel.Txn::loan)
+                    .distinct()
+                    .count();
+            if (small(loans)) {
+                to = end;
+                from = start;
+            }
+        }
+        assertThat(to).as("a month with recoveries on one to four loans").isNotNull();
+        long recovered = model.sumTxns(Set.of("recovery"), from, to, ALL_LOANS, true);
+        FactSet set = facts(user(UUID.randomUUID(), ALL, null), from, to, List.of(), null);
+        for (String key : List.of("portfolio.recovered", "revenue.recovered", "revenue.contribution")) {
+            assertThat(hidden(figure(set, key))).as(key).isTrue();
+        }
+        showsNowhere(set, recovered);
+        showsNowhere(set, model.revenue(from, to, ALL_LOANS)[3]);
+        showsNowhere(set, model.revenue(from, to, ALL_LOANS)[5]);
+    }
+
+    @Test
+    void arrearsAndRiskAreHiddenWhenFewerThanFiveLoansAreLate() {
+        // A product in which five or more loans are active and one to four are in arrears, and one in which one to four
+        // are more than 30 days late: the amounts at risk of those few must not show, in the arrears or in any PAR.
+        List<Pos> stock = model.live(TODAY, ALL_LOANS);
+        Map<UUID, List<Pos>> byProduct = stock.stream()
+                .collect(Collectors.groupingBy(p -> model.loans.get(p.loan()).product()));
+        UUID fewLate = null;
+        UUID fewOver30 = null;
+        for (Map.Entry<UUID, List<Pos>> e : byProduct.entrySet()) {
+            long active = e.getValue().size();
+            long late = e.getValue().stream().filter(p -> p.dpd() > 0).count();
+            long over30 = e.getValue().stream().filter(p -> p.dpd() > 30).count();
+            if (active >= PortfolioFacts.MIN_GROUP && small(late) && fewLate == null) {
+                fewLate = e.getKey();
+            }
+            if (active >= PortfolioFacts.MIN_GROUP
+                    && late >= PortfolioFacts.MIN_GROUP
+                    && small(over30)
+                    && fewOver30 == null) {
+                fewOver30 = e.getKey();
+            }
+        }
+        assertThat(fewLate).as("a product with one to four loans in arrears").isNotNull();
+        FactSet few = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), fewLate);
+        List<Pos> inProduct = byProduct.get(fewLate);
+        assertThat(figure(few, "portfolio.principal_outstanding").suppressed()).isFalse();
+        for (String key : List.of("portfolio.arrears", "portfolio.par1")) {
+            assertThat(hidden(figure(few, key))).as(key).isTrue();
+        }
+        showsNowhere(few, inProduct.stream().mapToLong(Pos::arrears).sum());
+
+        assertThat(fewOver30)
+                .as("a product with one to four loans over 30 days late")
+                .isNotNull();
+        FactSet over = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), fewOver30);
+        assertThat(hidden(figure(over, "portfolio.par30"))).isTrue();
+        assertThat(hidden(figure(over, "portfolio.par60"))).isTrue();
+        assertThat(figure(over, "portfolio.par1").suppressed())
+                .as("many loans are late, few very late")
+                .isFalse();
+    }
+
+    @Test
+    void aGroupsPar30IsHiddenWhenFewerThanFiveOfItsLoansAreMoreThan30DaysLate() {
+        FactSet set = wholeBook();
+        List<Pos> stock = model.live(TODAY, ALL_LOANS);
+        int hiddenGroups = 0;
+        for (Dimension dimension : Dimension.values()) {
+            for (Fact f : set.facts()) {
+                if (f.group() == null
+                        || f.group().dimension() != dimension
+                        || !f.key().endsWith(".par30")) {
+                    continue;
+                }
+                long over30 = stock.stream()
+                        .filter(p -> p.dpd() > 30
+                                && (dimension == Dimension.BRANCH
+                                                ? model.loans.get(p.loan()).branch()
+                                                : model.loans.get(p.loan()).product())
+                                        .toString()
+                                        .equals(f.group().id()))
+                        .count();
+                assertThat(f.suppressed()).as("%s of %s", f.key(), f.group()).isEqualTo(small(over30));
+                hiddenGroups += f.suppressed() ? 1 : 0;
+            }
+        }
+        assertThat(hiddenGroups)
+                .as("the fabricated year has a group with a few very late loans")
+                .isPositive();
     }
 
     // ---- No names ----------------------------------------------------------------------------------------------
@@ -877,11 +1106,13 @@ class PortfolioFactsIT extends IntegrationTest {
                 }
                 assertThat(byKey.get(prefix + ".loans").value()).isEqualTo((long) stock.size());
                 assertThat(byKey.get(prefix + ".principal_outstanding").value()).isEqualTo(GoldenModel.po(stock));
-                assertThat(byKey.get(prefix + ".par30").value())
-                        .isEqualTo(rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)));
-                assertThat(byKey.get(prefix + ".par30").display())
-                        .isEqualTo(
-                                FactDisplay.percent(byKey.get(prefix + ".par30").value()));
+                Fact par30 = byKey.get(prefix + ".par30");
+                if (small(late(stock, 30))) {
+                    assertThat(hidden(par30)).as("%s of %s", par30.key(), id).isTrue();
+                } else {
+                    assertThat(par30.value()).isEqualTo(rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)));
+                    assertThat(par30.display()).isEqualTo(FactDisplay.percent(par30.value()));
+                }
             }
         }
     }
@@ -910,19 +1141,54 @@ class PortfolioFactsIT extends IntegrationTest {
                 .isZero();
     }
 
+    @Autowired
+    InsightsSnapshots snapshots;
+
     @Test
-    void aScopeResolvedBeforeMidnightIsStillReadOnThatDay() {
+    void aScopeResolvedBeforeMidnightIsReadFromTheSnapshotOfItsDayNotFromTheLiveTables() {
         UUID user = UUID.randomUUID();
         clock.now = Instant.parse("2026-10-08T20:59:59Z");
         PortfolioScope scope = scope(user(user, ALL, null), null, null, List.of(), null);
         assertThat(scope.today()).isEqualTo(TODAY);
-        // A job runs it after midnight, when the clock says the 9th and the 8th has no snapshot yet.
+
+        // A job runs it after midnight, when the clock says the 9th: the live tables now hold the 9th's activity, and
+        // tonight's snapshot of the 8th has not been written. Refused with a clear code rather than read live.
         clock.now = Instant.parse("2026-10-08T21:00:30Z");
-        FactSet late = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
-        assertThat(late.asOf()).isEqualTo(TODAY);
-        assertThat(figure(late, "portfolio.active_loans").value())
-                .isEqualTo((long) model.live(TODAY, ALL_LOANS).size());
-        assertThat(figure(late, "brief.disbursed_today")).isNotNull();
+        assertThatThrownBy(() -> tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope)))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
+
+        // Once the night's job has written the snapshot of the 8th, the facts are the 8th's. One loan's snapshot row is
+        // moved by 1,000 shillings, which a read of the live tables could not show.
+        tenantJobs.callAs(a.tenantId(), () -> inTx(() -> snapshots.backfill(TODAY, TODAY)));
+        UUID loan = TestDatabase.owner()
+                .sql("SELECT loan_id FROM lending_loan_daily_snapshots WHERE tenant_id = ? AND business_date = ?"
+                        + " AND principal_outstanding_minor > 0 ORDER BY loan_id LIMIT 1")
+                .params(a.tenantId(), java.sql.Date.valueOf(TODAY))
+                .query(UUID.class)
+                .single();
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE lending_loan_daily_snapshots SET principal_outstanding_minor = principal_outstanding_minor + 1000"
+                                + " WHERE tenant_id = ? AND business_date = ? AND loan_id = ?")
+                .params(a.tenantId(), java.sql.Date.valueOf(TODAY), loan)
+                .update();
+        try {
+            FactSet late = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
+            assertThat(late.asOf()).isEqualTo(TODAY);
+            assertThat(figure(late, "portfolio.principal_outstanding").value())
+                    .as("the snapshot of the 8th, not the live tables")
+                    .isEqualTo(GoldenModel.po(model.live(TODAY, ALL_LOANS)) + 1000);
+            assertThat(figure(late, "portfolio.active_loans").value())
+                    .isEqualTo((long) model.live(TODAY, ALL_LOANS).size());
+            // The brief is today's live reading, and the 8th is not today any more: it is left out, not guessed.
+            assertThat(late.facts()).extracting(Fact::key).noneMatch(k -> k.startsWith("brief."));
+        } finally {
+            TestDatabase.owner()
+                    .sql("DELETE FROM lending_loan_daily_snapshots WHERE tenant_id = ? AND business_date = ?")
+                    .params(a.tenantId(), java.sql.Date.valueOf(TODAY))
+                    .update();
+        }
     }
 
     @Test
@@ -967,18 +1233,16 @@ class PortfolioFactsIT extends IntegrationTest {
     }
 
     @Test
-    void aPastDateWithoutASnapshotHasNoGroupsAndNoBrief() {
+    void aPastDateWithoutASnapshotIsRefusedNotGuessed() {
         TestDatabase.Fixture empty = TestDatabase.tenant("facts-past", true);
         LocalDate past = TODAY.minusDays(3);
         CurrentPrincipal.set(user(UUID.randomUUID(), ALL, null));
         PortfolioScope scope = tenantJobs.callAs(
                 empty.tenantId(), () -> inTx(() -> figures.scope(past.minusDays(6), past, List.of(), null, null)));
         CurrentPrincipal.clear();
-        FactSet set = tenantJobs.callAs(empty.tenantId(), () -> portfolioFacts.build(scope));
-        assertThat(set.asOf()).isEqualTo(past);
-        assertThat(set.facts()).extracting(Fact::key).noneMatch(k -> k.startsWith("brief."));
-        assertThat(set.facts()).noneMatch(f -> f.group() != null);
-        assertThat(figure(set, "portfolio.disbursed").display()).isEqualTo("UGX 0");
+        assertThatThrownBy(() -> tenantJobs.callAs(empty.tenantId(), () -> portfolioFacts.build(scope)))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
     }
 
     @Test

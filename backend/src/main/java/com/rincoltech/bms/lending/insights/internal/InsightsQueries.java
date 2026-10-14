@@ -88,6 +88,57 @@ class InsightsQueries {
         return jdbc.sql(sql).params(p).query(InsightsQueries::dayTotal).list();
     }
 
+    /**
+     * The distinct loans with a transaction of these types in the range, a reversed one excluded: how many borrowers a
+     * collected or recovered amount can describe (the population the AI facts check, ADR-037).
+     */
+    long loansWithTransactions(Scope s, String types) {
+        if (s.empty()) {
+            return 0;
+        }
+        Map<String, Object> p = range(s);
+        String sql = """
+                SELECT count(DISTINCT t.loan_id)
+                  FROM lending_loan_transactions t
+                  JOIN lending_loans l ON l.id = t.loan_id
+                 WHERE t.txn_type IN """ + types + " " + """
+                    AND t.value_date BETWEEN :from AND :to
+                   AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)""" + s.loanFilter("l", p) + """
+
+                """;
+        return jdbc.sql(sql).params(p).query(Long.class).single();
+    }
+
+    /** The distinct loans behind each revenue account's posted lines in the range, by system key. */
+    Map<String, Long> loansBehindRevenue(Scope s, LocalDate from, LocalDate to) {
+        if (s.empty()) {
+            return Map.of();
+        }
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("from", Date.valueOf(from));
+        p.put("to", Date.valueOf(to));
+        p.put("keys", REVENUE_ACCOUNTS);
+        String sql = """
+                SELECT ga.system_key, count(DISTINCT t.loan_id) AS loans
+                  FROM journal_entries je
+                  JOIN journal_lines jl ON jl.entry_id = je.id
+                  JOIN gl_accounts ga ON ga.id = jl.account_id
+                  JOIN lending_loan_transactions t ON t.id = je.source_id
+                  JOIN lending_loans l ON l.id = t.loan_id
+                 WHERE je.entry_date BETWEEN :from AND :to
+                   AND je.source_module = 'lending' AND je.source_type = 'loan_transaction'
+                   AND ga.system_key IN (:keys)""" + s.loanFilter("l", p) + """
+
+                 GROUP BY ga.system_key
+                """;
+        Map<String, Long> out = new HashMap<>();
+        jdbc.sql(sql)
+                .params(p)
+                .query((rs, n) -> out.put(rs.getString("system_key"), rs.getLong("loans")))
+                .list();
+        return out;
+    }
+
     /** Write-offs by date in the range (principal written off). */
     List<DayTotal> writtenOffByDay(Scope s) {
         if (s.empty()) {

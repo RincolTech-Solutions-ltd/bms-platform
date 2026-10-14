@@ -196,34 +196,42 @@ cheapest chat model, the model name being `BMS_AI_MODEL` only; no key, price or 
 Slice C2 built decisions 3, 5 and 10 without a model call, a route, a table or a migration. The numbers refer to the Decision
 section above (the Context list in this file is numbered 1 to 11). Where the build sharpened or changed them:
 
-1. **Decision 3, the small-count rule has a definition.** "Fewer than five loans or members" is applied to a population per
-   figure: the count it is computed over where the metrics dictionary has one, else the active loans in scope, and for
-   money collected the repayment transactions of the window. One to four makes the figure `fewer than 5` and removes its
-   changes; a change is also removed when the earlier period's population was one to four, since current minus change
-   returns that figure. Zero is not small. A branch or product under five loans is one suppressed fact and nothing else. A
-   residual risk is accepted and stated: shown groups subtracted from a total give the suppressed ones' share; the figures
-   are on the insights page for those allowed to see them.
+1. **Decision 3, the small-count rule has a definition.** "Fewer than five loans or members" is applied to the population each
+   figure is computed over: the loans in arrears for arrears, the loans more than 30 days late for PAR 30, the loans that paid
+   for collected, the loans behind a ledger line for a revenue figure, the loans written off for write-offs, else the active
+   loans. One to four makes the figure `fewer than 5` and removes its changes, and so does the hiding of any figure that would
+   give it back by subtraction (the contribution when any component is hidden, the collection rate when collected is hidden). A
+   change is also removed when the earlier period's population was small. Zero is not small. A branch or product under five
+   loans is one suppressed fact and nothing else. A residual risk is accepted and stated: shown groups subtracted from a total
+   give the suppressed ones' share; the figures are on the insights page for those allowed to see them.
 2. **Decision 3, the facts are the endpoints' figures, changes included.** Changes are the same figures for the range a week
    and a month earlier (stocks from the snapshot of that end date, flows from that range's transactions), the difference in
    the figure's units, absent where the earlier figure is unknowable. `PortfolioFacts` takes the caller's scope from
    `InsightsFigures.scope` and builds from the stored scope alone, like `InsightsFigures.par`, which also supplies the branch
-   and product groups. A branch manager's facts equal the endpoints' figures for that manager, proven metric by metric.
+   and product groups. A scope resolved for today and read after midnight reads the snapshot of its day, or is refused with
+   `snapshot_unavailable`; it never reads the next day's live tables. A branch manager's facts equal the endpoints' figures for
+   that manager, proven metric by metric.
 3. **Decision 3, aliases are by id order.** `Branch 1` and `Product A` follow the order of the ids, so an alias carries no
-   information about a name or a size; the real names travel in a separate list that prints nothing, and the prompt is built from
-   an alias-only structure.
+   information about a name or a size; the real names travel in a separate list that prints nowhere, and the prompt is built from
+   an alias-only structure. Real names are not matched in an answer: they were never in the prompt.
 4. **Decision 5, what "derivable" means.** A number passes when it equals the display or plain form of a cited fact in any
-   written form (digits of any script, separators, compact `1.2m`, number words by English grammar, percent, basis points,
-   currency before or after), or is that figure correctly rounded to the precision shown, for compact amounts and rates only and
-   within five percent; a rate to one decimal is the display and always passes. Units must agree, signs must agree with a
-   change, dates must be among those given, an alias must exist. A fraction word is a share of a rate; a factor word matches only
-   a fact of that value. Refusals use a closed code list (spec 5.13) and never carry a sentence of the model's.
+   written form (digits of any script, separators, compact `1.2m`, number words including `twelve point five`, roman numerals,
+   fractions, percent, basis points, currency before or after), or is that figure correctly rounded to the precision shown, for
+   compact amounts and rates only and within five percent; a rate to one decimal is the display and always passes. Units must
+   agree (a number before something counted is a count), signs must agree with a change, dates must be among those given, an
+   alias must exist, and a hidden fact accounts for no number. **A number belongs to the metric it sits beside**: figures swapped
+   between metrics, or a figure of an uncited metric, fail (`metric_mismatch`); a number with no unit and no metric named may
+   only be a count. Refusals use a closed code list (spec 5.13) and never carry a sentence of the model's.
 5. **Decision 5, the answer must also be plain text and carry nothing else.** A link or markup, a phone number, an email, an ID
    number or UUID shape, a letter outside the Latin alphabet (a direction word or number word could be disguised in another
-   script), a real name of a group, a planted string, or the repeated system prompt (a canary phrase) fails the answer.
-6. **Decision 5, direction attribution.** A direction word is checked against the change fact of the metric the sentence names,
-   the nearest one when it names several, and the period (`last week`, `last month`) near the word; a word with no change fact
-   cited fails; one fact with both directions in one period fails. Comparisons between groups and phrases such as `up to` are not
-   movements. A movement worded outside the lexicon is a residual risk the evaluation measures.
+   script), a planted string, or the repeated system prompt (a canary phrase) fails the answer; a defect in the validator itself
+   refuses the answer.
+6. **Decision 5, direction attribution is decided, not guessed.** A direction word is tied to the subject metric the sentence
+   names, then to the change whose figure the sentence quotes nearest to it, else to the period near it, else to every cited
+   change of the subject, and must be supported by every change left; two changes of opposite sign left open refuse the word.
+   The lexicon is a broad list of movement words and forms, `up to` included; a negated movement word fails; a word with no
+   change fact cited fails; one fact with both directions in one period fails. Comparisons between groups and phrases such as
+   `set up` are not movements. A movement worded outside the lexicon is a residual risk the evaluation measures.
 7. **Decision 10, the harness exists and is offline.** `AdvisorEvaluation` runs a fixed golden set of fabricated fact sets and
    recorded answers, adversarial ones included, through the real chain with the recording client, checks every request before
    it would be sent, and scores by category with a gate of 100 percent. The same cases go to a real provider with

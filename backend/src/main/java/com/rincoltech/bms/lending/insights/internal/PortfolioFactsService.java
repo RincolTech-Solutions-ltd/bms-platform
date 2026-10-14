@@ -1,20 +1,24 @@
 package com.rincoltech.bms.lending.insights.internal;
 
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.lending.insights.FactDisplay;
 import com.rincoltech.bms.lending.insights.InsightsFigures;
+import com.rincoltech.bms.lending.insights.InsightsFigures.ParBucket;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParFigures;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParGroup;
 import com.rincoltech.bms.lending.insights.InsightsFigures.ParGroupBy;
 import com.rincoltech.bms.lending.insights.InsightsFigures.PortfolioScope;
 import com.rincoltech.bms.lending.insights.PortfolioFacts;
+import com.rincoltech.bms.lending.insights.internal.InsightsApi.Bucket;
 import com.rincoltech.bms.lending.insights.internal.InsightsApi.Metric;
-import com.rincoltech.bms.lending.insights.internal.InsightsQueries.DayTotal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,16 +36,23 @@ import org.springframework.transaction.annotation.Transactional;
  * <ol>
  *   <li>the changes: the same figures read again for the range a week earlier and a month earlier (a stock from the
  *       nightly snapshot of that date, a flow from the transactions of that range), and the difference taken;
- *   <li>the suppression of small counts: a figure whose population is one to four loans or members is replaced by
- *       {@code fewer than 5}, and so is its change, and a change is left out when the earlier figure had such a
- *       population (current minus change would give it back);
+ *   <li>the suppression of small counts: a figure is hidden when the loans or borrowers it is <b>actually computed over</b>
+ *       number one to four (arrears over the loans in arrears, PAR 30 over the loans more than 30 days late, collected over
+ *       the loans that paid, a revenue line over the loans behind its ledger lines, write-offs over the loans written off),
+ *       and so is every figure that would give it back by subtraction from the ones shown (the contribution when any of its
+ *       components is hidden, the collection rate when collected is hidden). A change is hidden with its figure, and when the
+ *       earlier figure was hidden;
  *   <li>the groups: branches and products by id, never by name in a fact (the names travel apart in
  *       {@link FactSet#names()}).
  * </ol>
  *
- * <p>A residual risk that the acknowledgement states: when some groups are suppressed and others are shown, the
- * suppressed ones' share is the total minus the shown groups. A model asked not to compute is not an attacker, and the
- * same figures are on the insights page for the people allowed to see them.
+ * <p>The business date is the scope's: a scope resolved for "today" and read after midnight reads the snapshot of the day
+ * it was resolved for, and is refused with 422 {@code snapshot_unavailable} when that night's snapshot has not been
+ * written, because the live loan tables by then hold the next day's activity.
+ *
+ * <p>A residual risk that the acknowledgement states: when some groups are suppressed and others shown, the suppressed
+ * ones' share is the total minus the shown groups. A model asked not to compute is not an attacker, and the same figures
+ * are on the insights page for the people allowed to see them.
  */
 @Service
 class PortfolioFactsService implements PortfolioFacts {
@@ -49,18 +60,34 @@ class PortfolioFactsService implements PortfolioFacts {
     /** The most groups per dimension in the facts: the largest by loans, so that a prompt stays small. */
     static final int MAX_GROUPS = 10;
 
-    /** The synthetic population keys: repayment and recovery transactions in the window, and on its last day. */
-    private static final String COLLECTIONS = "txn.collections";
-
-    private static final String COLLECTIONS_TODAY = "txn.collections_today";
-
+    // Populations that are not themselves a figure of the dictionary.
     private static final String ACTIVE = "portfolio.active_loans";
+    private static final String PAYERS = "loans.paying";
+    private static final String PAYERS_TODAY = "loans.paying_today";
+    private static final String RECOVERERS = "loans.recovering";
+    private static final String IN_ARREARS = "loans.in_arrears";
+    private static final String OVER_30 = "loans.over_30";
+    private static final String OVER_60 = "loans.over_60";
+    private static final String OVER_90 = "loans.over_90";
+    private static final String REV_INTEREST = "loans.revenue.loan_interest_income";
+    private static final String REV_FEES = "loans.revenue.loan_fee_income";
+    private static final String REV_PENALTIES = "loans.revenue.loan_penalty_income";
+    private static final String REV_RECOVERED = "loans.revenue.bad_debt_recovered";
+    private static final String REV_WRITE_OFF = "loans.revenue.loan_write_off_expense";
 
-    /** How a figure is picked: its dictionary key, polarity, whether it has changes, and the populations it covers. */
-    private record Spec(String key, Polarity polarity, boolean delta, boolean stock, String... populations) {}
+    /**
+     * How a figure is picked: its dictionary key, polarity, whether it has changes, the populations it is computed over,
+     * and the other figures that would give it away (or that it would give away) if it were shown alone.
+     */
+    private record Spec(
+            String key, Polarity polarity, boolean delta, boolean stock, List<String> populations, List<String> deps) {}
 
     private static Spec spec(String key, Polarity polarity, boolean delta, boolean stock, String... populations) {
-        return new Spec(key, polarity, delta, stock, populations);
+        return new Spec(key, polarity, delta, stock, List.of(populations), List.of());
+    }
+
+    private static Spec with(Spec s, String... deps) {
+        return new Spec(s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), List.of(deps));
     }
 
     private static final Polarity BETTER = Polarity.HIGHER_IS_BETTER;
@@ -70,9 +97,9 @@ class PortfolioFactsService implements PortfolioFacts {
     private static final List<Spec> BRIEF = List.of(
             spec("brief.disbursed_today", BETTER, true, false, "brief.disbursed_loans_today"),
             spec("brief.disbursed_loans_today", BETTER, true, false, "brief.disbursed_loans_today"),
-            spec("brief.collected_today", BETTER, true, false, ACTIVE, COLLECTIONS_TODAY),
+            spec("brief.collected_today", BETTER, true, false, ACTIVE, PAYERS_TODAY),
             spec("brief.expected_today", NEUTRAL, true, false, ACTIVE),
-            spec("brief.collection_rate_today", BETTER, true, false, ACTIVE),
+            with(spec("brief.collection_rate_today", BETTER, true, false, ACTIVE), "brief.collected_today"),
             spec("brief.new_arrears", WORSE, false, false, "brief.new_arrears"),
             spec("brief.new_arrears_amount", WORSE, false, false, "brief.new_arrears"),
             spec("brief.going_bad", WORSE, false, false, "brief.going_bad"),
@@ -82,31 +109,39 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("portfolio.principal_outstanding", NEUTRAL, true, true, ACTIVE),
             spec("portfolio.active_loans", NEUTRAL, true, true, ACTIVE),
             spec("portfolio.borrowers", NEUTRAL, true, true, "portfolio.borrowers"),
-            spec("portfolio.arrears", WORSE, true, true, ACTIVE),
-            spec("portfolio.par1", WORSE, true, true, ACTIVE),
-            spec("portfolio.par30", WORSE, true, true, ACTIVE),
-            spec("portfolio.par60", WORSE, true, true, ACTIVE),
-            spec("portfolio.par90", WORSE, true, true, ACTIVE),
+            spec("portfolio.arrears", WORSE, true, true, IN_ARREARS),
+            spec("portfolio.par1", WORSE, true, true, ACTIVE, IN_ARREARS),
+            spec("portfolio.par30", WORSE, true, true, ACTIVE, OVER_30),
+            spec("portfolio.par60", WORSE, true, true, ACTIVE, OVER_60),
+            spec("portfolio.par90", WORSE, true, true, ACTIVE, OVER_90),
             spec("portfolio.disbursed", BETTER, true, false, "portfolio.disbursed_count"),
             spec("portfolio.disbursed_count", BETTER, true, false, "portfolio.disbursed_count"),
-            spec("portfolio.collected", BETTER, true, false, ACTIVE, COLLECTIONS),
+            spec("portfolio.collected", BETTER, true, false, ACTIVE, PAYERS),
             spec("portfolio.expected", NEUTRAL, true, false, ACTIVE),
-            spec("portfolio.collection_rate", BETTER, true, false, ACTIVE),
+            with(spec("portfolio.collection_rate", BETTER, true, false, ACTIVE), "portfolio.collected"),
             spec("portfolio.forecast_7", NEUTRAL, false, false, ACTIVE),
             spec("portfolio.forecast_30", NEUTRAL, false, false, ACTIVE),
-            spec("portfolio.written_off", WORSE, true, false, "portfolio.written_off_count"),
+            with(
+                    spec("portfolio.written_off", WORSE, true, false, "portfolio.written_off_count"),
+                    "revenue.write_off_expense"),
             spec("portfolio.written_off_count", WORSE, true, false, "portfolio.written_off_count"),
-            spec("portfolio.recovered", BETTER, true, false, ACTIVE),
+            spec("portfolio.recovered", BETTER, true, false, RECOVERERS, REV_RECOVERED),
             spec("portfolio.repeat_share", BETTER, true, false, "portfolio.disbursed_count"),
-            spec("portfolio.yield", BETTER, true, false, ACTIVE));
+            with(spec("portfolio.yield", BETTER, true, false, ACTIVE), "revenue.interest", "revenue.fees"));
 
     private static final List<Spec> REVENUE = List.of(
-            spec("revenue.interest", BETTER, true, false, ACTIVE),
-            spec("revenue.fees", BETTER, true, false, ACTIVE),
-            spec("revenue.penalties", BETTER, true, false, ACTIVE),
-            spec("revenue.recovered", BETTER, true, false, ACTIVE),
-            spec("revenue.write_off_expense", WORSE, true, false, ACTIVE),
-            spec("revenue.contribution", BETTER, true, false, ACTIVE));
+            spec("revenue.interest", BETTER, true, false, REV_INTEREST),
+            spec("revenue.fees", BETTER, true, false, REV_FEES),
+            spec("revenue.penalties", BETTER, true, false, REV_PENALTIES),
+            spec("revenue.recovered", BETTER, true, false, RECOVERERS, REV_RECOVERED),
+            with(spec("revenue.write_off_expense", WORSE, true, false, REV_WRITE_OFF), "portfolio.written_off_count"),
+            with(
+                    spec("revenue.contribution", BETTER, true, false, ACTIVE),
+                    "revenue.interest",
+                    "revenue.fees",
+                    "revenue.penalties",
+                    "revenue.recovered",
+                    "revenue.write_off_expense"));
 
     private static final List<Spec> MEMBERS = List.of(
             spec("members.new_members", BETTER, true, false, "members.new_members"),
@@ -115,6 +150,14 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("members.disbursed", BETTER, true, false, "members.disbursed"),
             spec("members.median_decision_hours", WORSE, true, false, "members.approved"),
             spec("members.dormant", WORSE, false, false, "members.dormant"));
+
+    private static final Map<String, Spec> BY_KEY = new LinkedHashMap<>();
+
+    static {
+        for (List<Spec> section : List.of(BRIEF, PORTFOLIO, REVENUE, MEMBERS)) {
+            section.forEach(s -> BY_KEY.put(s.key(), s));
+        }
+    }
 
     private final InsightsService insights;
     private final InsightsQueries queries;
@@ -157,11 +200,17 @@ class PortfolioFactsService implements PortfolioFacts {
             return present.contains(s.key()) && (!s.stock() || stockKnown);
         }
 
-        /** True when a population of this window is one to four. */
+        /** True when a population of this figure, or of a figure it would give away, is one to four. */
         boolean small(Spec s) {
             for (String p : s.populations()) {
                 Long n = values.get(p);
                 if (n != null && n > 0 && n < MIN_GROUP) {
+                    return true;
+                }
+            }
+            for (String dep : s.deps()) {
+                Spec d = BY_KEY.get(dep);
+                if (d != null && small(d)) {
                     return true;
                 }
             }
@@ -185,27 +234,58 @@ class PortfolioFactsService implements PortfolioFacts {
                 w.put(m.key(), m.value());
             }
             w.put(
-                    COLLECTIONS_TODAY,
-                    queries.collectedByDay(day.withRange(day.to(), day.to()), InsightsQueries.COLLECTED_TYPES).stream()
-                            .mapToLong(DayTotal::count)
-                            .sum());
+                    PAYERS_TODAY,
+                    queries.loansWithTransactions(day.withRange(day.to(), day.to()), InsightsQueries.COLLECTED_TYPES));
         }
         InsightsApi.PortfolioResponse portfolio = insights.portfolio(scope, null);
         for (Metric m : portfolio.metrics()) {
             w.put(m.key(), m.value());
         }
         w.stockKnown = !"none".equals(portfolio.stockSource());
+        // The loans behind the risk figures, from the ageing buckets of the same stock.
+        long inArrears = 0;
+        long over30 = 0;
+        long over60 = 0;
+        long over90 = 0;
+        for (Bucket b : portfolio.ageing()) {
+            switch (b.key()) {
+                case "1_30" -> inArrears += b.loans();
+                case "31_60" -> {
+                    inArrears += b.loans();
+                    over30 += b.loans();
+                }
+                case "61_90" -> {
+                    inArrears += b.loans();
+                    over30 += b.loans();
+                    over60 += b.loans();
+                }
+                case "over_90" -> {
+                    inArrears += b.loans();
+                    over30 += b.loans();
+                    over60 += b.loans();
+                    over90 += b.loans();
+                }
+                default -> {}
+            }
+        }
+        w.put(IN_ARREARS, inArrears);
+        w.put(OVER_30, over30);
+        w.put(OVER_60, over60);
+        w.put(OVER_90, over90);
         for (Metric m : insights.revenue(scope).metrics()) {
             w.put(m.key(), m.value());
         }
+        Map<String, Long> behind = queries.loansBehindRevenue(scope, scope.from(), scope.to());
+        w.put(REV_INTEREST, behind.getOrDefault("loan_interest_income", 0L));
+        w.put(REV_FEES, behind.getOrDefault("loan_fee_income", 0L));
+        w.put(REV_PENALTIES, behind.getOrDefault("loan_penalty_income", 0L));
+        w.put(REV_RECOVERED, behind.getOrDefault("bad_debt_recovered", 0L));
+        w.put(REV_WRITE_OFF, behind.getOrDefault("loan_write_off_expense", 0L));
         for (Metric m : insights.members(scope, null).metrics()) {
             w.put(m.key(), m.value());
         }
-        w.put(
-                COLLECTIONS,
-                queries.collectedByDay(scope, InsightsQueries.COLLECTED_TYPES).stream()
-                        .mapToLong(DayTotal::count)
-                        .sum());
+        w.put(PAYERS, queries.loansWithTransactions(scope, InsightsQueries.COLLECTED_TYPES));
+        w.put(RECOVERERS, queries.loansWithTransactions(scope, "('recovery')"));
         return w;
     }
 
@@ -222,7 +302,28 @@ class PortfolioFactsService implements PortfolioFacts {
 
     @Override
     @Transactional(readOnly = true)
-    public FactSet build(PortfolioScope p) {
+    public FactSet build(PortfolioScope requested) {
+        // The business date of the scope, against the business date now. A scope resolved for "today" and read after
+        // midnight must not read the live loan tables, which by then hold the next day's activity (the report-runs
+        // bug):
+        // it reads the snapshot of the day it was resolved for, or is refused when tonight's job has not written it.
+        LocalDate businessToday = insights.today();
+        PortfolioScope p = requested;
+        if (!requested.today().equals(businessToday)) {
+            p = new PortfolioScope(
+                    requested.from(),
+                    requested.to(),
+                    businessToday,
+                    requested.branchIds(),
+                    requested.officerId(),
+                    requested.productId());
+        }
+        if (!p.to().equals(p.today()) && !positions.snapshotTaken(p.to())) {
+            throw ApiException.rule(
+                    "snapshot_unavailable",
+                    "No snapshot of the loan book exists for " + p.to()
+                            + " yet. Try again after the nightly snapshot.");
+        }
         String currency = tenant.profile().currency();
         Scope now = new Scope(p.from(), p.to(), p.today(), p.branchIds(), p.officerId(), p.productId(), currency);
         boolean brief = now.to().equals(now.today());
@@ -296,7 +397,8 @@ class PortfolioFactsService implements PortfolioFacts {
 
     /**
      * The branch or product groups, from the public figures port: the largest first, a group of fewer than five loans
-     * as a single suppressed count and nothing else. A past date with no snapshot has no groups.
+     * as a single suppressed count and nothing else, and a group's PAR 30 hidden when fewer than five of its loans are
+     * more than 30 days late.
      */
     private void groups(
             PortfolioScope scope,
@@ -306,10 +408,6 @@ class PortfolioFactsService implements PortfolioFacts {
             String currency,
             List<Fact> facts,
             List<GroupName> names) {
-        if (!scope.to().equals(scope.today()) && !positions.snapshotTaken(scope.to())) {
-            // par() would refuse, and a refusal inside this transaction would mark it rollback-only.
-            return;
-        }
         ParFigures par = figures.par(scope, by, () -> {});
         List<ParGroup> largest = par.groups().stream()
                 .sorted(Comparator.comparingLong(ParGroup::loans).reversed().thenComparing(ParGroup::key))
@@ -354,17 +452,35 @@ class PortfolioFactsService implements PortfolioFacts {
                     null,
                     null,
                     group));
-            facts.add(new Fact(
-                    prefix + ".par30",
-                    "PAR 30",
-                    Kind.BASIS_POINTS,
-                    WORSE,
-                    g.par30Bp(),
-                    g.par30Bp() == null ? "not available" : FactDisplay.percent(g.par30Bp()),
-                    false,
-                    null,
-                    null,
-                    group));
+            long late = g.buckets().stream()
+                    .filter(b -> Arrays.asList("31_60", "61_90", "over_90").contains(b.bucket()))
+                    .mapToLong(ParBucket::loans)
+                    .sum();
+            if (late > 0 && late < MIN_GROUP) {
+                facts.add(new Fact(
+                        prefix + ".par30",
+                        "PAR 30",
+                        Kind.BASIS_POINTS,
+                        WORSE,
+                        null,
+                        "fewer than " + MIN_GROUP,
+                        true,
+                        null,
+                        null,
+                        group));
+            } else {
+                facts.add(new Fact(
+                        prefix + ".par30",
+                        "PAR 30",
+                        Kind.BASIS_POINTS,
+                        WORSE,
+                        g.par30Bp(),
+                        g.par30Bp() == null ? "not available" : FactDisplay.percent(g.par30Bp()),
+                        false,
+                        null,
+                        null,
+                        group));
+            }
         }
     }
 }

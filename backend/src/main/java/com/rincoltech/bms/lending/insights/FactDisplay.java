@@ -33,10 +33,10 @@ public final class FactDisplay {
         return (minor < 0 ? "-" : "") + currency + " " + grouped(whole) + fraction;
     }
 
-    /** {@code 12.5 percent} from basis points, rounded half up to one decimal (chapter 14 section 14.1). */
+    /** {@code 12.5 percent} from basis points, rounded half up (away from zero) to one decimal, with its minus sign (chapter 14 section 14.1). */
     public static String percent(long bp) {
-        long tenths = Math.floorDiv(bp + 5, 10);
-        return (tenths / 10) + "." + Math.abs(tenths % 10) + " percent";
+        long tenths = (Math.abs(bp) + 5) / 10;
+        return (bp < 0 && tenths != 0 ? "-" : "") + (tenths / 10) + "." + (tenths % 10) + " percent";
     }
 
     /** A count with thousands separators. */

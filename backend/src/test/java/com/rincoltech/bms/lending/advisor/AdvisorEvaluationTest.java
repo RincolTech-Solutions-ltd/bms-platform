@@ -121,6 +121,33 @@ class AdvisorEvaluationTest {
     }
 
     @Test
+    void everyRuleBitesBecauseItsRepairedAnswerIsAccepted() {
+        Map<String, String> repairs = GoldenCases.repairs();
+        assertThat(repairs).hasSizeGreaterThanOrEqualTo(25);
+        List<Case> originals = new java.util.ArrayList<>();
+        List<Case> repaired = new java.util.ArrayList<>();
+        for (Map.Entry<String, String> e : repairs.entrySet()) {
+            Case c = CASES.stream()
+                    .filter(x -> x.id().equals(e.getKey()))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(c.expect()).as(e.getKey()).isEqualTo(Expect.REJECT);
+            originals.add(c);
+            repaired.add(new Case(c.id(), c.category(), c.facts(), c.planted(), e.getValue(), Expect.ACCEPT, null));
+        }
+        // The original is refused with its code ...
+        Report refused = AdvisorEvaluation.run(originals, AdvisorEvaluation.recorded());
+        assertThat(refused.allPassed()).as(refused.text()).isTrue();
+        assertThat(refused.results())
+                .allSatisfy(r -> assertThat(r.accepted()).as(r.id()).isFalse());
+        // ... and mended in that one place it is accepted: the rule, and nothing else, was refusing it.
+        Report mended = AdvisorEvaluation.run(repaired, AdvisorEvaluation.recorded());
+        assertThat(mended.allPassed()).as(mended.text()).isTrue();
+        assertThat(mended.results())
+                .allSatisfy(r -> assertThat(r.accepted()).as(r.id()).isTrue());
+    }
+
+    @Test
     void aWrongCodeFailsTheCaseEvenWhenTheAnswerIsRefused() {
         Case right = CASES.stream()
                 .filter(c -> c.id().equals("par-rose-but-fell"))

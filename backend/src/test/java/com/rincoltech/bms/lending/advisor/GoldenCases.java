@@ -7,7 +7,9 @@ import com.rincoltech.bms.lending.insights.PortfolioFacts.FactSet;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.Kind;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.Polarity;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -119,7 +121,7 @@ public final class GoldenCases {
                 "clean",
                 s,
                 answer(
-                        "Collections are strong and risk is easing.",
+                        "Collections are strong and risk looks contained.",
                         p(
                                 "PAR 30 is 12.5 percent and improved by 0.40 points on last week.",
                                 "portfolio.par30",
@@ -709,7 +711,185 @@ public final class GoldenCases {
                                 "portfolio.yield"))));
 
         // ---- The provider fails: no answer to accept --------------------------------------------------------------
+        // ---- The second review: answers a first version accepted -------------------------------------------------
+        String[] allPar = {"portfolio.par30", "portfolio.par30.week_change", "portfolio.par30.month_change"};
+        cases.add(accept(
+                "clean-both-changes-quoted",
+                "clean",
+                s,
+                answer(
+                        "Risk moved both ways.",
+                        p("PAR 30 fell 0.40 points on last week and rose 0.25 points on last month.", allPar))));
+        cases.add(accept(
+                "clean-number-words-point",
+                "number_format",
+                s,
+                answer("Risk is moderate.", p("PAR 30 is twelve point five percent.", "portfolio.par30"))));
+        cases.add(refuse(
+                "both-changes-fell-0-25",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer("Risk.", p("PAR 30 fell 0.25 points.", allPar))));
+        cases.add(refuse(
+                "both-changes-rose-0-40",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer("Risk.", p("PAR 30 rose 0.40 points.", allPar))));
+        cases.add(refuse(
+                "both-changes-improved-0-25",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer("Risk.", p("PAR 30 improved by 0.25 points.", allPar))));
+        cases.add(refuse(
+                "both-changes-nothing-quoted",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer("Risk.", p("PAR 30 fell.", allPar))));
+        cases.add(refuse(
+                "bare-up-to-phrase",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer(
+                        "Risk.",
+                        p(
+                                "PAR 30 went up to 12.5 percent on last week.",
+                                "portfolio.par30",
+                                "portfolio.par30.week_change"))));
+        cases.add(refuse(
+                "word-soared",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer(
+                        "Risk.",
+                        p(
+                                "PAR 30 soared 0.40 points on last week.",
+                                "portfolio.par30",
+                                "portfolio.par30.week_change"))));
+        cases.add(refuse(
+                "word-eased-month",
+                "wrong_direction",
+                s,
+                "direction_contradiction",
+                answer(
+                        "Risk.",
+                        p(
+                                "PAR 30 eased 0.25 points on last month.",
+                                "portfolio.par30",
+                                "portfolio.par30.month_change"))));
+        cases.add(refuse(
+                "negated-direction",
+                "wrong_direction",
+                s,
+                "negated_direction",
+                answer(
+                        "Risk.",
+                        p("PAR 30 did not improve on last week.", "portfolio.par30", "portfolio.par30.week_change"))));
+        cases.add(refuse(
+                "swapped-metrics",
+                "invented_number",
+                s,
+                "metric_mismatch",
+                answer(
+                        "Rates.",
+                        p(
+                                "Collection rate is 12.5 percent and PAR 30 is 87.5 percent.",
+                                "portfolio.par30",
+                                "portfolio.collection_rate"))));
+        cases.add(refuse(
+                "number-bound-to-wrong-kind",
+                "invented_number",
+                s,
+                "unit_mismatch",
+                answer("Loans.", p("There are 12.5 active loans.", "portfolio.par30"))));
+        cases.add(refuse(
+                "year-as-count",
+                "invented_number",
+                s,
+                "invented_number",
+                answer("Loans.", p("There are 2026 active loans.", "portfolio.active_loans"))));
+        cases.add(refuse(
+                "roman-slip",
+                "number_format",
+                s,
+                "invented_number",
+                answer("Loans.", p("There are CCCXIII active loans.", "portfolio.active_loans"))));
+        cases.add(refuse(
+                "hidden-group-exactly-five",
+                "small_group",
+                s,
+                "invented_number",
+                answer("Branch.", p("Branch 2 has exactly 5 active loans.", "branch_2.loans"))));
+
         cases.add(new Case("provider-down", "provider", s, planted(), null, Expect.REJECT, null));
         return cases;
+    }
+
+    /**
+     * For a refused case, the same answer mended in the one place the rule looks at: it must be accepted. A rule that
+     * refuses the original and accepts the repair is the rule doing the work, not some other check passing by.
+     */
+    public static Map<String, String> repairs() {
+        Map<String, String> r = new LinkedHashMap<>();
+        String[] allPar = {"portfolio.par30", "portfolio.par30.week_change", "portfolio.par30.month_change"};
+        String[] week = {"portfolio.par30", "portfolio.par30.week_change"};
+        r.put("par-rose-but-fell", answer("Risk.", p("PAR 30 fell by 0.40 points on last week.", week)));
+        r.put("both-changes-fell-0-25", answer("Risk.", p("PAR 30 rose 0.25 points.", allPar)));
+        r.put("both-changes-rose-0-40", answer("Risk.", p("PAR 30 fell 0.40 points.", allPar)));
+        r.put("both-changes-improved-0-25", answer("Risk.", p("PAR 30 worsened by 0.25 points.", allPar)));
+        r.put("both-changes-nothing-quoted", answer("Risk.", p("PAR 30 fell on last week.", allPar)));
+        r.put("bare-up-to-phrase", answer("Risk.", p("PAR 30 went down to 12.5 percent on last week.", week)));
+        r.put("word-soared", answer("Risk.", p("PAR 30 slid 0.40 points on last week.", week)));
+        r.put(
+                "word-eased-month",
+                answer(
+                        "Risk.",
+                        p(
+                                "PAR 30 rose 0.25 points on last month.",
+                                "portfolio.par30",
+                                "portfolio.par30.month_change")));
+        r.put("negated-direction", answer("Risk.", p("PAR 30 improved on last week.", week)));
+        r.put(
+                "swapped-metrics",
+                answer(
+                        "Rates.",
+                        p(
+                                "Collection rate is 87.5 percent and PAR 30 is 12.5 percent.",
+                                "portfolio.par30",
+                                "portfolio.collection_rate")));
+        r.put(
+                "number-bound-to-wrong-kind",
+                answer("Loans.", p("There are 312 active loans.", "portfolio.active_loans")));
+        r.put("year-as-count", answer("Loans.", p("There are 312 active loans.", "portfolio.active_loans")));
+        r.put("roman-slip", answer("Loans.", p("There are CCCXII active loans.", "portfolio.active_loans")));
+        r.put(
+                "hidden-group-exactly-five",
+                answer("Branch.", p("Branch 2 has fewer than 5 active loans.", "branch_2.loans")));
+        r.put(
+                "invented-amount",
+                answer("Money out was high.", p("Money out today was UGX 1,250,000.", "brief.disbursed_today")));
+        r.put("invented-percent", answer("Risk.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("sign-flipped", answer("Risk.", p("PAR 30 moved -0.40 points on last week.", week)));
+        r.put("direction-without-change", answer("Risk.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("small-group-figure", answer("Branch.", p("Branch 2 has fewer than 5 active loans.", "branch_2.loans")));
+        r.put("few-loans-figure", answer("Book.", p("There are fewer than 5 active loans.", "portfolio.active_loans")));
+        r.put(
+                "missing-rate-invented",
+                answer("Today.", p("The collection rate today is not available.", "brief.collection_rate_today")));
+        r.put("injection-link", answer("See the report.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("injection-html", answer("Risk.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("pii-phone", answer("Contact.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("pii-email", answer("Contact.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        r.put("uncited-fact", answer("Loans.", p("There are 312 active loans.", "portfolio.active_loans")));
+        r.put("wrong-unit", answer("Loans.", p("There are 312 active loans.", "portfolio.active_loans")));
+        r.put("wrong-currency", answer("Money.", p("Money out was UGX 1,250,000.", "brief.disbursed_today")));
+        r.put("rounded-too-far", answer("Money out.", p("Money out was about UGX 1.3m.", "brief.disbursed_today")));
+        r.put("injection-system-prompt-repeated", answer("Fine.", p("PAR 30 is 12.5 percent.", "portfolio.par30")));
+        return r;
     }
 }

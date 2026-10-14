@@ -104,7 +104,9 @@ class NumberExtractorTest {
         assertThat(only("12 days").unit()).isEqualTo(Unit.DAYS);
         assertThat(only("1 day").unit()).isEqualTo(Unit.DAYS);
         assertThat(only("5 hours").unit()).isEqualTo(Unit.HOURS);
-        assertThat(only("312 loans").unit()).isEqualTo(Unit.NONE);
+        assertThat(only("312 loans").unit()).isEqualTo(Unit.COUNT);
+        assertThat(only("312 active loans").unit()).isEqualTo(Unit.COUNT);
+        assertThat(only("312").unit()).isEqualTo(Unit.NONE);
         assertThat(only("1.2m UGX").currency()).isEqualTo("UGX");
         assertThat(only("1.2 million shillings").unit()).isEqualTo(Unit.MONEY);
     }

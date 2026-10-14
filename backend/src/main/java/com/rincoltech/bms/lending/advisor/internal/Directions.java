@@ -1,6 +1,7 @@
 package com.rincoltech.bms.lending.advisor.internal;
 
 import com.rincoltech.bms.lending.advisor.internal.AliasedFacts.PromptFact;
+import com.rincoltech.bms.lending.advisor.internal.NumberExtractor.Token;
 import com.rincoltech.bms.lending.advisor.internal.NumericValidator.Violation;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.Polarity;
 import java.util.ArrayList;
@@ -14,19 +15,30 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Direction words against the sign of the change (spec 5.6, review item 13). A point that says up, rose, grew, higher,
- * increase may do so only when the change fact it cites is positive; down, fell, dropped, lower, decrease only when it
- * is negative; flat, unchanged, steady only when it is zero; better, improved only when the change is in the good
- * direction for the metric's polarity (a falling PAR is better, a falling collection rate is worse), worse, worsened
- * the other way. A direction word with no change fact cited at all is refused: nothing supports it. One fact with both
- * directions in one answer fails.
+ * Direction words against the sign of the change (spec 5.6, review items 13 and 4 of the second review). A word that
+ * says up, rose, grew, higher, increase may be used only of a change that is positive; down, fell, dropped, lower,
+ * decrease only of one that is negative; flat, unchanged, steady only of zero; better, improved only when the change is in
+ * the good direction for the metric's polarity (a falling PAR is better, a falling collection rate is worse), worse,
+ * worsened the other way.
  *
- * <p>Which fact a word speaks of is read from the sentence: the metric names in it, and the alias of a branch or
- * product, pick the facts, and the nearest one to the word wins; when the sentence names none, any cited change that
- * supports the word will do. The lexicon is fixed and English; a word outside it is a residual risk that the
- * evaluation measures. Phrases that use these words for something else ({@code up to}, {@code set up},
- * {@code breakdown}, {@code down payment}) and a comparison between two groups ({@code higher than Branch 2}) are
- * not movements and are set aside.
+ * <p>Which change a word speaks of is decided, never guessed in the model's favour:
+ *
+ * <ol>
+ *   <li>the metric: the names in the sentence, and the alias of a branch or product, pick the subject, the nearest to the
+ *       word winning; a sentence that names none speaks of all the cited changes;
+ *   <li>the change: the figure the sentence quotes nearest to the word, when it is one of the subject's changes
+ *       ({@code PAR 30 fell 0.25 points} speaks of the change of 0.25), else the period nearest to the word
+ *       ({@code last week}, {@code last month}), else every change cited for the subject;
+ *   <li>the word must be supported by <b>every</b> change left. When the sentence leaves two changes of opposite sign open
+ *       (nothing quoted, no period named), the word is refused: it cannot be told which one it claims.
+ * </ol>
+ *
+ * A word with no change fact cited at all is refused, and so is a negated one ({@code did not improve}): a negation of a
+ * movement is a claim about a sign the validator cannot read. The lexicon is a broad list of movement verbs, adverbs and
+ * their stems, so a word of the same family is checked rather than passed; a movement worded outside it is a residual risk
+ * the evaluation measures. {@code up to} is a movement word like the others. Only a few phrases that use these words for
+ * something else ({@code set up}, {@code breakdown}, {@code down payment}) and a comparison of groups ({@code higher than
+ * Branch 2}) are set aside.
  */
 final class Directions {
 
@@ -39,37 +51,49 @@ final class Directions {
     }
 
     private static final Pattern NOT_A_MOVEMENT = Pattern.compile(
-            "(?i)\\b(?:up to|up front|upfront|set up|setup|follow[- ]?up|make up|made up|makes up|catch up|caught up|"
+            "(?i)\\b(?:up front|upfront|set up|setup|follow[- ]?up|make up|made up|makes up|catch up|caught up|"
                     + "top[- ]?up|build up|built up|pick up|wrap up|sign up|signed up|look up|looked up|back up|"
                     + "break down|breakdown|broken down|write down|written down|down payment|top[- ]down)\\b");
     private static final Pattern BETWEEN_GROUPS = Pattern.compile(
-            "(?i)\\b(?:higher|lower|better|worse|stronger|weaker)\\b[^.!?;]{0,40}?\\bthan\\s+(?:the\\s+)?(?:branch\\s+\\d+|product\\s+[a-z]{1,2}\\b|portfolio|book|overall|average|total|rest|others?|whole)\\b");
+            "(?i)\\b(?:higher|lower|better|worse|stronger|weaker)\\b[^.!?;]{0,40}?\\bthan\\s+(?:the\\s+)?"
+                    + "(?:branch\\s+\\d+|product\\s+[a-z]{1,2}\\b|portfolio|book|overall|average|total|rest|others?|whole)\\b");
+    private static final Pattern NEGATION = Pattern.compile(
+            "(?i)(?:\\b(?:not|never|cannot|without|hardly|barely|no longer)\\b|n't\\b|\\b(?:fail|fails|failed)\\s+to\\b)"
+                    + "(?:\\W+\\w+){0,2}\\W*$");
 
     private static final Map<Dir, Pattern> WORDS = new LinkedHashMap<>();
 
     static {
         WORDS.put(
                 Dir.UP,
-                Pattern.compile("(?i)\\b(?:up|rose|rise[sn]?|rising|grew|grow[sn]?|growing|growth|higher|increase[sd]?|"
-                        + "increasing|climb(?:ed|s|ing)?|gain(?:ed|s)?|jump(?:ed|s)?|surg(?:ed|es|ing)?|upward|"
-                        + "uptick)\\b"));
+                Pattern.compile("(?i)\\b(?:up|upward|upwards|uptick|rose|rise|rises|risen|rising|grew|grow|grows|grown|"
+                        + "growing|growth|higher|increase|increased|increases|increasing|climb|climbed|climbs|climbing|"
+                        + "gain|gained|gains|gaining|jump|jumped|jumps|jumping|surge|surged|surges|surging|soar|soared|"
+                        + "soars|soaring|rally|rallied|rallies|rallying|spike|spiked|spikes|spiking|leap|leapt|leaped|"
+                        + "leaps|leaping)\\b"));
         WORDS.put(
                 Dir.DOWN,
-                Pattern.compile("(?i)\\b(?:down|fell|fall[sn]?|falling|drop(?:ped|s|ping)?|lower|decrease[sd]?|"
-                        + "decreasing|decline[sd]?|declining|dip(?:ped|s)?|slip(?:ped|s)?|shr(?:ank|unk|ink)|"
-                        + "reduc(?:ed|tion|es|ing)|sank|plunge[sd]?|tumbl(?:ed|es)|downward)\\b"));
+                Pattern.compile("(?i)\\b(?:down|downward|downwards|fell|fall|falls|fallen|falling|drop|dropped|drops|"
+                        + "dropping|lower|lowered|lowers|lowering|decrease|decreased|decreases|decreasing|decline|"
+                        + "declined|declines|declining|dip|dips|dipped|dipping|slip|slips|slipped|slipping|ease|eased|"
+                        + "eases|easing|shrink|shrinks|shrank|shrunk|shrinking|reduce|reduced|reduces|reducing|"
+                        + "reduction|sink|sinks|sank|sunk|sinking|plunge|plunged|plunges|plunging|plummet|plummeted|"
+                        + "plummets|plummeting|tumble|tumbled|tumbles|tumbling|slump|slumped|slumps|slumping|slide|"
+                        + "slides|slid|sliding|retreat|retreated|retreats|dwindle|dwindled|dwindles|crash|crashed|"
+                        + "crashes)\\b"));
         WORDS.put(
                 Dir.FLAT,
-                Pattern.compile("(?i)\\b(?:flat|unchanged|steady|stable|stagnant|no change|"
+                Pattern.compile("(?i)\\b(?:flat|unchanged|steady|stable|stagnant|plateau|plateaued|no change|"
                         + "(?:stayed|remained|held|kept)\\s+(?:the\\s+)?same|did\\s*(?:not|n't)\\s+change)\\b"));
         WORDS.put(
                 Dir.BETTER,
-                Pattern.compile("(?i)\\b(?:better|improv(?:ed|es|ing|ement)|strengthen(?:ed|s|ing)|healthier|"
-                        + "stronger)\\b"));
+                Pattern.compile("(?i)\\b(?:better|improve|improved|improves|improving|improvement|strengthen|"
+                        + "strengthened|strengthens|strengthening|healthier|stronger)\\b"));
         WORDS.put(
                 Dir.WORSE,
-                Pattern.compile("(?i)\\b(?:worse|worsen(?:ed|s|ing)|deteriorat(?:ed|es|ing|ion)|weaker|"
-                        + "weaken(?:ed|s|ing)|unhealthier)\\b"));
+                Pattern.compile("(?i)\\b(?:worse|worsen|worsened|worsens|worsening|deteriorate|deteriorated|"
+                        + "deteriorates|deteriorating|deterioration|weaker|weaken|weakened|weakens|weakening|"
+                        + "unhealthier)\\b"));
     }
 
     private Directions() {}
@@ -96,12 +120,14 @@ final class Directions {
      * @param text the text, {@link Text#normalise normalised}
      * @param where {@code summary} or {@code point 2}, for the violations
      * @param cited the facts this text may rest on
+     * @param tokens the numbers the text states, with their places in it
+     * @param currency the currency of the amounts
      */
-    static List<Violation> check(String text, String where, List<PromptFact> cited) {
+    static List<Violation> check(
+            String text, String where, List<PromptFact> cited, List<Token> tokens, String currency) {
         List<Violation> out = new ArrayList<>();
-        String cleaned = BETWEEN_GROUPS
-                .matcher(NOT_A_MOVEMENT.matcher(text).replaceAll(" "))
-                .replaceAll(" ");
+        // Same length as the text, so a place in one is a place in the other.
+        String cleaned = NumberExtractor.blank(BETWEEN_GROUPS, NumberExtractor.blank(NOT_A_MOVEMENT, text));
         Map<String, Subject> subjects = new LinkedHashMap<>();
         for (PromptFact f : cited) {
             if (f.isChange()) {
@@ -111,13 +137,18 @@ final class Directions {
             }
         }
         Map<String, Set<Dir>> seen = new LinkedHashMap<>();
-        for (String sentence : cleaned.split("(?<=[.!?;])\\s+|\\n+")) {
+        Matcher boundary = Pattern.compile("(?<=[.!?;])\\s+|\\n+").matcher(cleaned);
+        int from = 0;
+        List<int[]> spans = new ArrayList<>();
+        while (boundary.find()) {
+            spans.add(new int[] {from, boundary.start()});
+            from = boundary.end();
+        }
+        spans.add(new int[] {from, cleaned.length()});
+        for (int[] span : spans) {
+            String sentence = cleaned.substring(span[0], span[1]);
             List<Word> words = words(sentence);
             if (words.isEmpty()) {
-                continue;
-            }
-            if (subjects.isEmpty()) {
-                words.forEach(w -> out.add(new Violation("direction_without_delta", where, w.text())));
                 continue;
             }
             String lower = sentence.toLowerCase(Locale.ROOT);
@@ -131,6 +162,15 @@ final class Directions {
             dropContained(named, subjects);
             for (int wi = 0; wi < words.size(); wi++) {
                 Word w = words.get(wi);
+                if (NEGATION.matcher(sentence.substring(0, w.start())).find()) {
+                    out.add(new Violation("negated_direction", where, w.text().toLowerCase(Locale.ROOT)));
+                    continue;
+                }
+                if (subjects.isEmpty()) {
+                    out.add(new Violation(
+                            "direction_without_delta", where, w.text().toLowerCase(Locale.ROOT)));
+                    continue;
+                }
                 int clauseEnd = wi + 1 < words.size() ? words.get(wi + 1).start() : lower.length();
                 List<PromptFact> candidates = new ArrayList<>();
                 String key = null;
@@ -143,15 +183,19 @@ final class Directions {
                     key = nearest(named, w.start());
                     candidates.addAll(subjects.get(key).changes());
                 }
-                String period = periodOf(lower, w.start(), clauseEnd);
-                List<PromptFact> byPeriod = byPeriod(candidates, period);
-                if (byPeriod.stream().noneMatch(f -> supports(w.dir(), f))) {
+                List<PromptFact> chosen = quoted(words, wi, span[0], span[1], tokens, candidates, currency);
+                if (chosen.isEmpty()) {
+                    chosen = byPeriod(candidates, periodOf(lower, w.start(), clauseEnd));
+                }
+                List<PromptFact> decided = chosen;
+                if (!decided.stream().allMatch(f -> supports(w.dir(), f))) {
                     out.add(new Violation(
                             "direction_contradiction", where, w.text().toLowerCase(Locale.ROOT)));
                 }
                 if (key != null) {
                     // Up on last week and down on last month are two facts, not one fact with both directions.
-                    seen.computeIfAbsent(key + "|" + (period == null ? "any" : period), k -> EnumSet.noneOf(Dir.class))
+                    String tag = decided.size() == 1 ? decided.get(0).period() : "any";
+                    seen.computeIfAbsent(key + "|" + tag, k -> EnumSet.noneOf(Dir.class))
                             .add(w.dir());
                 }
             }
@@ -166,6 +210,52 @@ final class Directions {
             }
         }
         return out;
+    }
+
+    /**
+     * The changes the figure nearest to the word is one of: {@code PAR 30 fell 0.25 points} speaks of the change of 0.25,
+     * whatever the other changes say. Empty when the sentence quotes no figure that is one of the candidates.
+     */
+    private static List<PromptFact> quoted(
+            List<Word> words,
+            int index,
+            int sentenceStart,
+            int sentenceEnd,
+            List<Token> tokens,
+            List<PromptFact> candidates,
+            String currency) {
+        Word w = words.get(index);
+        int at = sentenceStart + w.start();
+        Token best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Token t : tokens) {
+            if (t.start() < sentenceStart || t.end() > sentenceEnd) {
+                continue;
+            }
+            // A figure belongs to the direction word nearest to it ("rose 0.25 points ... down on last week").
+            int own = Integer.MAX_VALUE;
+            int ownIndex = -1;
+            for (int i = 0; i < words.size(); i++) {
+                int d = Math.abs(t.start() - (sentenceStart + words.get(i).start()));
+                if (d < own) {
+                    own = d;
+                    ownIndex = i;
+                }
+            }
+            boolean one = candidates.stream().anyMatch(f -> NumericValidator.speaksOf(t, f, currency));
+            int distance = Math.abs(t.start() - at);
+            if (ownIndex == index && one && distance < bestDistance) {
+                best = t;
+                bestDistance = distance;
+            }
+        }
+        if (best == null) {
+            return List.of();
+        }
+        Token token = best;
+        return candidates.stream()
+                .filter(f -> NumericValidator.speaksOf(token, f, currency))
+                .toList();
     }
 
     private static List<Word> words(String sentence) {

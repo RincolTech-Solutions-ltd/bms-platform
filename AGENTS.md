@@ -227,7 +227,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   public port `PortfolioFacts` of `lending.insights` (with `FactDisplay`): about forty figures of the metrics dictionary with
   display forms, polarity and week-on-week and month-on-month changes, under the caller's scope (the same rules as the insights
   endpoints) or a stored `PortfolioScope`, plus the largest branches and products from `InsightsFigures.par`, any figure over one
-  to four loans or members replaced by `fewer than 5`, no officer dimension and no name. The new module `lending.advisor`:
+  to four loans or members they are computed over (and every figure that would give it back by subtraction) replaced by
+  `fewer than 5`, no officer dimension and no name, and a scope read after midnight reading the snapshot of its day. The new module `lending.advisor`:
   the alias mapper (`Branch 1`, `Product A`, mapped back by whole word for the person who asked), the prompt builder, the
   `NumericValidator` (every number derivable from a fact the point cites, in any written form, with units and signs; direction
   words against the sign of the change and the metric's polarity; plain text, no personal data shape, no real name) and the

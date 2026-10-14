@@ -762,53 +762,78 @@ Where the build differs from, or sharpens, the text above:
   exact). A stock (outstanding, PAR, arrears, loans, borrowers) is read from the nightly snapshot of the earlier end date, a
   flow from the transactions of the earlier range. There is no change when the earlier figure cannot be known (no snapshot
   for that date), and none for figures that are live only (new arrears, going bad, the forecasts, dormant members).
-- **Small counts.** Every figure has a population: the count it is computed over, from the dictionary where it has one
-  (`brief.new_arrears` for the new-arrears amount), else the active loans in scope, and for money in the number of
-  repayment transactions in the window (or on the day). A population of one to four makes the figure `fewer than 5`, and its
-  changes with it; a change is also left out when the **earlier** population was one to four, because current minus change would
-  give that figure back. Zero is not small: nothing is described. A branch or product of fewer than five loans is the single
-  fact `branch.loans` or `product.loans` with the display `fewer than 5`, and no other fact. Residual risk, stated in the
-  acknowledgement: when some groups are suppressed and others shown, the suppressed ones' share is the total minus the shown
-  groups; the same figures are on the insights page for the people allowed to see them, and the provider is not an adversary
-  that knows the tenant.
+- **Small counts.** A figure is hidden when the loans it is **actually computed over** number one to four, not when the
+  book is large: arrears and PAR 1 over the loans in arrears, PAR 30, 60 and 90 over the loans more than 30, 60 and 90 days
+  late, collected over the distinct loans that paid, recovered over the loans recovered, each revenue line over the distinct
+  loans behind its ledger lines, write-offs over the loans written off, the new-arrears amount over the new arrears, the rest
+  over the active loans. Hiding one figure hides **every figure that would give it back by subtraction** (complementary
+  suppression): the write-off amount, the write-off expense and the profit contribution go together, the recovered figures and
+  the contribution, any revenue line and the contribution, collected and the collection rate, interest and fees and the
+  yield. A change is hidden with its figure, and when the earlier figure was hidden, because current minus change would give
+  it back. Zero is not small: nothing is described. A branch or product of fewer than five loans is the single fact
+  `branch.loans` or `product.loans` with the display `fewer than 5`, and no other fact; a group's PAR 30 is hidden when fewer
+  than five of its loans are more than 30 days late. Residual risk, stated in the acknowledgement: when some groups are
+  suppressed and others shown, the suppressed ones' share is the total minus the shown groups; the same figures are on the
+  insights page for the people allowed to see them, and the provider is not an adversary that knows the tenant.
+- **The business date.** A scope resolved for today and read after midnight does not read the live loan tables, which by then
+  hold the next day's activity: it reads the snapshot of the day it was resolved for, and is refused with 422
+  `snapshot_unavailable` while tonight's snapshot is not written. A past date with no snapshot is refused the same way, and the
+  brief figures (live only) are left out of facts that are not for today. `PortfolioFactsIT` writes the snapshot of the 8th,
+  moves one row of it and shows the facts follow the snapshot, not the live tables.
 - **Cost.** A set of facts is twelve reads of the insights code (brief, portfolio, revenue and members, for the range and for
   the two earlier ranges) and two of the PAR port; it is built once per brief and once per question, so the daily brief and the
   per user question limit bound it.
 - **Names stay out.** A group is an id in the facts and its name travels apart in `FactSet.names()`, which prints nothing.
   `Aliases` assigns `Branch 1`, `Product A` (then `AA`) in the order of the ids, so an alias tells nothing about a name or a size.
   Group keys become `branch_1.par30`. A group the fact set does not name is left out, never sent under its id. The prompt is
-  built from `AliasedFacts` alone.
+  built from `AliasedFacts` alone. The real names are not matched in an answer: they were never in the prompt, so a branch
+  called `Main` must not block every answer that uses the word; an answer can only name a group by its alias, which is
+  mapped back for the person who asked. (The evaluation plants fabricated names as forbidden strings; production plants none.)
 - **What a number may be.** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
-  decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words (`twenty-five`,
-  `one hundred and twenty`, `two million`, grammar-checked: `nineteen and ninety` is two numbers), fractions (`half`, `a third`,
-  `three quarters`) and factors (`double`, `twice`). It is derivable when it equals the display or the plain form of a cited fact,
-  or is that figure correctly rounded to the precision the writer shows, for a compact amount or a rate only (never a count) and by
-  no more than five percent (`1.3m` for 1,250,000 passes, `1m` does not); a rate to one decimal is the display itself and always
-  passes. A fraction word matches a rate within five percent; a factor matches only a fact of that value. `1.200` has two
-  readings (1.2 and 1200) and either may match. The unit must agree: percent only for a rate, a currency only for an amount (a
-  shilling for UGX, KES or TZS), `days` and `hours` for those kinds; a bare number may rest on any kind. The sign must agree with
-  a change (`+0.4` for a fall fails); a plus sign on a figure fails; a negative figure needs a minus sign or a word for a loss.
-- **Not figures.** The dates given (the as-of date, the range, and both earlier ranges) in any written form, a year of those
-  dates, list markers and ordinals, `PAR 1` to `PAR 90`, the names of the facts, aliases, and a number glued to letters (`Q3`).
+  decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words
+  (`twenty-five`, `one hundred and twenty`, `two million`, `twelve point five`, grammar-checked: `nineteen and ninety` is two
+  numbers), roman numerals of two letters or more in capitals (`XII`), fractions (`half`, `a third`, `three quarters`, `1/2`,
+  the vulgar fractions, superscripts as digits) and factors (`double`, `twice`). It is derivable when it equals the display or
+  the plain form of a cited fact, or is that figure correctly rounded to the precision the writer shows, for a compact amount
+  or a rate only (never a count) and by no more than five percent (`1.3m` for 1,250,000 passes, `1m` does not); a rate to one
+  decimal is the display itself and always passes. A fraction word matches a rate within five percent; a factor matches only a
+  fact of that value. `1.200` has two readings (1.2 and 1200) and either may match. The unit must agree: percent only for a
+  rate, a currency only for an amount (a shilling for UGX, KES or TZS), `days` and `hours` for those kinds, and a number
+  followed by something counted (`12 active loans`) only for a count. A fact that is hidden (`fewer than 5`) accounts for no
+  number at all: `exactly 5` is a number nobody gave, and the words `fewer than 5` are set aside only when such a fact is
+  cited. The sign must agree with a change (`+0.4` for a fall fails); a plus sign on a figure fails; a negative figure needs a
+  minus sign or a word for a loss. Four digits are a year only after a word that makes them one (`in 2026`), not in `2026 active
+  loans`.
+- **A number belongs to its metric.** The nearest metric name in the number's clause (a clause ends at a full stop, `;`, a
+  comma before a space, or `and`, `but`, `while`, `whereas`, `then`) decides which metric it speaks of, with the alias of a branch
+  or product in the sentence. The number must be a figure of a cited fact of that metric or of its changes; otherwise it is
+  `metric_mismatch`: figures swapped between two metrics, or a figure of a metric nobody cited. With no metric named in the
+  clause, a number with no unit may only be a count; a compact amount, a fraction and a factor carry their own meaning.
+- **Not figures.** The dates given (the as-of date, the range, and both earlier ranges) in any written form, list markers and
+  ordinals, `PAR 1` to `PAR 90`, the names of facts that carry a digit, aliases, and a number glued to letters (`Q3`).
   `Branch 7` when there are three is an `unknown_alias` violation, not ignored. `one` counts as a number only before something
   counted (`one loan`, not `no one`).
-- **Direction.** The lexicon is up, rose, grew, higher, increase, climbed, gained, jumped, surged (and the verb forms); down, fell,
-  dropped, lower, decrease, declined, dipped, slipped, shrank, reduced; flat, unchanged, steady, stable, stayed the same; better,
-  improved, strengthened, stronger; worse, worsened, deteriorated, weaker. Which fact a word speaks of is read from the sentence:
-  the metric names in it and the alias of a branch or product pick the facts, the nearest one wins, and `last week` or `last month`
-  near the word picks the change; when the sentence names no metric, any cited change that supports the word is enough. A word
-  with no change fact cited at all is `direction_without_delta`. Not movements and so not checked: `up to`, `set up`,
-  `breakdown`, `down payment`, `follow up`, and a comparison of groups (`higher than Branch 2`, `lower than the portfolio`).
-  Residual risk: a movement worded outside the lexicon is not checked, and `higher than the average` is read as a comparison of
-  groups even when it means a time; the evaluation measures both.
+- **Direction.** The lexicon is a broad list of movement verbs, adverbs and their forms: up, rose, grew, higher, increase,
+  climbed, gained, jumped, surged, soared, rallied, spiked; down, fell, dropped, lower, decrease, declined, dipped, slipped, eased,
+  shrank, reduced, sank, plunged, tumbled, slumped, slid; flat, unchanged, steady, stable; better, improved, strengthened,
+  stronger; worse, worsened, deteriorated, weaker. `up to` is a movement like the others. Which change a word speaks of is
+  decided, never guessed in the model's favour: the metric names in the sentence (and the alias of a branch or product) pick
+  the subject, the nearest one winning; then the figure the sentence quotes nearest to the word, when it is one of the
+  subject's changes (`PAR 30 fell 0.25 points` speaks of the change of 0.25 whatever the other changes say), else the period
+  nearest to the word (`last week`, `last month`), else every change cited for the subject; the word must be supported by
+  **every** change left, so two changes of opposite sign left open by the sentence refuse the word. Polarity is the metric's:
+  a falling PAR is better, a falling collection rate is worse. A word with no change fact cited at all is
+  `direction_without_delta`; a negated word (`did not improve`, `no longer rising`) is `negated_direction`. Not movements and so
+  not checked: `set up`, `breakdown`, `down payment`, `follow up`, and a comparison of groups (`higher than Branch 2`, `lower
+  than the portfolio`). Residual risk: a movement worded outside the lexicon is not checked, and `higher than the average` is
+  read as a comparison of groups even when it means a time; the evaluation measures both.
 - **Plain text only, and nothing else in it.** An answer is also refused for a link or markup (`markup`), a phone number, an email,
   an ID number shape or a UUID (`pii_shape`), a letter outside the Latin alphabet, which could disguise a direction word or a
-  number word (`unexpected_script`), the real name of any group or any planted string, or the system prompt's canary phrase
-  (`forbidden_text`). Digits of other scripts, invisible characters and the minus sign and its lookalikes are normalised before
+  number word (`unexpected_script`), a planted string or the system prompt's canary phrase (`forbidden_text`). Digits of other scripts, invisible characters and the minus sign and its lookalikes are normalised before
   anything is checked, and an accepted answer is shown with digits as ASCII and the invisible characters removed.
 - **Closed codes.** `not_json`, `schema`, `too_long`, `too_many_facts`, `unknown_fact`, `invented_number`, `unit_mismatch`,
   `sign_mismatch`, `unknown_alias`, `direction_contradiction`, `direction_without_delta`, `both_directions`, `markup`,
-  `pii_shape`, `unexpected_script`, `forbidden_text`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
+  `pii_shape`, `unexpected_script`, `forbidden_text`, `metric_mismatch`, `negated_direction`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
   figure or a lexicon word, never a sentence of the model's. The summary may rest on the facts that any point cites.
 - **The harness.** `AdvisorEvaluation.run(cases, source)` takes cases (a fabricated fact set, an answer, the verdict expected and
   the code a refusal must give) and a source: `recorded()` answers each from the recording client, `with(client)` sends the same
@@ -816,7 +841,8 @@ Where the build differs from, or sharpens, the text above:
   string, no phone, email, ID or UUID shape, no run of six digits, no figure for a group that has a suppressed fact) and never
   sends one that fails. The golden set (`GoldenCases`: clean answers, invented, derived and mis-formatted numbers, wrong
   directions and signs, injection through a fake field and through the model, personal data, small groups, missing data, scope,
-  shape, a failing provider) must pass 100 percent in every category; the report is plain text with codes and counts, never a
+  shape, a failing provider) must pass 100 percent in every category, and every refused case of the second review has a repaired twin (the same answer
+  mended in the one place the rule looks at) that the harness accepts, so a refusal is the rule's and not another check's; the report is plain text with codes and counts, never a
   sentence, and costs nothing. The canary test (`AdvisorCanaryIT`) runs the real gateway with the recording client over a seeded
   book whose branches and products are named with canaries and asserts that none is in the request the client got, in the call log
   or in the facts, and that the gateway's own input screen let the prompt through.

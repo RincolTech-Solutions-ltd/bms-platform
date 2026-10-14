@@ -43,7 +43,9 @@ final class NumberExtractor {
         PERCENT,
         BASIS_POINTS,
         DAYS,
-        HOURS
+        HOURS,
+        /** A number followed by something counted: {@code 12 loans}. */
+        COUNT
     }
 
     /**
@@ -54,7 +56,9 @@ final class NumberExtractor {
      * @param currency {@code UGX}, {@code KES}, {@code TZS}, {@code USD}, {@code SHILLING} (any shilling) or null
      * @param fraction true for {@code half}, {@code two thirds}: the value is a ratio
      * @param multiplier true for {@code double}, {@code twice}: the value is a factor
-     * @param yearLike a four-digit whole number that is the year of an allowed date
+     * @param yearLike a four-digit whole number that stands as the year of an allowed date ({@code in 2026})
+     * @param start where it begins in the normalised text (every set-aside step keeps the length of the text)
+     * @param end where it ends
      */
     record Token(
             String text,
@@ -65,7 +69,9 @@ final class NumberExtractor {
             BigDecimal magnitude,
             boolean fraction,
             boolean multiplier,
-            boolean yearLike) {
+            boolean yearLike,
+            int start,
+            int end) {
 
         boolean compact() {
             return magnitude.compareTo(BigDecimal.ONE) != 0;
@@ -94,6 +100,14 @@ final class NumberExtractor {
     private static final Pattern PAR_NAME = Pattern.compile("(?i)(?<![\\p{L}\\d])par[\\s-]?(?:1|30|60|90)(?![\\d])");
     private static final Pattern LIST_MARK = Pattern.compile("(?m)^[ \\t]*\\(?\\d{1,2}[.)][ \\t]+");
     private static final Pattern ORDINAL = Pattern.compile("(?i)(?<![\\d.,])\\d+(?:st|nd|rd|th)(?![\\p{L}\\d])");
+
+    /** A word that makes the four digits after it a year: {@code in 2026}, {@code since 2026}. */
+    private static final Pattern YEAR_WORD =
+            Pattern.compile("(?i)(?<![\\p{L}])(?:in|during|since|of|year|fy|from|until|by|for|to)\\s+$");
+
+    private static final Pattern COUNT_NOUN = Pattern.compile(
+            "(?i)\\s+(?:[a-z-]+\\s+)?(?:loans?|members?|borrowers?|customers?|clients?|accounts?|applications?|"
+                    + "disbursements?|repayments?|payments?|branch(?:es)?|products?)(?![\\p{L}])");
 
     private static final Pattern CORE = Pattern.compile("(?<![\\d.,])(?:"
             + "\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?"
@@ -147,8 +161,14 @@ final class NumberExtractor {
             Map.entry("ninety", 90));
     private static final String WORD_ALTERNATIVES =
             String.join("|", WORDS.keySet()) + "|hundred|thousand|million|billion|dozen";
-    private static final Pattern WORD_RUN = Pattern.compile("(?i)(?<![\\p{L}])(?:" + WORD_ALTERNATIVES
-            + ")(?:(?:[-\\s]+|\\s+and\\s+)(?:" + WORD_ALTERNATIVES + "))*(?![\\p{L}])");
+    private static final String DIGIT_WORDS = "zero|one|two|three|four|five|six|seven|eight|nine";
+    private static final Pattern WORD_RUN = Pattern.compile("(?i)(?<![\\p{L}])(?<main>(?:" + WORD_ALTERNATIVES
+            + ")(?:(?:[-\\s]+|\\s+and\\s+)(?:" + WORD_ALTERNATIVES + "))*)(?<point>\\s+point(?:\\s+(?:" + DIGIT_WORDS
+            + "))+)?(?![\\p{L}])");
+    private static final Pattern SLASH_FRACTION =
+            Pattern.compile("(?<![\\d/.,])(\\d{1,3})\\s?/\\s?(\\d{1,3})(?![\\d/])");
+    private static final Pattern ROMAN = Pattern.compile(
+            "(?<![\\p{L}\\d])(?=[IVXLCDM]{2,}(?![\\p{L}\\d]))M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?![\\p{L}\\d])");
     private static final Pattern FRACTION =
             Pattern.compile("(?i)(?<![\\p{L}])(?:(a|one|two|three|four|five|six|seven|eight|nine|ten)[-\\s]+)?"
                     + "(halves|half|thirds|third|quarters|quarter|fifths|fifth)(?![\\p{L}])");
@@ -160,6 +180,18 @@ final class NumberExtractor {
 
     private NumberExtractor() {}
 
+    /** The text with every match of the pattern replaced by spaces of the same length, so offsets stay valid. */
+    static String blank(Pattern pattern, String text) {
+        Matcher m = pattern.matcher(text);
+        StringBuilder out = new StringBuilder();
+        int last = 0;
+        while (m.find()) {
+            out.append(text, last, m.start()).append(" ".repeat(m.end() - m.start()));
+            last = m.end();
+        }
+        return out.append(text, last, text.length()).toString();
+    }
+
     /**
      * @param normalised the text, already {@link Text#normalise normalised}
      * @param dates the dates the answer may name
@@ -169,34 +201,40 @@ final class NumberExtractor {
     static Extraction extract(String normalised, Set<LocalDate> dates, Aliases aliases, Collection<String> labels) {
         String s = stripDates(normalised, dates);
         if (aliases.pattern() != null) {
-            s = aliases.pattern().matcher(s).replaceAll(" ");
+            s = blank(aliases.pattern(), s);
         }
         List<String> unknown = new ArrayList<>();
         Matcher u = UNKNOWN_ALIAS.matcher(s);
         while (u.find()) {
             unknown.add(u.group().replaceAll("\\s+", " "));
         }
-        s = UNKNOWN_ALIAS.matcher(s).replaceAll(" ");
+        s = blank(UNKNOWN_ALIAS, s);
+        // Only a name that carries a digit can hide a figure ("PAR 30"); the others stay visible to the unit and noun
+        // checks.
         List<String> byLength = labels.stream()
+                .filter(label -> label.chars().anyMatch(Character::isDigit))
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
         for (String label : byLength) {
-            s = Pattern.compile(
+            s = blank(
+                    Pattern.compile(
                             "(?<![\\p{L}\\d])" + Pattern.quote(label).replace(" ", "\\E\\s+\\Q") + "(?![\\p{L}\\d])",
-                            Pattern.CASE_INSENSITIVE)
-                    .matcher(s)
-                    .replaceAll(" ");
+                            Pattern.CASE_INSENSITIVE),
+                    s);
         }
-        s = PAR_NAME.matcher(s).replaceAll(" ");
-        s = LIST_MARK.matcher(s).replaceAll(" ");
-        s = ORDINAL.matcher(s).replaceAll(" ");
+        s = blank(PAR_NAME, s);
+        s = blank(LIST_MARK, s);
+        s = blank(ORDINAL, s);
 
         Set<Integer> years = new java.util.HashSet<>();
         dates.forEach(d -> years.add(d.getYear()));
         List<Token> tokens = new ArrayList<>();
         char[] masked = s.toCharArray();
-        digits(s, years, tokens, masked);
+        slashFractions(s, tokens, masked);
+        digits(new String(masked), years, tokens, masked);
         String rest = new String(masked);
+        romans(rest, tokens, masked);
+        rest = new String(masked);
         fractions(rest, tokens, masked);
         rest = new String(masked);
         multipliers(rest, tokens, masked);
@@ -231,7 +269,11 @@ final class NumberExtractor {
             } catch (DateTimeException | NumberFormatException e) {
                 ok = false;
             }
-            m.appendReplacement(out, ok ? " " : Matcher.quoteReplacement(m.group()));
+            m.appendReplacement(
+                    out,
+                    ok
+                            ? Matcher.quoteReplacement(" ".repeat(m.group().length()))
+                            : Matcher.quoteReplacement(m.group()));
         }
         m.appendTail(out);
         return out.toString();
@@ -303,13 +345,17 @@ final class NumberExtractor {
                 currency = suffix.currency;
             }
             Unit unit = suffix.unit;
-            if (currency != null && unit == Unit.NONE) {
+            if (currency != null && (unit == Unit.NONE || unit == Unit.COUNT)) {
                 unit = Unit.MONEY;
             }
             boolean yearLike = suffix.magnitude.compareTo(BigDecimal.ONE) == 0
                     && unit == Unit.NONE
                     && m.group().matches("\\d{4}")
-                    && years.contains(Integer.parseInt(m.group()));
+                    && years.contains(Integer.parseInt(m.group()))
+                    && YEAR_WORD
+                            .matcher(s.substring(Math.max(0, start - 12), start))
+                            .find()
+                    && !COUNT_NOUN.matcher(s.substring(end)).lookingAt();
             tokens.add(new Token(
                     s.substring(tokenStart, suffix.end).strip(),
                     values,
@@ -319,7 +365,9 @@ final class NumberExtractor {
                     suffix.magnitude,
                     false,
                     false,
-                    yearLike));
+                    yearLike,
+                    tokenStart,
+                    suffix.end));
             for (int i = tokenStart; i < suffix.end; i++) {
                 masked[i] = ' ';
             }
@@ -379,6 +427,10 @@ final class NumberExtractor {
         Matcher c = CURRENCY_AFTER.matcher(s).region(i, s.length());
         if (c.lookingAt()) {
             return new Suffix(c.end(), magnitude, Unit.MONEY, currencyOf(c.group(1)));
+        }
+        // Followed by something counted: a count, which only a count fact can account for. Not consumed.
+        if (COUNT_NOUN.matcher(s).region(i, s.length()).lookingAt()) {
+            return new Suffix(i, magnitude, Unit.COUNT, null);
         }
         return new Suffix(i, magnitude, Unit.NONE, null);
     }
@@ -442,7 +494,17 @@ final class NumberExtractor {
             BigDecimal ratio = BigDecimal.valueOf(numerator)
                     .divide(BigDecimal.valueOf(denominator), 6, java.math.RoundingMode.HALF_UP);
             tokens.add(new Token(
-                    m.group(), List.of(ratio), Sign.NONE, Unit.NONE, null, BigDecimal.ONE, true, false, false));
+                    m.group(),
+                    List.of(ratio),
+                    Sign.NONE,
+                    Unit.NONE,
+                    null,
+                    BigDecimal.ONE,
+                    true,
+                    false,
+                    false,
+                    m.start(),
+                    m.end()));
             mask(masked, m.start(), m.end());
         }
     }
@@ -461,20 +523,42 @@ final class NumberExtractor {
                     BigDecimal.ONE,
                     false,
                     true,
-                    false));
+                    false,
+                    m.start(),
+                    m.end()));
             mask(masked, m.start(), m.end());
         }
     }
 
     private static void words(String s, List<Token> tokens) {
         Matcher m = WORD_RUN.matcher(s);
+        int consumed = 0;
         while (m.find()) {
-            String run = m.group();
-            if (run.equalsIgnoreCase("one")
+            if (m.start() < consumed) {
+                continue; // the "million" of "one point two five million" is part of that number
+            }
+            String run = m.group("main");
+            String point = m.group("point");
+            if (point == null
+                    && run.equalsIgnoreCase("one")
                     && !COUNTED_NOUN.matcher(s.substring(m.end())).matches()) {
                 continue; // "no one", "one of them": not a count
             }
-            List<Long> numbers = numbersOf(run);
+            List<BigDecimal> numbers = new ArrayList<>();
+            for (long n : numbersOf(run)) {
+                numbers.add(BigDecimal.valueOf(n));
+            }
+            if (point != null) {
+                // "twelve point five": the digits after the point are read one by one.
+                StringBuilder digits = new StringBuilder();
+                for (String w : point.strip().split("\\s+")) {
+                    if (!w.equalsIgnoreCase("point")) {
+                        digits.append(WORDS.get(w.toLowerCase(Locale.ROOT)));
+                    }
+                }
+                int last = numbers.size() - 1;
+                numbers.set(last, new BigDecimal(numbers.get(last).toPlainString() + "." + digits));
+            }
             String currency = null;
             Matcher c = CURRENCY_BEFORE.matcher(s.substring(Math.max(0, m.start() - 8), m.start()));
             if (c.find()) {
@@ -484,19 +568,95 @@ final class NumberExtractor {
             for (int i = 0; i < numbers.size(); i++) {
                 boolean last = i == numbers.size() - 1;
                 String cur = last && suffix.currency != null ? suffix.currency : (i == 0 ? currency : null);
-                Unit unit = !last ? Unit.NONE : suffix.unit == Unit.NONE && cur != null ? Unit.MONEY : suffix.unit;
+                Unit unit = !last
+                        ? Unit.NONE
+                        : cur != null && (suffix.unit == Unit.NONE || suffix.unit == Unit.COUNT)
+                                ? Unit.MONEY
+                                : suffix.unit;
                 tokens.add(new Token(
-                        run,
-                        List.of(BigDecimal.valueOf(numbers.get(i))),
+                        m.group(),
+                        List.of(numbers.get(i)),
                         Sign.NONE,
                         unit,
                         cur,
                         last ? suffix.magnitude : BigDecimal.ONE,
                         false,
                         false,
-                        false));
+                        false,
+                        m.start(),
+                        last ? suffix.end : m.end()));
             }
+            consumed = Math.max(consumed, suffix.end);
         }
+    }
+
+    /** {@code 1/2}, {@code 3/4}, and {@code 24/7} (which is a ratio no fact has): a share. */
+    private static void slashFractions(String s, List<Token> tokens, char[] masked) {
+        Matcher m = SLASH_FRACTION.matcher(s);
+        while (m.find()) {
+            int denominator = Integer.parseInt(m.group(2));
+            if (denominator == 0) {
+                continue;
+            }
+            BigDecimal ratio = BigDecimal.valueOf(Integer.parseInt(m.group(1)))
+                    .divide(BigDecimal.valueOf(denominator), 6, java.math.RoundingMode.HALF_UP);
+            tokens.add(new Token(
+                    m.group(),
+                    List.of(ratio),
+                    Sign.NONE,
+                    Unit.NONE,
+                    null,
+                    BigDecimal.ONE,
+                    true,
+                    false,
+                    false,
+                    m.start(),
+                    m.end()));
+            mask(masked, m.start(), m.end());
+        }
+    }
+
+    /** {@code XII percent}: a roman numeral of two letters or more, in capitals, is a number like any other. */
+    private static void romans(String s, List<Token> tokens, char[] masked) {
+        Matcher m = ROMAN.matcher(s);
+        while (m.find()) {
+            if (m.group().isEmpty()) {
+                continue;
+            }
+            Suffix suffix = suffix(s, m.end());
+            tokens.add(new Token(
+                    m.group(),
+                    List.of(BigDecimal.valueOf(romanValue(m.group()))),
+                    Sign.NONE,
+                    suffix.unit,
+                    suffix.currency,
+                    suffix.magnitude,
+                    false,
+                    false,
+                    false,
+                    m.start(),
+                    suffix.end));
+            mask(masked, m.start(), suffix.end);
+        }
+    }
+
+    private static int romanValue(String roman) {
+        int total = 0;
+        int previous = 0;
+        for (int i = roman.length() - 1; i >= 0; i--) {
+            int v = switch (roman.charAt(i)) {
+                case 'I' -> 1;
+                case 'V' -> 5;
+                case 'X' -> 10;
+                case 'L' -> 50;
+                case 'C' -> 100;
+                case 'D' -> 500;
+                default -> 1000;
+            };
+            total += v < previous ? -v : v;
+            previous = Math.max(previous, v);
+        }
+        return total;
     }
 
     private static final Set<String> MAGNITUDE_WORDS = Set.of("hundred", "thousand", "million", "billion");
