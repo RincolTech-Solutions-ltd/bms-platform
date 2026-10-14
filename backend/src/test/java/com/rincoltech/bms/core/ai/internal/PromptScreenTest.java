@@ -69,6 +69,61 @@ class PromptScreenTest {
     }
 
     @Test
+    void aNumberDressedUpInUnicodeIsStillRefused() {
+        String nbsp = "\u00A0";
+        String zwsp = "\u200B";
+        for (String text : List.of(
+                "0772" + nbsp + "123" + nbsp + "456",
+                "0772" + zwsp + "123" + zwsp + "456",
+                "07" + zwsp + "72123456",
+                "\uFF10\uFF17\uFF17\uFF12\uFF11\uFF12\uFF13\uFF14\uFF15\uFF16",
+                "0772/123/456",
+                "0772_123_456",
+                "0772\t123\t456",
+                "0772\u2009123\u2009456",
+                "+256\u00A0772\u00A0123\u00A0456",
+                "\uFF0B256 772 123 456",
+                "\u0660\u0667\u0667\u0662\u0661\u0662\u0663\u0664\u0665\u0666",
+                "\u00AD0772\uFEFF123 456",
+                "mail test.officer\uFF20example.test")) {
+            assertThat(check("Call " + text + " today")).as(text).isPresent();
+        }
+        assertThat(check("mail test.officer\uFF20example.test")).contains(Finding.EMAIL);
+        assertThat(check("\uFF10\uFF17\uFF17\uFF12\uFF11\uFF12\uFF13\uFF14\uFF15\uFF16"))
+                .contains(Finding.PHONE);
+        assertThat(check("account \uFF11\uFF12\uFF13\uFF14\uFF15\uFF16\uFF17")).contains(Finding.DIGITS);
+    }
+
+    @Test
+    void datesUuidsAndMaskedIdentifiersAreNotPersonalData() {
+        for (String text : List.of(
+                "On 07-10-2026 14 loans were disbursed.",
+                "On 07.10.2026 12 loans were disbursed.",
+                "On 7/10/2026 12 loans were disbursed.",
+                "As of 2026-10-14 the book is 3,200,000 UGX.",
+                "As of 20261014 the book is 3,200,000 UGX.",
+                "Run 123e4567-e89b-12d3-a456-446655440000 finished.",
+                "Member ****1234 and ID ******5678 are masked.",
+                "Account \u2022\u2022\u2022\u20224321 reviewed.")) {
+            assertThat(check(text)).as(text).isEmpty();
+        }
+    }
+
+    @Test
+    void aRealPhoneNextToThoseShapesIsStillRefused() {
+        assertThat(check("On 07-10-2026 call 0772 123 456")).contains(Finding.PHONE);
+        assertThat(check("0772 123 456 on 07.10.2026")).contains(Finding.PHONE);
+        assertThat(check("Run 123e4567-e89b-12d3-a456-446655440000 owner +256 772 123 456"))
+                .contains(Finding.PHONE);
+        assertThat(check("As of 2026-10-14 account 1234567")).contains(Finding.DIGITS);
+        assertThat(check("As of 20261014 mail a.b@example.test")).contains(Finding.EMAIL);
+        assertThat(check("****1234 and 0772123456")).contains(Finding.PHONE);
+        // Digits that are not a date are not excused by one nearby.
+        assertThat(check("2026-10-14 and 99999999")).contains(Finding.DIGITS);
+        assertThat(check("20261345")).contains(Finding.DIGITS);
+    }
+
+    @Test
     void everyMessageOfARequestIsScreenedNotOnlyTheLast() {
         com.rincoltech.bms.core.ai.LlmClient.Request request = new com.rincoltech.bms.core.ai.LlmClient.Request(
                 List.of(

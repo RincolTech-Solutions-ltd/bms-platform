@@ -195,6 +195,29 @@ class AiConfigurationTest {
     }
 
     @Test
+    void aNegativePriceOrABadCurrencyFailsStartupInsteadOfQuietlyBecomingZeroOrUsd() {
+        for (int field : new int[] {11, 12}) {
+            Object[] args = new Object[15];
+            args[field] = -1L;
+            assertThatThrownBy(() -> construct(args))
+                    .as("field %s", field)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (String bad : new String[] {"US", "DOLLARS", "U5D", "12"}) {
+            Object[] args = new Object[15];
+            args[13] = bad;
+            assertThatThrownBy(() -> construct(args)).as(bad).isInstanceOf(IllegalArgumentException.class);
+        }
+        // Unset or blank is the documented default, and a lower case code is normalised.
+        Object[] unset = new Object[15];
+        unset[13] = " ";
+        assertThat(construct(unset).priceCurrency()).isEqualTo("USD");
+        Object[] lower = new Object[15];
+        lower[13] = "ugx";
+        assertThat(construct(lower).priceCurrency()).isEqualTo("UGX");
+    }
+
+    @Test
     void aPerCallLimitOfZeroOrLessFailsStartupInsteadOfBecomingTheDefault() {
         for (int field : new int[] {4, 5, 6}) {
             Object[] args = new Object[15];

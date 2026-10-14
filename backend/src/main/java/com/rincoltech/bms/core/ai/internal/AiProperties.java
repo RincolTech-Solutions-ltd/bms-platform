@@ -80,11 +80,21 @@ record AiProperties(
         tenantDailyCostMicro = tenantDailyCostMicro == null
                 ? 500_000L
                 : notNegative("BMS_AI_TENANT_DAILY_COST_MICRO", tenantDailyCostMicro);
-        priceInputMicroPerMillion = priceInputMicroPerMillion == null ? 0L : Math.max(0L, priceInputMicroPerMillion);
-        priceOutputMicroPerMillion = priceOutputMicroPerMillion == null ? 0L : Math.max(0L, priceOutputMicroPerMillion);
-        priceCurrency = priceCurrency == null || !priceCurrency.matches("^[A-Za-z]{3}$")
-                ? "USD"
-                : priceCurrency.toUpperCase(Locale.ROOT);
+        // Unset is zero (cost is then not estimated and only the token caps bound the spend, said so in the runbook);
+        // a negative price, or a currency that is not three letters, is a typo and fails startup.
+        priceInputMicroPerMillion = priceInputMicroPerMillion == null
+                ? 0L
+                : notNegative("BMS_AI_PRICE_INPUT_MICRO_PER_MILLION", priceInputMicroPerMillion);
+        priceOutputMicroPerMillion = priceOutputMicroPerMillion == null
+                ? 0L
+                : notNegative("BMS_AI_PRICE_OUTPUT_MICRO_PER_MILLION", priceOutputMicroPerMillion);
+        if (priceCurrency == null || priceCurrency.isBlank()) {
+            priceCurrency = "USD";
+        } else if (!priceCurrency.strip().matches("^[A-Za-z]{3}$")) {
+            throw new IllegalArgumentException("BMS_AI_PRICE_CURRENCY must be three letters");
+        } else {
+            priceCurrency = priceCurrency.strip().toUpperCase(Locale.ROOT);
+        }
         enabledTenants = enabledTenants == null ? "" : enabledTenants;
     }
 

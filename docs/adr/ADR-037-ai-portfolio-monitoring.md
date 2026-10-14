@@ -145,7 +145,11 @@ they left open, and one change:
    transaction applies the per call cap and the four daily caps and writes the row; only then the breaker and the network.
    Between the allow-list and the reservation sits an input screen: a request whose text holds a run of six or more digits, an
    email address, a Uganda or international phone number in any spacing, or a national ID shape is refused (`input_refused`)
-   with no call, because the port accepts any text and the prompt builders are not the only line of defence. It cannot see a
+   with no call, because the port accepts any text and the prompt builders are not the only line of defence. The text is
+   normalised first (Unicode NFKC, every decimal digit of any script as ASCII, invisible format characters such as zero-width
+   spaces removed; separators are any space, dot, slash, underscore, dash or bracket), so no-break spaces, full-width digits and
+   a full-width at sign do not get past it; dates (`2026-10-14`, `20261014`, `07-10-2026`), UUIDs and masked identifiers
+   (`****1234`) are set aside before the check, and a real phone number beside them is still refused. It cannot see a
    name; the question box checks names in the database (slice C4). Facts therefore go in their grouped display form
    (`1,250,000`). Our own failures (the database, a bug) are a fallback `internal_error` that never feeds the breaker; a
    failure to write the log after the provider answered does not throw the answer away; and the gateway refuses to run inside
@@ -176,7 +180,9 @@ they left open, and one change:
    4xx other than 429, and a redirect (never followed) are not retried. Five failures in a row open the process-wide breaker
    for 60 seconds, then one probe decides; a request the provider found fault with does not count. Each call holds a permit of
    the breaker's generation, so a late result from a call that began before the breaker opened cannot close it or free the
-   probe's slot, and the slot is released in a `finally`, an `Error` included. Pauses carry random jitter (up to a quarter),
+   probe's slot, a probe has a ticket of its own so an older probe settling late cannot free or decide a newer probe's slot, and the
+   slot is released in a `finally`, an `Error` included. A bug of ours in the adapter is an `internal_error` fallback that gives the
+   permit back and does not count against the breaker. Pauses carry random jitter (up to a quarter),
    never fall under 250 ms, and a `Retry-After` is honoured up to 10 seconds. A call that dies between reserving and finishing
    is closed as failed after an hour by the nightly housekeeping, a database function that also deletes rows past 90 days for
    every tenant, suspended ones included.

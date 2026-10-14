@@ -203,20 +203,31 @@ class AiGatewayService implements AiGateway {
                         e.httpStatus());
                 return AiResult.fallback(reason, id);
             } catch (RuntimeException e) {
-                // An adapter bug: counted as a bad response (the provider gave us nothing usable), type only logged.
-                breaker.recordFailure(permit);
+                // A bug of ours in the adapter says nothing about the provider's health, so like every failure of ours
+                // it is an internal_error fallback that does not feed the breaker (the permit is given back). The
+                // request
+                // may have been sent, so the reservation stays. Only the type is logged: a message can quote data.
+                breaker.release(permit);
                 settled = true;
                 Instant end = clock.now();
                 quietly(
                         "fail",
                         () -> callLog.fail(
-                                id, end, Reason.BAD_RESPONSE, 0, 1, millis(start, end), -1, -1, properties::costMicro));
+                                id,
+                                end,
+                                Reason.INTERNAL_ERROR,
+                                0,
+                                1,
+                                millis(start, end),
+                                -1,
+                                -1,
+                                properties::costMicro));
                 log.error(
                         "ai call failed tenant={} purpose={} unexpected={}",
                         tenantId,
                         purpose,
                         e.getClass().getSimpleName());
-                return AiResult.fallback(Reason.BAD_RESPONSE, id);
+                return AiResult.fallback(Reason.INTERNAL_ERROR, id);
             }
 
             // The provider answered: that is its verdict, whatever our own bookkeeping does next.

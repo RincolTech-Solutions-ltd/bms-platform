@@ -893,12 +893,24 @@ class AiGatewayIT extends IntegrationTest {
             }
         });
         java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        // A start gate: every thread is up and waiting before any is let go, so all n reach the reservation together
+        // and contend for the same lock, instead of the pool running them one after another.
+        java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(n);
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
         try {
             List<java.util.concurrent.Future<AiResult>> futures = new ArrayList<>();
             for (int i = 0; i < n; i++) {
                 TestDatabase.Fixture t = tenants.get(i % tenants.size());
-                futures.add(pool.submit(() -> as(t, () -> gateway.complete("question", null, small(maxTokens)))));
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                    return as(t, () -> gateway.complete("question", null, small(maxTokens)));
+                }));
             }
+            assertThat(ready.await(30, java.util.concurrent.TimeUnit.SECONDS))
+                    .as("all %s threads waiting at the gate", n)
+                    .isTrue();
+            go.countDown();
             // Wait until every call is either in the provider (a pending row) or already refused.
             long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
             while (true) {
@@ -1097,14 +1109,21 @@ class AiGatewayIT extends IntegrationTest {
     }
 
     @Test
-    void aRuntimeFailureInsideTheAdapterIsAFallbackAndCountsAgainstTheBreaker() {
+    void aRuntimeFailureInsideTheAdapterIsOursSoAnInternalErrorThatNeverFeedsTheBreaker() {
         TestDatabase.Fixture t = enabledTenant();
         recording.onEachCall(() -> {
             throw new IllegalStateException("adapter bug with a name in it: Test Borrower 01");
         });
-        AiResult r = as(t, () -> gateway.complete("brief", null, small(100)));
-        assertThat(r.reason()).isEqualTo(Reason.BAD_RESPONSE);
+        AiResult r = null;
+        // More than the five failures that would open the breaker if these counted.
+        for (int i = 0; i < 7; i++) {
+            r = as(t, () -> gateway.complete("brief", null, small(100)));
+            assertThat(r.reason()).isEqualTo(Reason.INTERNAL_ERROR);
+        }
+        assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+        // The request may have gone out, so each keeps its reservation.
         assertThat(row(r.callId())).containsEntry("outcome", "failed").containsEntry("tokens_counted", 200);
+        assertThat(row(r.callId())).containsEntry("reason", "internal_error");
         String whole = TestDatabase.owner()
                 .sql("SELECT ai_calls::text FROM ai_calls WHERE id = ?")
                 .param(r.callId())

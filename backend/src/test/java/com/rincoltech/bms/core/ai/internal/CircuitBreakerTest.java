@@ -161,4 +161,65 @@ class CircuitBreakerTest {
         breaker.recordFailure(acquire());
         assertThat(breaker.state()).isEqualTo(State.CLOSED);
     }
+
+    // ---- a probe has its own ticket: an old probe cannot touch a new probe's slot -----------------------
+
+    private Permit openThenFirstProbe() {
+        fail(5);
+        now = now.plusSeconds(61);
+        return acquire();
+    }
+
+    @Test
+    void aLateSuccessOfAReleasedProbeCannotCloseTheBreakerWhileTheNewProbeRuns() {
+        Permit first = openThenFirstProbe();
+        breaker.release(first);
+        Permit second = acquire();
+        assertThat(second.ticket()).isNotEqualTo(first.ticket());
+        // The first probe, long gone, reports late: nothing happens, and the second still holds the slot.
+        breaker.recordSuccess(first);
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        assertThat(breaker.tryAcquire()).isEmpty();
+        breaker.recordSuccess(second);
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+    }
+
+    @Test
+    void aLateFailureOfAReleasedProbeCannotReopenTheBreakerWhileTheNewProbeRuns() {
+        Permit first = openThenFirstProbe();
+        breaker.release(first);
+        Permit second = acquire();
+        breaker.recordFailure(first);
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        breaker.recordSuccess(second);
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+    }
+
+    @Test
+    void aSecondReleaseOfAnOldProbeDoesNotFreeTheNewProbesSlot() {
+        Permit first = openThenFirstProbe();
+        breaker.release(first);
+        Permit second = acquire();
+        breaker.release(first);
+        breaker.release(first);
+        assertThat(breaker.tryAcquire())
+                .as("the second probe still holds the slot")
+                .isEmpty();
+        breaker.release(second);
+        assertThat(breaker.tryAcquire()).isPresent();
+    }
+
+    @Test
+    void aSettledProbeCannotSettleAgain() {
+        Permit probe = openThenFirstProbe();
+        breaker.recordFailure(probe);
+        assertThat(breaker.state()).isEqualTo(State.OPEN);
+        now = now.plusSeconds(61);
+        Permit next = acquire();
+        // The first probe's success, delivered a second time and late, does not close the breaker under the next one.
+        breaker.recordSuccess(probe);
+        assertThat(breaker.state()).isEqualTo(State.HALF_OPEN);
+        breaker.recordSuccess(next);
+        assertThat(breaker.state()).isEqualTo(State.CLOSED);
+    }
 }
