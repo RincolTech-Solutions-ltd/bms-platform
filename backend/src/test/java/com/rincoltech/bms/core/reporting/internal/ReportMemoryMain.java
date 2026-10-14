@@ -42,7 +42,8 @@ public final class ReportMemoryMain {
             // The staging limits (deploy/compose.pi-staging.yml).
             "--bms.reports.max-concurrent-runs=1",
             "--bms.reports.xlsx-row-cap=20000",
-            "--bms.reports.max-file-bytes=8388608"
+            "--bms.reports.max-file-bytes=8388608",
+            "--bms.reports.runner-enabled=false"
         };
         int failures = 0;
         try (ConfigurableApplicationContext ctx = app.run(settings)) {

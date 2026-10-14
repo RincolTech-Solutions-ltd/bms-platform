@@ -40,7 +40,8 @@ import tools.jackson.databind.ObjectMapper;
             "bms.reports.xlsx-row-cap=500",
             "bms.reports.max-file-bytes=1048576",
             "bms.reports.cancel-poll=PT0.2S",
-            "bms.reports.heartbeat=PT0.1S"
+            "bms.reports.heartbeat=PT0.1S",
+            "bms.reports.runner-enabled=false"
         })
 @ExtendWith(OutputCaptureExtension.class)
 class ReportRunnerIT extends ReportsItSupport {

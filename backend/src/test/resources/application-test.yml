@@ -1,3 +1,13 @@
+spring:
+  datasource:
+    hikari:
+      # Every distinct test context (a @Import, a spy bean) is cached with its own pool. A small
+      # pool that keeps no idle connections lets the cached contexts of the whole suite share the
+      # test database's connection slots.
+      maximum-pool-size: 5
+      minimum-idle: 0
+      idle-timeout: 10000
+
 bms:
   tenancy:
     # Hyphenated hosts under one zone, as on staging (ADR-018). TestRestTemplate calls localhost,
@@ -15,10 +25,6 @@ bms:
     # other profiles use the chapter 8 cost (64 MiB, 3 iterations).
     argon2-memory-kib: 4096
     argon2-iterations: 2
-  # The report runner's scheduled tick is off in tests: they drive ReportRunner.tick() themselves, so a tick of the
-  # scheduler cannot race them (ADR-038).
-  reports:
-    runner-enabled: false
   # High global caps, so the whole suite's sign-ups fit in one hour; OnboardingIT fills them on
   # purpose to prove the cap.
   onboarding:
