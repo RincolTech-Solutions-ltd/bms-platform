@@ -52,7 +52,8 @@ final class ReportsApi {
 
     /**
      * A run. Errors are codes ({@code report_too_large}, {@code snapshot_unavailable}, {@code timeout},
-     * {@code interrupted}, {@code reports_disabled}, {@code requester_deactivated}, {@code run_failed}); never a
+     * {@code report_stale_as_of}, {@code interrupted}, {@code reports_disabled}, {@code requester_deactivated},
+     * {@code run_failed}); never a
      * message that could carry data. A file is fetched with {@code POST /documents/{document_id}/download-url}.
      */
     @Schema(name = "ReportRun")

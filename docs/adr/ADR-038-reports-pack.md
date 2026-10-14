@@ -176,7 +176,7 @@ in memory instead of reading the spool.
 
 ## Amendment (issue #217, slice D2: the PDF and Excel renderers and the portfolio reports)
 
-Building the renderers settled six things. None reverses a decision; two of them (1 and 2) change a means the first text named.
+Building the renderers settled nine things (7 to 9 came from the independent review). None reverses a decision; two of them (1 and 2) change a means the first text named.
 
 1. **Excel is written by a minimal streaming writer, not by Apache POI.** Decision 6 named POI's SXSSF; the issue allowed a minimal
    writer when POI is not already in the build, and it is not. POI with its XML libraries would add several megabytes of jars that
@@ -211,6 +211,22 @@ Building the renderers settled six things. None reverses a decision; two of them
    that heap but fills the old generation (149 of 149 MB), so it is a setting for hosts with more heap and not for staging;
    `-Dreports.memory.pdf3000=true` repeats the measurement. The PDF layout, not the spool, is what grows with the cap, which is why the cap
    exists.
+
+7. **A run that outlives its date reads that date's snapshot, or is refused.** Amendment (issue #214) item 1 froze the business date so a
+   run queued at 23:59 and executed after midnight would still read the loan tables as of the day it was asked for. The tables are the
+   new day's by then (disbursements and repayments land), so that file said "as at the 8th" over the 9th's figures and no longer matched
+   the insights page. When the business date at execution is later than the frozen date, `InsightsFigures` reads the snapshot of the frozen
+   date if the nightly job has written it and otherwise refuses with 422 `report_stale_as_of`, which the screen explains (ask again once
+   the snapshot has run, or for today). It never guesses. The time a run's data was read is now the business clock's, taken as the
+   snapshot transaction starts, like every other timestamp of a run.
+8. **The scope is printed from the frozen scope.** A definition may describe the scope its run was frozen to
+   (`ReportDefinition.describeScope`); the lending reports say "All branches in your access", "n branches selected" and, for a caller
+   without `lending.insights.all_officers`, "your own loans only", so a file never claims more than it covers.
+9. **Reports leave a render place for documents.** The document renderer has two places (it holds a layout in memory), and
+   `BMS_REPORTS_MAX_CONCURRENT_RUNS` is two in production, so two report PDFs could take both and turn a receipt away with 503. A report
+   now takes at most one place (all but one, never fewer than one), builds its model (the printed rows) only after it holds it, and waits
+   for it until its own deadline. A measurement behind `-Dreports.memory.production=true` runs two tenants' PDFs of 3,000 rows and
+   workbooks of 20,000 rows on the production container's heap (1,075 MB, G1); all four runs finish with the old generation peaking at 190 of 1,080 MB.
 
 **Better:** one definition per figure now holds for the portfolio too, in four formats; the workbook opens in any spreadsheet with real
 numbers and no formula route; the PDF is the quality bar of ADR-034 with a visual check script and a reviewed sample sheet.

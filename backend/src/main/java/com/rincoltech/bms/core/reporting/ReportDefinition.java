@@ -60,6 +60,15 @@ public interface ReportDefinition {
     Prepared prepare(Map<String, Object> params);
 
     /**
+     * The scope a run was made under, in words, for the first lines of a PDF and the Parameters sheet (for example "2 branches
+     * selected, your own loans only"). Built from the frozen scope, so it says what the figures cover and not what was asked.
+     * Null (the default) leaves the generic line, which reads the {@code branch_id} parameter only.
+     */
+    default String describeScope(Prepared run) {
+        return null;
+    }
+
+    /**
      * Download time, with the downloader signed in: may they still have a file made under {@code run}'s frozen scope?
      * A report whose scope depends on the requester's branches or officers answers false when their access is now
      * narrower than the scope the file was made under. The default is true (a report with no such scope).

@@ -86,7 +86,8 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
                 .contains("loan tables")
                 .contains("written-off loans are not")
                 .contains("once in each group")
-                .contains("Fees and penalties outstanding are not shown");
+                .contains("Fees and penalties outstanding are not shown")
+                .contains("cannot be grouped by purpose");
         // Group, active loans, borrowers, principal outstanding, interest outstanding, arrears, average principal.
         // Head Office: 3 loans, 3 borrowers, 7,200,000, 50,000 interest, 1,050,000 arrears (1,000,000 + 50,000),
         // 2,400,000.
@@ -309,7 +310,7 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
                 .contains("LOAN PORTFOLIO OUTSTANDING")
                 .contains("As at 8 Oct 2026")
                 .doesNotContain("As at 8 Oct 2026 As at")
-                .contains("Branches All in your access")
+                .contains("Scope All branches in your access")
                 .contains("Group by Branch")
                 .contains("Currency UGX")
                 .contains("All branches in your access")
@@ -696,8 +697,14 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
         // Kampala is UTC+3 all year: 21:00 UTC is midnight. 20:59 UTC is 23:59 on the 8th; 21:00 and 21:01 are the 9th.
         Book book = book();
         UUID user = UUID.randomUUID();
-        // Queued at 20:59:30 UTC (23:59:30 on the 8th), executed at 21:01:00 UTC (00:01 on the 9th, before tonight's
-        // snapshot job has written the 8th): still the 8th, read from the loan tables, in every format.
+        // Queued at 20:59:30 UTC (23:59:30 on the 8th), executed at 21:01:00 UTC (00:01 on the 9th): still the 8th, in
+        // every format, read from the 8th's snapshot (the loan tables are the 9th's by then; without the snapshot the
+        // run
+        // is refused, see the next test).
+        tenantJobs.callAs(
+                book.t().tenantId(),
+                () -> new TransactionTemplate(transactions)
+                        .execute(x -> snapshotJob.backfill(LocalDate.of(2026, 10, 8), LocalDate.of(2026, 10, 8))));
         for (String format : List.of("pdf", "xlsx", "json")) {
             for (String key : List.of(PORT, PAR)) {
                 clock.set(Instant.parse("2026-10-08T20:59:30Z"));
@@ -725,7 +732,9 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
                     String text = new PdfProbe(downloadBytes(book.t(), user, PAR_PERMS, doc)).text();
                     // The figures are of the 8th; the file was made on the 9th, in the tenant's own time (00:01).
                     assertThat(text).contains("As at 8 Oct 2026").contains("Made 9 Oct 2026 00:01 (Africa/Kampala)");
-                    assertThat(text).contains("Figures read from the loan tables.");
+                    // The 8th is no longer the live book, so it is the 8th's snapshot, which the nightly job has
+                    // written.
+                    assertThat(text).contains("Figures read from the nightly snapshot of 2026-10-08.");
                 } else if (format.equals("xlsx")) {
                     XlsxReader wb = XlsxReader.read(downloadBytes(book.t(), user, PAR_PERMS, doc));
                     assertThat(wb.sheet("Parameters").text("B4"))
@@ -735,7 +744,7 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
                 } else {
                     JsonNode file = file(book, user, PAR_PERMS, run);
                     assertThat(file.get("parameters").get("as_at").asString()).isEqualTo("2026-10-08");
-                    assertThat(file.get("notes").toString()).contains("loan tables");
+                    assertThat(file.get("notes").toString()).contains("nightly snapshot of 2026-10-08");
                 }
             }
         }
@@ -765,6 +774,186 @@ class LendingPortfolioReportsIT extends LendingBookSupport {
     private JsonNode later(Book book, UUID user, String key, String groupBy, String format) throws Exception {
         clock.set(clock.instant().plusSeconds(120));
         return runReport(book, user, PAR_PERMS, key, Map.of("group_by", groupBy), format);
+    }
+
+    // JUSTIFICATION-A3: review cases of issue #217 (a run that outlives its date, the boundary days, the scope in
+    // words).
+    @Test
+    void aRunThatOutlivesItsDateNeverReadsTheNewDaysTablesItReadsTheSnapshotOrIsRefused() throws Exception {
+        Book book = book();
+        UUID user = UUID.randomUUID();
+        // Queued at 23:59:30 on the 8th in Kampala.
+        clock.set(Instant.parse("2026-10-08T20:59:30Z"));
+        ResponseEntity<JsonNode> posted = post(book.t(), user, PAR_PERMS, PORT, Map.of(), "pdf");
+        assertThat(posted.getStatusCode().value()).as("%s", posted.getBody()).isEqualTo(202);
+        assertThat(posted.getBody().get("as_of").asString()).isEqualTo("2026-10-08");
+        // The 9th's first disbursement (5,000,000, a member who already has a loan) lands before the runner gets to it.
+        loanOfMember(
+                book.t(),
+                book.product(),
+                book.t().headOffice(),
+                book.officerA(),
+                "LN0009",
+                "MLN0002",
+                5_000_000,
+                LocalDate.of(2026, 10, 9));
+        clock.set(Instant.parse("2026-10-08T21:01:00Z"));
+        drain();
+        // Nothing the runner could read is the 8th's book: the loan tables hold the 9th's loan and the 8th's snapshot
+        // is not
+        // written. The run is refused with a code the screen explains, and no file says "as at 8 Oct" over the 9th's
+        // figures.
+        JsonNode refused =
+                run(book.t(), user, PAR_PERMS, posted.getBody().get("id").asString());
+        assertThat(refused.get("status").asString()).isEqualTo("failed");
+        assertThat(refused.get("error").asString()).isEqualTo("report_stale_as_of");
+        assertThat(refused.get("document_id").isNull()).isTrue();
+
+        // The nightly job writes the 8th (the loan of the 9th is not in it); asked again at 23:59:30 the run is made at
+        // 00:01 from the snapshot, with the 8th's figures: the 7 loans and 10,600,000 of the book, not 15,600,000.
+        tenantJobs.callAs(
+                book.t().tenantId(),
+                () -> new TransactionTemplate(transactions)
+                        .execute(x -> snapshotJob.backfill(LocalDate.of(2026, 10, 8), LocalDate.of(2026, 10, 8))));
+        clock.set(Instant.parse("2026-10-08T20:59:30Z"));
+        ResponseEntity<JsonNode> again = post(book.t(), user, PAR_PERMS, PORT, Map.of(), "pdf");
+        clock.set(Instant.parse("2026-10-08T21:01:00Z"));
+        drain();
+        JsonNode ready =
+                run(book.t(), user, PAR_PERMS, again.getBody().get("id").asString());
+        assertThat(ready.get("status").asString()).as("%s", ready).isEqualTo("ready");
+        String text = new PdfProbe(downloadBytes(
+                        book.t(), user, PAR_PERMS, ready.get("document_id").asString()))
+                .text();
+        assertThat(text)
+                .contains("As at 8 Oct 2026")
+                .contains("Figures read from the nightly snapshot of 2026-10-08.")
+                .contains("All loans 7 6 10,600,000 50,000 1,860,000 1,514,286")
+                .doesNotContain("15,600,000");
+        // The page, asked after midnight for the 8th, reads the same snapshot: one number in both places.
+        JsonNode page = insightsPortfolio(book, user, "lending.insights.read,lending.insights.all_officers", null, "");
+        assertThat(metric(page, "portfolio.principal_outstanding")).isEqualTo(10_600_000L);
+    }
+
+    /**
+     * Loans one million each, first unpaid item due 0, 1, 30, 31, 60, 61, 90 and 91 days before the date (days past due 0,
+     * 1, 30, 31, 60, 61, 90, 91), and one disbursed on the date itself (nothing due yet): nine loans, 9,000,000. A band
+     * edge belongs to the lower band (1 to 30 holds 30, 31 to 60 holds 60, 61 to 90 holds 90), PAR x counts days past due
+     * above x. Hand computed: PAR 1 is 7 of 9 (7,778 basis points), PAR 30 is 5 of 9 (5,556), PAR 60 is 3 of 9 (3,333) and
+     * PAR 90 is 1 of 9 (1,111); each band but the last holds two loans (2,222) and the last one (1,111).
+     */
+    @Test
+    void theBoundaryDaysOfParFallInTheRightBandInBothReportsAndEqualTheInsightsPage() throws Exception {
+        TestDatabase.Fixture t = tenant(true);
+        UUID user = UUID.randomUUID();
+        UUID product = product(t, user);
+        int[] days = {0, 1, 30, 31, 60, 61, 90, 91};
+        for (int d : days) {
+            loan(t, product, t.headOffice(), user, "LB" + d, "active", 1_000_000, 0, 0, TODAY.minusDays(d));
+        }
+        loan(t, product, t.headOffice(), user, "LBNEW", "active", 1_000_000, 0, 0, TODAY.plusDays(30));
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE lending_loans SET disbursed_on = DATE '2026-10-08' WHERE tenant_id = ? AND loan_no = 'LBNEW'")
+                .param(t.tenantId())
+                .update();
+        Book book = new Book(t, user, user, product);
+
+        JsonNode par = file(book, user, PAR_PERMS, runReport(book, user, PAR_PERMS, PAR, Map.of(), "json"));
+        assertThat(rows(table(par, "par"))).containsExactly("[\"All loans\",9,9000000,7000000,7778,5556,3333,1111]");
+        assertThat(rows(table(par, "ageing")))
+                .containsExactly(
+                        "[\"All loans\",\"Current (not late)\",2,2000000,2222,0]",
+                        "[\"All loans\",\"1 to 30 days late\",2,2000000,2222,2000000]",
+                        "[\"All loans\",\"31 to 60 days late\",2,2000000,2222,2000000]",
+                        "[\"All loans\",\"61 to 90 days late\",2,2000000,2222,2000000]",
+                        "[\"All loans\",\"Over 90 days late\",1,1000000,1111,1000000]");
+        JsonNode portfolio = file(book, user, PAR_PERMS, runReport(book, user, PAR_PERMS, PORT, Map.of(), "json"));
+        assertThat(rows(table(portfolio, "portfolio")))
+                .containsExactly("[\"All loans\",9,9,9000000,0,7000000,1000000]");
+
+        JsonNode page = insightsPortfolio(book, user, "lending.insights.read,lending.insights.all_officers", null, "");
+        assertThat(metric(page, "portfolio.par1")).isEqualTo(7778L);
+        assertThat(metric(page, "portfolio.par30")).isEqualTo(5556L);
+        assertThat(metric(page, "portfolio.par60")).isEqualTo(3333L);
+        assertThat(metric(page, "portfolio.par90")).isEqualTo(1111L);
+        assertThat(metric(page, "portfolio.arrears")).isEqualTo(7_000_000L);
+        // The PDF prints the same in percentages made from those integers: 77.8, 55.6, 33.3 and 11.1.
+        PdfProbe pdf = new PdfProbe(downloadBytes(
+                t,
+                user,
+                PAR_PERMS,
+                runReport(book, user, PAR_PERMS, PAR, Map.of(), "pdf")
+                        .get("document_id")
+                        .asString()));
+        assertThat(pdf.text()).contains("All loans 9 9,000,000 7,000,000 77.8% 55.6% 33.3% 11.1%");
+    }
+
+    @Test
+    void theScopeLineSaysWhatTheFiguresCoverFromTheFrozenScopeIncludingTheOfficer() throws Exception {
+        Book book = book();
+        UUID user = UUID.randomUUID();
+        // An officer limited caller (without lending.insights.all_officers): their own loans only.
+        String own = PORTFOLIO + ",lending.insights.read";
+        for (String key : List.of(PORT, PAR)) {
+            PdfProbe pdf = new PdfProbe(downloadBytes(
+                    book.t(),
+                    book.officerB(),
+                    own,
+                    runReport(book, book.officerB(), own, key, Map.of(), "pdf")
+                            .get("document_id")
+                            .asString()));
+            assertThat(pdf.text()).as(key).contains("Scope All branches in your access, your own loans only");
+            XlsxReader wb = XlsxReader.read(downloadBytes(
+                    book.t(),
+                    book.officerB(),
+                    own,
+                    runReport(book, book.officerB(), own, key, Map.of(), "xlsx")
+                            .get("document_id")
+                            .asString()));
+            assertThat(scopeCell(wb)).as(key).isEqualTo("All branches in your access, your own loans only");
+        }
+        // A caller who holds one branch: what the run was frozen to, not "all".
+        String second = book.t().secondBranch().toString();
+        var h = headers(book.t(), user, PAR_PERMS);
+        h.set("X-Dev-Branch-Ids", second);
+        ResponseEntity<JsonNode> posted = http.exchange(
+                "/api/v1/report-runs",
+                HttpMethod.POST,
+                new HttpEntity<>(body(PORT, Map.of(), "pdf"), h),
+                JsonNode.class);
+        drain();
+        JsonNode run = run(book.t(), user, PAR_PERMS, posted.getBody().get("id").asString());
+        PdfProbe branchPdf = new PdfProbe(
+                downloadBytes(book.t(), user, PAR_PERMS, run.get("document_id").asString()));
+        assertThat(branchPdf.text()).contains("Scope 1 branch selected").doesNotContain("All branches in your access");
+        // A caller who sees everything and names two branches.
+        JsonNode two = runReport(
+                book,
+                user,
+                PAR_PERMS,
+                PORT,
+                Map.of("branch_id", List.of(book.t().headOffice().toString(), second)),
+                "pdf");
+        assertThat(new PdfProbe(downloadBytes(
+                                book.t(),
+                                user,
+                                PAR_PERMS,
+                                two.get("document_id").asString()))
+                        .text())
+                .contains("Scope 2 branches selected");
+    }
+
+    /** The scope row of the Parameters sheet: the value beside the label "Scope". */
+    private static String scopeCell(XlsxReader wb) {
+        for (var row : wb.sheet("Parameters").rows()) {
+            var cells = row.values().iterator();
+            var label = cells.next();
+            if ("Scope".equals(label.value()) && cells.hasNext()) {
+                return cells.next().value();
+            }
+        }
+        throw new AssertionError("no Scope row");
     }
 
     // ---- names -----------------------------------------------------------------------------------------------

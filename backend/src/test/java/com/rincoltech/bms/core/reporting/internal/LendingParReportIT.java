@@ -190,8 +190,36 @@ class LendingParReportIT extends LendingBookSupport {
         ResponseEntity<JsonNode> posted = post(book.t(), user, PAR_PERMS, "lending.par", Map.of(), "json");
         assertThat(posted.getStatusCode().value()).as("%s", posted.getBody()).isEqualTo(202);
         assertThat(posted.getBody().get("as_of").asString()).isEqualTo("2026-10-08");
-        // The runner gets to it after midnight (00:00:30 on 2026-10-09), before tonight's snapshot job has written
-        // 2026-10-08.
+        // The 9th's first disbursement lands, and the runner gets to the run after midnight (00:00:30 on 2026-10-09),
+        // before
+        // tonight's snapshot job has written 2026-10-08: the loan tables are no longer the 8th's book, so the run is
+        // refused
+        // with a retry hint and never prints the 9th's figures under the 8th.
+        loanOfMember(
+                book.t(),
+                book.product(),
+                book.t().headOffice(),
+                book.officerA(),
+                "LN0009",
+                "MLN0002",
+                5_000_000,
+                LocalDate.of(2026, 10, 9));
+        clock.set(java.time.Instant.parse("2026-10-08T21:00:30Z"));
+        drain();
+        JsonNode refused =
+                run(book.t(), user, PAR_PERMS, posted.getBody().get("id").asString());
+        assertThat(refused.get("status").asString()).as("%s", refused).isEqualTo("failed");
+        assertThat(refused.get("error").asString()).isEqualTo("report_stale_as_of");
+
+        // Once the nightly job has written the 8th, the same request, made at 23:59:30 and run after midnight, is the
+        // 8th's
+        // book from the snapshot: six loans and 10,000,000, without the loan of the 9th.
+        tenantJobs.callAs(
+                book.t().tenantId(),
+                () -> new TransactionTemplate(transactions)
+                        .execute(x -> snapshots.backfill(LocalDate.of(2026, 10, 8), LocalDate.of(2026, 10, 8))));
+        clock.set(java.time.Instant.parse("2026-10-08T20:59:30Z"));
+        posted = post(book.t(), user, PAR_PERMS, "lending.par", Map.of(), "json");
         clock.set(java.time.Instant.parse("2026-10-08T21:00:30Z"));
         drain();
 
@@ -202,7 +230,7 @@ class LendingParReportIT extends LendingBookSupport {
         JsonNode file = mapper.readTree(
                 download(book.t(), user, PAR_PERMS, run.get("document_id").asString()));
         assertThat(file.get("parameters").get("as_at").asString()).isEqualTo("2026-10-08");
-        assertThat(file.get("notes").toString()).contains("loan tables");
+        assertThat(file.get("notes").toString()).contains("nightly snapshot of 2026-10-08");
         assertThat(rows(table(file, "par"))).containsExactly("[\"All loans\",6,10000000,1860000,1800,800,300,300]");
     }
 

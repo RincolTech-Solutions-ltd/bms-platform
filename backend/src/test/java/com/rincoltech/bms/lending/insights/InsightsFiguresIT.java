@@ -93,6 +93,9 @@ class InsightsFiguresIT extends IntegrationTest {
     InsightsFigures figures;
 
     @Autowired
+    InsightsSnapshots snapshotWriter;
+
+    @Autowired
     TenantJobs tenantJobs;
 
     @BeforeEach
@@ -491,19 +494,36 @@ class InsightsFiguresIT extends IntegrationTest {
         assertThat(scope.to()).isEqualTo(TODAY);
 
         // The run is executed after midnight: the clock is now on 2026-10-09 in Kampala, and tonight's snapshot of the
-        // 8th
-        // has not been written. The scope still reads the 8th from the loan tables, as the day it was asked on.
+        // 8th has
+        // not been written. The loan tables now hold the 9th's activity, so they are no longer the 8th's book: the
+        // figures
+        // are refused with a retry hint, never read live under the 8th.
         clock.now = Instant.parse("2026-10-08T21:00:30Z");
-        assertThat(tenantJobs
-                        .callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {}))
-                        .source())
-                .isEqualTo("live");
+        assertThatThrownBy(() -> tenantJobs.callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {})))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("report_stale_as_of"));
+        assertThatThrownBy(() ->
+                        tenantJobs.callAs(a.tenantId(), () -> figures.portfolio(scope, ParGroupBy.NONE, () -> {})))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("report_stale_as_of"));
         // Resolved after midnight instead, the same date is a past date and has no snapshot: that is what the frozen
         // date avoids.
         PortfolioScope late = new PortfolioScope(TODAY, TODAY, TODAY.plusDays(1), null, null, null);
         assertThatThrownBy(() -> tenantJobs.callAs(a.tenantId(), () -> figures.par(late, ParGroupBy.NONE, () -> {})))
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
+        // Once the nightly job has written the 8th, the same scope reads that snapshot, which is the 8th's book.
+        tenantJobs.callAs(a.tenantId(), () -> inTx(() -> snapshotWriter.backfill(TODAY, TODAY)));
+        ParFigures later = tenantJobs.callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {}));
+        assertThat(later.source()).isEqualTo("snapshot");
+        assertThat(later.asAt()).isEqualTo(TODAY);
+        matches(later.total(), live(l -> true));
+        // On the day itself the same scope is still live.
+        clock.now = NOW;
+        assertThat(tenantJobs
+                        .callAs(a.tenantId(), () -> figures.par(scope, ParGroupBy.NONE, () -> {}))
+                        .source())
+                .isEqualTo("live");
     }
 
     @Test

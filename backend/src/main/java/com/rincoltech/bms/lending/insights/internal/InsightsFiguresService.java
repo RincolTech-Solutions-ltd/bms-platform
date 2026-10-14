@@ -145,6 +145,21 @@ class InsightsFiguresService implements InsightsFigures {
         }
         Scope s = scopeOf(p);
         boolean live = s.to().equals(today);
+        if (live && service.today().isAfter(today)) {
+            // The date the figures were asked for has passed while the run waited: the loan tables now hold the new
+            // day's
+            // disbursements and repayments, so they are no longer the book of the date on the page. Read that date's
+            // snapshot
+            // when the nightly job has written it, and refuse (never a guess) when it has not.
+            if (!positions.snapshotTaken(s.to())) {
+                throw ApiException.rule(
+                        "report_stale_as_of",
+                        "The date of this report (" + s.to()
+                                + ") passed before it was made and its snapshot is not written"
+                                + " yet. Ask for it again once the nightly snapshot has run, or for today's date.");
+            }
+            live = false;
+        }
         if (!live && !positions.snapshotTaken(s.to())) {
             throw ApiException.rule(
                     "snapshot_unavailable",

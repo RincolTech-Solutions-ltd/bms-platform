@@ -58,6 +58,10 @@ with `BMS_REPORTS_PDF_ROW_CAP`, because the whole table is held while pages are 
 (`ReportMemoryIT`): with the cap at 500 the run, a sheet of 20,000 rows and the lending reports together keep the old generation at 118 to 124 of
 149 MB; with the cap at 3,000 the old generation fills (149 of 149 MB) though the run finishes. So staging keeps 500, and a host with
 more heap may raise it; repeat the measurement with `mvn verify -Dit.test=ReportMemoryIT -Dreports.memory.pdf3000=true` before doing so on a small one.
+`-Dreports.memory.production=true` runs the production shape instead: two tenants asking at once for a PDF of 3,000 printed rows and a
+workbook of 20,000 rows, two runs at a time, on the production container's heap (1,075 MB, the default collector). A report takes at
+most one of the document renderer's two places, so the second PDF waits for the first and a receipt or a statement is never turned away
+by reports. Measured: all four runs ready, the old generation peaking at 190 of 1,080 MB.
 A PDF waits for one of the document renderer's places (`bms.documents.max-concurrent-renders`, two by default) until the run's own
 deadline; a run that waited the full ten minutes ends `timeout`. A run that fails in the layout ends `run_failed` and the log line names
 the exception classes and the first application frame, never the report's text.
@@ -90,6 +94,7 @@ SELECT error, count(*), max(finished_at) FROM report_runs
 |---|---|---|
 | `report_too_large` | A table passed the row cap or the file passed the byte cap | Ask for fewer branches or a shorter range; raise the cap only if the host can hold it |
 | `snapshot_unavailable` | A past date has no nightly snapshot | The snapshot job (`lending.insights-snapshot`) has not written that date; ask for a later date, or check the job |
+| `report_stale_as_of` | The run waited past midnight (Kampala) and the loan tables are the new day's; the snapshot of the date it was asked for is not written yet | Ask again once the nightly snapshot (`lending.insights-snapshot`) has run, or for today; nothing is broken |
 | `timeout` | The run passed 10 minutes | Narrow the report; for a big book measure the query (`EXPLAIN` it as the owner) before raising the timeout |
 | `interrupted` | The process holding the run died or was stopped (a restart, a kill, out of memory) | Run it again. The runner fails any run whose heartbeat is a minute old, or which an earlier process of the host left |
 | `reports_disabled` | The tenant switched reports off before the run started | Switch them on and ask again |

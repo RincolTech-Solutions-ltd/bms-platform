@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -47,7 +46,7 @@ import tools.jackson.databind.ObjectMapper;
  *       report's {@link ReportDefinition#query} writes its rows to the spool on disk, one at a time. The
  *       transaction then <b>commits</b>, so the snapshot (and the old row versions it pins) is released before
  *       anything slow happens. Every row of a run comes from this one snapshot.
- *   <li><b>Snapshot time.</b> The database's own start time of that transaction is recorded on the run.
+ *   <li><b>Snapshot time.</b> The business clock's time at the start of that transaction is recorded on the run.
  *   <li><b>Render.</b> The JSON or CSV file is streamed from the spool to a file, capped in size.
  *   <li><b>Store.</b> The object is written to storage without a transaction open, then one short transaction
  *       records the document and marks the run ready.
@@ -235,10 +234,8 @@ class RunExecutor {
                             remaining.plusSeconds(30).toMillis() + "ms")
                     .query((rs, n) -> 1)
                     .single();
-            Instant snapshotAt = jdbc.sql("SELECT transaction_timestamp()")
-                    .query(Timestamp.class)
-                    .single()
-                    .toInstant();
+            // The business clock, like every other timestamp of a run, so a test that pins the clock pins this too.
+            Instant snapshotAt = clock.now();
             String currency = tenant.profile().currency();
             try (Spool.Writer out = spool.writer(rowCap, sizeCap, guard)) {
                 def.query(prepared, out);
@@ -302,7 +299,8 @@ class RunExecutor {
                     .query(String.class)
                     .optional()
                     .orElse("Staff");
-            return Presentation.of(letterheads.current(), by, tenant.profile().timezone(), def, run.params());
+            String scope = def.describeScope(new ReportDefinition.Prepared(run.params(), run.scope(), run.asOf()));
+            return Presentation.of(letterheads.current(), by, tenant.profile().timezone(), def, run.params(), scope);
         });
     }
 

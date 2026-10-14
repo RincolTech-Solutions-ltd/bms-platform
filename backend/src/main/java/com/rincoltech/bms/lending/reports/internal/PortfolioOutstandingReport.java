@@ -54,6 +54,7 @@ class PortfolioOutstandingReport extends PortfolioReport {
         out.note("Only active loans are counted; written-off loans are not.");
         out.note("Borrowers are counted once in each group, so the groups can add up to more than the total.");
         out.note("Fees and penalties outstanding are not shown: the loan book on a past date does not hold them yet.");
+        out.note("The loans cannot be grouped by purpose: the loan book on a past date does not hold it yet.");
 
         ReportOutput.Table table = out.table(
                 "portfolio",

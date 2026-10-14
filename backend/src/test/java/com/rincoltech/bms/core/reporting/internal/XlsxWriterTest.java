@@ -264,6 +264,60 @@ class XlsxWriterTest {
         }
     }
 
+    // JUSTIFICATION-A3: review cases of issue #217 (a control character hiding a formula, apostrophes at a cut sheet
+    // name).
+    @Test
+    void aControlCharacterInFrontOfAFormulaDoesNotHideItFromTheQuotePrefix() {
+        Spool s = newSpool();
+        try (Spool.Writer out = s.writer(100, 1_000_000, () -> {})) {
+            var t = out.table("names", "Names", List.of(new Column("name", "Name", Kind.TEXT)));
+            t.row("\u0001=HYPERLINK(\"http://example.invalid\")");
+            t.row("\u0007\u0000+1+1");
+            t.row("\u0001 =1+1");
+            XlsxReader x = write("UGX", 10_000_000, out.finish(), s);
+            Sheet sh = x.sheet("Names");
+            // The cell holds what the spreadsheet will see (the control character is gone) and carries the quote
+            // prefix.
+            assertThat(sh.text("A2")).isEqualTo("=HYPERLINK(\"http://example.invalid\")");
+            assertThat(x.styles.get(sh.cell("A2").style()).quotePrefix()).isTrue();
+            assertThat(sh.text("A3")).isEqualTo("+1+1");
+            assertThat(x.styles.get(sh.cell("A3").style()).quotePrefix()).isTrue();
+            // A space in front is text to a spreadsheet and needs no prefix.
+            assertThat(sh.text("A4")).isEqualTo(" =1+1");
+            assertThat(x.styles.get(sh.cell("A4").style()).quotePrefix()).isFalse();
+        }
+    }
+
+    @Test
+    void aSheetNameNeverEndsWithAnApostropheAfterTheCutAndControlCharactersDoNotMakeNamesLookDifferent() {
+        // Thirty characters, then an apostrophe: the cut at 31 leaves it at the end, where a sheet name may not have
+        // one.
+        String title = "Branch portfolio at risk of 30" + "'" + "s book";
+        assertThat(title.charAt(30)).isEqualTo('\'');
+        assertThat(XlsxWriter.legalName(title, 31))
+                .isEqualTo("Branch portfolio at risk of 30")
+                .doesNotEndWith("'");
+        assertThat(XlsxWriter.legalName("'quoted'", 31)).isEqualTo("quoted");
+        assertThat(XlsxWriter.legalName("\u0001\u0002", 31)).isEqualTo("Table");
+        Spool s = newSpool();
+        try (Spool.Writer out = s.writer(100, 1_000_000, () -> {})) {
+            List<Column> one = List.of(new Column("id", "Id", Kind.COUNT));
+            out.table("a", "Names", one).row(1);
+            // Differs from the first only by a control character that is dropped when written: the same sheet name.
+            out.table("b", "Na\u0001mes", one).row(1);
+            out.table("c", title, one).row(1);
+            List<TableMeta> tables = out.finish();
+            List<String> names = XlsxWriter.sheetNames(tables);
+            assertThat(names).containsExactly("Parameters", "Names", "Names 2", "Branch portfolio at risk of 30");
+            for (String name : names) {
+                assertThat(name).isEqualTo(XlsxWriter.escape(name).replace("&apos;", "'"));
+            }
+            assertThat(write("UGX", 10_000_000, tables, s).sheets)
+                    .extracting(Sheet::name)
+                    .isEqualTo(names);
+        }
+    }
+
     @Test
     void aSheetWithMoreThanSevenColumnsPrintsLandscapeAndTheHeaderRepeats() {
         Spool s = newSpool();

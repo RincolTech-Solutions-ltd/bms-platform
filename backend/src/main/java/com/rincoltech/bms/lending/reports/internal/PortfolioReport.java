@@ -97,6 +97,21 @@ abstract class PortfolioReport implements ReportDefinition {
         return figures.covers(mapper.convertValue(run.scope(), PortfolioScope.class));
     }
 
+    @Override
+    public String describeScope(Prepared run) {
+        PortfolioScope scope = scope(run);
+        String branches = scope.branchIds() == null
+                ? "All branches in your access"
+                : scope.branchIds().isEmpty()
+                        ? "No branches"
+                        : scope.branchIds().size() == 1
+                                ? "1 branch selected"
+                                : scope.branchIds().size() + " branches selected";
+        // The officer is forced to the caller without lending.insights.all_officers (the reports offer no officer
+        // filter).
+        return scope.officerId() == null ? branches : branches + ", your own loans only";
+    }
+
     /** The frozen scope of a run. */
     PortfolioScope scope(Prepared prepared) {
         return mapper.convertValue(prepared.scope(), PortfolioScope.class);

@@ -49,11 +49,12 @@ final class PdfReport {
             Spool spool,
             Path target,
             Guard guard) {
-        Map<String, Object> model = model(limits.pdfRowCap, h, p, number, tables, spool, guard);
         while (true) {
             guard.checkpoint();
             try {
-                documents.renderPdf(TEMPLATE, model, target, 5_000);
+                // The model (the printed rows of every table) is built once a render place is held.
+                documents.renderPdf(
+                        TEMPLATE, () -> model(limits.pdfRowCap, h, p, number, tables, spool, guard), target, 5_000);
                 return;
             } catch (ApiException e) {
                 if (!e.code().equals("documents_busy")) {

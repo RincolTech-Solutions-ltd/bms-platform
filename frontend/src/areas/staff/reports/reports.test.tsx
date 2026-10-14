@@ -67,6 +67,7 @@ describe('failures in words', () => {
   it.each([
     ['report_too_large', /too large/i],
     ['snapshot_unavailable', /not saved for that date/i],
+    ['report_stale_as_of', /passed before it was made/i],
     ['timeout', /took too long/i],
     ['interrupted', /restart/i],
     ['reports_disabled', /switched off/i],

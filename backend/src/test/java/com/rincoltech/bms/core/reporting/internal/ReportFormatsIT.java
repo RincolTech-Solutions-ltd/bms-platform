@@ -204,7 +204,7 @@ class ReportFormatsIT extends ReportsItSupport {
                 .when(documents)
                 .renderPdf(
                         org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.anyMap(),
+                        org.mockito.ArgumentMatchers.<java.util.function.Supplier<Map<String, Object>>>any(),
                         org.mockito.ArgumentMatchers.any(Path.class),
                         org.mockito.ArgumentMatchers.anyLong());
         JsonNode run = runToTheEnd(t, user, "test.kinds", Map.of("n", 5), "pdf");

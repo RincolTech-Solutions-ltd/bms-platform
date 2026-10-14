@@ -29,7 +29,15 @@ public final class ReportMemoryMain {
     public static void main(String[] args) throws Exception {
         String url = args[0];
         String password = args[1];
-        UUID tenant = UUID.fromString(args[2]);
+        // One or more tenants, comma separated: a run is one at a time per tenant, so two runs at once need two
+        // tenants.
+        List<UUID> tenants = java.util.Arrays.stream(args[2].split(","))
+                .map(UUID::fromString)
+                .toList();
+        UUID tenant = tenants.get(0);
+        // The production measurement: a PDF row cap (fourth), runs at once (fifth); the default is staging's.
+        boolean production = args.length > 3;
+        int concurrent = args.length > 4 ? Integer.parseInt(args[4]) : 1;
         SpringApplication app = new SpringApplication(BmsApplication.class, TestReports.class);
         // Command line arguments win over application.yml (default properties would lose to its ${...} values).
         String[] settings = {
@@ -40,7 +48,7 @@ public final class ReportMemoryMain {
             "--server.port=0",
             "--management.server.port=0",
             // The staging limits (deploy/compose.pi-staging.yml).
-            "--bms.reports.max-concurrent-runs=1",
+            "--bms.reports.max-concurrent-runs=" + concurrent,
             "--bms.reports.xlsx-row-cap=20000",
             // The PDF row cap of staging (production's is 3,000); a fourth argument sets another, for the extra
             // measurement.
@@ -69,10 +77,12 @@ public final class ReportMemoryMain {
             // Every run is asked by its own user: ten new runs a minute is the limit of one (chapter 7 section 7.10).
             record Ask(String key, Map<String, Object> params, String format) {}
             // With a fourth argument: the production PDF cap of 3,000 rows, measured on the same 224 MB heap.
-            List<Ask> asks = args.length > 3
-                    ? List.of(
-                            new Ask("test.kinds", Map.of("n", 19_999), "pdf"),
-                            new Ask("lending.par", Map.of("group_by", "branch"), "pdf"))
+            List<Ask> asks = production
+                    ? tenants.stream()
+                            .flatMap(t -> java.util.stream.Stream.of(
+                                    new Ask("test.kinds", Map.of("n", 19_999), "pdf"),
+                                    new Ask("test.kinds", Map.of("n", 19_999), "xlsx")))
+                            .toList()
                     : List.of(
                             new Ask("lending.par", Map.of("group_by", "none"), "json"),
                             new Ask("lending.par", Map.of("group_by", "product"), "csv"),
@@ -100,7 +110,11 @@ public final class ReportMemoryMain {
                             new Ask("test.markup", Map.of(), "pdf"));
             List<UUID> ids = new ArrayList<>();
             Map<UUID, Principal> askers = new java.util.HashMap<>();
+            Map<UUID, UUID> tenantOf = new java.util.HashMap<>();
+            int n = 0;
             for (Ask ask : asks) {
+                // Production mode: two asks (PDF, workbook) per tenant, in order.
+                final UUID asked = production ? tenants.get(n++ / 2) : tenant;
                 Principal who = Principal.uniform(
                         UUID.randomUUID(),
                         "staff",
@@ -109,13 +123,14 @@ public final class ReportMemoryMain {
                         Set.of());
                 CurrentPrincipal.set(who);
                 UUID id = jobs.callAs(
-                                tenant,
+                                asked,
                                 () -> runs.request(
                                         null, new ReportsApi.RunRequest(ask.key(), ask.params(), ask.format())))
                         .run()
                         .id();
                 ids.add(id);
                 askers.put(id, who);
+                tenantOf.put(id, asked);
             }
             for (int i = 0; i < 100; i++) {
                 runner.tick();
@@ -125,7 +140,8 @@ public final class ReportMemoryMain {
                 boolean open = false;
                 for (UUID id : ids) {
                     CurrentPrincipal.set(askers.get(id));
-                    String status = jobs.callAs(tenant, () -> runs.get(id)).status();
+                    String status =
+                            jobs.callAs(tenantOf.get(id), () -> runs.get(id)).status();
                     open |= status.equals("queued") || status.equals("running");
                 }
                 if (!open) {
@@ -135,7 +151,7 @@ public final class ReportMemoryMain {
             for (int i = 0; i < asks.size(); i++) {
                 final UUID id = ids.get(i);
                 CurrentPrincipal.set(askers.get(id));
-                ReportsApi.RunView view = jobs.callAs(tenant, () -> runs.get(id));
+                ReportsApi.RunView view = jobs.callAs(tenantOf.get(id), () -> runs.get(id));
                 if (!view.status().equals("ready")) {
                     failures++;
                 }

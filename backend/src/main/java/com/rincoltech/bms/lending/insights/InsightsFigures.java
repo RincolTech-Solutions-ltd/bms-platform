@@ -38,9 +38,11 @@ public interface InsightsFigures {
 
     /**
      * Portfolio at risk and ageing as at {@code scope.to()} (chapter 14 section 14.3, {@code lending.par}): the live loan
-     * tables when {@code to} is the scope's business date, the nightly snapshot for an earlier one. Runs in the caller's
-     * transaction, which should be read only. Refuses with 422 {@code snapshot_unavailable} when a past date has no
-     * snapshot.
+     * tables when {@code to} is the scope's business date and that date is still the business date, the nightly snapshot
+     * for an earlier one. A scope whose date has passed since it was resolved (a run that waited past midnight) reads that date's
+     * snapshot when it exists, because the loan tables are the new day's by then, and is refused with 422
+     * {@code report_stale_as_of} when it does not. Runs in the caller's transaction, which should be read only. Refuses with
+     * 422 {@code snapshot_unavailable} when a past date has no snapshot.
      *
      * <p>The loans are read in blocks and totalled as they arrive, so memory grows with the number of groups and never
      * with the number of loans; {@code checkpoint} is called every 1,000 loans, so a caller can stop a long read (a

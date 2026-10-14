@@ -40,12 +40,17 @@ class ReportMemoryIT extends IntegrationTest {
     LendingSeeder seeder;
 
     private String child(TestDatabase.Fixture t, boolean gate, String... extra) throws Exception {
+        return child(t.tenantId().toString(), List.of("-Xmx224m", "-XX:+UseSerialGC"), 190, 224, gate, extra);
+    }
+
+    /** The staging heap or, with {@code heap}, another: a child JVM running {@link ReportMemoryMain} against the tenants. */
+    private String child(String tenants, List<String> heap, int minHeapMb, int maxHeapMb, boolean gate, String... extra)
+            throws Exception {
         String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        List<String> command = new ArrayList<>(List.of(
-                javaBin,
-                "-Xmx224m",
+        List<String> command = new ArrayList<>(List.of(javaBin));
+        command.addAll(heap);
+        command.addAll(List.of(
                 "-XX:MaxMetaspaceSize=128m",
-                "-XX:+UseSerialGC",
                 "-XX:+ExitOnOutOfMemoryError",
                 "-Djava.awt.headless=true",
                 "-cp",
@@ -53,7 +58,7 @@ class ReportMemoryIT extends IntegrationTest {
                 ReportMemoryMain.class.getName(),
                 TestDatabase.url(),
                 TestDatabase.APP_PASSWORD,
-                t.tenantId().toString()));
+                tenants));
         command.addAll(List.of(extra));
         Process child = new ProcessBuilder(command).redirectErrorStream(true).start();
         String output = new String(child.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -61,14 +66,20 @@ class ReportMemoryIT extends IntegrationTest {
         String lines = output.lines().filter(l -> l.startsWith("MEMORY ")).reduce("", (a, b) -> a + b + "\n");
         assertThat(child.exitValue()).as(lines.isEmpty() ? output : lines).isZero();
         // -Xmx224m: the serial collector reports a little less (it keeps one survivor space out of the figure).
-        Matcher heap = Pattern.compile("MEMORY maxHeapMb=(\\d+)").matcher(output);
-        assertThat(heap.find()).as(output).isTrue();
-        assertThat(Integer.parseInt(heap.group(1))).isBetween(190, 224);
+        Matcher heapMax = Pattern.compile("MEMORY maxHeapMb=(\\d+)").matcher(output);
+        assertThat(heapMax.find()).as(output).isTrue();
+        assertThat(Integer.parseInt(heapMax.group(1))).isBetween(minHeapMb, maxHeapMb);
         // The old generation's peak stays clear of the heap limit with a tenth spare
         // (promoted garbage counts in the peak, so this is a ceiling, not the live set; an out of memory error would
         // have ended the child).
         Matcher heapUse = Pattern.compile("oldPeakMb=(\\d+) oldMaxMb=(\\d+)").matcher(output);
         Matcher base = Pattern.compile("MEMORY oldBaselineMb=(\\d+)").matcher(output);
+        if (!gate) {
+            // Measurements print their figures and are judged by the caller.
+            assertThat(heapUse.find()).as(output).isTrue();
+            System.out.println("REPORT MEMORY " + String.join(" ", extra) + " " + heapUse.group(0));
+            return output;
+        }
         assertThat(heapUse.find() && base.find()).as(output).isTrue();
         long peak = Long.parseLong(heapUse.group(1));
         long max = Long.parseLong(heapUse.group(2));
@@ -154,5 +165,36 @@ class ReportMemoryIT extends IntegrationTest {
                 output.lines().filter(l -> l.startsWith("MEMORY run ")).toList();
         assertThat(runs).as(output).hasSize(2).allMatch(l -> l.contains("status=ready"));
         assertThat(output).contains("MEMORY run test.kinds pdf status=ready rows=20000");
+    }
+
+    /**
+     * A measurement behind {@code -Dreports.memory.production=true}, not part of the build: the production shape, two
+     * tenants asking for a PDF of 3,000 printed rows and a workbook of 20,000 each at the same time, on the heap of the
+     * production container (1,536 MB of memory at 70 percent is 1,075 MB) with the default collector (G1), two runs at once.
+     * Reports take one of the two render places, so the second PDF waits for the first; all four runs must be ready with no
+     * out of memory error. The figures print as {@code REPORT MEMORY}; the runbook records them.
+     */
+    @Test
+    void twoTenantsAskingForPdfsAtTheProductionRowCapOnTheProductionHeapAllFinish() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Boolean.getBoolean("reports.memory.production"),
+                "a measurement, run with -Dreports.memory.production=true");
+        TestDatabase.Fixture a = TestDatabase.tenant("report-memory-a", true);
+        TestDatabase.Fixture b = TestDatabase.tenant("report-memory-b", true);
+        for (TestDatabase.Fixture t : List.of(a, b)) {
+            TestDatabase.owner()
+                    .sql("""
+                            INSERT INTO tenant_settings (id, tenant_id, settings) VALUES (?, ?, '{"reports_enabled": true}')
+                            ON CONFLICT (tenant_id) DO UPDATE SET settings = tenant_settings.settings || '{"reports_enabled": true}'
+                            """)
+                    .params(UUID.randomUUID(), t.tenantId())
+                    .update();
+        }
+        String output = child(a.tenantId() + "," + b.tenantId(), List.of("-Xmx1075m"), 900, 1100, false, "3000", "2");
+        List<String> runs =
+                output.lines().filter(l -> l.startsWith("MEMORY run ")).toList();
+        assertThat(runs).as(output).hasSize(4).allMatch(l -> l.contains("status=ready"));
+        assertThat(runs.stream().filter(l -> l.contains("test.kinds pdf")).count())
+                .isEqualTo(2);
     }
 }

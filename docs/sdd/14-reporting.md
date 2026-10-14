@@ -386,8 +386,10 @@ of the group's principal) and `ageing` (per group and bucket: loans, principal o
 arrears). The figures come from the public `InsightsFigures` port (`lending.insights`); slice D2 (issue #217) added the portfolio
 figures to it and the remaining reports add theirs. A test asserts the report's principal outstanding, arrears, active loans and PAR 1,
 30, 60 and 90 equal the insights portfolio metrics for the same date. The restructured loan's separate line (FR-LCL-04) is not
-printed, because loans cannot be restructured yet. The business date is the one of the request: a run asked for at 23:59 and executed after midnight still reads the loan tables as
-of the day it was asked for, not a snapshot that tonight's job has not written. The figures are totalled as the loans are read, in
+printed, because loans cannot be restructured yet. The business date is the one of the request, and the figures are the book of that date: a run asked for at 23:59 and executed
+after midnight no longer finds that book in the loan tables (they hold the new day's disbursements and repayments), so it reads the
+date's nightly snapshot when the job has written it and is refused with `report_stale_as_of` when it has not (the user asks again
+once the snapshot exists, or for today). The figures are totalled as the loans are read, in
 blocks, so memory grows with the number of groups, not of loans; a cancelled or timed out run stops within 1,000 loans. The tenant
 switch is the setting `reports_enabled` (chapter 6 `tenant_settings`), also in `GET /me`.
 
@@ -428,8 +430,16 @@ migration (the `format` check of `report_runs` already allowed `pdf` and `xlsx`)
   finishes but the old generation fills its limit, so staging keeps 500 and a production host with more heap takes 3,000
   (`-Dreports.memory.pdf3000=true` repeats the measurement).
 - **Business date.** The figures are those of the request's business date in Kampala, whichever format: a PDF or workbook asked for at
-  23:59:30 and made after midnight says "As at 8 Oct 2026" and "Made 9 Oct 2026 00:01", and reads the loan tables, not a snapshot that
-  tonight's job has not written. Tests queue across 20:59 and 21:01 UTC.
+  23:59:30 and made after midnight says "As at 8 Oct 2026" and "Made 9 Oct 2026 00:01" and holds the 8th's book, read from the 8th's
+  snapshot. The loan tables are the 9th's by then, so a run whose date has passed without its snapshot is failed `report_stale_as_of`
+  rather than printing the 9th's figures under the 8th (a test lands a disbursement of the 9th between the queue and the run). Tests queue
+  across 20:59 and 21:01 UTC. The time the data was read is the business clock's, taken as the snapshot transaction starts.
+- **Scope in words.** The first lines of the PDF (the letterhead's second line and the parameters box) and of the Parameters sheet say
+  what the figures cover, from the frozen scope: "All branches in your access", "1 branch selected", "2 branches selected", and ", your
+  own loans only" for a caller without `lending.insights.all_officers`.
+- **Render places.** A report PDF takes at most one of the document renderer's two places and builds its model only once it holds it, so
+  a receipt or a statement asked for while two reports are made still finds a place (a test holds a report in its layout and renders a
+  document beside it).
 
 ## 14.8 Test datasets
 

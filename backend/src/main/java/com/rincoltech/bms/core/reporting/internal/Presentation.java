@@ -45,7 +45,16 @@ record Presentation(
 
     /** The presentation of a run from the tenant's letterhead and what the run stored. */
     static Presentation of(
-            Letterheads.Letterhead lh, String by, ZoneId zone, ReportDefinition def, Map<String, Object> params) {
+            Letterheads.Letterhead lh,
+            String by,
+            ZoneId zone,
+            ReportDefinition def,
+            Map<String, Object> params,
+            String frozenScope) {
+        String scope = frozenScope != null ? frozenScope : scope(params);
+        List<Line> lines = new ArrayList<>();
+        lines.add(new Line("Scope", scope));
+        lines.addAll(describe(def, params));
         return new Presentation(
                 by,
                 zone,
@@ -58,8 +67,8 @@ record Presentation(
                         .map(l -> "data:" + l.contentType() + ";base64,"
                                 + Base64.getEncoder().encodeToString(l.bytes()))
                         .orElse(null),
-                scope(params),
-                describe(def, params));
+                scope,
+                lines);
     }
 
     /** A pale tint of the brand colour for alternate table rows: 88% white over it (as the other documents do). */
@@ -90,9 +99,6 @@ record Presentation(
             }
             String label = ReportFormats.label(p.name(), p.type());
             if (value == null) {
-                if (p.type().equals("uuid_list")) {
-                    lines.add(new Line(label, "All in your access"));
-                }
                 continue;
             }
             lines.add(new Line(label, text(p, value)));

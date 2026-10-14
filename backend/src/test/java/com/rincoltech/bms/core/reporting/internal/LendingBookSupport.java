@@ -191,6 +191,19 @@ abstract class LendingBookSupport extends ReportsItSupport {
             String no,
             String memberNo,
             long principal) {
+        loanOfMember(t, product, branch, officer, no, memberNo, principal, LocalDate.of(2026, 1, 5));
+    }
+
+    /** As above, disbursed on {@code disbursedOn} (a loan of the day after the figures' date, for the midnight tests). */
+    void loanOfMember(
+            TestDatabase.Fixture t,
+            UUID product,
+            UUID branch,
+            UUID officer,
+            String no,
+            String memberNo,
+            long principal,
+            LocalDate disbursedOn) {
         UUID loan = UUID.randomUUID();
         var owner = TestDatabase.owner();
         owner.sql("""
@@ -199,7 +212,7 @@ abstract class LendingBookSupport extends ReportsItSupport {
                             requested_term_count, term_unit, interest_method, interest_rate_bp, rate_unit, repayment_pattern,
                             disbursed_on, principal_disbursed_minor, principal_outstanding_minor, maturity_date)
                         SELECT ?, ?, ?, ?, m.id, v.id, ?, 'active', 'staff', 'business', 'UGX', ?, 1, 'month', 'flat', 1000,
-                               'per_term', 'bullet', DATE '2026-01-05', ?, ?, DATE '2026-12-31'
+                               'per_term', 'bullet', ?, ?, ?, DATE '2026-12-31'
                           FROM lending_members m, lending_loan_product_versions v
                          WHERE m.tenant_id = ? AND m.member_no = ? AND v.product_id = ?
                         """)
@@ -210,6 +223,7 @@ abstract class LendingBookSupport extends ReportsItSupport {
                         no,
                         officer,
                         principal,
+                        Date.valueOf(disbursedOn),
                         principal,
                         principal,
                         t.tenantId(),

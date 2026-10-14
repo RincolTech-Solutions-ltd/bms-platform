@@ -286,7 +286,11 @@ class DocumentService implements Documents {
     }
 
     @Override
-    public void renderPdf(String template, Map<String, Object> model, java.nio.file.Path target, long waitMillis) {
+    public void renderPdf(
+            String template,
+            java.util.function.Supplier<Map<String, Object>> model,
+            java.nio.file.Path target,
+            long waitMillis) {
         pdf.renderTo(template, model, target, waitMillis);
     }
 

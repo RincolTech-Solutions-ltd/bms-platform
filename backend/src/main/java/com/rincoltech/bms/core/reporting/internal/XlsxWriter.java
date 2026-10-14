@@ -207,23 +207,30 @@ final class XlsxWriter {
         names.add("Parameters");
         used.add("parameters");
         for (TableMeta t : tables) {
-            String base = t.title()
-                    .replaceAll("[\\[\\]:*?/\\\\]", " ")
-                    .replaceAll("\\s+", " ")
-                    .trim();
-            base = base.replaceAll("^'+|'+$", "");
-            if (base.isEmpty()) {
-                base = "Table";
-            }
-            String name = cut(base, 31);
+            String name = legalName(t.title(), 31);
             int n = 2;
+            String base = t.title();
             while (!used.add(name.toLowerCase(Locale.ROOT))) {
                 String suffix = " " + n++;
-                name = cut(base, 31 - suffix.length()) + suffix;
+                name = legalName(base, 31 - suffix.length()) + suffix;
             }
             names.add(name);
         }
         return names;
+    }
+
+    /**
+     * A sheet name from a title: characters XML cannot hold dropped first (so what is compared for uniqueness is what is
+     * written), the characters a sheet name may not hold made spaces, then cut to {@code max} and only then stripped of the
+     * apostrophes a name may not begin or end with (a cut can leave one at the end).
+     */
+    static String legalName(String title, int max) {
+        String name = strip(title)
+                .replaceAll("[\\[\\]:*?/\\\\]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        name = cut(name, max).replaceAll("^'+|'+$", "").trim();
+        return name.isEmpty() ? "Table" : name;
     }
 
     private static String cut(String s, int max) {
@@ -488,7 +495,13 @@ final class XlsxWriter {
 
     /** A string cell: inline text, never a formula, with the quote prefix when it begins like one. */
     private static String textCell(String col, int row, String value, boolean wrap, boolean total) {
-        String text = value.length() > MAX_CELL_CHARS ? value.substring(0, MAX_CELL_CHARS) : value;
+        // The text a spreadsheet will hold: control characters are gone before the test, so a leading control character
+        // cannot hide a leading "=" from it.
+        String text = strip(value);
+        if (text.length() > MAX_CELL_CHARS) {
+            int end = Character.isHighSurrogate(text.charAt(MAX_CELL_CHARS - 1)) ? MAX_CELL_CHARS - 1 : MAX_CELL_CHARS;
+            text = text.substring(0, end);
+        }
         boolean quoted = looksLikeFormula(text);
         int s = wrap ? (quoted ? S_WRAP_Q : S_WRAP) : style(Kind.TEXT, total, quoted);
         return "<c r=\"" + col + row + "\" t=\"inlineStr\" s=\"" + s + "\"><is><t xml:space=\"preserve\">"
@@ -510,6 +523,28 @@ final class XlsxWriter {
      * character reference so that it survives.
      */
     static String escape(String s) {
+        return escapeStripped(strip(s));
+    }
+
+    /** The text with every character XML 1.0 cannot hold dropped (and nothing else changed). */
+    static String strip(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            i += Character.charCount(cp);
+            if (cp == '\t'
+                    || cp == '\n'
+                    || cp == '\r'
+                    || (cp >= 0x20 && cp <= 0xD7FF)
+                    || (cp >= 0xE000 && cp <= 0xFFFD)
+                    || (cp >= 0x10000 && cp <= 0x10FFFF)) {
+                sb.appendCodePoint(cp);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String escapeStripped(String s) {
         StringBuilder sb = new StringBuilder(s.length() + 16);
         for (int i = 0; i < s.length(); ) {
             int cp = s.codePointAt(i);

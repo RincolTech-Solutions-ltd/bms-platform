@@ -593,7 +593,7 @@ officer the requester could see when the run was queued, frozen: the job has no 
 the run, `host/instance`) and `heartbeat_at timestamptz` (when that process last said the run was alive), `document_id uuid` (the stored file; composite
 foreign key to `documents`), `row_count integer`, `size_bytes bigint`, `row_cap integer NOT NULL` and `size_cap_bytes bigint
 NOT NULL` (the limits the run was queued under; the run applies the smaller of these and the limits in force when it
-executes), `error text` (a stable code, never a message: `report_too_large`, `snapshot_unavailable`, `timeout`, `interrupted`,
+executes), `error text` (a stable code, never a message: `report_too_large`, `snapshot_unavailable`, `report_stale_as_of`, `timeout`, `interrupted`,
 `reports_disabled`, `requester_deactivated`, `report_unavailable`, `run_failed`), `expires_at timestamptz` (30 days after
 ready) and `files_deleted_at timestamptz` (the object was deleted; the `documents` row stays). Checks: a `ready` run names its
 document and expiry and no other run does; a `failed` run names its error and no other run does. Unique indexes: one `running`
