@@ -58,7 +58,20 @@ import org.springframework.test.context.TestPropertySource;
 @Import(AiGatewayIT.MovableClock.class)
 // This class needs a context of its own (the allow-list and the clock), and every cached context holds a pool open
 // for the whole test JVM against a PostgreSQL that allows 100 connections: keep this pool small.
-@TestPropertySource(properties = {"spring.datasource.hikari.maximum-pool-size=3", "db-scheduler.enabled=false"})
+@TestPropertySource(
+        properties = {
+            "spring.datasource.hikari.maximum-pool-size=3",
+            "db-scheduler.enabled=false",
+            // The recording stub, so nothing here can reach a network; the limits and prices the assertions use.
+            "bms.ai.provider=recording",
+            "bms.ai.model=test-model",
+            "bms.ai.platform-daily-tokens=100000",
+            "bms.ai.platform-daily-cost-micro=1000000",
+            "bms.ai.tenant-daily-tokens=10000",
+            "bms.ai.tenant-daily-cost-micro=500000",
+            "bms.ai.price-input-micro-per-million=1000000",
+            "bms.ai.price-output-micro-per-million=2000000"
+        })
 class AiGatewayIT extends IntegrationTest {
 
     /** Tenants on the platform allow-list: ids, handed to the application as BMS_AI_ENABLED_TENANTS would be. */

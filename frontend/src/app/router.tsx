@@ -112,6 +112,13 @@ const retailSupplierPaymentsRoute = retailScreen('/supplier-payments', 'Supplier
 const retailSupplierPaymentNewRoute = retailScreen('/supplier-payments/new', 'Pay a supplier').lazy(() => import('../areas/staff/retail/supplier-payment-new').then((m) => m.Route));
 const retailSupplierPaymentRoute = retailScreen('/supplier-payments/$paymentId', 'Supplier payment').lazy(() => import('../areas/staff/retail/supplier-payments').then((m) => m.DetailRoute));
 const retailSupplierPayablesRoute = retailScreen('/supplier-payables', 'What you owe suppliers').lazy(() => import('../areas/staff/retail/supplier-payables').then((m) => m.Route));
+// Landed costs and supplier credit notes (issue #199), also shown only while the purchasing capability is on.
+const retailLandedCostsRoute = retailScreen('/landed-costs', 'Landed costs').lazy(() => import('../areas/staff/retail/landed-costs').then((m) => m.Route));
+const retailLandedCostNewRoute = retailScreen('/landed-costs/new', 'New landed cost').lazy(() => import('../areas/staff/retail/landed-cost-new').then((m) => m.Route));
+const retailLandedCostRoute = retailScreen('/landed-costs/$landedCostId', 'Landed cost').lazy(() => import('../areas/staff/retail/landed-costs').then((m) => m.DetailRoute));
+const retailSupplierCreditsRoute = retailScreen('/supplier-credits', 'Supplier credit notes').lazy(() => import('../areas/staff/retail/supplier-credits').then((m) => m.Route));
+const retailSupplierCreditNewRoute = retailScreen('/supplier-credits/new', 'New credit note').lazy(() => import('../areas/staff/retail/supplier-credit-new').then((m) => m.Route));
+const retailSupplierCreditRoute = retailScreen('/supplier-credits/$creditId', 'Supplier credit note').lazy(() => import('../areas/staff/retail/supplier-credits').then((m) => m.DetailRoute));
 
 // The living style page (#106): every component and illustration, for development builds and the
 // platform host only (the page itself checks); a chunk of its own, so no tenant downloads it.
@@ -125,6 +132,9 @@ const lendingLoansRoute = createRoute({ getParentRoute: () => staffLendingRoute,
 );
 const staffInsightsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/insights', staticData: { crumb: 'Insights' } }).lazy(() =>
   import('../areas/staff/insights/page').then((m) => m.Route),
+);
+const staffReportsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/reports', staticData: { crumb: 'Reports' } }).lazy(() =>
+  import('../areas/staff/reports/page').then((m) => m.Route),
 );
 const lendingLoanRoute = createRoute({ getParentRoute: () => staffLendingRoute, path: '/loans/$loanId', staticData: { crumb: 'Loan' } }).lazy(() =>
   import('../areas/staff/lending/loan').then((m) => m.Route),
@@ -248,6 +258,12 @@ export const router = createRouter({
         retailSupplierPaymentNewRoute,
         retailSupplierPaymentRoute,
         retailSupplierPayablesRoute,
+        retailLandedCostsRoute,
+        retailLandedCostNewRoute,
+        retailLandedCostRoute,
+        retailSupplierCreditsRoute,
+        retailSupplierCreditNewRoute,
+        retailSupplierCreditRoute,
         retailBankingRoute,
         retailBankingReportRoute,
       ]), staffLendingRoute.addChildren([
@@ -266,7 +282,7 @@ export const router = createRouter({
         memberInvestmentNewRoute,
         investmentRoute,
         investmentCertificateRoute,
-      ]), staffInsightsRoute]),
+      ]), staffInsightsRoute, staffReportsRoute]),
     memberRoute,
     styleRoute,
     signUpRoute,

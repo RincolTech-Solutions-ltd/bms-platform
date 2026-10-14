@@ -222,7 +222,7 @@ published under the platform host.
 | 422 | Validation and business rule failures (codes below) |
 | 423 | `tenant_suspended`, `account_locked` |
 | 428 | `precondition_required`: a `PATCH`, or a state transition or retail price edit, without `If-Match` (section 7.9) |
-| 429 | Rate limited; `Retry-After` header set where the limiter knows it; `rate_limited` on the public sign-up endpoints (section 7.10) |
+| 429 | Rate limited; `Retry-After` header set where the limiter knows it; `rate_limited` on the public sign-up endpoints and on report runs (section 7.10) |
 | 500 | `internal_error`; the body carries only the generic title and the `request_id` |
 | 503 | Dependency down (the database); readiness fails; `uploads_busy` (image re-encoding is at capacity, retry shortly); `storage_unavailable` (document storage not configured) |
 
@@ -487,11 +487,17 @@ generic `POST /documents`. Built (#12): these two routes and the member document
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/reports` | authenticated staff | Catalogue filtered by permission. FR-RPT-01 |
-| GET | `/reports/{report_key}` | report's permission | Synchronous JSON for small reports; params as query |
-| POST | `/report-runs` | report's permission (a pack needs all seven) | `{report_key \| pack, params, format}`; async, returns the run (an identical queued or running request returns the same run). FR-RPT-04, FR-RPT-06, ADR-038 |
-| GET | `/report-runs` | requester | Own runs with status, as-of date, expiry |
-| GET | `/report-runs/{run_id}` | requester or `core.audit.read` | Status and document ids; 422 codes `report_too_large`, `snapshot_unavailable`, `timeout` on `failed` runs. Download goes through `POST /documents/{id}/download-url`, 410 `report_expired` after 30 days |
+| GET | `/reports` | authenticated staff | Catalogue filtered by permission and by the tenant's modules: a list of `{key, title, description, permission, formats, params}`; 404 `reports_not_enabled` while the tenant has not switched report runs on, like every other report route. FR-RPT-01. **Built (#214)** |
+| GET | `/reports/{report_key}` | report's permission | Synchronous JSON for small reports; params as query. Not built |
+| POST | `/report-runs` | report's permission (a pack needs all seven) | `{report_key, params, format}`; async, returns the run: 202 when queued, 200 when an identical queued or running request of the same user already exists (it is returned instead). An identical request is answered with the existing run before the rate limit is applied. Optional `Idempotency-Key` replays the first answer. 404 `reports_not_enabled` while the tenant switch is off, 404 `report_not_found`, 403 `permission_denied`, 422 `validation_failed` for an unknown parameter, a bad value or an unsupported format, 429 `rate_limited` at 10 new runs a minute per user (counted under a lock per requester, so it holds under concurrent requests). FR-RPT-04, FR-RPT-06, ADR-038. **Built (#214)**: formats `json` and `csv`; `pdf`, `xlsx` and `pack` arrive with slices D2 to D5 |
+| GET | `/report-runs` | requester | Own runs, newest first, with status, as-of date and expiry (`?limit`, at most 100). **Built (#214)** |
+| GET | `/report-runs/{run_id}` | requester or `core.audit.read` | Status, parameters, dates, row count, size, `document_id`, `expires_at`, `expired` and the stable `error` code of a `failed` run (`report_too_large`, `snapshot_unavailable`, `timeout`, ...); anyone else gets 404. Download goes through `POST /documents/{id}/download-url`: the requester only, while reports are on, while they still hold the report's permission and while their branches and officers still cover the scope the file was made under; every other case, including a colleague, is 404 (not 403); 410 `report_expired` after 30 days. **Built (#214)** |
+| POST | `/report-runs/{run_id}/cancel` | requester | A queued run is cancelled at once (200); a running one is asked to stop and ends `cancelled` at its next checkpoint (202); a finished one is 409 `run_finished`. Audited. **Built (#214)** |
+
+Responses of these routes are `Cache-Control: no-store`. The switch is the tenant setting `reports_enabled` (`PATCH /settings`,
+`core.settings.manage`; also `GET /me` `reports_enabled`, which the PWA reads to show the Reports tab), off by default. No new permission exists: a report is run under its own `lending.reports.*`
+permission and a loan officer sees only their own loans. The lending report `lending.par` additionally needs
+`lending.insights.read`, because its branch scope is the insights page's.
 
 ### 7.11.9 Imports (`/imports`)
 
@@ -1074,6 +1080,22 @@ Built (issue #198, optional purchasing, migration V47): the routes below. Every 
 | GET, PUT | `/retail/purchasing/settings` | `core.settings.manage` | `{over_receipt_bp, bill_tolerance_bp, order_approval_threshold_minor? (read only, present when set), version}`; PUT `{over_receipt_bp?, bill_tolerance_bp?}` (0 to 10000) under `If-Match`; audited |
 
 A cash supplier payment is a cash-out of the paying branch's till on its day in the cash book, and its reversal puts the cash back on the day it was reversed (`cash_purchases_minor` of the daily cash report).
+
+Built (issue #199, landed cost and supplier credit notes, migration V48): the routes below, all `retail.payable.manage` in the branch of every received line and of the invoice (404 for a document outside the scope), all 404 `capability_not_enabled` while `purchasing` is off, `M` taking an `Idempotency-Key`. The supplier invoice carries `kind` (`goods` or `landed_cost`), `credited_minor` and `open_minor` (total less paid less credited); an open item carries `credited_minor`; a goods receipt carries `held_for_costing` and, with `retail.profit.read`, `landed_minor` on each line; `GET` and `PUT /retail/purchasing/settings` carry `require_costing_before_sale`.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST (M) | `/retail/landed-costs` | `retail.payable.manage` | `{supplier_id (the payee), supplier_ref, cost_date?, due_date, method? (value, quantity, weight, manual; default value), goods_bill_id?, total_minor (as invoiced; must equal the charges), note?, charges: [{kind (freight, duty, clearing, insurance, other), description?, amount_minor}], lines: [{receipt_line_id, weight? (weight method), amount_minor? (manual: must add to the total)}]}`; 201 numbered `LC`, with the payee's invoice created in the same transaction; 409 `duplicate_supplier_bill`; 422 `landed_total_mismatch`, `allocation_total_mismatch`, `allocation_basis_zero`, `line_returned`, field problems `unknown_receipt_line`, `cost_before_receipt`, `not_on_bill` |
+| POST | `/retail/landed-costs/preview` | `retail.payable.manage` | The body above; writes nothing: `{total_minor, total_mismatch, method, lines}` with each line's share and, with `retail.profit.read`, `on_hand_qty`, `to_inventory_minor`, `to_cogs_minor`, `cost_before_minor`, `cost_after_minor`, `cost_applied`, `cost_note` |
+| GET | `/retail/landed-costs` | `retail.payable.manage` | `q` (landed number, payee's invoice number, payee), `supplier_id`, `receipt_id`, `status`, `from`, `to`, `branch_id`, `limit`, `cursor`; no charges or lines |
+| GET | `/retail/landed-costs/{landed_cost_id}` | `retail.payable.manage` | The charges and the allocation, `bill_id`, `bill_no` and `paid_minor` |
+| POST (M) | `/retail/landed-costs/{landed_cost_id}/void` | `retail.payable.manage` | `{reason}`; reverses every entry, voids the payee's invoice and puts the cost back where it is still the document's; 409 `landed_cost_voided`, `bill_paid`, `landed_cost_credited`; a voided landed cost holds a receipt it released again; 422 `landed_cost_stock_moved` |
+| POST (M), GET | `/retail/supplier-credits` | `retail.payable.manage` | `{bill_id, kind (goods, price), supplier_ref, credit_date?, total_minor, reason, note?, lines: [{bill_line_id, qty + unit_credit_minor? (goods), amount_minor (price)}]}`; 201 numbered `SC`; 409 `duplicate_supplier_credit`; 422 `credit_total_mismatch`, `credit_exceeds_billed`, `credit_exceeds_on_hand` (more than the receipt still has in its branch), `credit_exceeds_billed_value`, `credit_exceeds_open`, `line_returned`, `insufficient_stock`, `quantity_not_representable`. GET `q`, `supplier_id`, `bill_id`, `status`, `from`, `to`, `branch_id` |
+| GET | `/retail/supplier-credits/{credit_id}` | `retail.payable.manage` | The lines |
+| POST (M) | `/retail/supplier-credits/{credit_id}/void` | `retail.payable.manage` | `{reason}`; reverses every entry and puts goods back; 409 `credit_voided`; 422 `credit_stock_moved` |
+| POST (M) | `/retail/goods-receipts/{receipt_id}/release-hold` | `retail.payable.manage` in the receipt's branch | `{reason}`; releases a receipt held as received and not costed without a landed cost, under the receipt's lock; 409 `not_held`, `receipt_voided` |
+
+Also refused since issue #199: voiding a goods receipt that has a landed cost (409 `receipt_costed`), voiding a supplier invoice of kind `landed_cost` (409 `bill_is_landed_cost`) or one with a credit note standing (409 `bill_credited`), and a transfer out of a branch that would take the quantity of a held receipt while `require_costing_before_sale` is on (422 `receipt_not_costed`). A landed cost or credit note shows a reader only the lines of the branches in the reader's scope.
 
 Every route below answers 404 `capability_not_enabled` unless its capability is on
 (after 404 `module_not_enabled`); the full route table, permissions and the money-moving (`M`)

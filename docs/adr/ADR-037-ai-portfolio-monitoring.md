@@ -170,7 +170,7 @@ they left open, and one change:
 5. **Not sending is the default and is tested.** Provider `off` is the default; `openai_compatible` with a missing base
    URL, key or model, a key with whitespace, or a URL that is not https (a loopback address in the dev and test profiles
    excepted) is off with a logged warning, never a startup failure; `recording`, the stub, is refused at startup outside
-   the dev and test profiles. The test profile uses the stub, so no test can reach a network.
+   the dev and test profiles. The gateway integration test selects the stub and every other test leaves the provider off, so no test can reach a network.
 6. **Time.** One call has a total budget of 30 seconds at most that its retries and pauses must fit in; a 429 or a 5xx is
    retried up to three attempts with pauses of 0.5 and 1 second (or a `Retry-After` of up to 10 seconds); a read timeout, a
    4xx other than 429, and a redirect (never followed) are not retried. Five failures in a row open the process-wide breaker

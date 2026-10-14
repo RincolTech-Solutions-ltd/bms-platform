@@ -254,6 +254,16 @@ Notes:
   platform operator only; the assistant can be switched on only for tenants in `BMS_AI_ENABLED_TENANTS`; collections can be
   switched on only for the tenant named by `BMS_PESAPAL_TENANT_ID`; a member's SMS opt-out needs `lending.members.update`. Running a report run needs
   the report's own permission (a pack needs all seven); loan officers still see only their own loans.
+  Built (extras slice D1, issue #214): report runs add no permission and no seeded row (the matrix and the seeds are unchanged;
+  `PermissionMatrixIT` still compares them). `POST /report-runs` is open to signed-in staff and the service checks the report's own
+  permission, because the permission belongs to the report, not to the route; a run is read by its requester or a holder of
+  `core.audit.read`, and its file by its requester alone, judged when it is asked for: while reports are on, while they still hold the
+  report's permission, and while their branches and officers still cover the frozen scope (a user moved from all branches to one
+  cannot keep downloading the tenant-wide file); every refusal is 404. The branch and
+  officer scope is resolved from the requester's permissions when the run is queued and stored on the run, so the job that executes
+  it (no signed-in user) can neither widen nor lose it; `lending.par` takes it from the insights module, the same code as the
+  insights endpoints, and needs `lending.insights.read` as well. Report runs are off until a tenant administrator sets
+  `reports_enabled` in the tenant settings (`core.settings.manage`).
 - Branch managers approve loans, but never one they submitted or appraised (FR-APR-03).
 - Member ID images (`id_front`, `id_back`) need `lending.members.verify_kyc` in the member's
   branch, so tenant admins and branch managers, the people who verify KYC; photos and other member
@@ -317,7 +327,7 @@ Notes:
   large purchase order), both administrators only and consulted only while the `purchasing` capability is on; orders and receipts
   use the existing `retail.purchase.create`. Their scope is the order's, the receipt's, the invoice's and the payment's branch (an
   invoice may bill receipts of several branches only when the caller's scope covers all of them), and the author, the last editor and the sender of an order above
-  the tenant's threshold for `retail_purchase_order` (section 8.4) cannot be its checker.
+  the tenant's threshold for `retail_purchase_order` (section 8.4) cannot be its checker. Landed cost and supplier credit notes (issue #199, migration V48) add no permission: they use `retail.payable.manage` in the branch of every received line and of the invoice, and the cost columns of a line (the parts for inventory and cost of goods sold, the cost before and after, the landed amount on a receipt line) need `retail.profit.read` in the line's branch and are absent otherwise; no maker-checker action is registered for them.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares
   the seeded permissions with the matrix; all of them go to administrators only.
   `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales

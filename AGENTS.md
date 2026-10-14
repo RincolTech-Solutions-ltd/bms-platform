@@ -57,7 +57,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   ADR-032) `V30`, the first-run preferences (issue #19, ADR-025) `V31`, and lending investments
   (issue #152, ADR-031) `V32`, and lending insights (issue #153, ADR-030) `V33`. Flyway runs with
   `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
-  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241; `V41` is price lists, issue #195; `V42` is the loan reopen pledge guard, issue #176; `V43` is payment methods, issue #160; `V44` is customer accounts, issue #196; `V45` is returns, issue #201; `V46` is optional documents, issue #197; `V47` is optional purchasing, issue #198; `V51` is the `core.ai` call log, issue #220, the coordinator renumbers it at merge). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
+  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241; `V41` is price lists, issue #195; `V42` is the loan reopen pledge guard, issue #176; `V43` is payment methods, issue #160; `V44` is customer accounts, issue #196; `V45` is returns, issue #201; `V46` is optional documents, issue #197; `V47` is optional purchasing, issue #198; `V48` is landed cost and supplier credit notes, issue #199; `V49` is report runs, issue #214; `V51` is the `core.ai` call log, issue #220). The retail analytics pass (issue #149) is reports only on existing data: no migration; its
   queries are in `scripts/db-bench/queries` (k01 to k15).
 - **Built (trade 1 of 10, issue #191, ADR-033):** migration `V37` (`retail_branch_roles`, the permission
   `retail.branch_role.manage`, a backfill of role `both`); the tenant settings group `retail.capabilities`
@@ -145,6 +145,18 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   capability off. The Purchase orders, Goods received, Supplier invoices, Supplier payments and What you owe suppliers pages, and the purchasing tolerances on Retail settings, show while
   `module_capabilities` lists `purchasing`, which is marked ready with its own tour (`capability-purchasing`). Deferred: the supplier
   credit note and landed cost (issue #199), the purchase order PDF.
+- **Built (trade 10 of 10, issue #199, ADR-033):** migration `V48` (landed cost and supplier credit notes): eight tables (`retail_landed_costs`,
+  `_charges`, `_lines` and `_entries`; `retail_supplier_credits`, `_lines` and `_entries`; `retail_receipt_holds`), the stock movement kind
+  `return_to_supplier` (the two movement checks replaced `NOT VALID`, behind a five second `lock_timeout`) and the setting
+  `require_costing_before_sale`; no new permission (`retail.payable.manage`), no new chart account; routes `/retail/landed-costs` (create, preview,
+  list, get, void), `/retail/supplier-credits` (create, list, get, void) and `/retail/goods-receipts/{id}/release-hold`. A landed cost spreads the
+  charges of one payee over received lines by value, quantity, weight or typed amounts in exact integers (largest remainder, deterministic ties),
+  posts the share for goods still on hand (first in, first out) to inventory and the share for goods already sold or moved to cost of goods sold,
+  moves the product's cost only while the receipt is its latest cost event, and creates the payee's invoice as a supplier bill of kind
+  `landed_cost`, paid and aged like any other. A supplier credit note is against a supplier invoice that stands: goods sent back (stock out,
+  inventory and purchase price variance) or a price adjustment, never above what the invoice leaves to pay. Both are voidable with the guards of
+  a bill. The Landed costs and Supplier credit notes pages, the hold on a receipt and the costing switch show while `module_capabilities` lists
+  `purchasing`. Unapplied credits to spend later and a cash refund from a supplier are deferred.
 - **Self-onboarding, build step 1 (issue #89, ADR-024):** migration `V23` with
   `onboarding_applications` and `notification_outbox`, reached only through definer functions;
   the public sign-up and applicant page; the operator portal on the platform host (operator
@@ -196,12 +208,22 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   digest settings, indexes); the owner's daily digest through the outbox; `seed-lending
   --insights-demo [--scale N]` for a fabricated year. Metrics dictionary:
   `docs/specs/lending-insights-metrics.md`.
+- **Built (extras slice D1, issue #214, ADR-038):** migration `V49` (`report_runs` and three read-only definer functions for the
+  runner); `core.reporting`: queued report runs with the job `core.reporting.report-runner` (every 15 seconds, one run per
+  tenant, `BMS_REPORTS_MAX_CONCURRENT_RUNS` across the platform), one read-only `REPEATABLE READ` snapshot transaction per run
+  into a disk spool that commits before the JSON or CSV file is rendered and stored as a core document of type `report`, a
+  10 minute timeout, row and size caps, cancel, the nightly `report-expiry` that deletes files after 30 days (download then 410
+  `report_expired`), the catalogue `GET /reports`, `POST` and `GET /report-runs`, `POST /report-runs/{id}/cancel`, the audit
+  (`core.reports.run`, never a row), and a minimal Reports screen; off until the tenant setting `reports_enabled` is on. The
+  first report, `lending.par` (JSON and CSV), reads the figures through the new public port `InsightsFigures` of
+  `lending.insights`, which holds the PAR figures so far. No permission is added. Deferred: the PDF and Excel renderers, the
+  other six reports and the pack, the full report centre (slices D2 to D5, issues #217, #222, #225, #229).
 - **Built (client extras C1, issue #220, ADR-037):** migration `V51` (`ai_calls`, `ai_platform_usage`); `core.ai`, the
   language model gateway: nothing is sent unless `BMS_AI_PROVIDER=openai_compatible` with a base URL, key and model, the tenant
   has switched the assistant on (settings group `ai`, with the acknowledgement) and is named in `BMS_AI_ENABLED_TENANTS`; per
   call, daily tenant and platform token and cost caps are checked before any network call, an input screen refuses personal-data shapes, and a failed call keeps its reservation; no route, no permission, no screen
   (those are C2 to C5). Runbook: `docs/runbooks/ai-assistant.md`.
-- **Client extras, design only (issue #210):** `docs/specs/client-extras.md` specifies mobile money through Pesapal
+- **Client extras, design only (issue #210; slice D1 above is built):** `docs/specs/client-extras.md` specifies mobile money through Pesapal
   (ADR-035), SMS through Africa's Talking on the outbox (ADR-036), the advisory AI brief (ADR-037) and the formal
   reports pack as PDF and Excel (ADR-038), with a note on credit bureaus. Nothing is built; the build slices are issues
   #211 to #233 in the order of the spec's section 10. The numbers 033 and 034 belong to open pull requests.
@@ -271,7 +293,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `core.notifications` | Templates, outbox, SMS and email adapters; today the platform outbox with SMTP and Telegram senders (ADR-024) | NTF | 6.4 `notification_outbox`, 6.5 | 7.11.3, 7.11.7 |
 | `core.onboarding` | Public sign-up, applications, Verify, Needs info, Reject, Activate (ADR-024) | ONB | 6.4 `onboarding_applications` | 7.11.3 |
 | `core.documents` | PDFs, uploads, object storage, signed URLs | DOC | 6.5 `documents` | 7.11.7 |
-| `core.reporting` | Report catalogue and runs | RPT; chapter 14 | 6.5 `report_runs` | 7.11.8 |
+| `core.reporting` | Report catalogue and runs: the queue, the runner job, one snapshot transaction per run into a spool, JSON and CSV files, cancel and the 30 day expiry (ADR-038, issue #214); verticals register their reports | RPT; chapter 14 | 6.5 `report_runs` | 7.11.8 |
 | `core.imports` | Import batches, review queue, commit | IMP; chapter 13 | 13.4 | 7.11.9 |
 | `core.payments` | Payment intents, gateway, callbacks | PAY; chapter 12 | 6.5 | 7.11.10 |
 | `core.ai` (ADR-037, issue #220, migration `V51`) | The `LlmClient` port and one OpenAI-compatible adapter, the `AiGateway` every caller uses (tenant switch, platform allow-list, daily token and cost caps checked before any network call, circuit breaker, 30 second budget), the `ai_calls` log of counts and a request hash and never text, the settings group `ai` through `AiSettings`, a recording stub refused outside dev and test; off by default (`docs/runbooks/ai-assistant.md`); depends on no vertical | FR-AIA | 6.13 `ai_calls` | none |
@@ -287,14 +309,14 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending.investments` | Investment products, investments, returns job, maturity, rollover, early withdrawal, maturity ladder (ADR-031) | INV; 3.25.1 R-INV | 6.7 | 7.11.16 |
 | `lending.insights` | The insights read model, snapshots, daily digest, panel registry (ADR-030) | INS | 6.7 | 7.11.22 |
 | `lending.advisor` (ADR-037, design) | The advisory AI brief and question box over insights facts; aggregates and aliases only | FR-AIA | 6.13 `ai_briefs` | 7.11.24 |
-| `lending.reports` (ADR-038, design) | The definitions of the seven formal reports and the monthly pack, built on the insights figures through a public port | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
+| `lending.reports` (ADR-038; `lending.par` built, issue #214) | The definitions of the seven formal reports and the monthly pack, built on the insights figures through the public `InsightsFigures` port | RPT; chapter 14 section 14.10 | 6.5 `report_runs` | 7.11.8 |
 | `lending` collections | Due lists, arrears, actions | CLN | 6.7 | 7.11.17 |
 | Member area | Member self-service | MSS; chapter 11 | none | 7.11.18 |
 | `retail.manifest` | The retail vertical's registration with the core (ADR-020) | 3.28 | 6.11.1 chart | none |
 | `retail.catalogue` | Categories, units, products, append-only price history | RET-01, RET-02 | 6.11 | 7.11.20 |
 | `retail.stock` | Stock movements and balances, stock-takes, usage and damage, transfers between branches (one step, or dispatch then receive or cancel), branch roles, the stock-by-location and transfers-in-flight reports, reconciliation; retail posting helpers | RET-03, RET-07, RET-08, RET-11, RET-16 | 6.11 | 7.11.20 |
 | `retail.sales` | Sales with snapshots, voids, credit buyers, payments, customer accounts, customer returns and credit notes | RET-04, RET-05, RET-11 | 6.11 | 7.11.20 |
-| `retail.purchasing` | Suppliers, restocks that set prices atomically; with the `purchasing` capability purchase orders, goods received, supplier invoices with the three-way match, supplier payments and the payables report (ADR-033) | RET-06, RET-11, RET-39 | 6.11 | 7.11.20 |
+| `retail.purchasing` | Suppliers, restocks that set prices atomically; with the `purchasing` capability purchase orders, goods received, supplier invoices with the three-way match, supplier payments, the payables report, landed cost allocation and supplier credit notes (ADR-033) | RET-06, RET-11, RET-39 | 6.11 | 7.11.20 |
 | `retail.reports` | Valuation, revaluation difference, daily profit; the analytics reports of issue #149 (sales analysis, margins, stock health, credit control, business evaluation, owner dashboard), read only | RET-09, RET-10 | 6.11.3 | 7.11.20 |
 | `retail.cashbook` (ADR-022, issue #147, migration `V34`) | Daily savings, cash banked, withdrawals, expenses, advances to owner or company, cash reports | FR-RET-17 to FR-RET-32 | 6.11.5 | 7.11.21 |
 | `retail.imports` | The one-off `import-retail` command: pilot history, legacy balances, opening journals; `retail_import_refs` | RET-12; chapter 13 section 13.13 | 6.11.4 | none (a command, `docs/runbooks/import-retail.md`) |
@@ -466,7 +488,7 @@ Accepted (this list is the ADR index):
   (proposed, #151)
 - ADR-033 Wholesale support as optional per-tenant capabilities of the retail module: branch roles,
   units, price lists, customer accounts, documents, purchasing; no second vertical (accepted, #190;
-  amended by #193 for the two-step transfer and by #198 for optional purchasing; spec `docs/specs/trade-capabilities.md`)
+  amended by #193 for the two-step transfer, by #198 for optional purchasing and by #199 for landed cost and supplier credit notes; spec `docs/specs/trade-capabilities.md`)
 - ADR-034 Generated PDF documents: XHTML templates rendered with OpenHTMLtoPDF, on demand, stored once
   per version (accepted, #204)
 - ADR-035 Mobile money and card collections through Pesapal v3: hosted orders, the notification as a
@@ -478,7 +500,7 @@ Accepted (this list is the ADR index):
 - ADR-037 AI portfolio monitoring: advisory, aggregates and aliases only, numbers validated in code,
   off by default (proposed, #210)
 - ADR-038 The reports pack: asynchronous runs over one snapshot, PDF through the shared templates,
-  streamed Excel (proposed, #210)
+  streamed Excel (proposed, #210; run framework built and amended by #214)
 - ADR-039 One search convention: a shared kernel matcher (folded text, AND of terms, phone digits, ranked, rank in the
   cursor), `bms_fold` and `bms_digits` in V40 and no search index (none is usable under row-level security), one
   live search hook in the PWA (proposed, #241; spec `docs/specs/search.md`)
