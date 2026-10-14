@@ -44,7 +44,10 @@ public interface ReportDefinition {
     /** The parameters it accepts; a request naming any other is refused. */
     List<Param> params();
 
-    /** The output formats it supports, a subset of {@code json} and {@code csv} until the PDF and Excel slices. */
+    /**
+     * The output formats it supports, a subset of {@code json}, {@code csv}, {@code pdf} and {@code xlsx}. Every format is
+     * rendered from the same spooled rows by the framework, so a report offers all four by writing its tables once.
+     */
     Set<String> formats();
 
     /**

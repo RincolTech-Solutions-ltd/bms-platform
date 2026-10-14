@@ -599,6 +599,8 @@ ready) and `files_deleted_at timestamptz` (the object was deleted; the `document
 document and expiry and no other run does; a `failed` run names its error and no other run does. Unique indexes: one `running`
 run per tenant (`report_runs_one_running`) and one open run per tenant, requester and `params_hash`
 (`report_runs_dedupe`, over `queued` and `running`), so two identical requests give one run even when they arrive together.
+Slice D2 (issue #217) adds no column and no migration: the `format` check already allows `pdf` and `xlsx`, and a PDF or workbook is stored
+as a `documents` row of type `report` whose `doc_number` is the number printed on the PDF.
 `bms_app` holds SELECT, INSERT and UPDATE; a row is never deleted. Slice D2 adds `pdf_document_id` and `xlsx_document_id` for
 the pack. Three read-only `SECURITY DEFINER` functions let the runner see across tenants without reading any run's content:
 `app_count_running_report_runs()`, `app_tenants_with_queued_report_runs()` and

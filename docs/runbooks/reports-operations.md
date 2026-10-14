@@ -1,6 +1,6 @@
 # Report runs: operating them
 
-For ADR-038 and issue #214 (extras slice D1). Design: `docs/specs/client-extras.md` section 6; the data in chapter 6
+For ADR-038 and issues #214 and #217 (extras slices D1 and D2). Design: `docs/specs/client-extras.md` section 6; the data in chapter 6
 (`report_runs`); the routes in chapter 7 section 7.11.8. Read this when a report is stuck, slow or refused, when a limit needs
 changing, or when files fill the disk.
 
@@ -12,7 +12,8 @@ and at most `BMS_REPORTS_MAX_CONCURRENT_RUNS` across the platform. The run then:
 
 1. reads in one read-only `REPEATABLE READ` transaction and writes its rows to a spool file on disk, then **commits** (the
    snapshot and the old row versions it pinned are released here);
-2. renders the JSON or CSV file from the spool, stopping at the size cap;
+2. renders the JSON, CSV, PDF or Excel file from the spool (the PDF laid out by the document renderer, the workbook written a row at a
+   time), stopping at the size cap; none of this holds a transaction or a connection beyond one short read of the letterhead;
 3. writes the object to storage, and in one short transaction records the document and marks the run `ready`;
 4. removes the spool directory, whatever happened.
 
@@ -38,17 +39,38 @@ audited (`core.settings.updated`, with the old and new value). Turning it off ag
 |---|---|---|---|
 | `BMS_REPORTS_MAX_CONCURRENT_RUNS` | 2 | 1 | Runs executing at once, platform wide |
 | `BMS_REPORTS_XLSX_ROW_CAP` | 200,000 | 20,000 | Rows in the largest table of one output (Excel sheet, CSV, JSON); over it: `report_too_large` |
-| `BMS_REPORTS_PDF_ROW_CAP` | 3,000 | 500 | Rows of one table in a PDF (read from slice D2) |
+| `BMS_REPORTS_PDF_ROW_CAP` | 3,000 | 500 | Rows of one table printed in a PDF; a longer table is cut to that many rows, its total row kept, with the printed note "The full detail is in the Excel file". The run does not fail |
 | `BMS_REPORTS_MAX_FILE_BYTES` | 64 MiB | 8 MiB | Bytes of one output file; over it: `report_too_large` |
 | timeout | 10 minutes | 10 minutes | Over it: `timeout` (property `bms.reports.timeout`, ISO 8601) |
 | retention | 30 days | 30 days | Property `bms.reports.retention-days` |
 
 They are plain environment variables of the API container (`deploy/compose.yml`, `deploy/compose.pi-staging.yml`, `.env.example`);
 change one in `/opt/bms/.env` and restart the API. A run records the caps it was queued under and applies the smaller of those and
-the limits in force when it runs, so lowering a cap protects a host at once, including runs already queued; raising one applies to
+the limits in force when it runs (the PDF cap is read when the PDF is laid out), so lowering a cap protects a host at once, including runs already queued; raising one applies to
 runs queued after. Tune from measurements (run time and file size in `report_runs`), not by guessing. The staging numbers exist because
 the API container has a 448 MB limit and about 224 MB of heap; `ReportMemoryIT` runs the reports in a child JVM at that heap, and must
 pass before any change that makes a run hold more in memory.
+
+## The PDF and the workbook
+
+A PDF is laid out by the document renderer from the spool, after the snapshot has committed; the layout (not the spool) is what grows
+with `BMS_REPORTS_PDF_ROW_CAP`, because the whole table is held while pages are made. Measured on the 224 MB staging heap
+(`ReportMemoryIT`): with the cap at 500 the run, a sheet of 20,000 rows and the lending reports together keep the old generation at 118 to 124 of
+149 MB; with the cap at 3,000 the old generation fills (149 of 149 MB) though the run finishes. So staging keeps 500, and a host with
+more heap may raise it; repeat the measurement with `mvn verify -Dit.test=ReportMemoryIT -Dreports.memory.pdf3000=true` before doing so on a small one.
+A PDF waits for one of the document renderer's places (`bms.documents.max-concurrent-renders`, two by default) until the run's own
+deadline; a run that waited the full ten minutes ends `timeout`. A run that fails in the layout ends `run_failed` and the log line names
+the exception classes and the first application frame, never the report's text.
+
+The workbook is a zip of XML parts written by `core.reporting`'s `XlsxWriter`, a row at a time. Excel, Numbers and LibreOffice open it; if a
+user reports a file that will not open, keep it (it is a `documents` row of type `report`, fetched through the signed URL) and check it with
+`python3 -c "import openpyxl; openpyxl.load_workbook('file.xlsx')"`, which names the part that is wrong. The cell kinds and the quote prefix are in
+chapter 14 section 14.10.
+
+The visual check of the PDFs (ADR-034 quality bar item 8) is `make document-samples`, which writes each report PDF and a PNG per page to
+`backend/target/document-samples`; `scripts/report-sample-sheet.py backend/target/document-samples out.png` assembles the first page of each
+into one sheet to look at. The reviewed sheet is `docs/ui/report-samples/report-sample-sheet.png`. Look for: the heading of a column running into its
+neighbour, a table cut at the page edge, a heading or total that is not repeated or set off, text over a rule, a missing brand colour.
 
 ## A run is stuck, slow or failed
 
@@ -100,7 +122,7 @@ own clean-up removes and a restart sweeps.
 
 ## Storage and files
 
-Files live in object storage under `tenants/<tenant id>/report/<year>/<month>/<id>.json` or `.csv`, as documents of type `report`
+Files live in object storage under `tenants/<tenant id>/report/<year>/<month>/<id>.json`, `.csv`, `.pdf` or `.xlsx`, as documents of type `report`
 whose subject is the run (`core.report_run`). They contain figures and, for reports that list members, names: they are fetched only
 through the 5 minute signed URL of `POST /documents/{id}/download-url`, by the requester, and each issue is audited. If storage fills,
 reduce `bms.reports.retention-days` and let the nightly job catch up (2,000 runs per tenant per night, in batches of 50, storage called with no transaction open), or delete objects by key for

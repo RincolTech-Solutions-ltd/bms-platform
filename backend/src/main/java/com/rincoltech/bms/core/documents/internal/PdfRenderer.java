@@ -81,9 +81,13 @@ class PdfRenderer {
      * heap and take the whole service with it.
      */
     <T> T withSlot(Supplier<T> work) {
+        return withSlot(work, waitMillis);
+    }
+
+    private <T> T withSlot(Supplier<T> work, long wait) {
         boolean acquired;
         try {
-            acquired = slots.tryAcquire(waitMillis, TimeUnit.MILLISECONDS);
+            acquired = slots.tryAcquire(wait, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             acquired = false;
@@ -106,25 +110,43 @@ class PdfRenderer {
         return withSlot(() -> renderNow(template, model));
     }
 
+    /** A report's PDF streamed to a file, waiting up to {@code wait} milliseconds for a render place. */
+    void renderTo(String template, Map<String, Object> model, java.nio.file.Path target, long wait) {
+        withSlot(
+                () -> {
+                    try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(target)) {
+                        layout(template, model, out);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                    return null;
+                },
+                wait);
+    }
+
     private byte[] renderNow(String template, Map<String, Object> model) {
-        String html = xhtml(template, model);
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            PdfRendererBuilder builder = new PdfRendererBuilder();
-            builder.useFastMode();
-            builder.withProducer("BMS Platform");
-            builder.useExternalResourceAccessControl(
-                    (uri, type) -> uri != null && uri.regionMatches(true, 0, "data:", 0, 5),
-                    ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
-            builder.withHtmlContent(html, "/");
-            font(builder, "Regular", 400);
-            font(builder, "SemiBold", 600);
-            font(builder, "Bold", 700);
-            builder.toStream(out);
-            builder.run();
+            layout(template, model, out);
             return out.toByteArray();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private void layout(String template, Map<String, Object> model, java.io.OutputStream out) throws IOException {
+        String html = xhtml(template, model);
+        PdfRendererBuilder builder = new PdfRendererBuilder();
+        builder.useFastMode();
+        builder.withProducer("BMS Platform");
+        builder.useExternalResourceAccessControl(
+                (uri, type) -> uri != null && uri.regionMatches(true, 0, "data:", 0, 5),
+                ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
+        builder.withHtmlContent(html, "/");
+        font(builder, "Regular", 400);
+        font(builder, "SemiBold", 600);
+        font(builder, "Bold", 700);
+        builder.toStream(out);
+        builder.run();
     }
 
     /**

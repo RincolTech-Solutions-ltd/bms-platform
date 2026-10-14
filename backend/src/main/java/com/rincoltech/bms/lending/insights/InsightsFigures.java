@@ -49,6 +49,20 @@ public interface InsightsFigures {
     ParFigures par(PortfolioScope scope, ParGroupBy groupBy, Runnable checkpoint);
 
     /**
+     * The loan portfolio as at {@code scope.to()} (chapter 14 section 14.3, {@code lending.portfolio_outstanding}): per
+     * group and in total, the active loans, their distinct borrowers, principal and interest outstanding and arrears, from
+     * the same positions as {@link #par} and the insights page (the live loan tables for the scope's business date, the
+     * nightly snapshot for an earlier one; 422 {@code snapshot_unavailable} when there is none). Runs in the caller's
+     * transaction, which should be read only; memory grows with the number of groups, not of loans, and {@code checkpoint}
+     * is called every 1,000 loans as for {@link #par}.
+     *
+     * <p>The borrowers of a group are the distinct members with an active loan in it, so a member with loans in two
+     * branches counts once in each branch and once in the total: the groups' borrowers can add up to more than the
+     * total's, as on the insights page.
+     */
+    PortfolioFigures portfolio(PortfolioScope scope, ParGroupBy groupBy, Runnable checkpoint);
+
+    /**
      * True when the signed-in caller could still ask for everything {@code scope} covers: they still hold
      * {@code lending.insights.read}, every branch the scope names is still in their branches (all branches when the
      * scope names none), and the loans of every officer the scope covers are still theirs to see. A report file made
@@ -103,6 +117,33 @@ public interface InsightsFigures {
             Long par60Bp,
             Long par90Bp,
             List<ParBucket> buckets) {}
+
+    // JUSTIFICATION-A3: the portfolio report (issue #217) reads figures PAR does not carry (borrowers, interest,
+    // average); same port.
+
+    /**
+     * @param asAt the date the figures stand at
+     * @param source {@code live} or {@code snapshot}, as for {@link ParFigures}
+     * @param currency the tenant's currency; amounts are integer minor units
+     * @param total every loan in scope
+     * @param groups one per group when grouped (sorted by label), empty for {@link ParGroupBy#NONE}
+     */
+    record PortfolioFigures(
+            LocalDate asAt, String source, String currency, PortfolioGroup total, List<PortfolioGroup> groups) {}
+
+    /**
+     * Active loans of one group on the date: their count, distinct borrowers, principal and interest outstanding, arrears,
+     * and the average principal outstanding per loan (half up, null when the group has no loans).
+     */
+    record PortfolioGroup(
+            String key,
+            String label,
+            long loans,
+            long borrowers,
+            long principalOutstandingMinor,
+            long interestOutstandingMinor,
+            long arrearsMinor,
+            Long averagePrincipalMinor) {}
 
     /** One age bucket of a group: its loans, principal outstanding, share of the group's principal and arrears. */
     record ParBucket(String bucket, long loans, long principalOutstandingMinor, Long shareBp, long arrearsMinor) {}
