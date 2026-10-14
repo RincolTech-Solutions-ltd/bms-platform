@@ -508,7 +508,7 @@ class NumericValidatorTest {
     @Test
     void wordsThatAreNotMovementsAreNotChecked() {
         accepted("Follow up with the branches that have arrears; PAR 30 is 12.5 percent.", PAR);
-        accepted("The breakdown by branch is below; set up a review.", PAR);
+        accepted("The breakdown by branch is attached; set up a review.", PAR);
         // "up to" is a movement word like the others: "went up to 12.5 percent" must not slip through as a phrase.
         refused("direction_without_delta", "Set aside up to the limit.", PAR);
         accepted("Branch 1 has a higher PAR 30 than Branch 2.", "branch_1.par30", SMALL_BRANCH);

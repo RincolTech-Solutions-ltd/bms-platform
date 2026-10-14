@@ -203,7 +203,7 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    give it back by subtraction (the contribution when any component is hidden, the collection rate when collected is hidden). A
    change is also removed when the earlier period's population was small. Zero is not small. A branch or product under five
    loans is one suppressed fact and nothing else. A residual risk is accepted and stated: shown groups subtracted from a total
-   give the suppressed ones' share; the figures are on the insights page for those allowed to see them.
+   give the suppressed ones' share, which item 8 closes by complementary suppression.
 2. **Decision 3, the facts are the endpoints' figures, changes included.** Changes are the same figures for the range a week
    and a month earlier (stocks from the snapshot of that end date, flows from that range's transactions), the difference in
    the figure's units, absent where the earlier figure is unknowable. `PortfolioFacts` takes the caller's scope from
@@ -230,9 +230,25 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    names, then to the change whose figure the sentence quotes nearest to it, else to the period near it, else to every cited
    change of the subject, and must be supported by every change left; two changes of opposite sign left open refuse the word.
    The lexicon is a broad list of movement words and forms, `up to` included; a negated movement word fails; a word with no
-   change fact cited fails; one fact with both directions in one period fails. Comparisons between groups and phrases such as
+   change fact cited fails; one fact with both directions in one period fails. Items 4 to 6 describe the older validator, now
+   the second line of defence (see item 7). Comparisons between groups and phrases such as
    `set up` are not movements. A movement worded outside the lexicon is a residual risk the evaluation measures.
-7. **Decision 10, the harness exists and is offline.** `AdvisorEvaluation` runs a fixed golden set of fabricated fact sets and
+7. **Decision 5 revised: the model never writes a figure.** The first versions tried to validate figures, units, signs, periods
+   and direction words in free prose; two independent reviews kept finding wording that got through. The control is now
+   structural. The model cites facts by placeholder (`{{portfolio.par30.month_change}}`); our code writes the figure, its name,
+   the movement from the sign, the period and better or worse from the metric's polarity. The validator refuses unknown,
+   malformed, hidden and uncited placeholders, any remaining numeral in any script (digits, roman numerals, number words,
+   fractions, multipliers, vague quantities) except list numbers at the start of a line and the measure names `PAR 30` and so on,
+   any free movement word anywhere and any comparison word beside a placeholder, and the plain-text breaches. Figures cannot be
+   swapped between metrics, periods, or a branch and the portfolio, because each is written with its own name. The prompt is a
+   reviewed resource with a golden test of its contract. The earlier validator remains as a second line of defence over the
+   substituted text and for answers written in prose. Cost: honest sentences that need a number are refused and the model is
+   told to leave them out; the answers read more mechanically.
+8. **Decision 3, complementary suppression replaces the accepted residual risk.** The first amendment accepted that shown groups
+   subtracted from a total give a hidden group's share. The owner's rule is never to expose small counts, so it is closed: when
+   the hidden and left-out remainder is one to four loans, the smallest other groups are hidden too until it is five or more,
+   and likewise for the loans more than 30 days late behind a group's PAR 30.
+9. **Decision 10, the harness exists and is offline.** `AdvisorEvaluation` runs a fixed golden set of fabricated fact sets and
    recorded answers, adversarial ones included, through the real chain with the recording client, checks every request before
    it would be sent, and scores by category with a gate of 100 percent. The same cases go to a real provider with
    `AdvisorEvaluation.with(client)`; wiring that run and the model comparison is slice C5 (#232).

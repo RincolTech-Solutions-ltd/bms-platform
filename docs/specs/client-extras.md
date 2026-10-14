@@ -772,9 +772,12 @@ Where the build differs from, or sharpens, the text above:
   yield. A change is hidden with its figure, and when the earlier figure was hidden, because current minus change would give
   it back. Zero is not small: nothing is described. A branch or product of fewer than five loans is the single fact
   `branch.loans` or `product.loans` with the display `fewer than 5`, and no other fact; a group's PAR 30 is hidden when fewer
-  than five of its loans are more than 30 days late. Residual risk, stated in the acknowledgement: when some groups are
-  suppressed and others shown, the suppressed ones' share is the total minus the shown groups; the same figures are on the
-  insights page for the people allowed to see them, and the provider is not an adversary that knows the tenant.
+  than five of its loans are more than 30 days late. **Complementary suppression** (owner's rule: never expose small counts): the groups partition the book, so the total less
+  the groups shown is the hidden and left-out remainder; when that is one to four loans it is a small group's exact count,
+  principal and risk by subtraction, so the smallest other groups are hidden too until the remainder is five loans or more (or
+  nothing); the same is done for the loans more than 30 days late behind the PAR 30 of the groups shown. Groups beyond the
+  ten largest count as remainder. `PortfolioFactsIT` sweeps every product and branch scope of the fabricated year and asserts
+  the remainder is never one to four.
 - **The business date.** A scope resolved for today and read after midnight does not read the live loan tables, which by then
   hold the next day's activity: it reads the snapshot of the day it was resolved for, and is refused with 422
   `snapshot_unavailable` while tonight's snapshot is not written. A past date with no snapshot is refused the same way, and the
@@ -789,7 +792,26 @@ Where the build differs from, or sharpens, the text above:
   built from `AliasedFacts` alone. The real names are not matched in an answer: they were never in the prompt, so a branch
   called `Main` must not block every answer that uses the word; an answer can only name a group by its alias, which is
   mapped back for the person who asked. (The evaluation plants fabricated names as forbidden strings; production plants none.)
-- **What a number may be.** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
+- **The model never writes a figure (the primary control, round 3 of the review of #223).** Free prose cannot be checked
+  reliably by patterns, so the design is structural. The model cites a fact by writing its key between double braces,
+  `{{portfolio.par30}}`, `{{portfolio.par30.month_change}}`, `{{branch_1.loans}}`, and `{{asof}}` or `{{range}}` for the dates;
+  `PlaceholderValidator` replaces each with text made by our code: a figure as `PAR 30 (12.5 percent)`, a change as `PAR 30
+  rose by 0.25 points over the month (worse)` (the verb from the sign, the period from the fact, better or worse from the
+  metric's polarity), a missing figure as `(not available)`, an alias fact as `Branch 1: Active loans (120)`. The name travels
+  with the value, so figures cannot be swapped between metrics, between a branch and the portfolio, or between periods. The
+  validator refuses an answer when (1) a placeholder is unknown, malformed, hidden (`fewer than 5`) or not listed among the
+  facts its point cites; (2) any numeral remains once placeholders, known aliases, the measure names `PAR 1/30/60/90` and a
+  list number at the start of a line are set aside, in any script (digits after compatibility normalisation, roman numerals,
+  number words, fractions, multipliers, vague quantities such as `hundreds of`); (3) a movement word stands in the prose
+  (`rose`, `up to`, `above`, `soared`, `built up`, `widened`, `better`, `moved`), anywhere, or a comparison word (`more`, `than`)
+  in a sentence that holds a placeholder; (4) the plain-text rules fail (links, markup, personal data shapes, a letter outside
+  the Latin alphabet, the canary, planted strings). Honest sentences that need a number (`30 days late`, `top 3`, `2 branches`)
+  are refused by design; the prompt tells the model to leave them out. The text of the prompt is a reviewed resource
+  (`advisor/system-prompt.txt`), and `PromptContractTest` fails if it stops listing the placeholder syntax or shows an example
+  that is not a real key. As a second line of defence the older validator, described in the next bullets, re-derives every
+  number the substitution wrote from the facts it came from. Each rule has a test switch, and `ValidatorMutationTest` turns
+  each off in turn and requires the golden evaluation to fail with the cases that rule exists for accepted.
+- **What a number may be (the older validator, now the second line and the check of any answer written in prose).** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
   decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words
   (`twenty-five`, `one hundred and twenty`, `two million`, `twelve point five`, grammar-checked: `nineteen and ninety` is two
   numbers), roman numerals of two letters or more in capitals (`XII`), fractions (`half`, `a third`, `three quarters`, `1/2`,
@@ -804,7 +826,7 @@ Where the build differs from, or sharpens, the text above:
   cited. The sign must agree with a change (`+0.4` for a fall fails); a plus sign on a figure fails; a negative figure needs a
   minus sign or a word for a loss. Four digits are a year only after a word that makes them one (`in 2026`), not in `2026 active
   loans`.
-- **A number belongs to its metric.** The nearest metric name in the number's clause (a clause ends at a full stop, `;`, a
+- **A number belongs to its metric (older validator).** The nearest metric name in the number's clause (a clause ends at a full stop, `;`, a
   comma before a space, or `and`, `but`, `while`, `whereas`, `then`) decides which metric it speaks of, with the alias of a branch
   or product in the sentence. The number must be a figure of a cited fact of that metric or of its changes; otherwise it is
   `metric_mismatch`: figures swapped between two metrics, or a figure of a metric nobody cited. With no metric named in the
@@ -813,7 +835,7 @@ Where the build differs from, or sharpens, the text above:
   ordinals, `PAR 1` to `PAR 90`, the names of facts that carry a digit, aliases, and a number glued to letters (`Q3`).
   `Branch 7` when there are three is an `unknown_alias` violation, not ignored. `one` counts as a number only before something
   counted (`one loan`, not `no one`).
-- **Direction.** The lexicon is a broad list of movement verbs, adverbs and their forms: up, rose, grew, higher, increase,
+- **Direction (older validator; the lexicon is shared with the primary control).** The lexicon is a broad list of movement verbs, adverbs and their forms: up, rose, grew, higher, increase,
   climbed, gained, jumped, surged, soared, rallied, spiked; down, fell, dropped, lower, decrease, declined, dipped, slipped, eased,
   shrank, reduced, sank, plunged, tumbled, slumped, slid; flat, unchanged, steady, stable; better, improved, strengthened,
   stronger; worse, worsened, deteriorated, weaker. `up to` is a movement like the others. Which change a word speaks of is
@@ -833,7 +855,9 @@ Where the build differs from, or sharpens, the text above:
   anything is checked, and an accepted answer is shown with digits as ASCII and the invisible characters removed.
 - **Closed codes.** `not_json`, `schema`, `too_long`, `too_many_facts`, `unknown_fact`, `invented_number`, `unit_mismatch`,
   `sign_mismatch`, `unknown_alias`, `direction_contradiction`, `direction_without_delta`, `both_directions`, `markup`,
-  `pii_shape`, `unexpected_script`, `forbidden_text`, `metric_mismatch`, `negated_direction`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
+  `pii_shape`, `unexpected_script`, `forbidden_text`, `metric_mismatch`, `negated_direction`, the placeholder codes `raw_number`,
+  `free_movement_word`, `free_comparison_word`, `unknown_placeholder`, `hidden_placeholder`, `uncited_placeholder`,
+  `malformed_placeholder`, `render_check_failed`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
   figure or a lexicon word, never a sentence of the model's. The summary may rest on the facts that any point cites.
 - **The harness.** `AdvisorEvaluation.run(cases, source)` takes cases (a fabricated fact set, an answer, the verdict expected and
   the code a refusal must give) and a source: `recorded()` answers each from the recording client, `with(client)` sends the same
@@ -841,8 +865,10 @@ Where the build differs from, or sharpens, the text above:
   string, no phone, email, ID or UUID shape, no run of six digits, no figure for a group that has a suppressed fact) and never
   sends one that fails. The golden set (`GoldenCases`: clean answers, invented, derived and mis-formatted numbers, wrong
   directions and signs, injection through a fake field and through the model, personal data, small groups, missing data, scope,
-  shape, a failing provider) must pass 100 percent in every category, and every refused case of the second review has a repaired twin (the same answer
-  mended in the one place the rule looks at) that the harness accepts, so a refusal is the rule's and not another check's; the report is plain text with codes and counts, never a
+  shape, a failing provider) must pass 100 percent in every category, and every refused case has a repaired twin (the same answer mended in the one place the rule looks at) that the harness
+  accepts, so a refusal is the rule's and not another check's; the cases of both reviews are all there as refusals because a
+  raw numeral, a free movement word or a bad placeholder appears, and the clean ones are placeholder answers whose rendering is
+  asserted word for word; the report is plain text with codes and counts, never a
   sentence, and costs nothing. The canary test (`AdvisorCanaryIT`) runs the real gateway with the recording client over a seeded
   book whose branches and products are named with canaries and asserts that none is in the request the client got, in the call log
   or in the facts, and that the gateway's own input screen let the prompt through.

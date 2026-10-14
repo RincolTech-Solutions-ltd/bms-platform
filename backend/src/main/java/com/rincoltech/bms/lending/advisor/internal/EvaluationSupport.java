@@ -45,7 +45,7 @@ public final class EvaluationSupport {
     }
 
     /** The verdict on an answer: accepted or not, the distinct violation codes, and the text shown if accepted. */
-    public record Verdict(boolean accepted, List<String> codes, String shown) {}
+    public record Verdict(boolean accepted, List<String> codes, String shown, List<String> shownPoints) {}
 
     /**
      * Builds the request for the facts and checks it: no real name of a group and none of the planted strings, no
@@ -88,7 +88,7 @@ public final class EvaluationSupport {
 
     public static Verdict validate(Prepared prepared, String answer, List<String> planted) {
         NumericValidator.Result result =
-                NumericValidator.validate(answer, NumericValidator.Context.of(prepared.facts, planted));
+                PlaceholderValidator.validate(answer, NumericValidator.Context.of(prepared.facts, planted));
         List<String> codes = result.violations().stream()
                 .map(NumericValidator.Violation::code)
                 .distinct()
@@ -96,6 +96,11 @@ public final class EvaluationSupport {
         String shown = result.valid()
                 ? prepared.facts.aliases().toNames(result.answer().summary())
                 : null;
-        return new Verdict(result.valid(), codes, shown);
+        List<String> points = result.valid()
+                ? result.answer().points().stream()
+                        .map(p -> prepared.facts.aliases().toNames(p.text()))
+                        .toList()
+                : List.of();
+        return new Verdict(result.valid(), codes, shown, points);
     }
 }

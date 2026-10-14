@@ -230,8 +230,9 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   to four loans or members they are computed over (and every figure that would give it back by subtraction) replaced by
   `fewer than 5`, no officer dimension and no name, and a scope read after midnight reading the snapshot of its day. The new module `lending.advisor`:
   the alias mapper (`Branch 1`, `Product A`, mapped back by whole word for the person who asked), the prompt builder, the
-  `NumericValidator` (every number derivable from a fact the point cites, in any written form, with units and signs; direction
-  words against the sign of the change and the metric's polarity; plain text, no personal data shape, no real name) and the
+  `PlaceholderValidator` (the model never writes a figure: it cites facts as `{{key}}` placeholders and our code writes the
+  figure, its name, the movement and its polarity; any other numeral or movement word, and any bad placeholder, is refused; the
+  older `NumericValidator` is the second line of defence) with a reviewed prompt resource, and the
   offline evaluation harness `AdvisorEvaluation` with its golden set. Also fixes the members endpoint answering 500 for a range
   with no decisions. Spec `docs/specs/client-extras.md` section 5.13; runbook section 9 of `docs/runbooks/ai-assistant.md`.
 - **Client extras (issue #210; slices D1, B1 and C1 are built):** `docs/specs/client-extras.md` specifies mobile money through Pesapal

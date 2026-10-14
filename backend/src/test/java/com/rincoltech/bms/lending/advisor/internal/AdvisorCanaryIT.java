@@ -143,10 +143,10 @@ class AdvisorCanaryIT extends IntegrationTest {
         root.put("summary", "Overview of the book.");
         ArrayNode points = root.putArray("points");
         ObjectNode a = points.addObject();
-        a.put("text", figure.label() + " is " + figure.display() + ".");
+        a.put("text", "{{" + figure.key() + "}}.");
         a.putArray("facts").add(figure.key());
         ObjectNode b = points.addObject();
-        b.put("text", group.alias() + " has " + group.display() + " active loans.");
+        b.put("text", "{{" + group.key() + "}}.");
         b.putArray("facts").add(group.key());
         return root.toString();
     }
@@ -205,14 +205,14 @@ class AdvisorCanaryIT extends IntegrationTest {
 
         // The answer is valid, and shown with the real name in place of the alias.
         NumericValidator.Result verdict =
-                NumericValidator.validate(result.text(), NumericValidator.Context.of(facts, CANARIES));
+                PlaceholderValidator.validate(result.text(), NumericValidator.Context.of(facts, CANARIES));
         assertThat(verdict.violations()).isEmpty();
         assertThat(verdict.valid()).isTrue();
         String shown = facts.aliases().toNames(verdict.answer().points().get(1).text());
         assertThat(shown)
                 .doesNotContain(group.alias())
                 .contains("Canary ")
-                .contains(" has " + group.display() + " active loans.");
+                .contains("Active loans (" + group.display() + ")");
     }
 
     @Test
@@ -224,7 +224,7 @@ class AdvisorCanaryIT extends IntegrationTest {
         ObjectNode leak = JSON.createObjectNode();
         leak.put("summary", name + " is the weakest.");
         leak.putArray("points");
-        NumericValidator.Result r = NumericValidator.validate(leak.toString(), ctx);
+        NumericValidator.Result r = PlaceholderValidator.validate(leak.toString(), ctx);
         assertThat(r.valid()).isFalse();
         assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("forbidden_text");
 
@@ -239,8 +239,8 @@ class AdvisorCanaryIT extends IntegrationTest {
                 .put("text", "There are 9,999 active loans.")
                 .putArray("facts")
                 .add(figure.key());
-        r = NumericValidator.validate(invented.toString(), ctx);
+        r = PlaceholderValidator.validate(invented.toString(), ctx);
         assertThat(r.valid()).isFalse();
-        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("invented_number");
+        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("raw_number");
     }
 }

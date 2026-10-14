@@ -396,9 +396,15 @@ class PortfolioFactsService implements PortfolioFacts {
     }
 
     /**
-     * The branch or product groups, from the public figures port: the largest first, a group of fewer than five loans
-     * as a single suppressed count and nothing else, and a group's PAR 30 hidden when fewer than five of its loans are
-     * more than 30 days late.
+     * The branch or product groups, from the public figures port: the largest first. A group of fewer than five loans is a
+     * single suppressed count and nothing else, and a group's PAR 30 is hidden when fewer than five of its loans are more
+     * than 30 days late.
+     *
+     * <p>Complementary suppression (ADR-037, spec 5.13): the groups partition the book, so the total less the groups shown is
+     * what is hidden or left out. If that remainder is one to four loans it is one small group's exact count, principal and
+     * risk, recoverable by subtraction; so the smallest other groups are hidden too, one after another, until the remainder
+     * is five loans or more (or nothing). The same is done for the loans more than 30 days late behind the PAR 30 of the
+     * groups shown.
      */
     private void groups(
             PortfolioScope scope,
@@ -409,25 +415,66 @@ class PortfolioFactsService implements PortfolioFacts {
             List<Fact> facts,
             List<GroupName> names) {
         ParFigures par = figures.par(scope, by, () -> {});
-        List<ParGroup> largest = par.groups().stream()
+        List<ParGroup> all = par.groups().stream()
                 .sorted(Comparator.comparingLong(ParGroup::loans).reversed().thenComparing(ParGroup::key))
-                .limit(MAX_GROUPS)
                 .toList();
-        for (ParGroup g : largest) {
+        List<ParGroup> listed = all.stream().limit(MAX_GROUPS).toList();
+
+        // The loans partition: groups of fewer than five loans and groups left out make up the remainder.
+        Set<String> hidden = new HashSet<>();
+        long remainder =
+                all.stream().skip(MAX_GROUPS).mapToLong(ParGroup::loans).sum();
+        for (ParGroup g : listed) {
+            if (g.loans() < MIN_GROUP) {
+                hidden.add(g.key());
+                remainder += g.loans();
+            }
+        }
+        List<ParGroup> smallestFirst = listed.stream()
+                .filter(g -> !hidden.contains(g.key()))
+                .sorted(Comparator.comparingLong(ParGroup::loans).thenComparing(ParGroup::key))
+                .toList();
+        for (ParGroup g : smallestFirst) {
+            if (remainder == 0 || remainder >= MIN_GROUP) {
+                break;
+            }
+            hidden.add(g.key());
+            remainder += g.loans();
+        }
+
+        // The late partition: the loans more than 30 days late of the groups whose PAR 30 is not shown.
+        long totalLate = all.stream().mapToLong(PortfolioFactsService::late).sum();
+        Set<String> parHidden = new HashSet<>();
+        long shownLate = 0;
+        for (ParGroup g : listed) {
+            long late = late(g);
+            if (hidden.contains(g.key())) {
+                continue;
+            }
+            if (late > 0 && late < MIN_GROUP) {
+                parHidden.add(g.key());
+            } else {
+                shownLate += late;
+            }
+        }
+        long lateRemainder = totalLate - shownLate;
+        List<ParGroup> leastLate = listed.stream()
+                .filter(g -> !hidden.contains(g.key()) && !parHidden.contains(g.key()) && late(g) > 0)
+                .sorted(Comparator.comparingLong(PortfolioFactsService::late).thenComparing(ParGroup::key))
+                .toList();
+        for (ParGroup g : leastLate) {
+            if (lateRemainder == 0 || lateRemainder >= MIN_GROUP) {
+                break;
+            }
+            parHidden.add(g.key());
+            lateRemainder += late(g);
+        }
+
+        for (ParGroup g : listed) {
             Group group = new Group(dimension, g.key());
             names.add(new GroupName(group, g.label()));
-            if (g.loans() < MIN_GROUP) {
-                facts.add(new Fact(
-                        prefix + ".loans",
-                        "Active loans",
-                        Kind.COUNT,
-                        NEUTRAL,
-                        null,
-                        "fewer than " + MIN_GROUP,
-                        true,
-                        null,
-                        null,
-                        group));
+            if (hidden.contains(g.key())) {
+                facts.add(hiddenFact(prefix + ".loans", "Active loans", Kind.COUNT, NEUTRAL, group));
                 continue;
             }
             facts.add(new Fact(
@@ -452,22 +499,8 @@ class PortfolioFactsService implements PortfolioFacts {
                     null,
                     null,
                     group));
-            long late = g.buckets().stream()
-                    .filter(b -> Arrays.asList("31_60", "61_90", "over_90").contains(b.bucket()))
-                    .mapToLong(ParBucket::loans)
-                    .sum();
-            if (late > 0 && late < MIN_GROUP) {
-                facts.add(new Fact(
-                        prefix + ".par30",
-                        "PAR 30",
-                        Kind.BASIS_POINTS,
-                        WORSE,
-                        null,
-                        "fewer than " + MIN_GROUP,
-                        true,
-                        null,
-                        null,
-                        group));
+            if (parHidden.contains(g.key())) {
+                facts.add(hiddenFact(prefix + ".par30", "PAR 30", Kind.BASIS_POINTS, WORSE, group));
             } else {
                 facts.add(new Fact(
                         prefix + ".par30",
@@ -482,5 +515,17 @@ class PortfolioFactsService implements PortfolioFacts {
                         group));
             }
         }
+    }
+
+    private static Fact hiddenFact(String key, String label, Kind kind, Polarity polarity, Group group) {
+        return new Fact(key, label, kind, polarity, null, "fewer than " + MIN_GROUP, true, null, null, group);
+    }
+
+    /** The loans of the group more than 30 days late. */
+    private static long late(ParGroup g) {
+        return g.buckets().stream()
+                .filter(b -> Arrays.asList("31_60", "61_90", "over_90").contains(b.bucket()))
+                .mapToLong(ParBucket::loans)
+                .sum();
     }
 }

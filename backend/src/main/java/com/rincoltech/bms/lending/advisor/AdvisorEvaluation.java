@@ -71,7 +71,9 @@ public final class AdvisorEvaluation {
      * @param accepted whether the validator accepted the answer
      * @param codes the violation codes, in order, without duplicates
      * @param requestClean whether the request passed the leak checks before it was sent
-     * @param shown the accepted answer's summary with aliases mapped back to names, for the person who asked; null if refused
+     * @param shown the accepted answer's summary, placeholders rendered and aliases mapped back to names, for the person who
+     *     asked; null if refused
+     * @param shownPoints the accepted points, rendered the same way
      */
     public record Result(
             String id,
@@ -82,7 +84,8 @@ public final class AdvisorEvaluation {
             boolean requestClean,
             int inputTokens,
             int outputTokens,
-            String shown) {
+            String shown,
+            List<String> shownPoints) {
 
         @Override
         public String toString() {
@@ -173,7 +176,8 @@ public final class AdvisorEvaluation {
     private static Result runOne(Case c, LlmClient client) {
         EvaluationSupport.Prepared prepared = EvaluationSupport.prepare(c.facts(), c.planted());
         if (!prepared.clean()) {
-            return new Result(c.id(), c.category(), false, false, List.of("request_not_clean"), false, 0, 0, null);
+            return new Result(
+                    c.id(), c.category(), false, false, List.of("request_not_clean"), false, 0, 0, null, List.of());
         }
         LlmClient.Result answer;
         try {
@@ -192,7 +196,8 @@ public final class AdvisorEvaluation {
                     true,
                     0,
                     0,
-                    null);
+                    null,
+                    List.of());
         }
         EvaluationSupport.Verdict verdict = EvaluationSupport.validate(prepared, answer.text(), c.planted());
         boolean codeOk = c.code() == null || verdict.codes().contains(c.code());
@@ -212,6 +217,7 @@ public final class AdvisorEvaluation {
                 true,
                 in,
                 outTokens,
-                verdict.shown());
+                verdict.shown(),
+                verdict.shownPoints());
     }
 }

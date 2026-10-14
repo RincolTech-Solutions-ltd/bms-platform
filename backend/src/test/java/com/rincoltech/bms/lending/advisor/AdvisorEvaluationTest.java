@@ -147,6 +147,50 @@ class AdvisorEvaluationTest {
                 .allSatisfy(r -> assertThat(r.accepted()).as(r.id()).isTrue());
     }
 
+    private Result run(String id) {
+        return AdvisorEvaluation.run(
+                        CASES.stream().filter(c -> c.id().equals(id)).toList(), AdvisorEvaluation.recorded())
+                .results()
+                .get(0);
+    }
+
+    @Test
+    void theSystemWritesTheFiguresAndTheNameAndPolarityTravelWithEachOne() {
+        assertThat(run("clean-brief").shownPoints())
+                .containsExactly(
+                        "PAR 30 (12.5 percent); PAR 30 fell by 0.40 points over the week (better).",
+                        "Collection rate (87.5 percent); Collection rate rose by 1.20 points over the week (better).",
+                        "Money out today (UGX 1,250,000).");
+        assertThat(run("clean-direction-month").shownPoints())
+                .containsExactly(
+                        "PAR 30 rose by 0.25 points over the month (worse) while PAR 30 fell by 0.40 points over the week (better).");
+        assertThat(run("clean-flat").shownPoints())
+                .containsExactly("Loans written off (3); Loans written off was unchanged over the week.");
+        assertThat(run("clean-negative").shownPoints()).containsExactly("Profit contribution (-UGX 500,000).");
+        assertThat(run("clean-missing-data").shownPoints()).containsExactly("Collection rate today (not available).");
+        Result dates = run("clean-dates-by-placeholder");
+        assertThat(dates.shown()).isEqualTo("As of 14 October 2026.");
+        assertThat(dates.shownPoints())
+                .containsExactly("Over 1 October 2026 to 14 October 2026: PAR 30 (12.5 percent).");
+        assertThat(run("clean-list-numbering").shownPoints())
+                .containsExactly("1. PAR 30 (12.5 percent)\n2) Collection rate (87.5 percent)");
+    }
+
+    @Test
+    void figuresCannotBeSwappedBetweenMetricsOrBetweenABranchAndThePortfolio() {
+        // The model put PAR 30 where the collection rate belongs and the other way round: each value still carries its
+        // own name.
+        assertThat(run("clean-labels-travel-with-values").shownPoints())
+                .containsExactly(
+                        "Collection rate is PAR 30 (12.5 percent) and PAR 30 is Collection rate (87.5 percent).");
+        // A whole-portfolio figure cannot pass as a branch's: it is written with the portfolio's name.
+        assertThat(run("clean-branch-vs-portfolio").shownPoints())
+                .containsExactly("Fabricated Branch Alpha sits inside Active loans (312).");
+        assertThat(run("clean-respectively").shownPoints())
+                .containsExactly(
+                        "Fabricated Branch Alpha and Fabricated Product Gamma are Fabricated Branch Alpha: Active loans (120) and Fabricated Product Gamma: Active loans (88) respectively.");
+    }
+
     @Test
     void aWrongCodeFailsTheCaseEvenWhenTheAnswerIsRefused() {
         Case right = CASES.stream()
@@ -160,7 +204,7 @@ class AdvisorEvaluationTest {
                 right.planted(),
                 right.recorded(),
                 Expect.REJECT,
-                "invented_number");
+                "raw_number");
         assertThat(AdvisorEvaluation.run(List.of(right), AdvisorEvaluation.recorded())
                         .allPassed())
                 .isTrue();
@@ -169,7 +213,7 @@ class AdvisorEvaluationTest {
                 .get(0);
         assertThat(r.accepted()).isFalse();
         assertThat(r.passed()).isFalse();
-        assertThat(r.codes()).contains("direction_contradiction").doesNotContain("invented_number");
+        assertThat(r.codes()).contains("free_movement_word").doesNotContain("raw_number");
     }
 
     @Test
@@ -183,6 +227,10 @@ class AdvisorEvaluationTest {
                 .get(0);
         assertThat(r.accepted()).isTrue();
         assertThat(r.shown()).isEqualTo("Fabricated Branch Alpha is the larger branch.");
+        assertThat(r.shownPoints())
+                .containsExactly(
+                        "Fabricated Branch Alpha stands out: Fabricated Branch Alpha: Active loans (120) and Fabricated Branch Alpha: PAR 30 (9.1 percent).",
+                        "Fabricated Product Gamma: Fabricated Product Gamma: Active loans (88).");
         // And the refused ones show nothing at all.
         Result refused = AdvisorEvaluation.run(
                         CASES.stream()
@@ -196,17 +244,23 @@ class AdvisorEvaluationTest {
 
     @Test
     void noRequestCarriesAPlantedNameAnInstructionOrAPhoneNumber() {
-        // The canary at the client boundary: one recording client for every case, whose requests are inspected after.
+        // The canary at the client boundary: a recording client for the cases, whose requests are inspected after. The
+        // stub
+        // keeps its last 100 requests, so the cases go in batches.
         RecordingLlmClient client = new RecordingLlmClient("canary");
-        String clean = GoldenCases.answer("Fine.", GoldenCases.p("PAR 30 is 12.5 percent.", "portfolio.par30"));
-        for (int i = 0; i < CASES.size(); i++) {
-            client.thenAnswer(new LlmClient.Result(clean, 100, 20, "stop"));
+        String clean = GoldenCases.answer("Fine.", GoldenCases.p("{{portfolio.par30}}.", "portfolio.par30"));
+        List<LlmClient.Request> sent = new java.util.ArrayList<>();
+        for (int from = 0; from < CASES.size(); from += 50) {
+            List<Case> batch = CASES.subList(from, Math.min(CASES.size(), from + 50));
+            client.reset();
+            for (int i = 0; i < batch.size(); i++) {
+                client.thenAnswer(new LlmClient.Result(clean, 100, 20, "stop"));
+            }
+            Report report = AdvisorEvaluation.run(batch, AdvisorEvaluation.with(client));
+            assertThat(report.results())
+                    .allSatisfy(r -> assertThat(r.requestClean()).as(r.id()).isTrue());
+            sent.addAll(client.requests());
         }
-        Report report = AdvisorEvaluation.run(CASES, AdvisorEvaluation.with(client));
-        assertThat(report.results())
-                .allSatisfy(r -> assertThat(r.requestClean()).as(r.id()).isTrue());
-
-        List<LlmClient.Request> sent = client.requests();
         assertThat(sent).hasSize(CASES.size());
         for (LlmClient.Request request : sent) {
             String text =

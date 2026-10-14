@@ -165,9 +165,10 @@ missing URL, key or model, a key with whitespace, or a non-https URL is off with
 outside the dev and test profiles. Only the advisor module calls it, and only with the typed fact list and aliases (spec
 section 5.4). Built in #223 (the call itself arrives with #226): the advisor builds the request from `PortfolioFacts`
 through an alias-only structure (grouped figures, so no run of six digits reaches the input screen), and every answer passes
-its `NumericValidator` before anything is shown (spec 5.13): the shape, every number derivable from a fact the point cites, the
-sign and direction words against the change facts, plain text only, no personal data shape, no real name and no repeat of
-the system prompt. An offline evaluation harness runs a golden set of recorded answers through the same chain.
+its `PlaceholderValidator` before anything is shown (spec 5.13): the model never writes a figure, it cites facts as `{{key}}`
+placeholders and our code writes the figure, its name, the movement and its polarity; a raw numeral, a free movement word, a
+bad placeholder, a personal data shape, markup or a repeat of the system prompt is refused, and the older `NumericValidator`
+re-derives every number written as a second line. An offline evaluation harness runs a golden set of recorded answers through the same chain.
 
 ## 12.5 Object storage (Cloudflare R2)
 

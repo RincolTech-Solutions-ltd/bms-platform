@@ -391,7 +391,9 @@ output changed.
   in the call log or in the facts, and the gateway's input screen lets the prompt through), `NumericValidatorTest` (amounts,
   rates, changes, number words, dates, ordinals, aliases, units and signs each with a near miss that must fail; direction words
   against the sign and the polarity; unicode digits, zero-width characters and look-alike letters; personal data shapes, markup,
-  names and the repeated prompt; the shape and limits of the answer; property tests with fixed seeds), `NumericValidatorReviewTest` (the
+  names and the repeated prompt; the shape and limits of the answer; property tests with fixed seeds), `PlaceholderValidatorTest` (every attack of both reviews refused because a raw numeral, a free movement word or a bad
+  placeholder appears, and the honest answers rendered word for word), `ValidatorMutationTest` (each rule off in turn makes the
+  golden evaluation fail), `PromptContractTest` (the prompt resource lists the placeholder syntax), `NumericValidatorReviewTest` (the
   hostile answers of the second independent review: a direction word tied to the change whose figure the sentence quotes, figures
   swapped between metrics, bare numbers, `went up to`, `soared`, `eased`, negation, a hidden group's `exactly 5`, a year as a count,
   roman numerals, vulgar fractions, `twelve point five`, a group named `Main`), `NumberExtractorTest`,

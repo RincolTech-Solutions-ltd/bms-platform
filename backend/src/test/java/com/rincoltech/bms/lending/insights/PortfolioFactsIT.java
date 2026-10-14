@@ -764,6 +764,7 @@ class PortfolioFactsIT extends IntegrationTest {
 
         int small = 0;
         int shown = 0;
+        int forced = 0;
         for (Map.Entry<UUID, Long> e : perBranch.entrySet()) {
             Group group = new Group(Dimension.BRANCH, e.getKey().toString());
             List<Fact> of =
@@ -786,6 +787,12 @@ class PortfolioFactsIT extends IntegrationTest {
                 assertThat(set.facts())
                         .noneMatch(x -> x.display().equals(grouped) && group.equals(x.group()))
                         .noneMatch(x -> group.equals(x.group()) && x.value() != null);
+            } else if (e.getValue() >= PortfolioFacts.MIN_GROUP && of.size() == 1) {
+                // Hidden with the small branch, so that subtracting the shown ones from the total cannot give its
+                // count.
+                assertThat(of.get(0).suppressed()).isTrue();
+                assertThat(of.get(0).key()).isEqualTo("branch.loans");
+                forced++;
             } else if (e.getValue() >= PortfolioFacts.MIN_GROUP) {
                 shown++;
                 assertThat(of)
@@ -798,7 +805,9 @@ class PortfolioFactsIT extends IntegrationTest {
             }
         }
         assertThat(small).isGreaterThan(0);
-        assertThat(shown).isGreaterThan(0);
+        assertThat(shown + forced)
+                .as("branches of five or more loans, shown or hidden with the small one")
+                .isGreaterThan(0);
     }
 
     @Test
@@ -977,7 +986,9 @@ class PortfolioFactsIT extends IntegrationTest {
                 .isNotNull();
         FactSet over = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), fewOver30);
         assertThat(hidden(figure(over, "portfolio.par30"))).isTrue();
-        assertThat(hidden(figure(over, "portfolio.par60"))).isTrue();
+        // PAR 60 is hidden exactly when one to four loans are more than 60 days late; zero late loans is a plain 0.0
+        // percent.
+        assertThat(hidden(figure(over, "portfolio.par60"))).isEqualTo(small(late(byProduct.get(fewOver30), 60)));
         assertThat(figure(over, "portfolio.par1").suppressed())
                 .as("many loans are late, few very late")
                 .isFalse();
@@ -1003,13 +1014,123 @@ class PortfolioFactsIT extends IntegrationTest {
                                         .toString()
                                         .equals(f.group().id()))
                         .count();
-                assertThat(f.suppressed()).as("%s of %s", f.key(), f.group()).isEqualTo(small(over30));
+                if (small(over30)) {
+                    assertThat(f.suppressed())
+                            .as("%s of %s", f.key(), f.group())
+                            .isTrue();
+                }
                 hiddenGroups += f.suppressed() ? 1 : 0;
             }
         }
         assertThat(hiddenGroups)
                 .as("the fabricated year has a group with a few very late loans")
                 .isPositive();
+    }
+
+    // ---- Complementary suppression: the groups never add up to a small remainder --------------------------
+
+    private static long shownLoans(FactSet set, Dimension dimension, String key) {
+        return set.facts().stream()
+                .filter(f -> f.group() != null
+                        && f.group().dimension() == dimension
+                        && f.key().equals(key)
+                        && !f.suppressed())
+                .mapToLong(Fact::value)
+                .sum();
+    }
+
+    /** The loans of the scope more than 30 days late, by the golden model. */
+    private static long lateOf(Predicate<Loan> in) {
+        return model.live(TODAY, in).stream().filter(p -> p.dpd() > 30).count();
+    }
+
+    private void remainderIsNeverSmall(FactSet set, Dimension dimension, Predicate<Loan> scope) {
+        Fact total = figure(set, "portfolio.active_loans");
+        if (total.suppressed()) {
+            return;
+        }
+        String loansKey = dimension == Dimension.BRANCH ? "branch.loans" : "product.loans";
+        long remainder = total.value() - shownLoans(set, dimension, loansKey);
+        assertThat(remainder == 0 || remainder >= PortfolioFacts.MIN_GROUP)
+                .as("total less the %s shown leaves %d loans", dimension, remainder)
+                .isTrue();
+        if (small(lateOf(scope))) {
+            return; // the total's own PAR 30 is hidden, so there is nothing to subtract from
+        }
+        // The same for the loans more than 30 days late behind the PAR 30 of the groups shown.
+        long shownLate = 0;
+        for (Fact f : set.facts()) {
+            if (f.group() != null
+                    && f.group().dimension() == dimension
+                    && f.key().endsWith(".par30")
+                    && !f.suppressed()) {
+                String id = f.group().id();
+                shownLate += lateOf(scope.and(l -> (dimension == Dimension.BRANCH ? l.branch() : l.product())
+                        .toString()
+                        .equals(id)));
+            }
+        }
+        long lateRemainder = lateOf(scope) - shownLate;
+        assertThat(lateRemainder == 0 || lateRemainder >= PortfolioFacts.MIN_GROUP)
+                .as("loans over 30 days late not behind a shown PAR 30: %d", lateRemainder)
+                .isTrue();
+    }
+
+    @Test
+    void subtractingTheShownGroupsFromTheTotalNeverGivesASmallGroupsExactFigures() {
+        UUID user = UUID.randomUUID();
+        remainderIsNeverSmall(wholeBook(), Dimension.BRANCH, ALL_LOANS);
+        remainderIsNeverSmall(wholeBook(), Dimension.PRODUCT, ALL_LOANS);
+        Set<UUID> products = model.loans.values().stream().map(Loan::product).collect(Collectors.toSet());
+        Set<UUID> branches = model.loans.values().stream().map(Loan::branch).collect(Collectors.toSet());
+        int scopes = 0;
+        for (UUID product : products) {
+            FactSet set = facts(user(user, ALL, null), FROM, TODAY, List.of(), product);
+            remainderIsNeverSmall(set, Dimension.BRANCH, l -> l.product().equals(product));
+            scopes++;
+        }
+        for (UUID branch : branches) {
+            FactSet set = facts(user(user, ALL, null), FROM, TODAY, List.of(branch), null);
+            remainderIsNeverSmall(set, Dimension.PRODUCT, l -> l.branch().equals(branch));
+            scopes++;
+        }
+        assertThat(scopes).isGreaterThan(2);
+    }
+
+    @Test
+    void aBranchWithFiveOrMoreLoansIsHiddenWhenThatIsTheOnlyWayToKeepASmallBranchApart() {
+        // A product in which one branch has one to four loans and the others five or more: showing every other branch
+        // would
+        // give the small one's exact count by subtraction, so the smallest other branch is hidden with it.
+        UUID product = productWithASmallBranch();
+        assertThat(product).isNotNull();
+        FactSet set = facts(user(UUID.randomUUID(), ALL, null), FROM, TODAY, List.of(), product);
+        Map<UUID, Long> perBranch = model.live(TODAY, l -> l.product().equals(product)).stream()
+                .map(p -> model.loans.get(p.loan()))
+                .collect(Collectors.groupingBy(Loan::branch, Collectors.counting()));
+        long smallLoans = perBranch.values().stream()
+                .filter(PortfolioFactsIT::small)
+                .mapToLong(Long::longValue)
+                .sum();
+        long forced = perBranch.entrySet().stream()
+                .filter(e -> e.getValue() >= PortfolioFacts.MIN_GROUP)
+                .filter(e -> set.facts().stream()
+                        .anyMatch(f -> f.group() != null
+                                && f.group().id().equals(e.getKey().toString())
+                                && f.key().equals("branch.loans")
+                                && f.suppressed()))
+                .count();
+        assertThat(smallLoans).isPositive();
+        if (smallLoans < PortfolioFacts.MIN_GROUP) {
+            assertThat(forced).as("another branch hidden with the small one").isPositive();
+        } else {
+            assertThat(forced)
+                    .as("the small branches already add up to five or more")
+                    .isZero();
+        }
+        long remainder =
+                figure(set, "portfolio.active_loans").value() - shownLoans(set, Dimension.BRANCH, "branch.loans");
+        assertThat(remainder).isGreaterThanOrEqualTo(PortfolioFacts.MIN_GROUP);
     }
 
     // ---- No names ----------------------------------------------------------------------------------------------
@@ -1104,11 +1225,20 @@ class PortfolioFactsIT extends IntegrationTest {
                     assertThat(byKey.keySet()).containsExactly(prefix + ".loans");
                     continue;
                 }
+                if (byKey.size() == 1) {
+                    // Five or more loans, hidden with a small group so that the total less the shown cannot give it
+                    // back.
+                    assertThat(hidden(byKey.get(prefix + ".loans"))).isTrue();
+                    continue;
+                }
                 assertThat(byKey.get(prefix + ".loans").value()).isEqualTo((long) stock.size());
                 assertThat(byKey.get(prefix + ".principal_outstanding").value()).isEqualTo(GoldenModel.po(stock));
                 Fact par30 = byKey.get(prefix + ".par30");
                 if (small(late(stock, 30))) {
                     assertThat(hidden(par30)).as("%s of %s", par30.key(), id).isTrue();
+                } else if (hidden(par30)) {
+                    // Hidden to close a subtraction of the late loans, not because this group's own few late loans.
+                    assertThat(par30.display()).isEqualTo("fewer than 5");
                 } else {
                     assertThat(par30.value()).isEqualTo(rate(GoldenModel.parAmount(stock, 30), GoldenModel.po(stock)));
                     assertThat(par30.display()).isEqualTo(FactDisplay.percent(par30.value()));
@@ -1158,32 +1288,51 @@ class PortfolioFactsIT extends IntegrationTest {
                 .isInstanceOfSatisfying(
                         ApiException.class, e -> assertThat(e.code()).isEqualTo("snapshot_unavailable"));
 
-        // Once the night's job has written the snapshot of the 8th, the facts are the 8th's. One loan's snapshot row is
-        // moved by 1,000 shillings, which a read of the live tables could not show.
+        // Once the night's job has written the snapshot of the 8th, the facts are the 8th's. Then activity of the 9th
+        // lands
+        // in the live tables (a repayment of 1,000 shillings on an active loan): it must not appear in the 8th's facts.
         tenantJobs.callAs(a.tenantId(), () -> inTx(() -> snapshots.backfill(TODAY, TODAY)));
-        UUID loan = TestDatabase.owner()
-                .sql("SELECT loan_id FROM lending_loan_daily_snapshots WHERE tenant_id = ? AND business_date = ?"
-                        + " AND principal_outstanding_minor > 0 ORDER BY loan_id LIMIT 1")
-                .params(a.tenantId(), java.sql.Date.valueOf(TODAY))
+        String liveSum = "SELECT sum(i.principal_due_minor - i.principal_paid_minor) FROM lending_schedule_items i"
+                + " JOIN lending_loans l ON l.id = i.loan_id WHERE i.tenant_id = ? AND l.status = 'active'";
+        long liveBefore = TestDatabase.owner()
+                .sql(liveSum)
+                .param(a.tenantId())
+                .query(Long.class)
+                .single();
+        UUID item = TestDatabase.owner()
+                .sql("SELECT i.id FROM lending_schedule_items i JOIN lending_loans l ON l.id = i.loan_id"
+                        + " WHERE i.tenant_id = ? AND l.status = 'active'"
+                        + " AND i.principal_due_minor - i.principal_paid_minor >= 1000 ORDER BY i.id LIMIT 1")
+                .param(a.tenantId())
                 .query(UUID.class)
                 .single();
         TestDatabase.owner()
                 .sql(
-                        "UPDATE lending_loan_daily_snapshots SET principal_outstanding_minor = principal_outstanding_minor + 1000"
-                                + " WHERE tenant_id = ? AND business_date = ? AND loan_id = ?")
-                .params(a.tenantId(), java.sql.Date.valueOf(TODAY), loan)
+                        "UPDATE lending_schedule_items SET principal_paid_minor = principal_paid_minor + 1000 WHERE id = ?")
+                .param(item)
                 .update();
         try {
+            long liveAfter = TestDatabase.owner()
+                    .sql(liveSum)
+                    .param(a.tenantId())
+                    .query(Long.class)
+                    .single();
+            assertThat(liveAfter).as("the activity is in the live tables").isEqualTo(liveBefore - 1000);
             FactSet late = tenantJobs.callAs(a.tenantId(), () -> portfolioFacts.build(scope));
             assertThat(late.asOf()).isEqualTo(TODAY);
             assertThat(figure(late, "portfolio.principal_outstanding").value())
-                    .as("the snapshot of the 8th, not the live tables")
-                    .isEqualTo(GoldenModel.po(model.live(TODAY, ALL_LOANS)) + 1000);
+                    .as("the snapshot of the 8th: the activity after midnight is not in it")
+                    .isEqualTo(GoldenModel.po(model.live(TODAY, ALL_LOANS)));
             assertThat(figure(late, "portfolio.active_loans").value())
                     .isEqualTo((long) model.live(TODAY, ALL_LOANS).size());
             // The brief is today's live reading, and the 8th is not today any more: it is left out, not guessed.
             assertThat(late.facts()).extracting(Fact::key).noneMatch(k -> k.startsWith("brief."));
         } finally {
+            TestDatabase.owner()
+                    .sql(
+                            "UPDATE lending_schedule_items SET principal_paid_minor = principal_paid_minor - 1000 WHERE id = ?")
+                    .param(item)
+                    .update();
             TestDatabase.owner()
                     .sql("DELETE FROM lending_loan_daily_snapshots WHERE tenant_id = ? AND business_date = ?")
                     .params(a.tenantId(), java.sql.Date.valueOf(TODAY))

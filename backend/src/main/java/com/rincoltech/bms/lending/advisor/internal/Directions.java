@@ -51,9 +51,8 @@ final class Directions {
     }
 
     private static final Pattern NOT_A_MOVEMENT = Pattern.compile(
-            "(?i)\\b(?:up front|upfront|set up|setup|follow[- ]?up|make up|made up|makes up|catch up|caught up|"
-                    + "top[- ]?up|build up|built up|pick up|wrap up|sign up|signed up|look up|looked up|back up|"
-                    + "break down|breakdown|broken down|write down|written down|down payment|top[- ]down)\\b");
+            "(?i)\\b(?:up front|upfront|set up|setup|follow[- ]?up|break down|breakdown|broken down|write down|"
+                    + "written down|down payment|top[- ]down)\\b");
     private static final Pattern BETWEEN_GROUPS = Pattern.compile(
             "(?i)\\b(?:higher|lower|better|worse|stronger|weaker)\\b[^.!?;]{0,40}?\\bthan\\s+(?:the\\s+)?"
                     + "(?:branch\\s+\\d+|product\\s+[a-z]{1,2}\\b|portfolio|book|overall|average|total|rest|others?|whole)\\b");
@@ -70,7 +69,9 @@ final class Directions {
                         + "growing|growth|higher|increase|increased|increases|increasing|climb|climbed|climbs|climbing|"
                         + "gain|gained|gains|gaining|jump|jumped|jumps|jumping|surge|surged|surges|surging|soar|soared|"
                         + "soars|soaring|rally|rallied|rallies|rallying|spike|spiked|spikes|spiking|leap|leapt|leaped|"
-                        + "leaps|leaping)\\b"));
+                        + "leaps|leaping|above|exceed|exceeds|exceeded|exceeding|widen|widened|widens|widening|advance|"
+                        + "advanced|advances|advancing|expand|expanded|expands|expanding|firm|firmed|firms|boost|boosted|"
+                        + "lift|lifted|outperform|outperformed|outperforms|build|built|builds|building)\\b"));
         WORDS.put(
                 Dir.DOWN,
                 Pattern.compile("(?i)\\b(?:down|downward|downwards|fell|fall|falls|fallen|falling|drop|dropped|drops|"
@@ -80,7 +81,9 @@ final class Directions {
                         + "reduction|sink|sinks|sank|sunk|sinking|plunge|plunged|plunges|plunging|plummet|plummeted|"
                         + "plummets|plummeting|tumble|tumbled|tumbles|tumbling|slump|slumped|slumps|slumping|slide|"
                         + "slides|slid|sliding|retreat|retreated|retreats|dwindle|dwindled|dwindles|crash|crashed|"
-                        + "crashes)\\b"));
+                        + "crashes|below|narrow|narrowed|narrows|narrowing|soften|softened|softens|softening|fade|"
+                        + "faded|fades|fading|lag|lagged|lags|lagging|underperform|underperformed|underperforms|trail|"
+                        + "trailed|trails|trailing|diminish|diminished|diminishes|erode|eroded|erodes|eroding)\\b"));
         WORDS.put(
                 Dir.FLAT,
                 Pattern.compile("(?i)\\b(?:flat|unchanged|steady|stable|stagnant|plateau|plateaued|no change|"
@@ -97,6 +100,25 @@ final class Directions {
     }
 
     private Directions() {}
+
+    /** Every movement word of the lexicon, in one pattern: what the placeholder validator refuses in free prose. */
+    static Pattern movementWords() {
+        StringBuilder all = new StringBuilder("(?i)");
+        boolean first = true;
+        for (Pattern p : WORDS.values()) {
+            all.append(first ? "" : "|")
+                    .append("(?:")
+                    .append(p.pattern().replace("(?i)", ""))
+                    .append(")");
+            first = false;
+        }
+        return Pattern.compile(all.toString());
+    }
+
+    /** The text with the few phrases that use a movement word for something else blanked (same length). */
+    static String withoutExemptPhrases(String text) {
+        return NumberExtractor.blank(NOT_A_MOVEMENT, text);
+    }
 
     private record Word(Dir dir, int start, String text) {}
 

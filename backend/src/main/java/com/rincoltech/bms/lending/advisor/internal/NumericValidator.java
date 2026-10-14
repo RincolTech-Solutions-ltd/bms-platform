@@ -110,6 +110,23 @@ final class NumericValidator {
             return new Result(false, parsed.violations(), null);
         }
         AdvisorAnswer answer = parsed.answer();
+        List<Violation> violations = checkAnswer(answer, ctx);
+        if (!violations.isEmpty()) {
+            return new Result(false, violations, null);
+        }
+        List<Point> shown = new ArrayList<>();
+        for (Point p : answer.points()) {
+            shown.add(new Point(Text.display(p.text()), p.facts()));
+        }
+        return new Result(true, List.of(), new AdvisorAnswer(Text.display(answer.summary()), shown));
+    }
+
+    /**
+     * The per-text checks of an answer that has already parsed: every cited key exists, and the summary and each point rest on
+     * the facts they cite. Used on a model's own prose (legacy answers) and, as the second line of defence, on the text the
+     * placeholder substitution produced.
+     */
+    static List<Violation> checkAnswer(AdvisorAnswer answer, Context ctx) {
         Map<String, PromptFact> byKey = new LinkedHashMap<>();
         ctx.facts().facts().forEach(f -> byKey.put(f.key(), f));
         List<Violation> violations = new ArrayList<>();
@@ -134,35 +151,40 @@ final class NumericValidator {
         for (int i = 0; i < answer.points().size(); i++) {
             violations.addAll(checkText(answer.points().get(i).text(), "point " + (i + 1), cited.get(i), ctx));
         }
-        if (!violations.isEmpty()) {
-            return new Result(false, violations, null);
+        return violations;
+    }
+
+    /**
+     * Only the numbers of a text, each against the cited facts (no binding, no direction words): what the placeholder
+     * validator uses to re-derive the figures its own substitution wrote.
+     */
+    static List<Violation> derivable(String text, String where, List<PromptFact> cited, Context ctx) {
+        List<Violation> out = new ArrayList<>();
+        String n = Text.normalise(text);
+        Set<String> names = new LinkedHashSet<>();
+        ctx.facts().facts().forEach(f -> {
+            names.add(f.label());
+            names.add(f.metric());
+        });
+        NumberExtractor.Extraction found =
+                NumberExtractor.extract(n, ctx.facts().dates(), ctx.facts().aliases(), names);
+        boolean loss = LOSS_WORD.matcher(n).find();
+        for (Token t : found.tokens()) {
+            if (t.yearLike()) {
+                continue;
+            }
+            String code = verdict(t, cited, ctx.facts().currency(), loss);
+            if (code != null) {
+                out.add(new Violation(code, where, tokenText(t)));
+            }
         }
-        List<Point> shown = new ArrayList<>();
-        for (Point p : answer.points()) {
-            shown.add(new Point(Text.display(p.text()), p.facts()));
-        }
-        return new Result(true, List.of(), new AdvisorAnswer(Text.display(answer.summary()), shown));
+        return out;
     }
 
     private static List<Violation> checkText(String text, String where, List<PromptFact> cited, Context ctx) {
         List<Violation> out = new ArrayList<>();
         String n = Text.normalise(text);
-        if (!Text.onlyLatinLetters(n)) {
-            out.add(new Violation("unexpected_script", where, null));
-        }
-        if (MARKUP.matcher(n).find()) {
-            out.add(new Violation("markup", where, null));
-        }
-        if (looksPersonal(n)) {
-            out.add(new Violation("pii_shape", where, null));
-        }
-        String lower = n.toLowerCase(Locale.ROOT);
-        for (String forbidden : ctx.forbidden()) {
-            if (lower.contains(Text.normalise(forbidden).toLowerCase(Locale.ROOT))) {
-                out.add(new Violation("forbidden_text", where, null));
-                break;
-            }
-        }
+        plainText(n, where, ctx, out);
 
         Set<String> names = new LinkedHashSet<>();
         ctx.facts().facts().forEach(f -> {
@@ -191,6 +213,29 @@ final class NumericValidator {
         }
         out.addAll(Directions.check(n, where, cited, found.tokens(), ctx.facts().currency()));
         return out;
+    }
+
+    /**
+     * The checks every answer passes whatever its shape: Latin letters only (another script can disguise a word), no link or
+     * markup, no personal data shape, and none of the forbidden strings (the system prompt's canary, anything a caller planted).
+     */
+    static void plainText(String normalised, String where, Context ctx, List<Violation> out) {
+        if (!Text.onlyLatinLetters(normalised)) {
+            out.add(new Violation("unexpected_script", where, null));
+        }
+        if (MARKUP.matcher(normalised).find()) {
+            out.add(new Violation("markup", where, null));
+        }
+        if (looksPersonal(normalised)) {
+            out.add(new Violation("pii_shape", where, null));
+        }
+        String lower = normalised.toLowerCase(Locale.ROOT);
+        for (String forbidden : ctx.forbidden()) {
+            if (lower.contains(Text.normalise(forbidden).toLowerCase(Locale.ROOT))) {
+                out.add(new Violation("forbidden_text", where, null));
+                break;
+            }
+        }
     }
 
     /** True when the normalised text holds an email address, a phone number, an ID number shape or a UUID. */
