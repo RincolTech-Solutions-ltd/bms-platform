@@ -3,11 +3,15 @@ package com.rincoltech.bms.lending.loans.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.notifications.SmsEvents;
+import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.lending.loans.LoanFixtures;
 import com.rincoltech.bms.lending.loans.LoanServicing;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
+import com.rincoltech.bms.lending.members.MemberLookup;
+import com.rincoltech.bms.testsupport.MovableClockConfig;
 import com.rincoltech.bms.testsupport.SmsTenants;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -15,13 +19,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -34,6 +45,7 @@ import tools.jackson.databind.JsonNode;
  * tenant asked; another tenant is untouched. The sending itself (the window, caps, opt-out, backlog, exact texts) is
  * proved with the real channel in {@code SmsEventsIT}. All figures and numbers fabricated.
  */
+@Import(MovableClockConfig.class)
 class LoanEventSmsIT extends LoanFixtures {
 
     @Autowired
@@ -51,16 +63,38 @@ class LoanEventSmsIT extends LoanFixtures {
     @Autowired
     LoanServicing port;
 
+    @Autowired
+    JdbcClient jdbc;
+
+    /** Spies that call the real beans until a test arms one; the money event must not notice when one breaks. */
+    @MockitoSpyBean
+    MemberLookup memberLookup;
+
+    @MockitoSpyBean
+    TenantSettings tenantSettings;
+
+    @MockitoSpyBean
+    SmsEvents smsEvents;
+
     final UUID appraiser = UUID.randomUUID();
     final UUID manager = UUID.randomUUID();
     final UUID cashier = UUID.randomUUID();
     String cashierPerms;
-    LocalDate today;
 
     @BeforeEach
     void users() {
         cashierPerms = permissionsOf("cashier");
-        today = clock.today(BusinessClock.DEFAULT_ZONE);
+        // Twenty-nine seconds of a minute before Kampala's midnight: the business date is the 15th, and the test moves
+        // it.
+        MovableClockConfig.CLOCK.set(MovableClockConfig.BEFORE_MIDNIGHT);
+    }
+
+    LocalDate today() {
+        return clock.today(BusinessClock.DEFAULT_ZONE);
+    }
+
+    static String dmy(LocalDate d) {
+        return "%02d/%02d/%d".formatted(d.getDayOfMonth(), d.getMonthValue(), d.getYear());
     }
 
     // ---- Fixtures ---------------------------------------------------------------------------------
@@ -76,6 +110,11 @@ class LoanEventSmsIT extends LoanFixtures {
 
     /** Flat 10 percent a month, three monthly instalments, no fees. */
     String instalmentProduct(String code) {
+        return instalmentProduct(code, List.of());
+    }
+
+    /** As above with these fees. */
+    String instalmentProduct(String code, List<Map<String, Object>> fees) {
         Map<String, Object> terms = new LinkedHashMap<>();
         terms.put("interest_method", "flat");
         terms.put("interest_rate_bp", 1000);
@@ -88,7 +127,7 @@ class LoanEventSmsIT extends LoanFixtures {
         terms.put("instalment_frequency", "monthly");
         terms.put("min_principal_minor", 100_000);
         terms.put("max_principal_minor", 5_000_000);
-        terms.put("fees", List.of());
+        terms.put("fees", fees);
         ResponseEntity<JsonNode> r = send(
                 HttpMethod.POST,
                 "/api/v1/lending/loan-products",
@@ -134,11 +173,22 @@ class LoanEventSmsIT extends LoanFixtures {
     }
 
     void disburse(String loan) {
+        disburse(loan, today(), null);
+    }
+
+    /** @param notify the request's {@code notify_member}, or null to leave it out */
+    void disburse(String loan, LocalDate date, Boolean notify) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("disbursement_date", date.toString());
+        body.put("payment_method_key", "cash");
+        if (notify != null) {
+            body.put("notify_member", notify);
+        }
         ResponseEntity<JsonNode> r = send(
                 HttpMethod.POST,
                 LOANS + "/" + loan + "/disbursements",
                 withKey(as(cashier, cashierPerms, "*", null), key()),
-                Map.of("disbursement_date", today.toString(), "payment_method_key", "cash"));
+                body);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         ResponseEntity<JsonNode> d = send(
                 HttpMethod.POST,
@@ -149,15 +199,30 @@ class LoanEventSmsIT extends LoanFixtures {
     }
 
     ResponseEntity<JsonNode> repay(String loan, long amount, String key) {
+        return repay(loan, amount, today(), key, null);
+    }
+
+    ResponseEntity<JsonNode> repay(String loan, long amount, LocalDate date, String key, Boolean notify) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("amount_minor", amount);
+        body.put("value_date", date.toString());
+        body.put("payment_method_key", "cash");
+        if (notify != null) {
+            body.put("notify_member", notify);
+        }
         return send(
                 HttpMethod.POST,
                 LOANS + "/" + loan + "/repayments",
                 withKey(as(cashier, cashierPerms, "*", null), key),
-                Map.of("amount_minor", amount, "value_date", today.toString(), "payment_method_key", "cash"));
+                body);
     }
 
     JsonNode repaid(String loan, long amount) {
-        ResponseEntity<JsonNode> r = repay(loan, amount, key());
+        return repaid(loan, amount, today(), null);
+    }
+
+    JsonNode repaid(String loan, long amount, LocalDate date, Boolean notify) {
+        ResponseEntity<JsonNode> r = repay(loan, amount, date, key(), notify);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         return r.getBody();
     }
@@ -242,8 +307,7 @@ class LoanEventSmsIT extends LoanFixtures {
                 .isEqualTo(get(loan, "").get("loan_no").asString());
         assertThat(p.get("currency").asString()).isEqualTo("UGX");
         assertThat(p.get("amount").asString()).isEqualTo("1,200,000");
-        assertThat(p.get("date").asString())
-                .isEqualTo("%02d/%02d/%d".formatted(today.getDayOfMonth(), today.getMonthValue(), today.getYear()));
+        assertThat(p.get("date").asString()).isEqualTo(dmy(today()));
         assertThat(p.get("next_amount").asString())
                 .isEqualTo(grouped(first.get("total_due_minor").asLong()));
         assertThat(p.get("next_due_date").asString())
@@ -277,8 +341,7 @@ class LoanEventSmsIT extends LoanFixtures {
         assertThat(p.get("receipt_no").asString())
                 .isEqualTo(paid.get("transaction").get("receipt_no").asString())
                 .startsWith("RC-");
-        assertThat(p.get("date").asString())
-                .isEqualTo("%02d/%02d/%d".formatted(today.getDayOfMonth(), today.getMonthValue(), today.getYear()));
+        assertThat(p.get("date").asString()).isEqualTo(dmy(today()));
         assertThat(p.has("balance")).as("default: no balance").isFalse();
         assertThat(only("loan.repayment_received").get("idempotency_key").toString())
                 .endsWith(":" + paid.get("transaction").get("id").asString() + ":" + memberId);
@@ -340,12 +403,16 @@ class LoanEventSmsIT extends LoanFixtures {
         // FR-REP-05: the checker reverses the closing repayment. The loan reopens; the member is told nothing.
         reverse(loan, closing.get("transaction").get("id").asString());
         assertThat(get(loan, "").get("status").asString()).isEqualTo("active");
-        assertThat(templates()).as("a reversal sends nothing").hasSize(3);
+        assertThat(templates()).as("a reversal sends nothing new").hasSize(3);
+        // And what the closing repayment queued, if the sender has not claimed it, is withdrawn: the receipt and the
+        // thanks.
+        assertThat(cancelled()).containsExactlyInAnyOrder("loan.repayment_received", "loan.closed");
 
         // Paying it off again closes it again, once more: a new transaction, a new receipt and a new thanks.
         repaid(loan, get(loan, "/payoff-quote").get("total_minor").asLong());
         assertThat(templates()).hasSize(5);
         assertThat(templates().stream().filter("loan.closed"::equals)).hasSize(2);
+        assertThat(cancelled()).as("the new ones stand").hasSize(2);
     }
 
     @Test
@@ -398,6 +465,226 @@ class LoanEventSmsIT extends LoanFixtures {
         assertThat(templates()).doesNotContain("loan.closed");
     }
 
+    /** The templates of the rows a reversal withdrew, with their parameters cleared. */
+    List<String> cancelled() {
+        return TestDatabase.owner()
+                .sql("SELECT template_key FROM notification_outbox WHERE channel = 'sms' AND tenant_id = ?"
+                        + " AND status = 'failed' AND last_error = 'cancelled_reversed' AND params = '{}'::jsonb")
+                .param(t.tenantId())
+                .query(String.class)
+                .list();
+    }
+
+    // ---- The edge of Kampala's day ------------------------------------------------------------------------
+
+    /**
+     * 20:59 UTC is 23:59 on the 15th in Kampala and 21:01 UTC is 00:01 on the 16th. The date in a message is the business
+     * date of the event, whichever side of midnight it happens.
+     */
+    @Test
+    void frNtf04_theDateInAMessageIsTheKampalaDateOfTheEventAcrossMidnight() {
+        smsOn();
+        String loan = approved(instalmentProduct("SMSE"), 1_200_000, 3, 11);
+        assertThat(today()).isEqualTo(LocalDate.parse("2026-10-15"));
+        disburse(loan);
+        assertThat(params(only("loan.disbursed")).get("date").asString()).isEqualTo("15/10/2026");
+
+        MovableClockConfig.CLOCK.set(MovableClockConfig.AFTER_MIDNIGHT);
+        assertThat(today()).isEqualTo(LocalDate.parse("2026-10-16"));
+        repaid(loan, 100_000);
+
+        assertThat(params(only("loan.repayment_received")).get("date").asString())
+                .isEqualTo("16/10/2026");
+        // Both are receipts, queued at once with their hour from the moment of the event.
+        assertThat(rows(t).stream().map(r -> r.get("category")).distinct()).containsExactly("transactional");
+    }
+
+    // ---- What the member receives, with fees ---------------------------------------------------------------
+
+    @Test
+    void frDis02_theDisbursementMessageStatesWhatWasPaidOutAfterFeesDeductedAtDisbursement() {
+        smsOn();
+        Map<String, Object> fee = new LinkedHashMap<>();
+        fee.put("name", "Test processing fee");
+        fee.put("fee_type", "processing");
+        fee.put("calc_method", "flat");
+        fee.put("amount_minor", 50_000);
+        fee.put("rate_bp", null);
+        fee.put("timing", "deducted_at_disbursement");
+        String loan = approved(instalmentProduct("SMSFEE", List.of(fee)), 1_200_000, 3, 12);
+
+        disburse(loan);
+
+        // The loan is 1,200,000; 50,000 of fee is kept at disbursement; the member receives 1,150,000.
+        assertThat(params(only("loan.disbursed")).get("amount").asString()).isEqualTo("1,150,000");
+    }
+
+    // ---- The request can say no; old events are never texted --------------------------------------------------
+
+    @Test
+    void notifyMemberFalseOnADisbursementAndARepaymentQueuesNothingAndTrueOrOmittedDoes() {
+        smsOn();
+        String quiet = approved(instalmentProduct("SMSQ"), 1_200_000, 3, 13);
+        disburse(quiet, today(), false);
+        repaid(quiet, 100_000, today(), false);
+        assertThat(rows(t)).as("a register import says notify_member false").isEmpty();
+        assertThat(get(quiet, "/transactions").get("items").findValuesAsString("txn_type"))
+                .containsExactlyInAnyOrder("disbursement", "repayment");
+
+        repaid(quiet, 100_000, today(), true);
+        assertThat(templates()).containsExactly("loan.repayment_received");
+        repaid(quiet, 100_000, today(), null);
+        assertThat(templates()).hasSize(2);
+    }
+
+    @Test
+    void frNtf17_anEventWhoseValueDateIsOlderThanTheCutoffIsNeverTexted() {
+        smsOn();
+        LocalDate today = today();
+        String loan = approved(instalmentProduct("SMSO3"), 1_200_000, 3, 14);
+        // Disbursed ten days ago: a register being loaded, not news.
+        disburse(loan, today.minusDays(10), null);
+        assertThat(rows(t)).isEmpty();
+        // Repayments dated four days ago (one day past the cutoff of three): no text. Three days ago: the edge, a text.
+        repaid(loan, 100_000, today.minusDays(4), null);
+        assertThat(rows(t)).isEmpty();
+        repaid(loan, 100_000, today.minusDays(3), null);
+        assertThat(templates()).containsExactly("loan.repayment_received");
+        assertThat(params(only("loan.repayment_received")).get("date").asString())
+                .isEqualTo(dmy(today.minusDays(3)));
+        repaid(loan, 100_000, today, null);
+        assertThat(templates()).hasSize(2);
+        // Past midnight the cutoff moves with the Kampala date: on the 16th the 12th is four days old and is not
+        // texted,
+        // the 13th is three days old and is.
+        MovableClockConfig.CLOCK.set(MovableClockConfig.AFTER_MIDNIGHT);
+        LocalDate twelfth = LocalDate.parse("2026-10-12");
+        String other = approved(instalmentProduct("SMSO4"), 1_200_000, 3, 15);
+        disburse(other, twelfth, null);
+        repaid(other, 100_000, twelfth, null);
+        assertThat(templates()).as("nothing new for the 12th").hasSize(2);
+        repaid(other, 100_000, twelfth.plusDays(1), null);
+        assertThat(templates()).hasSize(3);
+    }
+
+    // ---- A reversal withdraws the message that has not gone ---------------------------------------------------
+
+    @Test
+    void frNtf01_aReversalWithdrawsTheReceiptOfTheEntryItReversesIfTheSenderHasNotClaimedItAndLeavesAClaimedOne() {
+        smsOn();
+        String loan = approved(instalmentProduct("SMSV"), 1_200_000, 3, 16);
+        disburse(loan);
+        JsonNode first = repaid(loan, 100_000).get("transaction");
+        JsonNode second = repaid(loan, 150_000).get("transaction");
+        // The sender has claimed the first receipt (an attempt counted, a lease taken): it may be at the provider.
+        TestDatabase.owner()
+                .sql("UPDATE notification_outbox SET attempts = 1 WHERE tenant_id = ? AND idempotency_key LIKE ?")
+                .params(
+                        t.tenantId(),
+                        "sms:loan.repayment_received:%:" + first.get("id").asString() + ":%")
+                .update();
+
+        reverse(loan, second.get("id").asString());
+        assertThat(cancelled()).containsExactly("loan.repayment_received");
+        Map<String, Object> gone = TestDatabase.owner()
+                .sql("SELECT status, last_error, params::text AS params FROM notification_outbox"
+                        + " WHERE idempotency_key LIKE ?")
+                .param("sms:loan.repayment_received:%:" + second.get("id").asString() + ":%")
+                .query()
+                .singleRow();
+        assertThat(gone.get("status")).isEqualTo("failed");
+        assertThat(gone.get("last_error")).isEqualTo("cancelled_reversed");
+        assertThat(gone.get("params"))
+                .as("the amount and receipt number are cleared")
+                .isEqualTo("{}");
+
+        reverse(loan, first.get("id").asString());
+        assertThat(cancelled()).as("the claimed one is left alone").containsExactly("loan.repayment_received");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM notification_outbox WHERE idempotency_key LIKE ?")
+                        .param("sms:loan.repayment_received:%:"
+                                + first.get("id").asString() + ":%")
+                        .query(String.class)
+                        .single())
+                .isEqualTo("pending");
+        // The operator's list of failed messages does not offer a withdrawn one for "send again".
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM notification_outbox_failures(1000) WHERE last_error = 'cancelled_reversed'")
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    // ---- A failure of any collaborator of the message never loses the money ------------------------------------
+
+    /**
+     * Each of the four things the message needs from the caller's transaction is made to fail in turn, once with a Java
+     * exception and once with a database error that aborts the PostgreSQL transaction (as a statement that raises does): the
+     * member lookup and the settings read (both go through transactional proxies, which mark the transaction rollback-only
+     * when an exception leaves them), the amount formatting, and the check that SMS is on. The repayment is recorded all the
+     * same, nothing is queued, and the next repayment, with the collaborator healthy again, queues its receipt.
+     */
+    @Test
+    void frNtf01_aFailureOfAnyCollaboratorOfTheMessageNeverLosesTheRepayment() {
+        smsOn();
+        SmsTenants.set(t.tenantId(), Map.of("include_balance", true));
+        String loan = approved(instalmentProduct("SMSG"), 1_200_000, 3, 17);
+        disburse(loan);
+        MemberLookup lookup = AopTestUtils.getUltimateTargetObject(memberLookup);
+        TenantSettings settings = AopTestUtils.getUltimateTargetObject(tenantSettings);
+        SmsEvents events = AopTestUtils.getUltimateTargetObject(smsEvents);
+        Map<String, Consumer<Boolean>> breakers = new LinkedHashMap<>();
+        breakers.put(
+                "member lookup",
+                sql -> Mockito.doAnswer(i -> fail(sql)).when(lookup).smsPhone(ArgumentMatchers.any()));
+        breakers.put(
+                "settings",
+                sql -> Mockito.doAnswer(i -> fail(sql)).when(settings).smsIncludeBalance());
+        breakers.put(
+                "amount formatting",
+                sql -> Mockito.doAnswer(i -> fail(sql))
+                        .when(events)
+                        .amount(ArgumentMatchers.anyLong(), ArgumentMatchers.anyString()));
+        breakers.put(
+                "active check",
+                sql -> Mockito.doAnswer(i -> fail(sql)).when(events).active());
+
+        int repayments = 0;
+        for (Map.Entry<String, Consumer<Boolean>> breaker : breakers.entrySet()) {
+            for (boolean sqlError : new boolean[] {false, true}) {
+                Mockito.reset(lookup, settings, events);
+                breaker.getValue().accept(sqlError);
+
+                JsonNode paid = repaid(loan, 10_000);
+                repayments++;
+
+                String what = breaker.getKey() + (sqlError ? " (database error)" : " (exception)");
+                assertThat(paid.get("transaction").get("txn_type").asString())
+                        .as(what)
+                        .isEqualTo("repayment");
+                assertThat(get(loan, "/transactions").get("items").findValuesAsString("txn_type").stream()
+                                .filter("repayment"::equals))
+                        .as(what + ": the repayment is recorded")
+                        .hasSize(repayments);
+                assertThat(templates()).as(what + ": nothing queued").containsExactly("loan.disbursed");
+            }
+        }
+        Mockito.reset(lookup, settings, events);
+        repaid(loan, 10_000);
+        assertThat(templates())
+                .as("healthy again")
+                .containsExactlyInAnyOrder("loan.disbursed", "loan.repayment_received");
+    }
+
+    /** Fails as asked: a database error inside the caller's transaction, or a plain exception. */
+    Object fail(boolean sqlError) {
+        if (sqlError) {
+            jdbc.sql("SELECT 1 / 0").query(Integer.class).single();
+        }
+        throw new IllegalStateException("collaborator down");
+    }
+
     // ---- What queues nothing ------------------------------------------------------------------------------
 
     @Test
@@ -415,7 +702,7 @@ class LoanEventSmsIT extends LoanFixtures {
                     t.tenantId(),
                     () -> new TransactionTemplate(transactionManager).execute(tx -> {
                         Loan l = loanRepository.lock(loanId).orElseThrow();
-                        servicer.repay(l, 400_000, today, "cash", null, cashier, "staff");
+                        servicer.repay(l, 400_000, today(), "cash", null, cashier, "staff");
                         assertThat(TestDatabase.owner()
                                         .sql(
                                                 "SELECT count(*) FROM notification_outbox WHERE tenant_id = ? AND template_key = ?")
@@ -443,8 +730,8 @@ class LoanEventSmsIT extends LoanFixtures {
         TenantContext.callAs(
                 t.tenantId(),
                 () -> new TransactionTemplate(transactionManager).execute(tx -> {
-                    port.disburseApproved(loanId, today, "cash", cashier, manager);
-                    port.recordRepayment(loanId, 100_000, today, "cash", cashier);
+                    port.disburseApproved(loanId, today(), "cash", cashier, manager);
+                    port.recordRepayment(loanId, 100_000, today(), "cash", cashier);
                     return null;
                 }));
         assertThat(get(loan, "").get("status").asString()).isEqualTo("active");
