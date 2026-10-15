@@ -84,6 +84,39 @@ class SmsTemplateLanguageTest {
     }
 
     @Test
+    void eachNewEventOffersItsOwnPlaceholdersAndNoOtherEventsAndNeverTheBalance() {
+        Event receipt = SmsTemplateEvents.find("loan.repayment_received").orElseThrow();
+        Event disbursed = SmsTemplateEvents.find("loan.disbursed").orElseThrow();
+        Event maturing = SmsTemplateEvents.find("investment.maturing").orElseThrow();
+        assertThat(SmsTemplateLanguage.validate(receipt, "Paid {amount} on {date} for {loan_no}. Ref {receipt_no}"))
+                .containsExactlyInAnyOrder("amount", "date", "loan_no", "receipt_no");
+        // The balance is never offered, and a placeholder of another event is unknown here.
+        assertThat(codeOf(() -> SmsTemplateLanguage.validate(receipt, "Paid {amount} {loan_no} {balance}")))
+                .isEqualTo("unknown_placeholder");
+        assertThat(codeOf(() -> SmsTemplateLanguage.validate(receipt, "Paid {amount} {loan_no} {next_amount}")))
+                .isEqualTo("unknown_placeholder");
+        assertThat(codeOf(() -> SmsTemplateLanguage.validate(receipt, "Paid {amount} {account_no}")))
+                .isEqualTo("unknown_placeholder");
+        assertThat(SmsTemplateLanguage.validate(
+                        disbursed, "Loan {loan_no}: {amount}, first {next_amount} on {next_due_date}"))
+                .contains("next_amount", "next_due_date");
+        // What makes the message mean something is required.
+        assertThat(codeOf(() -> SmsTemplateLanguage.validate(receipt, "Thank you for paying {amount}")))
+                .isEqualTo("missing_required_placeholder");
+        assertThat(codeOf(() -> SmsTemplateLanguage.validate(maturing, "Your investment {account_no} is ending")))
+                .isEqualTo("missing_required_placeholder");
+        // Values are plain text: markup and quotes stay, a line feed becomes a space, a loan number that is too long is
+        // refused.
+        Map<String, String> values = new LinkedHashMap<>(SmsTemplateLanguage.sampleValues(receipt, null));
+        values.put("tenant_name", "A&B <Sons> \"Ltd\" 'x'\nCafe");
+        assertThat(SmsTemplateLanguage.render(receipt, "{tenant_name}: {amount} for {loan_no}", values))
+                .isEqualTo("A&B <Sons> \"Ltd\" 'x' Cafe: 50,000 for LN-HQ-000123");
+        values.put("loan_no", "L".repeat(25));
+        assertThat(codeOf(() -> SmsTemplateLanguage.render(receipt, "{amount} for {loan_no}", values)))
+                .isEqualTo("value_too_long");
+    }
+
+    @Test
     void anUnknownPlaceholderIsRefusedAtSaveWithItsCode() {
         // Acceptance (issue #218): saving {unknown} fails with unknown_placeholder.
         assertThat(code("Paid {unknown} on {account_no} {amount}")).isEqualTo("unknown_placeholder");

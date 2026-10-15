@@ -601,6 +601,52 @@ class SmsEventsIT extends IntegrationTest {
                 .isEqualTo(expected);
     }
 
+    /**
+     * The tenant's own wording for a new event is used, with the values cleaned; a broken override (it no longer validates)
+     * never costs the member the receipt: the default goes. No override ever carries the balance, even for a tenant that
+     * asked for it.
+     */
+    @Test
+    void frNtf03_aTenantsOwnWordingIsUsedForTheNewEventsAndABrokenOneFallsBackToTheDefault() {
+        Rig rig = new Rig(BASE);
+        TestDatabase.Fixture t = tenant(1000);
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET name = 'Test Lender' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+        SmsTenants.set(t.tenantId(), Map.of("include_balance", true));
+        Map<String, String> withBalance = new java.util.HashMap<>(RECEIPT);
+        withBalance.put("balance", "600,000");
+
+        override(
+                t,
+                "loan.repayment_received",
+                "Thank you! {currency} {amount} received for {loan_no} (ref {receipt_no}).");
+        assertThat(queue(rig, t, UUID.randomUUID(), "0700000190", "loan.repayment_received", withBalance, "w1", null))
+                .isEqualTo(Result.QUEUED);
+        assertThat(rig.dispatch()).isEqualTo(1);
+        assertThat(rig.provider.sent().getFirst().body())
+                .isEqualTo("Thank you! UGX 400,000 received for LN-HQ-000123 (ref RC-HQ-000042).");
+
+        // The wording now names a placeholder this event does not offer: the default is sent, balance and all.
+        override(t, "loan.repayment_received", "Paid {amount} on {account_no}");
+        assertThat(queue(rig, t, UUID.randomUUID(), "0700000191", "loan.repayment_received", withBalance, "w2", null))
+                .isEqualTo(Result.QUEUED);
+        assertThat(rig.dispatch()).isEqualTo(1);
+        assertThat(rig.provider.sent().get(1).body())
+                .isEqualTo(
+                        "Test Lender: Received UGX 400,000 on 15/10/2026 for loan LN-HQ-000123. Receipt RC-HQ-000042."
+                                + " Balance UGX 600,000.");
+    }
+
+    void override(TestDatabase.Fixture t, String event, String body) {
+        TestDatabase.owner()
+                .sql("INSERT INTO sms_template_overrides (id, tenant_id, event_key, body) VALUES (?, ?, ?, ?)"
+                        + " ON CONFLICT (tenant_id, event_key) DO UPDATE SET body = excluded.body")
+                .params(UUID.randomUUID(), t.tenantId(), event, body)
+                .update();
+    }
+
     // ---- Opt-out, other tenants, backlog --------------------------------------------------------------------
 
     @Test
