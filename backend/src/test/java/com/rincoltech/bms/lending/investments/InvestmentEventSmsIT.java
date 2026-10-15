@@ -6,6 +6,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.lending.loans.LoanFixtures;
+import com.rincoltech.bms.testsupport.MovableClockConfig;
 import com.rincoltech.bms.testsupport.SmsTenants;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -20,6 +21,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -35,6 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
  * each queue one message for the investor's own phone in the outbox, once; a reversal, the seed's port, a replay of past
  * days and a tenant without SMS queue nothing. All figures and numbers fabricated.
  */
+@Import(MovableClockConfig.class)
 class InvestmentEventSmsIT extends LoanFixtures {
 
     static final String INV = "/api/v1/lending/investments";
@@ -57,7 +60,6 @@ class InvestmentEventSmsIT extends LoanFixtures {
     final UUID accountant = UUID.randomUUID();
     String cashierPerms;
     String accountantPerms;
-    LocalDate today;
     int members;
     String investorPhone;
 
@@ -65,7 +67,12 @@ class InvestmentEventSmsIT extends LoanFixtures {
     void users() {
         cashierPerms = permissionsOf("cashier");
         accountantPerms = permissionsOf("accountant");
-        today = clock.today(BusinessClock.DEFAULT_ZONE);
+        // One minute before Kampala's midnight on 2026-10-15: the business date is the 15th.
+        MovableClockConfig.CLOCK.set(MovableClockConfig.BEFORE_MIDNIGHT);
+    }
+
+    LocalDate today() {
+        return clock.today(BusinessClock.DEFAULT_ZONE);
     }
 
     // ---- Fixtures -------------------------------------------------------------------------------------
@@ -119,11 +126,18 @@ class InvestmentEventSmsIT extends LoanFixtures {
     }
 
     ResponseEntity<JsonNode> requestFunding(String id, LocalDate date, String key) {
+        return requestFunding(id, date, key, null);
+    }
+
+    ResponseEntity<JsonNode> requestFunding(String id, LocalDate date, String key, Boolean notify) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("value_date", date.toString());
+        body.put("payment_method_key", "cash");
+        if (notify != null) {
+            body.put("notify_member", notify);
+        }
         return send(
-                HttpMethod.POST,
-                INV + "/" + id + "/funding",
-                withKey(as(cashier, cashierPerms, "*", null), key),
-                Map.of("value_date", date.toString(), "payment_method_key", "cash"));
+                HttpMethod.POST, INV + "/" + id + "/funding", withKey(as(cashier, cashierPerms, "*", null), key), body);
     }
 
     ResponseEntity<JsonNode> decide(String approvalId, UUID user, String perms) {
@@ -202,13 +216,13 @@ class InvestmentEventSmsIT extends LoanFixtures {
 
         // Below the threshold it executes at once; above it waits for a checker (the default here): fund with a
         // checker.
-        ResponseEntity<JsonNode> r = requestFunding(id, today, k);
+        ResponseEntity<JsonNode> r = requestFunding(id, today(), k);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(rows(t)).as("nothing before the checker approves").isEmpty();
         assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        ResponseEntity<JsonNode> replay = requestFunding(id, today, k);
+        ResponseEntity<JsonNode> replay = requestFunding(id, today(), k);
         assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
 
         Map<String, Object> row = only("investment.funded");
@@ -221,17 +235,17 @@ class InvestmentEventSmsIT extends LoanFixtures {
                 .isEqualTo(funded.get("account_no").asString());
         assertThat(p.get("amount").asString()).isEqualTo("1,000,000");
         assertThat(p.get("currency").asString()).isEqualTo("UGX");
-        assertThat(p.get("date").asString()).isEqualTo(today.format(DMY));
+        assertThat(p.get("date").asString()).isEqualTo(today().format(DMY));
         assertThat(p.get("maturity_date").asString())
                 .isEqualTo(
                         LocalDate.parse(funded.get("maturity_date").asString()).format(DMY));
         assertThat(p.get("receipt_no").asString()).startsWith("RC-");
         assertThat((String) row.get("params")).doesNotContain("Test Investor").doesNotContain("700000");
-        // A receipt lives an hour from when it was queued (two reads of the clock, a moment apart).
-        assertThat(at(row.get("expires_at")))
-                .isBetween(
-                        at(row.get("created_at")).plusSeconds(3590),
-                        at(row.get("created_at")).plusSeconds(3610));
+        // Queued at 20:59 UTC, 23:59 in Kampala: a receipt is not held by the window, and lives an hour.
+        assertThat(at(row.get("created_at"))).isEqualTo(MovableClockConfig.BEFORE_MIDNIGHT);
+        assertThat(at(row.get("next_attempt_at"))).isEqualTo(MovableClockConfig.BEFORE_MIDNIGHT);
+        assertThat(at(row.get("expires_at"))).isEqualTo(MovableClockConfig.BEFORE_MIDNIGHT.plusSeconds(3600));
+        assertThat(p.get("date").asString()).isEqualTo("15/10/2026");
     }
 
     // ---- The maturity reminder ---------------------------------------------------------------------------
@@ -241,35 +255,37 @@ class InvestmentEventSmsIT extends LoanFixtures {
         smsOn();
         String p = product("SMSM", Map.of("payout_frequency", "at_maturity"));
         String soon = open(p, 1_000_000, 3);
-        fund(soon, today.minusMonths(3).plusDays(5));
+        fund(soon, today().minusMonths(3).plusDays(5));
         String soonPhone = investorPhone;
         // The fabricated history replays days that are gone: that run marks reminders and texts nobody.
         String replayed = open(p, 1_000_000, 3);
-        fund(replayed, today.minusMonths(3).plusDays(4));
-        assertThat(templates()).as("two fundings").containsExactly("investment.funded", "investment.funded");
+        fund(replayed, today().minusMonths(3).plusDays(4));
+        assertThat(rows(t))
+                .as("fundings dated months ago are a register being loaded, not news: not texted")
+                .isEmpty();
         TestDatabase.owner()
                 .sql("DELETE FROM notification_outbox WHERE tenant_id = ?")
                 .param(t.tenantId())
                 .update();
 
-        assertThat(runDaily(today.minusDays(2)))
+        assertThat(runDaily(today().minusDays(2)))
                 .as("both are due a reminder two days ago")
                 .isEqualTo(2);
         assertThat(rows(t)).as("a past date texts nobody").isEmpty();
-        assertThat(runDaily(today)).as("and they are not reminded again").isZero();
+        assertThat(runDaily(today())).as("and they are not reminded again").isZero();
         assertThat(rows(t)).isEmpty();
 
         // A third one, reached on the day itself.
         String third = open(p, 2_000_000, 3);
-        fund(third, today.minusMonths(3).plusDays(6));
+        fund(third, today().minusMonths(3).plusDays(6));
         String thirdPhone = investorPhone;
         TestDatabase.owner()
                 .sql("DELETE FROM notification_outbox WHERE tenant_id = ?")
                 .param(t.tenantId())
                 .update();
 
-        assertThat(runDaily(today)).isEqualTo(1);
-        assertThat(runDaily(today)).as("the job run twice").isZero();
+        assertThat(runDaily(today())).isEqualTo(1);
+        assertThat(runDaily(today())).as("the job run twice").isZero();
         Map<String, Object> row = only("investment.maturing");
         assertThat(rows(t)).hasSize(1);
         JsonNode params = params(row);
@@ -281,9 +297,14 @@ class InvestmentEventSmsIT extends LoanFixtures {
                 .isEqualTo(LocalDate.parse(inv(third).get("maturity_date").asString())
                         .format(DMY));
         assertThat(params.has("balance")).isFalse();
-        // A reminder is held for the tenant's window and outlives the deferral to it.
-        assertThat(at(row.get("next_attempt_at"))).isAfterOrEqualTo(at(row.get("created_at")));
-        assertThat(at(row.get("expires_at"))).isAfter(at(row.get("next_attempt_at")));
+        // Queued at 23:59 in Kampala: held to the window opening at 08:00 on the 16th (05:00 UTC), and it expires at
+        // the
+        // end of that window day (20:00, 17:00 UTC), after the deferral.
+        assertThat(at(row.get("created_at"))).isEqualTo(MovableClockConfig.BEFORE_MIDNIGHT);
+        assertThat(at(row.get("next_attempt_at"))).isEqualTo(Instant.parse("2026-10-16T05:00:00Z"));
+        assertThat(at(row.get("expires_at")))
+                .isEqualTo(Instant.parse("2026-10-16T17:00:00Z"))
+                .isAfter(at(row.get("next_attempt_at")));
         // The key names the investment and its maturity date, so a rollover (a new date) would be a new message.
         assertThat(row.get("idempotency_key").toString())
                 .contains(third + ":" + inv(third).get("maturity_date").asString());
@@ -296,8 +317,8 @@ class InvestmentEventSmsIT extends LoanFixtures {
         smsOn();
         // A return payout.
         String monthly = open(product("SMSP1", Map.of()), 1_000_000, 6);
-        fund(monthly, today.minusMonths(3));
-        runDaily(today);
+        fund(monthly, today().minusMonths(3));
+        runDaily(today());
         TestDatabase.owner()
                 .sql("DELETE FROM notification_outbox WHERE tenant_id = ?")
                 .param(t.tenantId())
@@ -313,7 +334,7 @@ class InvestmentEventSmsIT extends LoanFixtures {
         assertThat(params(row).get("voucher_no").asString())
                 .isEqualTo(paid.getBody().get("transaction").get("receipt_no").asString())
                 .startsWith("VC-");
-        assertThat(params(row).get("date").asString()).isEqualTo(today.format(DMY));
+        assertThat(params(row).get("date").asString()).isEqualTo(today().format(DMY));
 
         // Its reversal (a checker's decision) sends nothing.
         ResponseEntity<JsonNode> reversal = send(
@@ -327,11 +348,14 @@ class InvestmentEventSmsIT extends LoanFixtures {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(templates()).containsExactly("investment.paid_out");
+        assertThat(cancelled())
+                .as("the unclaimed voucher message of the reversed payout is withdrawn")
+                .containsExactly("investment.paid_out");
 
         // The maturity payout.
         String matured = open(product("SMSP2", Map.of("payout_frequency", "at_maturity")), 2_000_000, 3);
-        fund(matured, today.minusMonths(3));
-        runDaily(today);
+        fund(matured, today().minusMonths(3));
+        runDaily(today());
         TestDatabase.owner()
                 .sql("DELETE FROM notification_outbox WHERE tenant_id = ?")
                 .param(t.tenantId())
@@ -356,8 +380,8 @@ class InvestmentEventSmsIT extends LoanFixtures {
                                 200)),
                 1_000_000,
                 12);
-        fund(early, today.minusMonths(2).minusDays(3));
-        runDaily(today);
+        fund(early, today().minusMonths(2).minusDays(3));
+        runDaily(today());
         TestDatabase.owner()
                 .sql("DELETE FROM notification_outbox WHERE tenant_id = ?")
                 .param(t.tenantId())
@@ -380,6 +404,84 @@ class InvestmentEventSmsIT extends LoanFixtures {
         assertThat(params(withdrawn).get("amount").asString()).isEqualTo(String.format(Locale.ROOT, "%,d", cash));
     }
 
+    /** The templates of the rows a reversal withdrew, with their parameters cleared. */
+    List<String> cancelled() {
+        return TestDatabase.owner()
+                .sql("SELECT template_key FROM notification_outbox WHERE channel = 'sms' AND tenant_id = ?"
+                        + " AND status = 'failed' AND last_error = 'cancelled_reversed' AND params = '{}'::jsonb")
+                .param(t.tenantId())
+                .query(String.class)
+                .list();
+    }
+
+    @Test
+    void notifyMemberFalseOnAFundingAndAPayoutQueuesNothing() {
+        smsOn();
+        String id = open(product("SMSQ", Map.of("payout_frequency", "at_maturity")), 1_000_000, 3);
+        ResponseEntity<JsonNode> r = requestFunding(id, today().minusMonths(3).plusDays(1), key(), false);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(rows(t)).as("a register import sends notify_member false").isEmpty();
+        // A funding dated today with the flag false is silent too, and the same with true is not.
+        String today = open(product("SMSQ2", Map.of()), 1_000_000, 6);
+        ResponseEntity<JsonNode> quiet = requestFunding(today, today(), key(), false);
+        assertThat(decide(quiet.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(rows(t)).isEmpty();
+        String loud = open(product("SMSQ3", Map.of()), 1_000_000, 6);
+        ResponseEntity<JsonNode> told = requestFunding(loud, today(), key(), true);
+        assertThat(decide(told.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(templates()).containsExactly("investment.funded");
+
+        // A return payout with the flag false.
+        String monthly = open(product("SMSQ4", Map.of()), 1_000_000, 6);
+        fund(monthly, today().minusMonths(3));
+        runDaily(today());
+        ResponseEntity<JsonNode> paid = send(
+                HttpMethod.POST,
+                INV + "/" + monthly + "/return-payouts",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("payment_method_key", "cash", "notify_member", false));
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+        // (The nightly run also reminded the investor of the first investment, which matures tomorrow: a job, not a
+        // request.)
+        assertThat(templates())
+                .as("no payout message")
+                .containsExactlyInAnyOrder("investment.funded", "investment.maturing");
+    }
+
+    @Test
+    void frNtf01_aReversedFundingWithdrawsItsUnclaimedMessage() {
+        smsOn();
+        String id = open(product("SMSV", Map.of()), 1_000_000, 6);
+        fund(id, today());
+        assertThat(templates()).containsExactly("investment.funded");
+        String funding = TestDatabase.owner()
+                .sql("SELECT id::text FROM lending_investment_transactions WHERE investment_id = ?::uuid")
+                .param(id)
+                .query(String.class)
+                .single();
+
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                INV + "/" + id + "/transactions/" + funding + "/reverse",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("reason", "Test counterfeit notes"));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        assertThat(inv(id).get("status").asString()).isEqualTo("cancelled");
+        assertThat(cancelled()).containsExactly("investment.funded");
+        assertThat(templates()).as("nothing new was queued").containsExactly("investment.funded");
+    }
+
     // ---- What queues nothing -------------------------------------------------------------------------------
 
     @Test
@@ -395,24 +497,23 @@ class InvestmentEventSmsIT extends LoanFixtures {
                 t.slug(),
                 "lending",
                 () -> tx.execute(s -> {
-                    servicing.fundApproved(UUID.fromString(id), today.minusMonths(3), "cash", cashier, manager);
-                    servicing.runDaily(today);
-                    servicing.payOutMatured(UUID.fromString(id), today, "cash", cashier);
+                    servicing.fundApproved(UUID.fromString(id), today().minusMonths(3), "cash", cashier, manager);
+                    servicing.runDaily(today(), false);
+                    servicing.payOutMatured(UUID.fromString(id), today(), "cash", cashier);
                     return null;
                 }));
         assertThat(inv(id).get("status").asString()).isEqualTo("paid_out");
         assertThat(rows(t))
-                .as("no funded and no paid out; the nightly reminder is a job, not a port call")
-                .extracting(r -> r.get("template_key"))
-                .doesNotContain("investment.funded", "investment.paid_out");
+                .as("the seed's port texts nobody: no funding, no payout and, replaying today, no reminder either")
+                .isEmpty();
     }
 
     @Test
     void frNtf20_withSmsOffNothingIsQueuedAndAnotherTenantIsNeverMixedIn() {
         String p = product("SMSO", Map.of("payout_frequency", "at_maturity"));
         String id = open(p, 1_000_000, 3);
-        fund(id, today.minusMonths(3));
-        runDaily(today);
+        fund(id, today().minusMonths(3));
+        runDaily(today());
         assertThat(pay(id, "payout", key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(rows(t)).as("neither switch is on").isEmpty();
 
@@ -421,7 +522,7 @@ class InvestmentEventSmsIT extends LoanFixtures {
         SmsTenants.enable(other.tenantId());
         smsOn();
         String second = open(p, 1_000_000, 3);
-        fund(second, today.minusMonths(3));
+        fund(second, today());
         assertThat(templates()).containsExactly("investment.funded");
         assertThat(rows(other)).isEmpty();
     }
