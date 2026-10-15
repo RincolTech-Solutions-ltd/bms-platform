@@ -529,7 +529,8 @@ class SavingsIT extends LoanFixtures {
                 .update();
         assertThat(depositWith(account, 20_000, null, false).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(smsRows()).as("a register import says notify_member false").isEmpty();
-        // A deposit dated a week ago is a register being loaded, not news; two days ago is inside the cutoff and is texted.
+        // A deposit dated a week ago is a register being loaded, not news; two days ago is inside the cutoff and is
+        // texted.
         assertThat(depositWith(account, 20_000, today.minusDays(7), null).getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
         assertThat(smsRows()).isEmpty();
