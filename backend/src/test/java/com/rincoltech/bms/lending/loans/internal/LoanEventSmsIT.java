@@ -348,6 +348,56 @@ class LoanEventSmsIT extends LoanFixtures {
         assertThat(templates().stream().filter("loan.closed"::equals)).hasSize(2);
     }
 
+    @Test
+    void frNtf02_aRecoveryOnAWrittenOffLoanIsAReceiptWithoutABalanceEvenForATenantThatAskedForIt() {
+        smsOn();
+        SmsTenants.set(t.tenantId(), Map.of("include_balance", true));
+        String loan = approved(instalmentProduct("SMSW"), 1_200_000, 3, 10);
+        disburse(loan);
+        repaid(loan, 300_000);
+        ResponseEntity<JsonNode> request = send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/write-off",
+                withKey(as(UUID.randomUUID(), permissionsOf("accountant"), "*", null), key()),
+                Map.of("reason", "Test borrower unreachable"));
+        assertThat(request.getStatusCode()).as("%s", request.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(send(
+                                HttpMethod.POST,
+                                "/api/v1/approvals/"
+                                        + request.getBody()
+                                                .get("approval_request_id")
+                                                .asString() + "/approve",
+                                as(UUID.randomUUID(), adminPerms, "*", null),
+                                Map.of("note", "Checked"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(get(loan, "").get("status").asString()).isEqualTo("written_off");
+        assertThat(templates())
+                .as("a write-off sends nothing")
+                .containsExactlyInAnyOrder("loan.disbursed", "loan.repayment_received");
+
+        JsonNode recovery = repaid(loan, 50_000).get("transaction");
+
+        assertThat(recovery.get("txn_type").asString()).isEqualTo("recovery");
+        List<Map<String, Object>> receipts = rows(t).stream()
+                .filter(r -> "loan.repayment_received".equals(r.get("template_key")))
+                .toList();
+        assertThat(receipts).hasSize(2);
+        assertThat(receipts.stream().map(r -> params(r)))
+                .filteredOn(p -> "50,000".equals(p.get("amount").asString()))
+                .singleElement()
+                .satisfies(p -> {
+                    assertThat(p.has("balance")).isFalse();
+                    assertThat(p.get("receipt_no").asString())
+                            .isEqualTo(recovery.get("receipt_no").asString());
+                });
+        assertThat(receipts.stream().map(r -> params(r)))
+                .filteredOn(p -> "300,000".equals(p.get("amount").asString()))
+                .singleElement()
+                .satisfies(p -> assertThat(p.has("balance")).isTrue());
+        assertThat(templates()).doesNotContain("loan.closed");
+    }
+
     // ---- What queues nothing ------------------------------------------------------------------------------
 
     @Test

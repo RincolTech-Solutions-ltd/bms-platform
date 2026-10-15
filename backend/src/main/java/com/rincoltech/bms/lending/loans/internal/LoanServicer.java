@@ -374,7 +374,12 @@ class LoanServicer implements LoanServicing {
         return txnId;
     }
 
-    /** FR-LCL-01: fully paid or waived; the pledges are released by the status move. */
+    /** FR-LCL-01: fully paid or waived; the pledges are released by the status move. Tells the borrower nothing. */
+    private void close(Loan loan, LocalDate on, UUID by) {
+        close(loan, on, by, null);
+    }
+
+    /** As above; with the repayment that settled the loan, the borrower is thanked (SMS, issue #221). */
     private void close(Loan loan, LocalDate on, UUID by, UUID closingTxnId) {
         loans.move(loan.id(), "active", "closed", by, null, Map.of());
         repo.closedOn(loan.id(), on);
@@ -635,7 +640,7 @@ class LoanServicer implements LoanServicing {
                 restorePledges(loan, by, unsecuredItemsListedOnRequest);
             } else if (loan.status().equals("active") && position.settled()) {
                 // A reversal that settles the loan texts nobody: the member was told about every repayment already.
-                close(loan, today, by, null);
+                close(loan, today, by);
             }
         }
     }
