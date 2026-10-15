@@ -713,9 +713,9 @@ review is a go-live condition.
 | Personal data reaches the provider | Typed fact list, aliases for branches and products, no officer dimension, groups under five suppressed, no free rows; question scrub; canary test at the client boundary; log inspection test |
 | A branch manager reads figures outside their branches | The stored brief is all-branches and shown only to all-branch users; questions are computed under the caller's scope (5.2) |
 | A tenant turns the feature on before the provider terms are on file | The platform allow-list `BMS_AI_ENABLED_TENANTS` (5.2) |
-| Model states a wrong or invented number, or the wrong direction | Cited-fact validator with number words and direction words checked against the delta sign; fallback; advisory label |
-| Prompt injection through a question | No tools, no write path, plain text output, scrubbed and length-limited input, injection test in the evaluation |
-| Injection through data (a branch named with instructions) | Names are aliases; only numbers and fixed labels are in the prompt |
+| Model states a wrong or invented number, or the wrong direction | The model writes no number, word or sentence: it chooses fact keys, a topic, a catalogue action and a priority from closed sets, anything else refuses the whole answer, and our code writes every figure, movement and polarity (5.13); second-line number re-derivation; fallback; advisory label |
+| Prompt injection through a question | No tools, no write path, a structured answer that can carry no free text (a rendered brief only), scrubbed and length-limited input, injection test in the evaluation |
+| Injection through data (a branch named with instructions or markup) | Names are aliases; only numbers and fixed labels are in the prompt; a real name written back into a sentence for the person who asked is neutralised (angle brackets, markdown characters, line breaks, ampersands removed) |
 | Cost runaway | Daily caps, `max_tokens`, one brief per day, platform ceiling, breaker |
 | Provider outage or slowness blocks users | 30 second budget, fallback, breaker; the page never depends on it |
 | Cross-tenant mix-up | Prompts are built under the tenant binding; `ai_calls` has row-level security; no shared cache of answers |
@@ -748,7 +748,12 @@ Where the build differs from, or sharpens, the text above:
   and the difference taken in the figure's own units (basis points for a rate, shown as points to two decimals, which is
   exact). A stock (outstanding, PAR, arrears, loans, borrowers) is read from the nightly snapshot of the earlier end date, a
   flow from the transactions of the earlier range. There is no change when the earlier figure cannot be known (no snapshot
-  for that date), and none for figures that are live only (new arrears, going bad, the forecasts, dormant members).
+  for that date), and none for figures that are live only (new arrears, going bad, the forecasts, dormant members). **A change
+  is also left out whenever the distinct loans behind the two figures differ by one to four, or either is one to four** (for
+  every figure with changes: write-offs, recoveries, collected, disbursed, penalties, arrears, the PAR levels, revenue and the
+  rates): write-offs of 6 loans now and 5 a week earlier would give "+1 loan" and one loan's exact amount. The figure itself
+  stays when it is over five loans or more. `PortfolioFactsSuppressionTest` sweeps every pair of loan counts from 0 to 30 for
+  every figure with changes.
 - **Small counts.** A figure is hidden when the loans it is **actually computed over** number one to four, not when the
   book is large: arrears and PAR 1 over the loans in arrears, PAR 30, 60 and 90 over the loans more than 30, 60 and 90 days
   late, collected over the distinct loans that paid, recovered over the loans recovered, each revenue line over the distinct
@@ -801,7 +806,8 @@ Where the build differs from, or sharpens, the text above:
   left out by complementary suppression: `hidden_fact`), is of a family the topic may not cite (`fact_topic_mismatch`), or is
   repeated (`duplicate_fact`); or the rendering fails the second line (`render_check_failed`). A defect in the validator itself
   refuses (`validator_error`). A refused answer is never repaired and never partly shown: the person sees the deterministic
-  facts-only brief instead (`Fallback`: a fixed list of key figures and their changes, written by the same phrases).
+  facts-only brief instead (`Fallback`: a fixed list of key figures and their changes, written by the same phrases). An answer
+  with no finding and nothing to watch shows the same key figures, not an empty statement. A provider failure shows it too.
 - **Our code writes every sentence.** The summary line, each finding, the watch line, the facts-only brief and the "nothing was
   flagged" line are templates in the catalogue resource, filled by `Templates.fill` in one pass, so a value cannot contain a
   placeholder that is filled again. A fact is written by the phrase table (`Phrases`) as `PAR 30 (12.5 percent)`, a change as
@@ -810,13 +816,18 @@ Where the build differs from, or sharpens, the text above:
   name travels with the value, so figures cannot be swapped between metrics, groups or periods. The finding reads
   `<Priority> priority. <facts>. Suggested action: <action>`, the action being the catalogue text with `{{where}}` filled by
   our code with the groups the finding cites (` for Branch 1 and Product A`, mapped to names only for the person who asked).
-- **The catalogue is reviewed text.** It holds nine topics and twenty actions with stable codes (arrears follow-up, collections
-  focus, disbursement pace, collateral cover, concentration, write-off review, savings and investment liquidity, data quality,
-  portfolio risk and profitability). Each action belongs to one topic, and each topic lists the fact families it may cite
+- **The catalogue is reviewed text.** It holds nine topics and nineteen actions with stable codes (arrears follow-up, collections
+  focus, disbursement pace, collateral cover, concentration, write-off review, cash flow from expected repayments, data quality,
+  portfolio risk and profitability). No text mentions an officer (there is no officer dimension) or savings and investments (no
+  fact covers them yet; a topic for them arrives with the facts). Topics and actions keep the order of the file, and the loader
+  refuses a duplicate topic code, action code or JSON key. Each action belongs to one topic, and each topic lists the fact families it may cite
   (`portfolio.par30`, `branch.loans`, and so on: a group fact is bound by its family, whatever its alias or period). The loader
   refuses a catalogue with fewer than 12 or more than 20 actions, an action of an unknown topic, a topic without an action, any
   digit of any script, markup or `@` in a text, and any placeholder in an action other than `{{where}}` (a figure never
-  appears in catalogue text; it comes from the facts). `CatalogueTest` and a property test over every action with every fact of
+  appears in catalogue text; it comes from the facts). An action that says no action is needed (`calm`, marked in the file
+  and required of any text that says so) is allowed only at low priority and when no cited change is worse (`calm_action_mismatch`),
+  so a worsening is never described as calm. No action text refers to the cited facts as `this figure` or `these figures`, and a
+  fact phrase uses no verb that agrees with the name (`did not change`), so one fact or three read alike. `CatalogueTest` and a property test over every action with every fact of
   its topic assert that the output is only template text plus values written by our code.
 - **The prompt is a reviewed resource** (`advisor/system-prompt.txt`) filled with the topics and actions of the catalogue and the
   canary phrase; `PromptContractTest` fails if it stops listing the output shape, a topic or an action code, or the rules the

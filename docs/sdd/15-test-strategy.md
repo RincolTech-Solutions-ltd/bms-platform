@@ -407,9 +407,10 @@ output changed.
   with the real names, and prose, an extra field and an unknown key are refused), `StructuredValidatorTest` (the limits,
   extras, enum near-misses such as case, padding and look-alikes, the closed codes, the rendering word for word, a property
   test that renders every catalogue action with every fact of its topic and finds only template text plus values written by our
-  code), `CatalogueTest` (twelve to twenty actions, a topic for each, no digit, markup or foreign placeholder in any text, the
+  code), `CatalogueTest` (twelve to twenty actions, a topic for each, file order kept, duplicates refused, calm wording marked, no officer or savings text, no figure reference, no digit, markup or foreign placeholder in any text, the
   loader refusing bad text, a fact bound to its topic by family), `PortfolioFactsSuppressionTest` (nested windows counted in
-  distinct loans on other days, including one loan paying six times, the PAR levels as a partition, figures that give each other
+  distinct loans on other days, including one loan paying six times; a change left out for every figure when the loans of the
+  two windows differ by one to four or either is one to four, swept over every pair of counts from 0 to 30, the PAR levels as a partition, figures that give each other
   away), `ValidatorMutationTest` (each rule of the validator off in turn makes the golden evaluation fail with the cases that
   rule exists for wrongly accepted; a corrupted phrase table is caught by the second line), `PromptContractTest` (the prompt
   resource lists the output shape, every topic and action of the catalogue, and the rules the validator enforces),

@@ -469,19 +469,29 @@ class PortfolioFactsIT extends IntegrationTest {
             long poThen = GoldenModel.po(then);
             long poNow = GoldenModel.po(now);
             assertThat(then).as("a book on %s", to).hasSizeGreaterThan(50);
-            assertChange(figure(set, "portfolio.principal_outstanding"), week, poNow - poThen, then.size());
-            assertChange(figure(set, "portfolio.active_loans"), week, (long) now.size() - then.size(), then.size());
+            assertChange(
+                    figure(set, "portfolio.principal_outstanding"),
+                    week,
+                    poNow - poThen,
+                    pair(now.size(), then.size()));
+            assertChange(
+                    figure(set, "portfolio.active_loans"),
+                    week,
+                    (long) now.size() - then.size(),
+                    pair(now.size(), then.size()));
             assertChange(
                     figure(set, "portfolio.par30"),
                     week,
                     rate(GoldenModel.parAmount(now, 30), poNow) - rate(GoldenModel.parAmount(then, 30), poThen),
-                    then.size());
+                    pair(now.size(), then.size()),
+                    pair(late(now, 30), late(then, 30)),
+                    parHidden(then, 1) ? pair(1, 1) : pair(0, 0));
             assertChange(
                     figure(set, "portfolio.arrears"),
                     week,
                     now.stream().mapToLong(Pos::arrears).sum()
                             - then.stream().mapToLong(Pos::arrears).sum(),
-                    then.size());
+                    pair(late(now, 0), late(then, 0)));
             // Flows are the transactions of the earlier range.
             long disbursedNow = model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false);
             long disbursedThen = model.sumTxns(Set.of("disbursement"), from, to, ALL_LOANS, false);
@@ -489,17 +499,17 @@ class PortfolioFactsIT extends IntegrationTest {
                     figure(set, "portfolio.disbursed"),
                     week,
                     disbursedNow - disbursedThen,
-                    model.countTxns("disbursement", from, to, ALL_LOANS));
+                    pair(
+                            model.countTxns("disbursement", FROM, TODAY, ALL_LOANS),
+                            model.countTxns("disbursement", from, to, ALL_LOANS)));
             long collectedNow = model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true);
             long collectedThen = model.sumTxns(COLLECTED, from, to, ALL_LOANS, true);
             assertChange(
                     figure(set, "portfolio.collected"),
                     week,
                     collectedNow - collectedThen,
-                    then.size(),
-                    model.txns.values().stream()
-                            .filter(t -> COLLECTED.contains(t.type()) && GoldenModel.between(t.valueDate(), from, to))
-                            .count());
+                    pair(now.size(), then.size()),
+                    pair(loansWith(COLLECTED, FROM, TODAY, ALL_LOANS), loansWith(COLLECTED, from, to, ALL_LOANS)));
             long expectedNow = model.expected(FROM, TODAY, ALL_LOANS);
             long expectedThen = model.expected(from, to, ALL_LOANS);
             assertChange(
@@ -507,18 +517,23 @@ class PortfolioFactsIT extends IntegrationTest {
                     week,
                     rate(model.collectedOnDue(FROM, TODAY, ALL_LOANS), expectedNow)
                             - rate(model.collectedOnDue(from, to, ALL_LOANS), expectedThen),
-                    then.size());
+                    pair(now.size(), then.size()),
+                    pair(loansWith(COLLECTED, FROM, TODAY, ALL_LOANS), loansWith(COLLECTED, from, to, ALL_LOANS)));
             assertChange(
                     figure(set, "revenue.interest"),
                     week,
                     model.revenue(FROM, TODAY, ALL_LOANS)[0] - model.revenue(from, to, ALL_LOANS)[0],
-                    then.size());
+                    pair(
+                            loansBehind("loan_interest_income", FROM, TODAY, ALL_LOANS),
+                            loansBehind("loan_interest_income", from, to, ALL_LOANS)));
             assertChange(
                     figure(set, "brief.disbursed_today"),
                     week,
                     model.sumTxns(Set.of("disbursement"), TODAY, TODAY, ALL_LOANS, false)
                             - model.sumTxns(Set.of("disbursement"), to, to, ALL_LOANS, false),
-                    model.countTxns("disbursement", to, to, ALL_LOANS));
+                    pair(
+                            model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS),
+                            model.countTxns("disbursement", to, to, ALL_LOANS)));
         }
         // Figures with no earlier comparison have no change facts.
         assertThat(figure(set, "brief.new_arrears").weekOnWeek()).isNull();
@@ -526,15 +541,29 @@ class PortfolioFactsIT extends IntegrationTest {
         assertThat(figure(set, "portfolio.forecast_7").weekOnWeek()).isNull();
     }
 
-    /** The change is the golden difference, in the figure's units, with the display form of its sign. */
-    static void assertChange(Fact f, boolean week, long golden, long... populationsBefore) {
-        PortfolioFacts.Delta d = week ? f.weekOnWeek() : f.monthOnMonth();
-        boolean earlierSmall = false;
-        for (long p : populationsBefore) {
-            earlierSmall |= small(p);
+    static long[] pair(long now, long then) {
+        return new long[] {now, then};
+    }
+
+    /** True when a change over these loans would be a small group's exact figure: a small side, or one to four between. */
+    static boolean changeHidden(long[]... populations) {
+        for (long[] p : populations) {
+            long diff = Math.abs(p[0] - p[1]);
+            if (small(p[0]) || small(p[1]) || (diff > 0 && diff < PortfolioFacts.MIN_GROUP)) {
+                return true;
+            }
         }
-        if (f.suppressed() || earlierSmall) {
-            // Current minus the change would give back a figure over fewer than five loans: there is no change.
+        return false;
+    }
+
+    /**
+     * The change is the golden difference, in the figure's units, with the display form of its sign, and is left out when
+     * the loans behind either figure are one to four or when the two windows' loans differ by one to four (the change would
+     * then be the exact figure of those few loans). Each pair is the loans (now, earlier) of one population of the figure.
+     */
+    static void assertChange(Fact f, boolean week, long golden, long[]... populations) {
+        PortfolioFacts.Delta d = week ? f.weekOnWeek() : f.monthOnMonth();
+        if (f.suppressed() || changeHidden(populations)) {
             assertThat(d)
                     .as("%s %s change over a small population", f.key(), week ? "week" : "month")
                     .isNull();
@@ -549,28 +578,44 @@ class PortfolioFactsIT extends IntegrationTest {
     }
 
     @Test
-    void aChangeIsLeftOutWhenTheEarlierRangeHeldFewerThanFiveLoansEvenThoughTheCurrentOneDid() {
-        // Scan the fabricated year for a range with five or more disbursements whose week earlier had one to four, and
-        // one
-        // whose week earlier had five or more: the first must give no change (current minus change would give the small
-        // figure back), the second must give one.
+    void aChangeIsLeftOutWhenTheEarlierRangeHeldFewerThanFiveLoansOrTheTwoRangesDifferByOneToFour() {
+        // Scan the fabricated year for ranges of 14 days whose week earlier held one to four disbursements, five or
+        // more
+        // that differ from the current by one to four, and five or more that are the same or differ by five or more:
+        // only
+        // the last gives a change (the others would hand back a small group's exact figure by subtraction).
         LocalDate smallEarlier = null;
-        LocalDate bigEarlier = null;
+        LocalDate nearEarlier = null;
+        LocalDate farEarlier = null;
         int length = 14;
-        for (int back = 0; back < 150 && (smallEarlier == null || bigEarlier == null); back++) {
+        for (int back = 0; back < 200 && (smallEarlier == null || nearEarlier == null || farEarlier == null); back++) {
             LocalDate to = TODAY.minusDays(back);
             LocalDate from = to.minusDays(length - 1);
             long now = model.countTxns("disbursement", from, to, ALL_LOANS);
             long before = model.countTxns("disbursement", from.minusDays(7), to.minusDays(7), ALL_LOANS);
+            long diff = Math.abs(now - before);
             if (now >= PortfolioFacts.MIN_GROUP && small(before) && smallEarlier == null) {
                 smallEarlier = to;
             }
-            if (now >= PortfolioFacts.MIN_GROUP && before >= PortfolioFacts.MIN_GROUP && bigEarlier == null) {
-                bigEarlier = to;
+            if (now >= PortfolioFacts.MIN_GROUP
+                    && before >= PortfolioFacts.MIN_GROUP
+                    && diff > 0
+                    && diff < PortfolioFacts.MIN_GROUP
+                    && nearEarlier == null) {
+                nearEarlier = to;
+            }
+            if (now >= PortfolioFacts.MIN_GROUP
+                    && before >= PortfolioFacts.MIN_GROUP
+                    && (diff == 0 || diff >= PortfolioFacts.MIN_GROUP)
+                    && farEarlier == null) {
+                farEarlier = to;
             }
         }
         assertThat(smallEarlier).as("a range after a quiet week").isNotNull();
-        assertThat(bigEarlier).as("a range after a busy week").isNotNull();
+        assertThat(nearEarlier)
+                .as("a range one to four loans from the week before")
+                .isNotNull();
+        assertThat(farEarlier).as("a range far from the week before").isNotNull();
 
         UUID user = UUID.randomUUID();
         FactSet quiet = facts(user(user, ALL, null), smallEarlier.minusDays(length - 1), smallEarlier, List.of(), null);
@@ -580,15 +625,21 @@ class PortfolioFactsIT extends IntegrationTest {
         assertThat(count.weekOnWeek()).as("the earlier week held one to four").isNull();
         assertThat(figure(quiet, "portfolio.disbursed").weekOnWeek()).isNull();
 
-        FactSet busy = facts(user(user, ALL, null), bigEarlier.minusDays(length - 1), bigEarlier, List.of(), null);
+        FactSet near = facts(user(user, ALL, null), nearEarlier.minusDays(length - 1), nearEarlier, List.of(), null);
+        assertThat(figure(near, "portfolio.disbursed_count").weekOnWeek())
+                .as("the two ranges differ by one to four loans")
+                .isNull();
+        assertThat(figure(near, "portfolio.disbursed").weekOnWeek()).isNull();
+
+        FactSet far = facts(user(user, ALL, null), farEarlier.minusDays(length - 1), farEarlier, List.of(), null);
         long beforeCount = model.countTxns(
-                "disbursement", bigEarlier.minusDays(length - 1 + 7), bigEarlier.minusDays(7), ALL_LOANS);
+                "disbursement", farEarlier.minusDays(length - 1 + 7), farEarlier.minusDays(7), ALL_LOANS);
         assertChange(
-                figure(busy, "portfolio.disbursed_count"),
+                figure(far, "portfolio.disbursed_count"),
                 true,
-                figure(busy, "portfolio.disbursed_count").value() - beforeCount,
-                beforeCount);
-        assertThat(figure(busy, "portfolio.disbursed_count").weekOnWeek()).isNotNull();
+                figure(far, "portfolio.disbursed_count").value() - beforeCount,
+                pair(figure(far, "portfolio.disbursed_count").value(), beforeCount));
+        assertThat(figure(far, "portfolio.disbursed_count").weekOnWeek()).isNotNull();
     }
 
     @Test

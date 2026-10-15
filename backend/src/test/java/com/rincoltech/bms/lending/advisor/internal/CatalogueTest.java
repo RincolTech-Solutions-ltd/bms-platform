@@ -109,4 +109,75 @@ class CatalogueTest {
             assertThat(Catalogue.base(fact)).as(e.getKey()).isEqualTo(e.getValue());
         }
     }
+
+    // ---- Order and duplicates (review round 5) ----------------------------------------------------------------
+
+    @Test
+    void topicsAndActionsKeepTheOrderOfTheFileWhateverTheJvm() throws Exception {
+        try (InputStream in = CatalogueTest.class.getResourceAsStream(Catalogue.RESOURCE)) {
+            tools.jackson.databind.JsonNode root = tools.jackson.databind.json.JsonMapper.builder()
+                    .build()
+                    .readTree(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            java.util.List<String> topics = new java.util.ArrayList<>();
+            root.get("topics").forEach(t -> topics.add(t.get("code").asString()));
+            java.util.List<String> actions = new java.util.ArrayList<>();
+            root.get("actions").forEach(a -> actions.add(a.get("code").asString()));
+            assertThat(C.topics().keySet()).containsExactlyElementsOf(topics);
+            assertThat(C.actions().keySet()).containsExactlyElementsOf(actions);
+            assertThat(C.topicCodes()).containsExactlyElementsOf(topics);
+            // The topic's fact families keep the file's order too.
+            for (tools.jackson.databind.JsonNode t : root.get("topics")) {
+                java.util.List<String> facts = new java.util.ArrayList<>();
+                t.get("facts").forEach(f -> facts.add(f.asString()));
+                assertThat(C.topics().get(t.get("code").asString()).facts()).containsExactlyElementsOf(facts);
+            }
+        }
+    }
+
+    private static String file() throws Exception {
+        try (InputStream in = CatalogueTest.class.getResourceAsStream(Catalogue.RESOURCE)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    void theFileOnTheClasspathParsesToTheSameCatalogue() throws Exception {
+        Catalogue again = Catalogue.parse(file());
+        assertThat(again.actions().keySet())
+                .containsExactlyElementsOf(C.actions().keySet());
+        assertThat(again.topics().keySet()).containsExactlyElementsOf(C.topics().keySet());
+    }
+
+    @Test
+    void aDuplicateActionCodeTopicCodeOrJsonKeyFailsTheLoadInsteadOfTheLastOneWinning() throws Exception {
+        String ok = file();
+        // The first action's line, repeated: the same code twice.
+        String firstAction = java.util.Arrays.stream(ok.split("\n"))
+                .filter(l -> l.contains("\"code\": \"ARREARS_REVIEW_OLDEST\""))
+                .findFirst()
+                .orElseThrow();
+        String duplicateAction = ok.replace(firstAction, firstAction + "\n" + firstAction);
+        assertThatThrownBy(() -> Catalogue.parse(duplicateAction))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("duplicate action code ARREARS_REVIEW_OLDEST");
+        // The same topic twice.
+        String duplicateTopic = ok.replace("\"code\": \"liquidity\",", "\"code\": \"concentration\",");
+        assertThatThrownBy(() -> Catalogue.parse(duplicateTopic))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("duplicate topic code concentration");
+        // The same JSON key twice in one object (a last-one-wins in some parsers).
+        String duplicateKey = ok.replace("\"nothing\":", "\"nothing\": \"x\", \"nothing\":");
+        assertThatThrownBy(() -> Catalogue.parse(duplicateKey)).isInstanceOf(IllegalStateException.class);
+        // A calm wording on an action not marked calm, and a calm mark on a text that does not say so.
+        String unmarked = ok.replace("\"calm\": true, ", "");
+        assertThatThrownBy(() -> Catalogue.parse(unmarked))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("marked calm");
+        String wronglyMarked = ok.replace(
+                "{\"code\": \"ARREARS_REVIEW_OLDEST\", \"topic\": \"arrears_follow_up\",",
+                "{\"code\": \"ARREARS_REVIEW_OLDEST\", \"topic\": \"arrears_follow_up\", \"calm\": true,");
+        assertThatThrownBy(() -> Catalogue.parse(wronglyMarked))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("marked calm");
+    }
 }

@@ -61,6 +61,7 @@ final class StructuredValidator {
         static volatile boolean factFitsTopic = true;
         static volatile boolean noDuplicates = true;
         static volatile boolean limits = true;
+        static volatile boolean calmAction = true;
         static volatile boolean secondLine = true;
 
         private Rules() {}
@@ -76,6 +77,7 @@ final class StructuredValidator {
             factFitsTopic = true;
             noDuplicates = true;
             limits = true;
+            calmAction = true;
             secondLine = true;
             Phrases.corrupt = false;
         }
@@ -194,6 +196,9 @@ final class StructuredValidator {
                 bad.add(new Violation("bad_priority", where, null));
             }
             checkKeys(keys, topic, byKey, where, true, bad);
+            if (action != null && action.calm() && Rules.calmAction && !calmAllowed(priority, keys, byKey)) {
+                bad.add(new Violation("calm_action_mismatch", where, null));
+            }
             if (topic != null && action != null) {
                 findings.add(new Finding(keys, topic, action, priority));
             }
@@ -207,6 +212,29 @@ final class StructuredValidator {
             return new Result(false, bad, null);
         }
         return render(findings, watch, byKey, ctx, catalogue);
+    }
+
+    /**
+     * A calm action ("no action is needed now") contradicts a high or medium priority and a cited change that is worse: it is
+     * allowed only at low priority and when no change among the cited facts is worse.
+     */
+    private static boolean calmAllowed(String priority, List<String> keys, Map<String, PromptFact> byKey) {
+        if (!"low".equals(priority)) {
+            return false;
+        }
+        return keys.stream().map(byKey::get).filter(Objects::nonNull).noneMatch(StructuredValidator::isWorse);
+    }
+
+    /** A change fact whose movement is the bad one for its metric. */
+    static boolean isWorse(PromptFact f) {
+        if (!f.isChange() || f.value() == null || f.value() == 0) {
+            return false;
+        }
+        return switch (f.polarity()) {
+            case HIGHER_IS_BETTER -> f.value() < 0;
+            case HIGHER_IS_WORSE -> f.value() > 0;
+            case NEUTRAL -> false;
+        };
     }
 
     private static boolean isString(JsonNode node) {
@@ -307,8 +335,14 @@ final class StructuredValidator {
             cited.add(used);
         }
         if (points.isEmpty()) {
-            points.add(new Point(catalogue.template("nothing"), List.of()));
-            cited.add(List.of());
+            // No finding and nothing to watch: the person sees the key figures, as for a refused answer.
+            for (Point p : Fallback.render(facts).points()) {
+                points.add(p);
+                cited.add(p.facts().stream()
+                        .map(byKey::get)
+                        .filter(Objects::nonNull)
+                        .toList());
+            }
         }
         AdvisorAnswer rendered = new AdvisorAnswer(summary, points);
         if (Rules.secondLine) {

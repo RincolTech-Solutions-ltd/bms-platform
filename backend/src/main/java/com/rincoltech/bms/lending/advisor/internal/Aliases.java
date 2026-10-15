@@ -116,10 +116,26 @@ final class Aliases {
         StringBuilder out = new StringBuilder();
         while (m.find()) {
             String name = nameOf.get(canonical(m.group()));
-            m.appendReplacement(out, Matcher.quoteReplacement(name == null ? m.group() : name));
+            m.appendReplacement(out, Matcher.quoteReplacement(name == null ? m.group() : neutral(name)));
         }
         m.appendTail(out);
         return out.toString();
+    }
+
+    /**
+     * A real name as it may be written into a sentence: a name is the tenant's own text and may hold markup, a line break or
+     * markdown, so the characters that could start any of them are removed (angle brackets, backticks, asterisks, tildes,
+     * pipes, square brackets, backslashes, underscores; an ampersand becomes "and" and a double quote a single one) and
+     * every run of white space or control characters becomes one space.
+     */
+    static String neutral(String name) {
+        String s = name.replaceAll("[\\p{Cntrl}\\p{Z}\\s]+", " ")
+                .replaceAll("[<>`*~|\\[\\]\\\\_]", "")
+                .replace("&", " and ")
+                .replace('"', '\'')
+                .replaceAll(" {2,}", " ")
+                .strip();
+        return s.isEmpty() ? "(unnamed)" : s;
     }
 
     /** {@code BRANCH   1} as {@code Branch 1}: the word capitalised, spaces collapsed. */

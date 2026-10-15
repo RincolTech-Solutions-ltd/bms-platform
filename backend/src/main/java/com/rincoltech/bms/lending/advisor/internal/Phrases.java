@@ -61,7 +61,7 @@ final class Phrases {
         long change = f.value() == null ? 0 : f.value();
         String compared = "compared with " + comparedWith(f.deltaOf(), f.period());
         if (change == 0) {
-            return name + " was unchanged " + compared;
+            return name + " did not change " + compared;
         }
         String magnitude = display.replaceFirst("^[+-]", "");
         String how = switch (f.polarity()) {

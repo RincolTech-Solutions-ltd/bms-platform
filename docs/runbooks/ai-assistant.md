@@ -150,8 +150,8 @@ second, so it runs in every build. Fabricated data only: nothing here reads a te
    catalogue text holds a digit, markup or a placeholder other than `{{where}}`. Change either in a pull request like code, and
    rerun section 9, step 1. A new kind of advice is a new catalogue action: give it a topic, a text with no figure, and a golden case.
 5. **Mutation check.** `ValidatorMutationTest` switches each rule of `StructuredValidator` off in turn (strict fields, topic,
-   action and priority enums, action belongs to the topic, fact exists, fact not hidden, fact fits the topic, no duplicates,
-   limits) and requires the golden set to fail with the cases that rule exists for accepted; a separate switch corrupts the
+   action and priority enums, action belongs to the topic, a calm action only at low priority beside no worse change, fact exists, fact not hidden,
+   fact fits the topic, no duplicates, limits) and requires the golden set to fail with the cases that rule exists for accepted; a separate switch corrupts the
    phrase table to prove the second line (the number re-derivation) catches it. A rule that can be removed with the harness still
    green is untested.
 6. **Adding a case.** Add it to `GoldenCases` with the answer a model might give and the code a refusal must produce; a new

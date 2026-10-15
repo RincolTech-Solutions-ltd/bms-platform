@@ -137,7 +137,8 @@ class AliasesTest {
         FactSet set = Facts.asOf("2026-10-14")
                 .group(Dimension.BRANCH, "b-1", "Fabricated $1 \\ (Annex) [x] *")
                 .build();
-        assertThat(Aliases.of(set).toNames("Branch 1 is open.")).isEqualTo("Fabricated $1 \\ (Annex) [x] * is open.");
+        // Replacement characters stay literal; the characters that could start markup are neutralised.
+        assertThat(Aliases.of(set).toNames("Branch 1 is open.")).isEqualTo("Fabricated $1 (Annex) x is open.");
     }
 
     @Test
@@ -185,5 +186,33 @@ class AliasesTest {
             }
             assertThat(a.toNames(text.toString())).as(text.toString()).isEqualTo(expected.toString());
         }
+    }
+
+    @Test
+    void aRealNameIsNeutralisedForHtmlAndMarkdownWhereItIsMappedBack() {
+        for (String hostile : new String[] {
+            "<img src=x onerror=alert(1)>",
+            "<script>alert(1)</script>",
+            "Line one\nLine two\r\n" + Facts.cp(0x2028) + "three",
+            "**bold** __strong__ ~~gone~~",
+            "[link](javascript:alert(1))",
+            "`code` and a | pipe",
+            "back\\slash",
+            "Smith &amp; Sons &lt;b&gt;"
+        }) {
+            FactSet set = Facts.asOf("2026-10-14")
+                    .group(Dimension.BRANCH, "b-1", hostile)
+                    .build();
+            String shown = Aliases.of(set).toNames("Branch 1 is open.");
+            assertThat(shown)
+                    .as(hostile)
+                    .doesNotContainPattern("[<>`*~|\\[\\]\\\\_&]")
+                    .doesNotContainPattern("\\R");
+            assertThat(shown).as(hostile).endsWith(" is open.").isEqualTo(shown.strip());
+        }
+        assertThat(Aliases.neutral("Smith & Sons")).isEqualTo("Smith and Sons");
+        assertThat(Aliases.neutral("   ")).isEqualTo("(unnamed)");
+        assertThat(Aliases.neutral("O'Brien \"North\"")).isEqualTo("O'Brien 'North'");
+        assertThat(Aliases.neutral("Kampala Road (Main) Branch")).isEqualTo("Kampala Road (Main) Branch");
     }
 }

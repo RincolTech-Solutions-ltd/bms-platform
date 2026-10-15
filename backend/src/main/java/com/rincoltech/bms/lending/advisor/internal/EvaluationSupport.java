@@ -93,6 +93,13 @@ public final class EvaluationSupport {
         return facts.facts().stream().noneMatch(f -> f.alias() != null && small.contains(f.alias()) && !f.suppressed());
     }
 
+    /** What the person sees when there is no usable answer (a failed call, a refused answer): the deterministic brief. */
+    public static List<String> fallback(Prepared prepared) {
+        return Fallback.render(prepared.facts).points().stream()
+                .map(p -> prepared.facts.aliases().toNames(p.text()))
+                .toList();
+    }
+
     public static Verdict validate(Prepared prepared, String answer, List<String> planted) {
         NumericValidator.Result result =
                 StructuredValidator.validate(answer, NumericValidator.Context.of(prepared.facts));

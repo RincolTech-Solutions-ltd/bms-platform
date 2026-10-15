@@ -2,8 +2,12 @@ package com.rincoltech.bms.lending.insights.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Delta;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Kind;
 import com.rincoltech.bms.lending.insights.internal.PortfolioFactsService.Spec;
 import com.rincoltech.bms.lending.insights.internal.PortfolioFactsService.Window;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -199,5 +203,87 @@ class PortfolioFactsSuppressionTest {
         assertThat(writeOffs.small(spec("portfolio.written_off"))).isTrue();
         assertThat(writeOffs.small(spec("revenue.write_off_expense"))).isTrue();
         assertThat(writeOffs.small(spec("revenue.contribution"))).isTrue();
+    }
+
+    // ---- Changes: the loans behind the difference (review round 5) -------------------------------------------
+
+    /** Every population key of a figure and of the figures it would give away, other-days ones left out. */
+    static Set<String> populations(Spec s) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String p : s.populations()) {
+            if (!p.endsWith("_other_days")) {
+                out.add(p);
+            }
+        }
+        for (String dep : s.deps()) {
+            out.addAll(populations(spec(dep)));
+        }
+        return out;
+    }
+
+    /** A window in which every population of the figure is this many loans and the figure itself this value. */
+    static Window windowOf(Spec s, long loans, long value) {
+        Window w = new Window();
+        w.put(s.key(), value);
+        for (String p : populations(s)) {
+            w.put(p, loans);
+        }
+        for (String dep : s.deps()) {
+            w.put(dep, value);
+        }
+        return w;
+    }
+
+    static Delta change(Spec s, long loansNow, long loansBefore) {
+        return PortfolioFactsService.delta(
+                s,
+                Kind.MONEY,
+                6_000_000L,
+                windowOf(s, loansNow, 6_000_000L),
+                windowOf(s, loansBefore, 4_730_000L),
+                "UGX");
+    }
+
+    @Test
+    void sixWriteOffsNowAndFiveAWeekEarlierGiveNoChangeBecauseItWouldBeOneLoansExactAmount() {
+        Spec s = spec("portfolio.written_off");
+        // The review's case: 6 loans / UGX 6,000,000 now against 5 loans / UGX 4,730,000: "+1 loan, +UGX 1,270,000".
+        assertThat(change(s, 6, 5)).isNull();
+        assertThat(change(spec("portfolio.written_off_count"), 6, 5)).isNull();
+        assertThat(change(spec("portfolio.collected"), 6, 5)).isNull();
+        // Ten against five loans is a difference of five loans: shown.
+        assertThat(change(s, 10, 5)).isNotNull();
+        assertThat(change(s, 5, 5)).isNotNull();
+    }
+
+    @Test
+    void noShownChangeIsBasedOnFewerThanFiveLoansOrOnADifferenceOfOneToFourLoans() {
+        int checked = 0;
+        for (Spec s : PortfolioFactsService.BY_KEY.values()) {
+            if (!s.delta()) {
+                continue;
+            }
+            for (long now = 0; now <= 30; now++) {
+                for (long before = 0; before <= 30; before++) {
+                    Delta d = change(s, now, before);
+                    String where = s.key() + " " + now + " vs " + before;
+                    long diff = Math.abs(now - before);
+                    boolean mustHide = small(now) || small(before) || (diff > 0 && diff < 5);
+                    if (d != null) {
+                        checked++;
+                        assertThat(mustHide)
+                                .as(where + " shown but based on a small population")
+                                .isFalse();
+                    } else if (!mustHide) {
+                        assertThat(d).as(where + " hidden without need").isNotNull();
+                    }
+                }
+            }
+        }
+        assertThat(checked).isGreaterThan(1000);
+    }
+
+    private static boolean small(long n) {
+        return n > 0 && n < 5;
     }
 }

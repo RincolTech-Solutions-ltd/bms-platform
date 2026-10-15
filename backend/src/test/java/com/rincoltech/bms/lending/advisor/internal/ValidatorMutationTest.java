@@ -94,6 +94,11 @@ class ValidatorMutationTest {
                         v -> StructuredValidator.Rules.factFitsTopic = v,
                         Set.of("fact-of-another-topic", "fact-of-another-topic-change")));
         m.put(
+                "calmAction",
+                new Mutation(
+                        v -> StructuredValidator.Rules.calmAction = v,
+                        Set.of("calm-high-priority", "calm-medium-priority", "calm-worse-change")));
+        m.put(
                 "noDuplicates",
                 new Mutation(
                         v -> StructuredValidator.Rules.noDuplicates = v, Set.of("keys-duplicate", "watch-duplicate")));

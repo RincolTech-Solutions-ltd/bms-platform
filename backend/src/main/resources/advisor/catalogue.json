@@ -63,7 +63,7 @@
     },
     {
       "code": "liquidity",
-      "label": "Savings and investment liquidity",
+      "label": "Cash flow from expected repayments",
       "facts": [
         "portfolio.forecast_7", "portfolio.forecast_30", "portfolio.collected", "brief.collected_today",
         "portfolio.principal_outstanding"
@@ -95,18 +95,17 @@
     {"code": "COLLECTIONS_VISIT_LATE", "topic": "collections_focus", "text": "Plan field visits to the borrowers who are late{{where}}."},
     {"code": "COLLECTIONS_REMIND", "topic": "collections_focus", "text": "Send payment reminders ahead of the due dates{{where}}."},
     {"code": "DISBURSEMENT_CHECK_PIPELINE", "topic": "disbursement_pace", "text": "Check the pipeline of applications{{where}} and decide the ones that are ready."},
-    {"code": "DISBURSEMENT_REVIEW_LIMITS", "topic": "disbursement_pace", "text": "Review the approval limits for new loans{{where}} before approving more."},
+    {"code": "DISBURSEMENT_REVIEW_LIMITS", "topic": "disbursement_pace", "text": "Review the approval limits{{where}} before approving more new loans."},
     {"code": "COLLATERAL_CHECK_LARGEST", "topic": "collateral_cover", "text": "Check the collateral cover of the largest loans{{where}}."},
     {"code": "COLLATERAL_REVALUE", "topic": "collateral_cover", "text": "Ask for a fresh valuation of the collateral behind the largest exposures{{where}}."},
-    {"code": "CONCENTRATION_REVIEW_SPREAD", "topic": "concentration", "text": "Review how the book is spread across branches and products{{where}}."},
-    {"code": "CONCENTRATION_LOOK_CLOSER", "topic": "concentration", "text": "Look more closely at the loans{{where}} and the officers who manage them."},
+    {"code": "CONCENTRATION_REVIEW_SPREAD", "topic": "concentration", "text": "Review the concentration of the book{{where}}."},
+    {"code": "CONCENTRATION_LOOK_CLOSER", "topic": "concentration", "text": "Look more closely at how the loans are distributed{{where}}."},
     {"code": "WRITE_OFF_REVIEW_PROPOSED", "topic": "write_off_review", "text": "Review the loans proposed for write-off{{where}} and the recovery steps already taken."},
     {"code": "WRITE_OFF_PUSH_RECOVERY", "topic": "write_off_review", "text": "Follow up the recovery of loans that were already written off{{where}}."},
     {"code": "LIQUIDITY_COMPARE_FORECAST", "topic": "liquidity", "text": "Compare the repayments expected in the coming days with the planned disbursements{{where}}."},
-    {"code": "LIQUIDITY_CHECK_PAYOUTS", "topic": "liquidity", "text": "Check that cash on hand covers expected savings withdrawals and investment payouts{{where}}."},
     {"code": "DATA_REVIEW_IDENTITY", "topic": "data_quality", "text": "Review the member records with missing or unverified identity details{{where}}."},
     {"code": "DATA_CONTACT_DORMANT", "topic": "data_quality", "text": "Contact the dormant members{{where}} to confirm their details and interest."},
-    {"code": "RISK_REVIEW_BY_GROUP", "topic": "risk_monitoring", "text": "Review the portfolio at risk by branch and by product{{where}}."},
-    {"code": "RISK_KEEP_WATCHING", "topic": "risk_monitoring", "text": "No action is needed now; keep watching this figure{{where}}."}
+    {"code": "RISK_REVIEW_BY_GROUP", "topic": "risk_monitoring", "text": "Review the portfolio at risk{{where}} and compare it with the other branches and products."},
+    {"code": "RISK_KEEP_WATCHING", "topic": "risk_monitoring", "calm": true, "text": "No action is needed now; keep this under watch{{where}}."}
   ]
 }

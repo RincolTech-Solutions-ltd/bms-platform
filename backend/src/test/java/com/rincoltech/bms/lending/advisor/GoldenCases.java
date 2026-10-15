@@ -432,6 +432,29 @@ public final class GoldenCases {
                 "unknown_fact",
                 root(List.of(), "portfolio.par99").toString()));
         cases.add(refuse(
+                "calm-high-priority",
+                "binding",
+                s,
+                "calm_action_mismatch",
+                answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "high", PAR))));
+        cases.add(refuse(
+                "calm-medium-priority",
+                "binding",
+                s,
+                "calm_action_mismatch",
+                answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "medium", PAR))));
+        cases.add(refuse(
+                "calm-worse-change",
+                "binding",
+                s,
+                "calm_action_mismatch",
+                answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "low", PAR, PAR_MONTH))));
+        cases.add(accept(
+                "clean-calm-low-better-change",
+                "clean",
+                s,
+                answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "low", PAR, PAR_WEEK))));
+        cases.add(refuse(
                 "keys-four",
                 "shape",
                 s,
@@ -573,6 +596,9 @@ public final class GoldenCases {
         r.put(
                 "fact-of-another-topic-change",
                 answer(finding("arrears_follow_up", "ARREARS_REVIEW_OLDEST", "high", PAR_WEEK)));
+        r.put("calm-high-priority", answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "low", PAR)));
+        r.put("calm-medium-priority", answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "low", PAR)));
+        r.put("calm-worse-change", answer(finding("risk_monitoring", "RISK_KEEP_WATCHING", "low", PAR, PAR_WEEK)));
         r.put("priority-unknown", ok);
         r.put("priority-upper-case", ok);
         r.put("fact-unknown", ok);

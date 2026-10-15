@@ -95,4 +95,56 @@ class PromptContractTest {
         assertThat(content).contains("branch_2.loans | Branch 2: Active loans | fewer than 5");
         assertThat(content).doesNotContain("Fabricated").doesNotContain("{{");
     }
+
+    /**
+     * The whole system prompt, compared exactly with the resource file filled from the catalogue FILE (parsed here, in the
+     * file's own order): a different order of topics or actions between JVM runs, a lost line or a stray edit fails this.
+     */
+    @Test
+    void theGeneratedPromptIsExactlyTheResourceFilledFromTheCatalogueFileInItsOrder() throws Exception {
+        String catalogueFile;
+        try (InputStream in = PromptContractTest.class.getResourceAsStream(Catalogue.RESOURCE)) {
+            catalogueFile = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        tools.jackson.databind.JsonNode root =
+                tools.jackson.databind.json.JsonMapper.builder().build().readTree(catalogueFile);
+        StringBuilder topics = new StringBuilder();
+        for (tools.jackson.databind.JsonNode t : root.get("topics")) {
+            topics.append("- ")
+                    .append(t.get("code").asString())
+                    .append(": ")
+                    .append(t.get("label").asString())
+                    .append('\n');
+        }
+        StringBuilder actions = new StringBuilder();
+        for (tools.jackson.databind.JsonNode a : root.get("actions")) {
+            actions.append("- ")
+                    .append(a.get("code").asString())
+                    .append(", ")
+                    .append(a.get("topic").asString())
+                    .append(": ")
+                    .append(a.get("text").asString().replace("{{where}}", ""))
+                    .append('\n');
+        }
+        String expected = resource()
+                .replace("@CANARY@", "ADVISOR-PROMPT-V1")
+                .replace("@TOPICS@", topics.toString().stripTrailing())
+                .replace("@ACTIONS@", actions.toString().stripTrailing());
+        assertThat(PromptBuilder.SYSTEM).isEqualTo(expected);
+        // A new JVM must give the same text: the order is the file's, never a hash order.
+        assertThat(PromptBuilder.SYSTEM.indexOf("- arrears_follow_up:"))
+                .isLessThan(PromptBuilder.SYSTEM.indexOf("- collections_focus:"))
+                .isLessThan(PromptBuilder.SYSTEM.indexOf("- risk_monitoring:"));
+    }
+
+    @Test
+    void everyCalmActionIsNamedInTheRuleThatRestrictsIt() {
+        Catalogue.INSTANCE.actions().values().stream()
+                .filter(Catalogue.Action::calm)
+                .forEach(a -> assertThat(PromptBuilder.SYSTEM)
+                        .as(a.code())
+                        .contains("The action " + a.code() + " says that no action is needed")
+                        .contains("only with priority \"low\"")
+                        .contains("none of the\n   change facts you cite is a worsening"));
+    }
 }

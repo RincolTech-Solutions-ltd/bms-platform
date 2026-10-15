@@ -239,13 +239,16 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    scope, hidden or suppressed, a key of the wrong topic, an action of another topic, a duplicate key, a number of findings or keys
    over the limit, or malformed JSON refuses the whole answer, and the person sees the deterministic facts-only brief instead.
    **Our code writes every sentence** from reviewed templates in `advisor/catalogue.json` using the facts (name, value, change,
-   period, better or worse) and the catalogue action text. The catalogue holds 20 actions with stable codes under nine topics
-   (arrears follow-up, collections focus, disbursement pace, collateral cover, concentration, write-off review, savings and
-   investment liquidity, data quality, portfolio risk and profitability); each action is bound to one topic and each topic to the
+   period, better or worse) and the catalogue action text. The catalogue holds 19 actions with stable codes under nine topics
+   (arrears follow-up, collections focus, disbursement pace, collateral cover, concentration, write-off review, cash flow from
+   expected repayments, data quality, portfolio risk and profitability; no text mentions officers, savings or investments, which
+   no fact covers); each action is bound to one topic and each topic to the
    fact families it may cite. Catalogue text has no digit of any script, no markup and no placeholder except `{{where}}`, which
    only our code fills (with the aliases of the groups cited, mapped back to names for the person who asked); the loader refuses
-   a catalogue that breaks this. The system prompt is a reviewed resource filled from the catalogue, with a golden test of its
-   contract.
+   a catalogue that breaks this, or that repeats a topic or action code. An action that says no action is needed is marked
+   `calm` and is allowed only at low priority and when no cited change is worse. A real name written back into a sentence is
+   neutralised (markup, markdown and line breaks removed). An answer with no finding shows the key figures. The system prompt is
+   a reviewed resource filled from the catalogue in the file's order, with an exact golden test of its text.
    **Why.** A structured choice from closed sets can be checked completely: every string the model sends is compared to an
    enumerated set, so there is nothing a clever sentence can get past. The wording a person reads is reviewed once, in a
    resource file, instead of being re-checked on every answer.
@@ -272,6 +275,10 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    recorded answers, adversarial ones included, through the real chain with the recording client, checks every request before
    it would be sent, and scores by category with a gate of 100 percent. The same cases go to a real provider with
    `AdvisorEvaluation.with(client)`; wiring that run and the model comparison is slice C5 (#232).
+10. **Decision 3, a change needs five loans on both sides and a difference of none or five (round 5).** A change was hidden only
+    when the earlier window's own figure was over a small population. Write-offs of 6 loans now and 5 a week earlier gave "+1 loan"
+    and one loan's exact amount. A change is now left out for every figure whenever the distinct loans behind the two figures
+    differ by one to four or either side is one to four; the figure itself stays when it is over five loans or more.
 
 **Better:** the claims of decisions 3 and 5 are now executable and structural: a planted name, an invented figure or a wrong
 direction cannot reach a screen because the model writes no text, and each control has a test that fails if it is removed.

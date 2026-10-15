@@ -4,6 +4,7 @@ import com.rincoltech.bms.lending.advisor.internal.AliasedFacts.PromptFact;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -33,7 +35,12 @@ final class Catalogue {
 
     record Topic(String code, String label, Set<String> facts) {}
 
-    record Action(String code, String topic, String text) {}
+    /** A calm action says no action is needed: it is allowed only at low priority and when no cited change is worse. */
+    record Action(String code, String topic, String text, boolean calm) {}
+
+    /** An action text that tells the owner to do nothing; such an action must be marked calm in the file. */
+    static final Pattern CALM_WORDING =
+            Pattern.compile("(?i)\\b(?:no action|nothing to do|keep (?:this )?under watch|keep watching)\\b");
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([a-z]+)\\}\\}");
     private static final Set<String> ACTION_PLACEHOLDERS = Set.of("where");
@@ -93,8 +100,19 @@ final class Catalogue {
             if (in == null) {
                 throw new IllegalStateException("missing resource " + RESOURCE);
             }
-            JsonNode root =
-                    JsonMapper.builder().build().readTree(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            return parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new IllegalStateException("the advisor catalogue cannot be read: " + e.getMessage(), e);
+        }
+    }
+
+    /** Parses and checks a catalogue file; a duplicate key, topic code or action code is a defect, never a last-one-wins. */
+    static Catalogue parse(String json) {
+        try {
+            JsonNode root = JsonMapper.builder()
+                    .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                    .build()
+                    .readTree(json);
             Map<String, String> templates = new LinkedHashMap<>();
             root.get("templates")
                     .properties()
@@ -107,23 +125,31 @@ final class Catalogue {
             for (JsonNode t : root.get("topics")) {
                 Set<String> facts = new LinkedHashSet<>();
                 t.get("facts").forEach(f -> facts.add(f.asString()));
-                topics.put(
-                        t.get("code").asString(),
-                        new Topic(t.get("code").asString(), t.get("label").asString(), Set.copyOf(facts)));
+                String code = t.get("code").asString();
+                require(!topics.containsKey(code), "duplicate topic code " + code);
+                topics.put(code, new Topic(code, t.get("label").asString(), Collections.unmodifiableSet(facts)));
             }
             Map<String, Action> actions = new LinkedHashMap<>();
             for (JsonNode a : root.get("actions")) {
+                String code = a.get("code").asString();
+                require(!actions.containsKey(code), "duplicate action code " + code);
+                JsonNode calm = a.get("calm");
                 actions.put(
-                        a.get("code").asString(),
+                        code,
                         new Action(
-                                a.get("code").asString(),
+                                code,
                                 a.get("topic").asString(),
-                                a.get("text").asString()));
+                                a.get("text").asString(),
+                                calm != null && calm.asBoolean()));
             }
             check(templates, priorities, topics, actions);
+            // Unmodifiable views that keep the order of the file: the prompt lists topics and actions in that order.
             return new Catalogue(
-                    Map.copyOf(topics), Map.copyOf(actions), Map.copyOf(templates), Map.copyOf(priorities));
-        } catch (IOException | RuntimeException e) {
+                    Collections.unmodifiableMap(topics),
+                    Collections.unmodifiableMap(actions),
+                    Collections.unmodifiableMap(templates),
+                    Collections.unmodifiableMap(priorities));
+        } catch (RuntimeException e) {
             throw new IllegalStateException("the advisor catalogue is not valid: " + e.getMessage(), e);
         }
     }
@@ -150,6 +176,9 @@ final class Catalogue {
             require(a.code().matches("[A-Z_]{3,50}"), "action code " + a.code());
             require(topics.containsKey(a.topic()), "action " + a.code() + " has an unknown topic");
             checkText("action " + a.code(), a.text(), ACTION_PLACEHOLDERS);
+            require(
+                    a.calm() == CALM_WORDING.matcher(a.text()).find(),
+                    "action " + a.code() + " says no action is needed if and only if it is marked calm");
         });
         topics.keySet()
                 .forEach(t -> require(

@@ -279,13 +279,22 @@ class StructuredValidatorTest {
             combinations.add(allowed.subList(0, Math.min(3, allowed.size())));
             for (List<AliasedFacts.PromptFact> used : combinations) {
                 String[] keys = used.stream().map(AliasedFacts.PromptFact::key).toArray(String[]::new);
+                String priority = action.calm() ? "low" : "medium";
                 Result r = StructuredValidator.validate(
-                        answer(List.of(finding(action.topic(), action.code(), "medium", keys))), ctx);
+                        answer(List.of(finding(action.topic(), action.code(), priority, keys))), ctx);
+                if (action.calm() && used.stream().anyMatch(StructuredValidator::isWorse)) {
+                    // A calm action beside a worsening is refused whole, never rendered.
+                    assertThat(r.valid())
+                            .as("%s with %s", action.code(), List.of(keys))
+                            .isFalse();
+                    assertThat(r.violations()).extracting(Violation::code).containsExactly("calm_action_mismatch");
+                    continue;
+                }
                 assertThat(r.violations())
                         .as("%s with %s", action.code(), List.of(keys))
                         .isEmpty();
                 String text = r.answer().points().get(0).text();
-                String expected = "Medium priority. "
+                String expected = (action.calm() ? "Low" : "Medium") + " priority. "
                         + String.join("; ", used.stream().map(Phrases::fact).toList())
                         + ". Suggested action: "
                         + action.text().replace("{{where}}", StructuredValidator.where(used));
@@ -295,7 +304,7 @@ class StructuredValidatorTest {
                         .doesNotContain("{{")
                         .doesNotContain("}}")
                         .doesNotContain(action.code())
-                        .doesNotContain(topic.code());
+                        .doesNotContain("_");
                 for (String key : keys) {
                     assertThat(text).as("key %s in %s", key, text).doesNotContain(key);
                 }
@@ -310,6 +319,164 @@ class StructuredValidatorTest {
             }
         }
         assertThat(rendered).isGreaterThan(1000);
+    }
+
+    // ---- A calm action: "no action is needed" ------------------------------------------------------------------
+
+    @Test
+    void anActionThatSaysNoActionIsNeededIsAllowedOnlyAtLowPriorityAndWithNoWorseChange() {
+        AliasedFacts facts = AliasedFacts.of(everyFamily());
+        Context ctx = Context.of(facts);
+        Catalogue catalogue = Catalogue.INSTANCE;
+        int calmActions = 0;
+        for (Action action : catalogue.actions().values()) {
+            // The wording decides: any text that says so must be marked calm, and nothing else is.
+            assertThat(action.calm())
+                    .as(action.code())
+                    .isEqualTo(Catalogue.CALM_WORDING.matcher(action.text()).find());
+            if (!action.calm()) {
+                continue;
+            }
+            calmActions++;
+            Topic topic = catalogue.topics().get(action.topic());
+            List<AliasedFacts.PromptFact> inTopic = facts.facts().stream()
+                    .filter(f -> !f.suppressed() && topic.facts().contains(Catalogue.base(f)))
+                    .toList();
+            AliasedFacts.PromptFact plain =
+                    inTopic.stream().filter(f -> !f.isChange()).findFirst().orElseThrow();
+            AliasedFacts.PromptFact worse = inTopic.stream()
+                    .filter(StructuredValidator::isWorse)
+                    .findFirst()
+                    .orElseThrow();
+            AliasedFacts.PromptFact better = inTopic.stream()
+                    .filter(f -> f.isChange() && f.value() != null && f.value() != 0 && !StructuredValidator.isWorse(f))
+                    .findFirst()
+                    .orElseThrow();
+            for (String priority : List.of("high", "medium")) {
+                Result r = StructuredValidator.validate(
+                        answer(List.of(finding(topic.code(), action.code(), priority, plain.key()))), ctx);
+                assertThat(r.violations())
+                        .as("%s at %s priority", action.code(), priority)
+                        .extracting(Violation::code)
+                        .containsExactly("calm_action_mismatch");
+            }
+            Result withWorse = StructuredValidator.validate(
+                    answer(List.of(finding(topic.code(), action.code(), "low", plain.key(), worse.key()))), ctx);
+            assertThat(withWorse.violations()).extracting(Violation::code).containsExactly("calm_action_mismatch");
+            // The same beside a change that is better, or no change at all, is allowed at low priority.
+            assertThat(StructuredValidator.validate(
+                                    answer(List.of(
+                                            finding(topic.code(), action.code(), "low", plain.key(), better.key()))),
+                                    ctx)
+                            .valid())
+                    .isTrue();
+            assertThat(StructuredValidator.validate(
+                                    answer(List.of(finding(topic.code(), action.code(), "low", plain.key()))), ctx)
+                            .valid())
+                    .isTrue();
+        }
+        assertThat(calmActions).isGreaterThanOrEqualTo(1);
+        // And the wording check itself: the phrases that mean "nothing to do" are all recognised.
+        for (String calmText : List.of(
+                "No action is needed now.",
+                "There is no action needed.",
+                "Keep watching the book.",
+                "Keep this under watch.")) {
+            assertThat(Catalogue.CALM_WORDING.matcher(calmText).find())
+                    .as(calmText)
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void aWorseChangeIsDecidedBySignAndPolarity() {
+        AliasedFacts facts = AliasedFacts.of(Facts.standard());
+        java.util.Map<String, Boolean> expected = java.util.Map.of(
+                "portfolio.par30.week_change", false, // PAR fell: better
+                "portfolio.par30.month_change", true, // PAR rose: worse
+                "portfolio.collection_rate.week_change", false, // collection rate rose: better
+                "portfolio.collection_rate.month_change", true, // collection rate fell: worse
+                "portfolio.principal_outstanding.week_change", false, // neutral
+                "portfolio.par30", false); // not a change
+        expected.forEach((key, worse) -> assertThat(StructuredValidator.isWorse(facts.facts().stream()
+                        .filter(f -> f.key().equals(key))
+                        .findFirst()
+                        .orElseThrow()))
+                .as(key)
+                .isEqualTo(worse));
+    }
+
+    // ---- No finding: the key figures ----------------------------------------------------------------------------
+
+    @Test
+    void anAnswerWithNoFindingAndNothingToWatchShowsTheKeyFiguresNotAnEmptyStatement() {
+        Result r = StructuredValidator.validate(answer(List.of()), CTX);
+        assertThat(r.valid()).isTrue();
+        assertThat(r.answer().points()).singleElement().satisfies(p -> {
+            assertThat(p.text()).startsWith("Key figures: Principal outstanding (UGX 245,000,000)");
+            assertThat(p.text()).doesNotContain("Nothing was flagged");
+        });
+        // With no figure to show at all, and only then, the plain statement remains.
+        Result few = StructuredValidator.validate(
+                answer(List.of()),
+                Context.of(AliasedFacts.of(com.rincoltech.bms.lending.advisor.GoldenCases.fewLoans())));
+        assertThat(few.valid()).isTrue();
+        assertThat(few.answer().points().get(0).text()).isEqualTo("Nothing was flagged for this scope.");
+    }
+
+    // ---- Grammar: the same words for a singular and a plural name -----------------------------------------------
+
+    @Test
+    void aFactPhraseUsesNoVerbThatAgreesWithTheNameSoSingularAndPluralNamesReadAlike() {
+        FactSet set = Facts.asOf("2026-10-14")
+                .count("portfolio.written_off_count", "Loans written off", Polarity.HIGHER_IS_WORSE, 8, 0L, 3L)
+                .count("portfolio.active_loans", "Active loans", Polarity.NEUTRAL, 312, 0L, 0L)
+                .rate("portfolio.par30", "PAR 30", Polarity.HIGHER_IS_WORSE, 1254, 0L, 25L)
+                .rate("portfolio.collection_rate", "Collection rate", Polarity.HIGHER_IS_BETTER, 8750, 0L, -300L)
+                .build();
+        for (AliasedFacts.PromptFact f : AliasedFacts.of(set).facts()) {
+            String phrase = Phrases.fact(f);
+            assertThat(phrase).as(phrase).doesNotContainPattern("\\b(?:is|are|was|were|has|have)\\b");
+            if (f.isChange() && f.value() != null && f.value() == 0) {
+                assertThat(phrase)
+                        .endsWith("did not change compared with " + Phrases.comparedWith(f.deltaOf(), f.period()));
+            }
+        }
+    }
+
+    @Test
+    void noActionOrTemplateTextRefersToTheCitedFactsAsAFigureOrFiguresSoItReadsRightForOneFactOrThree() {
+        Pattern reference = Pattern.compile("(?i)\\b(?:figures?|numbers?|values?|these|those|each of)\\b");
+        Catalogue.INSTANCE
+                .actions()
+                .values()
+                .forEach(a -> assertThat(reference.matcher(a.text()).find())
+                        .as(a.code() + ": " + a.text())
+                        .isFalse());
+        // The templates too, but the facts line and the "Key figures" lead-in are headings, not references.
+        assertThat(Catalogue.INSTANCE.template("finding")).doesNotContainPattern("(?i)\\b(?:this|these)\\b");
+        assertThat(Catalogue.INSTANCE.template("watch")).doesNotContainPattern("(?i)\\b(?:this|these)\\b");
+    }
+
+    @Test
+    void noActionTextMentionsAnOfficerOrAnythingTheFactsDoNotCover() {
+        // There is no officer dimension (ADR-037 decision 3): no text may suggest one, nor savings or investments,
+        // which
+        // no fact covers.
+        Pattern uncovered = Pattern.compile(
+                "(?i)\\b(?:officers?|staff|agents?|savings|investments?|withdrawals?|payouts?|deposits?)\\b");
+        Catalogue.INSTANCE
+                .actions()
+                .values()
+                .forEach(a -> assertThat(uncovered.matcher(a.text()).find())
+                        .as(a.code() + ": " + a.text())
+                        .isFalse());
+        Catalogue.INSTANCE
+                .topics()
+                .values()
+                .forEach(t -> assertThat(uncovered.matcher(t.label()).find())
+                        .as(t.code() + ": " + t.label())
+                        .isFalse());
     }
 
     @Test

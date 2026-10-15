@@ -246,6 +246,32 @@ class PortfolioFactsService implements PortfolioFacts {
             return false;
         }
 
+        /**
+         * True when the loans behind this figure in the two windows differ by one to four: the change would then be the
+         * figure of those few loans (write-offs of 6 loans now and 5 a week earlier give "+1 loan" and the amount of exactly
+         * one loan). Checked for the populations of the figure and of every figure it would give away. The populations of
+         * "the other days" are properties of one window and are not compared across windows.
+         */
+        boolean differsSmall(Window before, Spec s) {
+            for (String p : s.populations()) {
+                if (p.endsWith("_other_days")) {
+                    continue;
+                }
+                Long n = values.get(p);
+                Long m = before.values.get(p);
+                if (n != null && m != null && diffSmall(Math.max(n, m), Math.min(n, m))) {
+                    return true;
+                }
+            }
+            for (String dep : s.deps()) {
+                Spec d = BY_KEY.get(dep);
+                if (d != null && differsSmall(before, d)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /** True when a population of this figure, or of a figure it would give away, is one to four. */
         boolean small(Spec s) {
             for (String p : s.populations()) {
@@ -419,14 +445,17 @@ class PortfolioFactsService implements PortfolioFacts {
                 value,
                 FactDisplay.of(kind, value, currency),
                 false,
-                s.delta() ? delta(s, kind, value, week, currency) : null,
-                s.delta() ? delta(s, kind, value, month, currency) : null,
+                s.delta() ? delta(s, kind, value, current, week, currency) : null,
+                s.delta() ? delta(s, kind, value, current, month, currency) : null,
                 null);
     }
 
-    /** The change against an earlier window, or null when that figure is unknown or covered a small population. */
-    private static Delta delta(Spec s, Kind kind, long value, Window before, String currency) {
-        if (!before.has(s) || before.small(s)) {
+    /**
+     * The change against an earlier window, or null when that figure is unknown, covered a small population, or the loans
+     * behind the two figures differ by one to four (the difference would then be those few loans' exact figure).
+     */
+    static Delta delta(Spec s, Kind kind, long value, Window current, Window before, String currency) {
+        if (!before.has(s) || before.small(s) || current.small(s) || current.differsSmall(before, s)) {
             return null;
         }
         Long then = before.values.get(s.key());

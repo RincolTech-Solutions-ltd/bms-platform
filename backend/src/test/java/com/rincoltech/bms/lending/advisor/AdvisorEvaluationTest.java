@@ -8,8 +8,10 @@ import com.rincoltech.bms.lending.advisor.AdvisorEvaluation.Case;
 import com.rincoltech.bms.lending.advisor.AdvisorEvaluation.Expect;
 import com.rincoltech.bms.lending.advisor.AdvisorEvaluation.Report;
 import com.rincoltech.bms.lending.advisor.AdvisorEvaluation.Result;
+import com.rincoltech.bms.lending.advisor.internal.EvaluationSupport;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.Dimension;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.FactSet;
+import com.rincoltech.bms.lending.insights.PortfolioFacts.Kind;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.Polarity;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -174,17 +176,18 @@ class AdvisorEvaluationTest {
                 .containsExactly(
                         "High priority. PAR 30 (12.5 percent); PAR 30 fell by 0.40 points compared with a week ago (better);"
                                 + " PAR 30 rose by 0.25 points compared with a month ago (worse)."
-                                + " Suggested action: Review the portfolio at risk by branch and by product.");
+                                + " Suggested action: Review the portfolio at risk and compare it with the other branches and products.");
         assertThat(run("clean-watch-only").shownPoints())
                 .containsExactly("To watch: PAR 30 (12.5 percent); Collection rate (87.5 percent);"
                         + " Principal outstanding (UGX 245,000,000).");
-        assertThat(run("clean-nothing-to-flag").shownPoints()).containsExactly("Nothing was flagged for this scope.");
+        // No finding and nothing to watch: the person sees the key figures, not an empty answer.
+        assertThat(run("clean-nothing-to-flag").shownPoints()).containsExactly(KEY_FIGURES);
         assertThat(run("clean-missing-data").shownPoints())
                 .containsExactly("Low priority. Collection rate today (not available)."
                         + " Suggested action: Send payment reminders ahead of the due dates.");
         assertThat(run("clean-negative").shownPoints())
                 .containsExactly("Low priority. Profit contribution (-UGX 500,000)."
-                        + " Suggested action: No action is needed now; keep watching this figure.");
+                        + " Suggested action: No action is needed now; keep this under watch.");
     }
 
     @Test
@@ -196,14 +199,46 @@ class AdvisorEvaluationTest {
         assertThat(run("clean-two-groups-where").shownPoints())
                 .containsExactly("Low priority. Fabricated Branch Alpha: PAR 30 (9.1 percent);"
                         + " Fabricated Product Gamma: Active loans (88)."
-                        + " Suggested action: Look more closely at the loans for Fabricated Branch Alpha"
-                        + " and Fabricated Product Gamma and the officers who manage them.");
+                        + " Suggested action: Look more closely at how the loans are distributed"
+                        + " for Fabricated Branch Alpha and Fabricated Product Gamma.");
         // The hostile names of a tenant never get near the rendering: the aliases are what is written and mapped back.
         assertThat(run("clean-hostile-names-aliased").shownPoints())
                 .singleElement()
                 .asString()
                 .contains(GoldenCases.INJECTION_BRANCH)
                 .contains(GoldenCases.INJECTION_PRODUCT);
+    }
+
+    @Test
+    void aNameWithMarkupOrALineBreakIsNeutralisedWhereItIsWrittenIntoASentence() {
+        String hostile = "<img src=x onerror=alert(1)>\n**Bold** [click](http://x.example) `code` & _more_ | \\ <b>";
+        FactSet set = Facts.asOf("2026-10-14")
+                .group(Dimension.BRANCH, "b-1", hostile)
+                .groupFact(Dimension.BRANCH, "b-1", "branch.loans", "Active loans", Kind.COUNT, Polarity.NEUTRAL, 120)
+                .build();
+        EvaluationSupport.Prepared prepared = EvaluationSupport.prepare(set, List.of());
+        String answer = GoldenCases.answer(
+                GoldenCases.finding("concentration", "CONCENTRATION_REVIEW_SPREAD", "low", "branch_1.loans"));
+        EvaluationSupport.Verdict verdict = EvaluationSupport.validate(prepared, answer, List.of());
+        assertThat(verdict.accepted()).isTrue();
+        String shown = String.join("\n", verdict.shownPoints());
+        assertThat(shown)
+                .contains("img src=x onerror=alert(1)")
+                .contains("Bold")
+                .contains("click");
+        assertThat(shown)
+                .doesNotContain("<")
+                .doesNotContain(">")
+                .doesNotContain("*")
+                .doesNotContain("`")
+                .doesNotContain("[")
+                .doesNotContain("]")
+                .doesNotContain("|")
+                .doesNotContain("\\")
+                .doesNotContain("&")
+                .doesNotContain("_");
+        // Exactly one point and no line break inside it: the name's own line break became a space.
+        assertThat(verdict.shownPoints()).singleElement().asString().doesNotContain("\n");
     }
 
     @Test

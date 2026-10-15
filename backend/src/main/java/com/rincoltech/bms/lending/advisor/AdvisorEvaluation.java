@@ -210,7 +210,7 @@ public final class AdvisorEvaluation {
                     0,
                     null,
                     List.of(),
-                    List.of());
+                    EvaluationSupport.fallback(prepared));
         }
         EvaluationSupport.Verdict verdict = EvaluationSupport.validate(prepared, answer.text(), c.planted());
         boolean codeOk = c.code() == null || verdict.codes().contains(c.code());
