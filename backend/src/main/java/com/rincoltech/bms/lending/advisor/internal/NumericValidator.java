@@ -1,6 +1,5 @@
 package com.rincoltech.bms.lending.advisor.internal;
 
-import com.rincoltech.bms.lending.advisor.internal.AdvisorAnswer.Point;
 import com.rincoltech.bms.lending.advisor.internal.AliasedFacts.PromptFact;
 import com.rincoltech.bms.lending.advisor.internal.NumberExtractor.Sign;
 import com.rincoltech.bms.lending.advisor.internal.NumberExtractor.Token;
@@ -10,34 +9,21 @@ import com.rincoltech.bms.lending.insights.PortfolioFacts;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The numeric validator (spec 5.6, ADR-037 decision 5; pure, no I/O): an answer is accepted only if it parses, and
- * every number in its summary and in each point's text is derivable from a fact that point cites, and every direction
- * word agrees with the sign of the change it rests on. Nothing the model says is trusted: the facts are the only source
- * of a figure, so an invented, miscomputed, rounded-wrongly or mis-signed number, a number with the wrong unit, a date
- * that is not one of the dates given, or a branch that does not exist, fails.
+ * The second line of defence over the text our own renderer wrote (ADR-037 decision 5 as amended in issue #223): the model
+ * writes no text at all, so there is no prose to validate, but every number in what the renderer produced is still
+ * re-derived from the facts it came from, so that a defect in a template or in the substitution cannot put a wrong figure
+ * on a screen. A number is derivable when it equals a cited fact's display or plain form in any written form, or is that
+ * figure correctly rounded to the precision shown (compact amounts and rates only, never a count, by no more than five
+ * percent); units must agree and the sign of a change must agree with the fact. A hidden fact has no number to state.
  *
- * <p>A number is derivable when it equals a cited fact's display or plain form in any of the written forms
- * ({@code 1,200,000}, {@code 1200000}, {@code 1.2m}, {@code 1.2 million}, {@code UGX 1.2m}, {@code 12.5%},
- * {@code 12.5 percent}), or is that figure correctly rounded to the precision the writer shows (compact amounts and
- * rates only, never a count, never by more than five percent). The sign of a change must agree with the fact
- * ({@code fell 3.2} against {@code +3.2}). A rate over nothing, a suppressed group ({@code fewer than 5}) and a missing
- * figure have no number to state.
- *
- * <p>It also refuses an answer that carries something other than figures and words about them: a phone number, an
- * email address, an ID number shape, a link or markup, a letter outside the Latin alphabet (which could disguise a
- * direction word or a number word), a real name or the system prompt's canary. Violations carry a closed code and,
- * at most, a number or a lexicon word, never a sentence of the model's.
+ * <p>It also carries the shape screen for personal data ({@link #looksPersonal}) that the renderer's output is run through.
+ * Violations carry a closed code and at most a number as written, never a sentence.
  */
 final class NumericValidator {
 
@@ -53,55 +39,23 @@ final class NumericValidator {
     private static final Pattern NIN = Pattern.compile("(?<![A-Za-z0-9])[Cc][MFmf][A-Za-z0-9]{12}(?![A-Za-z0-9])");
     private static final Pattern UUID_SHAPE =
             Pattern.compile("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
-    /** The top-level domains a model could turn a bare address into; not every two-letter word, which would block prose. */
-    private static final String TLDS =
-            "com|org|net|edu|gov|mil|int|io|co|ug|ke|tz|rw|app|dev|xyz|info|biz|me|tv|ly|cc|ru|cn|in"
-                    + "|uk|us|de|fr|shop|site|online|top|club|link|click|page|cloud|ai|so|tld|example|test|invalid|local";
-
-    private static final Pattern MARKUP =
-            Pattern.compile("(?i)<\\s*[a-z/!]|\\]\\(|https?:|www\\.|ftp:|javascript:|data:text|```"
-                    + "|&[a-z]+;|&#"
-                    // a bare domain or a domain with a path, an IPv4 or IPv6 literal, an @handle
-                    + "|(?<![\\p{L}\\d@.-])(?:[a-z0-9-]{1,63}\\.){1,5}(?:" + TLDS + ")(?![\\p{L}\\d])"
-                    + "|(?<![\\p{L}\\d@.-])[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){1,5}/\\S"
-                    + "|(?<![\\d.])\\d{1,3}(?:\\.\\d{1,3}){3}(?![\\d.])"
-                    + "|(?<![\\p{L}\\d:])(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}(?![\\p{L}\\d])"
-                    + "|(?<![\\p{L}\\d])::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})+"
-                    + "|(?<![\\p{L}\\d])@[a-z0-9_]{2,}");
-    private static final Pattern THRESHOLD = Pattern.compile("(?i)\\b(?:fewer|less)\\s+than\\s+(?:5|five)\\b");
-    private static final Pattern SENTENCE_END = Pattern.compile("[.!?;](?=\\s|$)|\\n");
-    private static final Pattern CLAUSE_END = Pattern.compile(
-            "[.!?;](?=\\s|$)|,(?=\\s)|\\n|(?<![\\p{L}])(?:and|but|while|whereas|whilst|yet|then|although)(?![\\p{L}])",
-            Pattern.CASE_INSENSITIVE);
     private static final Pattern LOSS_WORD =
             Pattern.compile("(?i)\\b(?:loss|losses|deficit|negative|minus|shortfall|below zero)\\b");
-
-    /** The longest text the screens run on: a summary is at most 400 characters and a point at most 300. */
-    static final int MAX_TEXT = 2000;
 
     private NumericValidator() {}
 
     /** What the validator needs to know about the prompt the answer belongs to. */
-    record Context(AliasedFacts facts, Set<String> forbidden) {
+    record Context(AliasedFacts facts) {
 
-        /**
-         * The prompt's facts, plus the strings that must never come back (a caller may plant some, as the evaluation does
-         * with its fabricated names and injection texts) and the system prompt's canary. The real names of groups are not
-         * matched in an answer: they were never in the prompt, and a branch called Main would otherwise block every answer
-         * that uses the word.
-         */
-        static Context of(AliasedFacts facts, Collection<String> alsoForbidden) {
-            Set<String> forbidden = new LinkedHashSet<>(alsoForbidden);
-            forbidden.add(PromptBuilder.CANARY);
-            forbidden.removeIf(s -> s == null || s.strip().length() < 3);
-            return new Context(facts, forbidden);
+        static Context of(AliasedFacts facts) {
+            return new Context(facts);
         }
     }
 
-    /** {@code code} is closed; {@code where} is {@code answer}, {@code summary} or {@code point N}; {@code token} a number or a lexicon word, or null. */
+    /** {@code code} is closed; {@code where} says which part of the answer; {@code token} is a number or null, never a sentence. */
     record Violation(String code, String where, String token) {}
 
-    /** The verdict. {@code answer} is the text to show (digits as ASCII, invisible characters gone), null unless valid. */
+    /** The verdict. {@code answer} is the rendered brief, null unless valid. */
     record Result(boolean valid, List<Violation> violations, AdvisorAnswer answer) {
 
         boolean has(String code) {
@@ -109,72 +63,7 @@ final class NumericValidator {
         }
     }
 
-    /**
-     * Validates one raw answer. It fails closed: a defect in the validator itself (an exception) refuses the answer with the
-     * code {@code validator_error}, never accepts it.
-     */
-    static Result validate(String raw, Context ctx) {
-        try {
-            return validateAnswer(raw, ctx);
-        } catch (RuntimeException e) {
-            return new Result(false, List.of(new Violation("validator_error", "answer", null)), null);
-        }
-    }
-
-    private static Result validateAnswer(String raw, Context ctx) {
-        AdvisorAnswer.Parsed parsed = AdvisorAnswer.parse(raw);
-        if (parsed.answer() == null) {
-            return new Result(false, parsed.violations(), null);
-        }
-        AdvisorAnswer answer = parsed.answer();
-        List<Violation> violations = checkAnswer(answer, ctx);
-        if (!violations.isEmpty()) {
-            return new Result(false, violations, null);
-        }
-        List<Point> shown = new ArrayList<>();
-        for (Point p : answer.points()) {
-            shown.add(new Point(Text.display(p.text()), p.facts()));
-        }
-        return new Result(true, List.of(), new AdvisorAnswer(Text.display(answer.summary()), shown));
-    }
-
-    /**
-     * The per-text checks of an answer that has already parsed: every cited key exists, and the summary and each point rest on
-     * the facts they cite. Used on a model's own prose (legacy answers) and, as the second line of defence, on the text the
-     * placeholder substitution produced.
-     */
-    static List<Violation> checkAnswer(AdvisorAnswer answer, Context ctx) {
-        Map<String, PromptFact> byKey = new LinkedHashMap<>();
-        ctx.facts().facts().forEach(f -> byKey.put(f.key(), f));
-        List<Violation> violations = new ArrayList<>();
-        List<List<PromptFact>> cited = new ArrayList<>();
-        Set<PromptFact> everything = new LinkedHashSet<>();
-        int n = 0;
-        for (Point p : answer.points()) {
-            n++;
-            List<PromptFact> facts = new ArrayList<>();
-            for (String key : p.facts()) {
-                PromptFact f = byKey.get(key);
-                if (f == null) {
-                    violations.add(new Violation("unknown_fact", "point " + n, null));
-                } else {
-                    facts.add(f);
-                }
-            }
-            cited.add(facts);
-            everything.addAll(facts);
-        }
-        violations.addAll(checkText(answer.summary(), "summary", List.copyOf(everything), ctx));
-        for (int i = 0; i < answer.points().size(); i++) {
-            violations.addAll(checkText(answer.points().get(i).text(), "point " + (i + 1), cited.get(i), ctx));
-        }
-        return violations;
-    }
-
-    /**
-     * Only the numbers of a text, each against the cited facts (no binding, no direction words): what the placeholder
-     * validator uses to re-derive the figures its own substitution wrote.
-     */
+    /** Every number of a text against the cited facts. */
     static List<Violation> derivable(String text, String where, List<PromptFact> cited, Context ctx) {
         List<Violation> out = new ArrayList<>();
         String n = Text.normalise(text);
@@ -198,75 +87,14 @@ final class NumericValidator {
         return out;
     }
 
-    private static List<Violation> checkText(String text, String where, List<PromptFact> cited, Context ctx) {
-        List<Violation> out = new ArrayList<>();
-        String n = Text.normalise(text);
-        plainText(n, where, ctx, out);
-
-        Set<String> names = new LinkedHashSet<>();
-        ctx.facts().facts().forEach(f -> {
-            names.add(f.label());
-            names.add(f.metric());
-        });
-        // "fewer than 5" names the threshold, not a figure; with a suppressed fact cited it is set aside, so that any
-        // other 5 is a number nobody gave.
-        String forExtraction =
-                cited.stream().anyMatch(PromptFact::suppressed) ? NumberExtractor.blank(THRESHOLD, n) : n;
-        NumberExtractor.Extraction found = NumberExtractor.extract(
-                forExtraction, ctx.facts().dates(), ctx.facts().aliases(), names);
-        found.unknownAliases().forEach(a -> out.add(new Violation("unknown_alias", where, a)));
-        boolean loss = LOSS_WORD.matcher(n).find();
-        for (Token t : found.tokens()) {
-            if (t.yearLike()) {
-                continue;
-            }
-            String code = verdict(t, cited, ctx.facts().currency(), loss);
-            if (code == null) {
-                code = binding(t, n, cited, ctx.facts(), loss);
-            }
-            if (code != null) {
-                out.add(new Violation(code, where, tokenText(t)));
-            }
-        }
-        out.addAll(Directions.check(n, where, cited, found.tokens(), ctx.facts().currency()));
-        return out;
-    }
-
-    /**
-     * The checks every answer passes whatever its shape: Latin letters only (another script can disguise a word), no link or
-     * markup, no personal data shape, and none of the forbidden strings (the system prompt's canary, anything a caller planted).
-     */
-    static void plainText(String normalised, String where, Context ctx, List<Violation> out) {
-        if (normalised.length() > MAX_TEXT) {
-            // Nothing a summary or a point needs is this long; the pattern screens are not run on it.
-            out.add(new Violation("too_long", where, null));
-            return;
-        }
-        if (!Text.onlyLatinLetters(normalised)) {
-            out.add(new Violation("unexpected_script", where, null));
-        }
-        if (MARKUP.matcher(normalised).find()) {
-            out.add(new Violation("markup", where, null));
-        }
-        if (looksPersonal(normalised)) {
-            out.add(new Violation("pii_shape", where, null));
-        }
-        String lower = normalised.toLowerCase(Locale.ROOT);
-        for (String forbidden : ctx.forbidden()) {
-            if (lower.contains(Text.normalise(forbidden).toLowerCase(Locale.ROOT))) {
-                out.add(new Violation("forbidden_text", where, null));
-                break;
-            }
-        }
-    }
-
     /** True when the normalised text holds an email address, a phone number, an ID number shape or a UUID. */
     static boolean looksPersonal(String normalised) {
-        return EMAIL.matcher(normalised).find()
-                || UGANDA_MOBILE.matcher(normalised).find()
-                || INTERNATIONAL.matcher(normalised).find()
-                || NIN.matcher(normalised).find()
-                || UUID_SHAPE.matcher(normalised).find();
+        return normalised.length() <= 2000
+                && (EMAIL.matcher(normalised).find()
+                        || UGANDA_MOBILE.matcher(normalised).find()
+                        || INTERNATIONAL.matcher(normalised).find()
+                        || NIN.matcher(normalised).find()
+                        || UUID_SHAPE.matcher(normalised).find());
     }
 
     /** A number, as written, for a violation: digits and symbols only, never a sentence. */
@@ -290,100 +118,6 @@ final class NumericValidator {
             }
         }
         return sign ? "sign_mismatch" : unit ? "unit_mismatch" : "invented_number";
-    }
-
-    /** True when the token is a figure of this fact, whatever its sign or unit: used to tell which change a sentence quotes. */
-    static boolean speaksOf(Token t, PromptFact f, String currency) {
-        return match(t, f, currency, true) != Match.NO;
-    }
-
-    /** The figure and its changes are one family. */
-    private static String family(PromptFact f) {
-        return f.isChange() ? f.deltaOf() : f.key();
-    }
-
-    private record Mention(int start, int end, String metric) {}
-
-    /**
-     * A number belongs to the metric it sits beside (review item 2): the nearest metric name in its clause, with the alias of
-     * a branch or product in the sentence. The token must be a figure of a cited fact of that metric, else the figures are
-     * swapped or it is a figure of a metric nobody cited ({@code metric_mismatch}). With no metric named in the clause, a
-     * number with no unit may only be a count; a compact amount ({@code 250k}), a fraction and a factor carry their own
-     * meaning.
-     */
-    private static String binding(Token t, String n, List<PromptFact> cited, AliasedFacts all, boolean loss) {
-        if (t.fraction() || t.multiplier()) {
-            return null;
-        }
-        List<PromptFact> matched = new ArrayList<>();
-        for (PromptFact f : cited) {
-            if (match(t, f, all.currency(), loss) == Match.OK) {
-                matched.add(f);
-            }
-        }
-        String lower = n.toLowerCase(Locale.ROOT);
-        int clauseStart = 0;
-        int clauseEnd = n.length();
-        Matcher clause = CLAUSE_END.matcher(n);
-        while (clause.find()) {
-            if (clause.end() <= t.start()) {
-                clauseStart = clause.end();
-            } else if (clause.start() >= t.end()) {
-                clauseEnd = clause.start();
-                break;
-            }
-        }
-        int sentenceStart = 0;
-        int sentenceEnd = n.length();
-        Matcher sentence = SENTENCE_END.matcher(n);
-        while (sentence.find()) {
-            if (sentence.end() <= t.start()) {
-                sentenceStart = sentence.end();
-            } else if (sentence.start() >= t.end()) {
-                sentenceEnd = sentence.start();
-                break;
-            }
-        }
-        String clauseText = lower.substring(clauseStart, Math.max(clauseStart, clauseEnd));
-        String sentenceText = lower.substring(sentenceStart, Math.max(sentenceStart, sentenceEnd));
-
-        List<Mention> mentions = new ArrayList<>();
-        Set<String> metrics = new LinkedHashSet<>();
-        all.facts().forEach(f -> metrics.add(f.metric()));
-        for (String metric : metrics) {
-            String m = metric.toLowerCase(Locale.ROOT);
-            for (int at = clauseText.indexOf(m); at >= 0; at = clauseText.indexOf(m, at + 1)) {
-                mentions.add(new Mention(clauseStart + at, clauseStart + at + m.length(), metric));
-            }
-        }
-        // A name inside a longer name that is also there ("Collected" in "Collected on due") is the longer one.
-        mentions.removeIf(a -> mentions.stream()
-                .anyMatch(b -> b != a
-                        && b.start() <= a.start()
-                        && b.end() >= a.end()
-                        && b.end() - b.start() > a.end() - a.start()));
-        Mention nearest = null;
-        int best = Integer.MAX_VALUE;
-        for (Mention m : mentions) {
-            int d = m.start() >= t.end() ? m.start() - t.end() : t.start() >= m.end() ? t.start() - m.end() : 0;
-            if (d < best) {
-                best = d;
-                nearest = m;
-            }
-        }
-        if (nearest == null) {
-            boolean count = matched.stream().anyMatch(f -> f.kind() == PortfolioFacts.Kind.COUNT);
-            return t.unit() == Unit.NONE && !t.compact() && !count ? "unit_mismatch" : null;
-        }
-        String metric = nearest.metric();
-        Set<String> families = new LinkedHashSet<>();
-        for (PromptFact f : all.facts()) {
-            if (f.metric().equals(metric)
-                    && (f.alias() == null || sentenceText.contains(f.alias().toLowerCase(Locale.ROOT)))) {
-                families.add(family(f));
-            }
-        }
-        return matched.stream().anyMatch(f -> families.contains(family(f))) ? null : "metric_mismatch";
     }
 
     enum Match {

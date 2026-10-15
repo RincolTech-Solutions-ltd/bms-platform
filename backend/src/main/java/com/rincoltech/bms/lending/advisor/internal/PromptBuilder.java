@@ -24,7 +24,34 @@ final class PromptBuilder {
     /** The reviewed text of the system prompt: a resource, so a change to the contract is a change to a file in review. */
     static final String RESOURCE = "/advisor/system-prompt.txt";
 
-    static final String SYSTEM = load().replace("@CANARY@", CANARY);
+    // JUSTIFICATION-A3: the prompt must list the topic and action codes of the catalogue (the only strings the model may write); no existing code does.
+    static final String SYSTEM = load().replace("@CANARY@", CANARY)
+            .replace("@TOPICS@", topics())
+            .replace("@ACTIONS@", actions());
+
+    /** The topic codes with their meaning, from the catalogue. */
+    private static String topics() {
+        StringBuilder out = new StringBuilder();
+        Catalogue.INSTANCE.topics().values().forEach(t -> out.append("- ")
+                .append(t.code())
+                .append(": ")
+                .append(t.label())
+                .append('\n'));
+        return out.toString().stripTrailing();
+    }
+
+    /** The action codes with the topic each belongs to and what the system will recommend, from the catalogue. */
+    private static String actions() {
+        StringBuilder out = new StringBuilder();
+        Catalogue.INSTANCE.actions().values().forEach(a -> out.append("- ")
+                .append(a.code())
+                .append(", ")
+                .append(a.topic())
+                .append(": ")
+                .append(a.text().replace("{{where}}", ""))
+                .append('\n'));
+        return out.toString().stripTrailing();
+    }
 
     private static String load() {
         try (java.io.InputStream in = PromptBuilder.class.getResourceAsStream(RESOURCE)) {
@@ -57,7 +84,7 @@ final class PromptBuilder {
                 .append(". Currency: ")
                 .append(facts.currency())
                 .append(".\n");
-        out.append("FACTS (write a fact as {{key}} | name | value | note)\n");
+        out.append("FACTS (key | name | value | note)\n");
         for (PromptFact f : facts.facts()) {
             out.append(f.key()).append(" | ").append(f.label()).append(" | ").append(f.display());
             if (!f.suppressed() && f.value() != null && f.display() != null) {
