@@ -136,6 +136,20 @@ class LoanServicer implements LoanServicing {
             UUID makerId,
             UUID checkerId,
             String source) {
+        disburse(loan, date, paymentMethodKey, externalReference, approvalId, makerId, checkerId, source, true);
+    }
+
+    /** As above; {@code notifyMember} false (a register import's request) queues no SMS. */
+    void disburse(
+            Loan loan,
+            LocalDate date,
+            String paymentMethodKey,
+            String externalReference,
+            UUID approvalId,
+            UUID makerId,
+            UUID checkerId,
+            String source,
+            boolean notifyMember) {
         LocalDate today = today();
         long principal = loan.approvedPrincipalMinor();
         List<FeeCharge> fees = products.fees(loan.productVersionId(), principal);
@@ -243,8 +257,8 @@ class LoanServicer implements LoanServicing {
         after.put("approval_request_id", approvalId);
         audit.record(new AuditLog.Entry(
                 "lending.loan.disbursed", SUBJECT, loan.id(), loan.branchId(), Map.of("status", "approved"), after));
-        if (LoanNotices.sends(source)) {
-            notices.disbursed(loan, txnId, date, principal, schedule.getFirst());
+        if (LoanNotices.sends(source, notifyMember)) {
+            notices.disbursed(loan, txnId, date, principal - deducted, schedule.getFirst());
         }
     }
 
@@ -278,6 +292,19 @@ class LoanServicer implements LoanServicing {
             String externalReference,
             UUID recordedBy,
             String source) {
+        return repay(loan, amountMinor, valueDate, paymentMethodKey, externalReference, recordedBy, source, true);
+    }
+
+    /** As above; {@code notifyMember} false (a register import's request) queues no SMS. */
+    UUID repay(
+            Loan loan,
+            long amountMinor,
+            LocalDate valueDate,
+            String paymentMethodKey,
+            String externalReference,
+            UUID recordedBy,
+            String source,
+            boolean notifyMember) {
         LocalDate today = today();
         String method = books.methodAccount(paymentMethodKey, loan.branchId());
         String receipt = number("RC", "receipt", loan.branchId());
@@ -353,7 +380,8 @@ class LoanServicer implements LoanServicing {
         if (!recovery) {
             position = refresh(loan.id(), items, today);
         }
-        if (LoanNotices.sends(source)) {
+        boolean tell = LoanNotices.sends(source, notifyMember);
+        if (tell) {
             // The receipt, then (below) the thanks if this repayment settled the loan, in the money's own transaction.
             notices.repaymentReceived(
                     loan,
@@ -369,7 +397,7 @@ class LoanServicer implements LoanServicing {
                                     + position.penaltiesOutstandingMinor());
         }
         if (position != null && position.settled()) {
-            close(loan, valueDate, recordedBy, LoanNotices.sends(source) ? txnId : null);
+            close(loan, valueDate, recordedBy, tell ? txnId : null);
         }
         return txnId;
     }
@@ -391,7 +419,7 @@ class LoanServicer implements LoanServicing {
                 Map.of("status", "active"),
                 Map.of("status", "closed", "closed_on", on.toString())));
         if (closingTxnId != null) {
-            notices.closed(loan, closingTxnId);
+            notices.closed(loan, closingTxnId, on);
         }
     }
 
@@ -548,6 +576,8 @@ class LoanServicer implements LoanServicing {
         Txn txn = repo.txn(txnId).orElseThrow(ApiException::notFound);
         Loan loan = loans.lock(txn.loanId()).orElseThrow(ApiException::notFound);
         checkReversible(loan, txn);
+        // The receipt (and the thanks) of the entry being reversed, if the sender has not taken them yet, must not go.
+        notices.reversed(txn.id());
         LocalDate today = today();
         UUID reversalId = UUID.randomUUID();
         String key = "lending.txn:" + reversalId;

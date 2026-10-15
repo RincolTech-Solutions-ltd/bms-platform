@@ -327,7 +327,7 @@ class SavingsIT extends LoanFixtures {
         List<Map<String, Object>> sms = TestDatabase.owner()
                 .sql("SELECT recipient, template_key, params::text AS params, status, expires_at IS NOT NULL AS expires"
                         + " FROM notification_outbox WHERE channel = 'sms' AND idempotency_key LIKE ?")
-                .param("lending.savings.sms:" + t.tenantId() + ":%")
+                .param("sms:savings.%:" + t.tenantId() + ":%")
                 .query()
                 .listOfRows();
         assertThat(sms).hasSize(1);
@@ -343,7 +343,7 @@ class SavingsIT extends LoanFixtures {
                         .sql("SELECT category || ' ' || subject_type || ' ' || (tenant_id = ?) || ' '"
                                 + " || (expires_at <= created_at + interval '1 hour') FROM notification_outbox"
                                 + " WHERE channel = 'sms' AND idempotency_key LIKE ?")
-                        .params(t.tenantId(), "lending.savings.sms:" + t.tenantId() + ":%")
+                        .params(t.tenantId(), "sms:savings.%:" + t.tenantId() + ":%")
                         .query(String.class)
                         .single())
                 .isEqualTo("transactional member true true");
@@ -356,7 +356,7 @@ class SavingsIT extends LoanFixtures {
         String product = product("SMSOFF", Map.of());
         String member = member("Test Saver 04", "+256700000204", t.headOffice(), true);
         String account = open(member, product).get("id").asString();
-        String like = "lending.savings.sms:" + t.tenantId() + ":%";
+        String like = "sms:savings.%:" + t.tenantId() + ":%";
         String count = "SELECT count(*) FROM notification_outbox WHERE channel = 'sms' AND idempotency_key LIKE ?";
 
         assertThat(deposit(account, 30_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -502,7 +502,7 @@ class SavingsIT extends LoanFixtures {
                 .asString();
         String sms = "SELECT template_key FROM notification_outbox WHERE channel = 'sms' AND idempotency_key LIKE ?"
                 + " ORDER BY template_key";
-        String like = "lending.savings.sms:" + t.tenantId() + ":%";
+        String like = "sms:savings.%:" + t.tenantId() + ":%";
         assertThat(TestDatabase.owner().sql(sms).param(like).query(String.class).list())
                 .containsExactly("savings.deposit", "savings.withdrawal");
 

@@ -295,7 +295,8 @@ class SavingsService {
                     r.paymentMethodKey(),
                     blankToNull(r.externalReference()),
                     CurrentPrincipal.require().userId(),
-                    "staff");
+                    "staff",
+                    !Boolean.FALSE.equals(r.notifyMember()));
             return new DepositResult(
                     repo.transaction(txn).orElseThrow(), view(repo.account(id).orElseThrow()));
         });
@@ -311,6 +312,7 @@ class SavingsService {
             payload.put(WithdrawalAction.AMOUNT, r.amountMinor());
             payload.put(WithdrawalAction.METHOD, r.paymentMethodKey());
             payload.put(WithdrawalAction.REFERENCE, blankToNull(r.externalReference()));
+            payload.put(WithdrawalAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     WithdrawalAction.TYPE, a.branchId(), a.id(), a.version(), r.amountMinor(), a.currency(), payload));
             return outcome(id, o, a.txnCount(), "withdrawal");
@@ -328,6 +330,7 @@ class SavingsService {
             payload.put(WithdrawalAction.METHOD, r.paymentMethodKey());
             payload.put(WithdrawalAction.REFERENCE, blankToNull(r.externalReference()));
             payload.put(WithdrawalAction.REASON, blankToNull(r.reason()));
+            payload.put(WithdrawalAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     WithdrawalAction.TYPE, a.branchId(), a.id(), a.version(), amount, a.currency(), payload));
             return outcome(id, o, a.txnCount(), "withdrawal");

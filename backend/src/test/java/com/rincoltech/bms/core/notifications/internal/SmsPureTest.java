@@ -186,4 +186,12 @@ class SmsPureTest {
         // The day is the Kampala day, not the UTC day: 23:30 Kampala is 20:30 UTC the same date.
         assertThat(w.endOfDay(kampala("23:30"))).isEqualTo(kampala("17:00"));
     }
+
+    @Test
+    void smsAmountsUseTheCurrencyExponent() {
+        assertThat(SmsEventsService.format(1_234_567, 0)).isEqualTo("1,234,567");
+        assertThat(SmsEventsService.format(1_234_567, 2)).isEqualTo("12,345.67");
+        assertThat(SmsEventsService.format(0, 2)).isEqualTo("0.00");
+        assertThat(SmsEventsService.format(5, 2)).isEqualTo("0.05");
+    }
 }

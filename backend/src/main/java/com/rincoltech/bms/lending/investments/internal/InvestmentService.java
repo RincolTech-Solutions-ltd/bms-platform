@@ -179,6 +179,7 @@ class InvestmentService {
             payload.put(FundingAction.DATE, r.valueDate().toString());
             payload.put(FundingAction.METHOD, r.paymentMethodKey());
             payload.put(FundingAction.REFERENCE, blankToNull(r.externalReference()));
+            payload.put(FundingAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     FundingAction.TYPE,
                     inv.branchId(),
@@ -202,7 +203,8 @@ class InvestmentService {
                     r.paymentMethodKey(),
                     blankToNull(r.externalReference()),
                     CurrentPrincipal.require().userId(),
-                    "staff");
+                    "staff",
+                    !Boolean.FALSE.equals(r.notifyMember()));
             return result(id, txn);
         });
     }
@@ -218,7 +220,8 @@ class InvestmentService {
                     r.paymentMethodKey(),
                     blankToNull(r.externalReference()),
                     CurrentPrincipal.require().userId(),
-                    "staff");
+                    "staff",
+                    !Boolean.FALSE.equals(r.notifyMember()));
             return result(id, txn);
         });
     }
@@ -265,6 +268,7 @@ class InvestmentService {
             payload.put(EarlyWithdrawalAction.METHOD, r.paymentMethodKey());
             payload.put(EarlyWithdrawalAction.REFERENCE, blankToNull(r.externalReference()));
             payload.put(EarlyWithdrawalAction.REASON, r.reason().trim());
+            payload.put(EarlyWithdrawalAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     EarlyWithdrawalAction.TYPE,
                     inv.branchId(),

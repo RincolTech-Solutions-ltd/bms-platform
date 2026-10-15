@@ -19,7 +19,9 @@ import org.springframework.stereotype.Component;
  * only. It names the business and the account number and no name of the member.
  *
  * <p>Funding and payouts message the member only when staff made them (a source other than {@code staff}, the seed and the
- * import, never does) and a reversal sends nothing. A payout is any money paid to the investor: a return payout, the
+ * import port, never does), when the request did not say {@code notify_member: false} (a register import does) and when the
+ * value date is not more than the cutoff days old; a reversal sends nothing new and withdraws what the reversed transaction
+ * queued if the sender has not claimed it. A payout is any money paid to the investor: a return payout, the
  * maturity payout and an early withdrawal, each with its voucher. The maturing notice is a reminder, so the tenant's sending
  * window holds it, and it is sent once per investment and maturity date: by the job's own record that the reminder was made
  * (the date is stamped on the investment) and by the idempotency key, so a job run twice queues nothing new.
@@ -39,13 +41,16 @@ class InvestmentNotices {
         this.members = members;
     }
 
-    /** Whether an event with this {@code source} messages the member: a staff event does, the seed and the import do not. */
-    static boolean sends(String source) {
-        return "staff".equals(source);
+    /**
+     * Whether an event with this {@code source} messages the member: a staff event does, the seed and the import port do not,
+     * and a staff request that said {@code notify_member: false} does not.
+     */
+    static boolean sends(String source, boolean notifyMember) {
+        return "staff".equals(source) && notifyMember;
     }
 
     void funded(Inv inv, UUID txnId, LocalDate valueDate, LocalDate maturity, String receiptNo) {
-        queue(FUNDED, inv, txnId.toString(), Outbox.TRANSACTIONAL, () -> {
+        queue(FUNDED, inv, txnId.toString(), Outbox.TRANSACTIONAL, valueDate, () -> {
             Map<String, String> params = base(inv, inv.principalMinor());
             params.put("date", sms.date(valueDate));
             params.put("maturity_date", sms.date(maturity));
@@ -56,7 +61,7 @@ class InvestmentNotices {
 
     /** The reminder that the investment matures soon; one per investment and maturity date (a rollover has a new date). */
     void maturing(Inv inv) {
-        queue(MATURING, inv, inv.id() + ":" + inv.maturityDate(), Outbox.REMINDER, () -> {
+        queue(MATURING, inv, inv.id() + ":" + inv.maturityDate(), Outbox.REMINDER, null, () -> {
             Map<String, String> params = base(inv, inv.principalMinor());
             params.put("maturity_date", sms.date(inv.maturityDate()));
             return params;
@@ -64,12 +69,20 @@ class InvestmentNotices {
     }
 
     void paidOut(Inv inv, UUID txnId, long paidMinor, LocalDate valueDate, String voucherNo) {
-        queue(PAID_OUT, inv, txnId.toString(), Outbox.TRANSACTIONAL, () -> {
+        queue(PAID_OUT, inv, txnId.toString(), Outbox.TRANSACTIONAL, valueDate, () -> {
             Map<String, String> params = base(inv, paidMinor);
             params.put("date", sms.date(valueDate));
             params.put("voucher_no", voucherNo);
             return params;
         });
+    }
+
+    /**
+     * A reversal withdraws what the reversed transaction queued and the sender has not yet claimed (a receipt for an entry
+     * made on the wrong account must not tell the wrong person). What has gone stays gone; nothing new is sent.
+     */
+    void reversed(UUID reversedTxnId) {
+        sms.cancel(reversedTxnId.toString());
     }
 
     private Map<String, String> base(Inv inv, long amountMinor) {
@@ -81,12 +94,18 @@ class InvestmentNotices {
     }
 
     private void queue(
-            String templateKey, Inv inv, String eventRef, String category, Supplier<Map<String, String>> params) {
+            String templateKey,
+            Inv inv,
+            String eventRef,
+            String category,
+            LocalDate valueDate,
+            Supplier<Map<String, String>> params) {
         sms.queueWhenActive(
                 templateKey,
                 inv.memberId(),
                 eventRef,
                 category,
+                valueDate,
                 () -> members.smsPhone(inv.memberId()).orElse(null),
                 params);
     }

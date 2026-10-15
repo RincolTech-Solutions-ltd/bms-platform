@@ -99,7 +99,8 @@ class SmsEventsIT extends IntegrationTest {
                     currentTenant,
                     tenantSettings,
                     business,
-                    transactionManager);
+                    transactionManager,
+                    3);
             SmsSettings settings = new SmsSettings(
                     "test", SmsSettings.Mode.LIVE, SmsSettings.Kind.FAKE, Set.of(), 100_000, null, null, null);
             this.channel = new SmsOutboxChannel(
@@ -282,6 +283,7 @@ class SmsEventsIT extends IntegrationTest {
                         member,
                         UUID.randomUUID().toString(),
                         Outbox.TRANSACTIONAL,
+                        null,
                         () -> "0700000113",
                         () -> Map.of("loan_no", "LN-HQ-000123")));
     }
@@ -323,6 +325,11 @@ class SmsEventsIT extends IntegrationTest {
                 jdbc.sql("SELECT 1 / 0").query(Integer.class).single();
             }
             throw new IllegalStateException("outbox down for " + message.templateKey());
+        }
+
+        @Override
+        public int cancelUnclaimed(String eventRef) {
+            throw new IllegalStateException("outbox down");
         }
 
         @Override
@@ -459,7 +466,7 @@ class SmsEventsIT extends IntegrationTest {
                         "VC-HQ-000044"));
         Map<String, String> expected = Map.of(
                 "loan.disbursed",
-                "Test Lender: Loan LN-HQ-000123 of UGX 500,000 disbursed on 15/10/2026. First payment UGX 600,000 due 15/11/2026.",
+                "Test Lender: Loan LN-HQ-000123: UGX 500,000 paid out on 15/10/2026. First payment UGX 600,000 due 15/11/2026.",
                 "loan.repayment_received",
                 "Test Lender: Received UGX 400,000 on 15/10/2026 for loan LN-HQ-000123. Receipt RC-HQ-000042.",
                 "loan.closed",

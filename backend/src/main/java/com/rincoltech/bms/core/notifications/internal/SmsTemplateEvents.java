@@ -10,8 +10,9 @@ import java.util.Set;
  * The event types whose SMS wording a tenant may change (FR-NTF-03, spec 4.10), each with the placeholders it
  * offers. An event appears here when the application sends it today: the two savings receipts, the loan events
  * (disbursed, repayment received, closed) and the investment events (funded, maturing, paid out) of issue #221. The
- * reminders (#227) join the list when their slice queues them, with their own whitelist. The default text is the one the channel sends when a tenant has no override
- * ({@link OutboxTemplates}); a test renders every default through this language so the two cannot drift.
+ * reminders (#227) join the list when their slice queues them, with their own whitelist. The default text is the one
+ * the channel sends when a tenant has no override ({@link OutboxTemplates}); a test renders every default through this
+ * language so the two cannot drift.
  *
  * <p>No event offers a balance: an override never carries one (on a phone a household shares, a balance tells
  * everyone what a member holds). A tenant that switched {@code include_balance} on keeps the default wording with
@@ -44,7 +45,7 @@ final class SmsTemplateEvents {
     private static final List<Placeholder> LOAN_DISBURSED = List.of(
             TENANT,
             CURRENCY,
-            AMOUNT,
+            new Placeholder("amount", "The amount paid out: the loan less fees deducted at disbursement", "50,000", 24),
             DATE,
             LOAN_NO,
             new Placeholder("next_amount", "The first instalment", "120,000", 24),

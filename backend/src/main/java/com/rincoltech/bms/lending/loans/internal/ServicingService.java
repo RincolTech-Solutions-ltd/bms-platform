@@ -67,6 +67,7 @@ class ServicingService {
             payload.put(DisbursementAction.DATE, r.disbursementDate().toString());
             payload.put(DisbursementAction.METHOD, r.paymentMethodKey());
             payload.put(DisbursementAction.REFERENCE, r.externalReference());
+            payload.put(DisbursementAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     DisbursementAction.TYPE,
                     loan.branchId(),
@@ -93,7 +94,8 @@ class ServicingService {
                     r.paymentMethodKey(),
                     blankToNull(r.externalReference()),
                     principal.userId(),
-                    "staff");
+                    "staff",
+                    !Boolean.FALSE.equals(r.notifyMember()));
             return new RepaymentResult(
                     repo.transaction(id, txn).orElseThrow(),
                     loans.find(id).orElseThrow().status(),

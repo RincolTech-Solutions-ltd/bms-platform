@@ -148,15 +148,14 @@ class OutboxTemplates {
                             null,
                             "{tenant_name}: Withdrawal of {currency} {amount} from account {account_no}. Voucher {receipt_no}."
                                     + " Balance {currency} {balance}.")),
-            // The loan and investment events of FR-NTF-02 (issue #221). Same rules as the savings receipts: no name of
-            // the member, only the business, the loan or account number and the amounts; the repayment receipt omits
-            // the
-            // balance unless the tenant asked for it. Dates are dd/MM/yyyy.
+            // The loan and investment events of FR-NTF-02 (issue #221). Same rules as the savings receipts: no name
+            // of the member, only the business, the loan or account number and the amounts; the repayment receipt
+            // omits the balance unless the tenant asked for it. Dates are dd/MM/yyyy.
             Map.entry(
                     "loan.disbursed",
                     new Template(
                             null,
-                            "{tenant_name}: Loan {loan_no} of {currency} {amount} disbursed on {date}."
+                            "{tenant_name}: Loan {loan_no}: {currency} {amount} paid out on {date}."
                                     + " First payment {currency} {next_amount} due {next_due_date}.")),
             Map.entry(
                     "loan.repayment_received",
