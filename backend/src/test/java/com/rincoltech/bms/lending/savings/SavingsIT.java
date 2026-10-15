@@ -7,6 +7,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.lending.loans.LoanFixtures;
+import com.rincoltech.bms.lending.members.MemberLookup;
 import com.rincoltech.bms.testsupport.SmsTenants;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -17,11 +18,16 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -50,6 +56,13 @@ class SavingsIT extends LoanFixtures {
 
     @Autowired
     PlatformTransactionManager transactionManager;
+
+    @Autowired
+    JdbcClient jdbc;
+
+    /** A spy that calls the real bean until a test arms it; the money movement must not notice when it breaks. */
+    @MockitoSpyBean
+    MemberLookup memberLookup;
 
     final UUID cashier = UUID.randomUUID();
     final UUID manager = UUID.randomUUID();
@@ -478,6 +491,142 @@ class SavingsIT extends LoanFixtures {
         // Below the threshold it runs at once.
         assertThat(withdraw(account, 50_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         booksAgree();
+    }
+
+    // ---- The savings receipts through SmsEvents (issue #221) ----------------------------------------------
+
+    List<Map<String, Object>> smsRows() {
+        return TestDatabase.owner()
+                .sql("SELECT template_key, status, last_error, params::text AS params FROM notification_outbox"
+                        + " WHERE channel = 'sms' AND tenant_id = ? ORDER BY created_at, template_key")
+                .param(t.tenantId())
+                .query()
+                .listOfRows();
+    }
+
+    ResponseEntity<JsonNode> depositWith(String account, long amount, LocalDate date, Boolean notify) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("amount_minor", amount);
+        body.put("payment_method_key", "cash");
+        if (date != null) {
+            body.put("value_date", date.toString());
+        }
+        if (notify != null) {
+            body.put("notify_member", notify);
+        }
+        return send(HttpMethod.POST, ACCOUNTS + "/" + account + "/deposits", withKey(asCashier(), key()), body);
+    }
+
+    @Test
+    void frNtf02_notifyMemberFalseAndAnOldValueDateQueueNoReceiptAndTheOthersDo() {
+        threshold(10_000_000);
+        smsOn();
+        String account = account(product("SMSQ", Map.of()));
+        // An account opened ten days ago, so that earlier value dates are allowed.
+        TestDatabase.owner()
+                .sql("UPDATE lending_savings_accounts SET opened_on = ?::date - 10 WHERE id = ?::uuid")
+                .params(today.toString(), account)
+                .update();
+        assertThat(depositWith(account, 20_000, null, false).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).as("a register import says notify_member false").isEmpty();
+        // A deposit dated a week ago is a register being loaded, not news; two days ago is inside the cutoff and is texted.
+        assertThat(depositWith(account, 20_000, today.minusDays(7), null).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).isEmpty();
+        assertThat(depositWith(account, 20_000, today.minusDays(2), true).getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).hasSize(1);
+        // A withdrawal that says no is silent, and one that does not say is not.
+        ResponseEntity<JsonNode> quiet = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/withdrawals",
+                withKey(asCashier(), key()),
+                Map.of("amount_minor", 10_000, "payment_method_key", "mtn_momo", "notify_member", false));
+        assertThat(quiet.getStatusCode()).as("%s", quiet.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).hasSize(1);
+        assertThat(withdraw(account, 10_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows().stream().map(r -> r.get("template_key")))
+                .containsExactlyInAnyOrder("savings.deposit", "savings.withdrawal");
+        // A closure's payout follows the same flag.
+        ResponseEntity<JsonNode> closed = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/close",
+                withKey(asCashier(), key()),
+                Map.of("payment_method_key", "cash", "notify_member", false));
+        assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isIn(HttpStatus.CREATED, HttpStatus.ACCEPTED);
+        assertThat(smsRows()).as("no third message").hasSize(2);
+    }
+
+    @Test
+    void frNtf02_aReversalWithdrawsTheUnclaimedReceiptOfTheEntryItReverses() {
+        threshold(10_000_000);
+        smsOn();
+        String account = account(product("SMSCAN", Map.of()));
+        deposit(account, 80_000, key());
+        String withdrawal = withdraw(account, 30_000, key())
+                .getBody()
+                .get("transaction")
+                .get("id")
+                .asString();
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/transactions/" + withdrawal + "/reverse",
+                withKey(asCashier(), key()),
+                Map.of("reason", "Recorded on the wrong account"));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        List<Map<String, Object>> rows = smsRows();
+        assertThat(rows).hasSize(2);
+        Map<String, Object> gone = rows.stream()
+                .filter(x -> "savings.withdrawal".equals(x.get("template_key")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(gone.get("status")).isEqualTo("failed");
+        assertThat(gone.get("last_error")).isEqualTo("cancelled_reversed");
+        assertThat(gone.get("params")).isEqualTo("{}");
+        assertThat(rows.stream().filter(x -> "savings.deposit".equals(x.get("template_key"))))
+                .singleElement()
+                .satisfies(x -> assertThat(x.get("status")).isEqualTo("pending"));
+    }
+
+    @Test
+    void frNtf01_aFailureOfTheMemberLookupOrANumberWeWouldNotTextNeverLosesTheDeposit() {
+        threshold(10_000_000);
+        smsOn();
+        String member = member("Test Saver 09", "+256700000209", t.headOffice(), true);
+        String account = open(member, product("SMSG", Map.of())).get("id").asString();
+        MemberLookup lookup = AopTestUtils.getUltimateTargetObject(memberLookup);
+
+        for (boolean sqlError : new boolean[] {false, true}) {
+            Mockito.reset(lookup);
+            Mockito.doAnswer(i -> {
+                        if (sqlError) {
+                            jdbc.sql("SELECT 1 / 0").query(Integer.class).single();
+                        }
+                        throw new IllegalStateException("members down");
+                    })
+                    .when(lookup)
+                    .smsPhone(ArgumentMatchers.any());
+            assertThat(deposit(account, 10_000, key()).getStatusCode())
+                    .as("sqlError=%s", sqlError)
+                    .isEqualTo(HttpStatus.CREATED);
+        }
+        Mockito.reset(lookup);
+        assertThat(get(account).get("balance_minor").asLong())
+                .as("both deposits are in")
+                .isEqualTo(20_000);
+        assertThat(smsRows()).as("and nothing was queued").isEmpty();
+
+        // A number of another country is one we do not text; the deposit is recorded all the same.
+        TestDatabase.owner()
+                .sql("UPDATE lending_members SET phone_e164 = '+14155550123' WHERE id = ?::uuid")
+                .param(member)
+                .update();
+        assertThat(deposit(account, 10_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).isEmpty();
     }
 
     // ---- Reversal -----------------------------------------------------------------------------
