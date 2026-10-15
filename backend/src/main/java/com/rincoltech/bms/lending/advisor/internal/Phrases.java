@@ -64,12 +64,11 @@ final class Phrases {
             return name + " was unchanged " + compared;
         }
         String magnitude = display.replaceFirst("^[+-]", "");
-        String how =
-                switch (f.polarity()) {
-                    case HIGHER_IS_BETTER -> change > 0 ? " (better)" : " (worse)";
-                    case HIGHER_IS_WORSE -> change > 0 ? " (worse)" : " (better)";
-                    case NEUTRAL -> "";
-                };
+        String how = switch (f.polarity()) {
+            case HIGHER_IS_BETTER -> change > 0 ? " (better)" : " (worse)";
+            case HIGHER_IS_WORSE -> change > 0 ? " (worse)" : " (better)";
+            case NEUTRAL -> "";
+        };
         return name + (change > 0 ? " rose by " : " fell by ") + magnitude + " " + compared + how;
     }
 }

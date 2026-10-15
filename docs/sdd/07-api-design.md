@@ -1150,7 +1150,9 @@ routes below arrive with #226 and #230.
 
 Refused with 404 `advisor_disabled` unless the tenant has switched the assistant on. Responses carry
 `Cache-Control: no-store`. Every answer body has `advisory: true`, `as_of`, `source` (`model` or `fallback`), the text,
-and `facts` (keys with display values). Provider errors never reach the client; the fallback is returned instead.
+and `facts` (keys with display values). The text is written by our code from a structured model answer (findings that
+choose facts, a topic, a catalogue action and a priority; spec 5.13), never taken from the model. Provider errors and
+refused answers never reach the client; the deterministic facts-only brief is returned instead.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|

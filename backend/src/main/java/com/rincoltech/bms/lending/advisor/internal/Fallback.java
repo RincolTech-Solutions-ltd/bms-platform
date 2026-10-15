@@ -31,8 +31,10 @@ final class Fallback {
         String summary = Templates.fill(
                 catalogue.template("summary"),
                 Map.of(
-                        "asof", Phrases.date(facts.asOf()),
-                        "range", Phrases.date(facts.from()) + " to " + Phrases.date(facts.to())));
+                        "asof",
+                        Phrases.date(facts.asOf()),
+                        "range",
+                        Phrases.date(facts.from()) + " to " + Phrases.date(facts.to())));
         List<String> keys = new ArrayList<>();
         List<String> phrases = new ArrayList<>();
         for (String key : KEY_FIGURES) {

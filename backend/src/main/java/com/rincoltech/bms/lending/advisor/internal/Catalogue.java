@@ -93,25 +93,36 @@ final class Catalogue {
             if (in == null) {
                 throw new IllegalStateException("missing resource " + RESOURCE);
             }
-            JsonNode root = JsonMapper.builder().build().readTree(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            JsonNode root =
+                    JsonMapper.builder().build().readTree(new String(in.readAllBytes(), StandardCharsets.UTF_8));
             Map<String, String> templates = new LinkedHashMap<>();
-            root.get("templates").properties().forEach(e -> templates.put(e.getKey(), e.getValue().asString()));
+            root.get("templates")
+                    .properties()
+                    .forEach(e -> templates.put(e.getKey(), e.getValue().asString()));
             Map<String, String> priorities = new LinkedHashMap<>();
-            root.get("priorities").properties().forEach(e -> priorities.put(e.getKey(), e.getValue().asString()));
+            root.get("priorities")
+                    .properties()
+                    .forEach(e -> priorities.put(e.getKey(), e.getValue().asString()));
             Map<String, Topic> topics = new LinkedHashMap<>();
             for (JsonNode t : root.get("topics")) {
                 Set<String> facts = new LinkedHashSet<>();
                 t.get("facts").forEach(f -> facts.add(f.asString()));
-                topics.put(t.get("code").asString(), new Topic(t.get("code").asString(), t.get("label").asString(), Set.copyOf(facts)));
+                topics.put(
+                        t.get("code").asString(),
+                        new Topic(t.get("code").asString(), t.get("label").asString(), Set.copyOf(facts)));
             }
             Map<String, Action> actions = new LinkedHashMap<>();
             for (JsonNode a : root.get("actions")) {
                 actions.put(
                         a.get("code").asString(),
-                        new Action(a.get("code").asString(), a.get("topic").asString(), a.get("text").asString()));
+                        new Action(
+                                a.get("code").asString(),
+                                a.get("topic").asString(),
+                                a.get("text").asString()));
             }
             check(templates, priorities, topics, actions);
-            return new Catalogue(Map.copyOf(topics), Map.copyOf(actions), Map.copyOf(templates), Map.copyOf(priorities));
+            return new Catalogue(
+                    Map.copyOf(topics), Map.copyOf(actions), Map.copyOf(templates), Map.copyOf(priorities));
         } catch (IOException | RuntimeException e) {
             throw new IllegalStateException("the advisor catalogue is not valid: " + e.getMessage(), e);
         }
@@ -123,7 +134,9 @@ final class Catalogue {
             Map<String, Topic> topics,
             Map<String, Action> actions) {
         require(priorities.keySet().equals(PRIORITIES), "priorities must be exactly high, medium and low");
-        require(templates.keySet().equals(TEMPLATE_PLACEHOLDERS.keySet()), "templates must be exactly " + TEMPLATE_PLACEHOLDERS.keySet());
+        require(
+                templates.keySet().equals(TEMPLATE_PLACEHOLDERS.keySet()),
+                "templates must be exactly " + TEMPLATE_PLACEHOLDERS.keySet());
         templates.forEach((name, text) -> checkText("template " + name, text, TEMPLATE_PLACEHOLDERS.get(name)));
         priorities.forEach((code, label) -> checkText("priority " + code, label, Set.of()));
         require(topics.size() >= 6, "at least six topics");
@@ -138,7 +151,9 @@ final class Catalogue {
             require(topics.containsKey(a.topic()), "action " + a.code() + " has an unknown topic");
             checkText("action " + a.code(), a.text(), ACTION_PLACEHOLDERS);
         });
-        topics.keySet().forEach(t -> require(actions.values().stream().anyMatch(a -> a.topic().equals(t)), "topic " + t + " has no action"));
+        topics.keySet()
+                .forEach(t -> require(
+                        actions.values().stream().anyMatch(a -> a.topic().equals(t)), "topic " + t + " has no action"));
     }
 
     /** No digit, no placeholder but the allowed ones, no braces left over, no markup. */

@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import tools.jackson.core.JacksonException;
@@ -88,8 +89,9 @@ final class StructuredValidator {
     private static final Set<String> ROOT_FIELDS = Set.of("findings", "watch");
     private static final Set<String> FINDING_FIELDS = Set.of("fact_keys", "topic", "action", "priority");
 
-    private static final JsonMapper MAPPER =
-            JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+    private static final JsonMapper MAPPER = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
 
     private record Finding(List<String> keys, Topic topic, Action action, String priority) {}
 
@@ -161,7 +163,11 @@ final class StructuredValidator {
             JsonNode topicNode = node.get("topic");
             JsonNode actionNode = node.get("action");
             JsonNode priorityNode = node.get("priority");
-            if (keysNode == null || !keysNode.isArray() || !isString(topicNode) || !isString(actionNode) || !isString(priorityNode)) {
+            if (keysNode == null
+                    || !keysNode.isArray()
+                    || !isString(topicNode)
+                    || !isString(actionNode)
+                    || !isString(priorityNode)) {
                 bad.add(new Violation("schema", where, null));
                 continue;
             }
@@ -232,7 +238,12 @@ final class StructuredValidator {
     }
 
     private static void checkKeys(
-            List<String> keys, Topic topic, Map<String, PromptFact> byKey, String where, boolean bindToTopic, List<Violation> bad) {
+            List<String> keys,
+            Topic topic,
+            Map<String, PromptFact> byKey,
+            String where,
+            boolean bindToTopic,
+            List<Violation> bad) {
         Set<String> seen = new LinkedHashSet<>();
         for (String key : keys) {
             if (!seen.add(key) && Rules.noDuplicates) {
@@ -257,27 +268,37 @@ final class StructuredValidator {
     // ---- The rendering ------------------------------------------------------------------------------------------
 
     private static Result render(
-            List<Finding> findings, List<String> watch, Map<String, PromptFact> byKey, Context ctx, Catalogue catalogue) {
+            List<Finding> findings,
+            List<String> watch,
+            Map<String, PromptFact> byKey,
+            Context ctx,
+            Catalogue catalogue) {
         AliasedFacts facts = ctx.facts();
         String summary = Templates.fill(
                 catalogue.template("summary"),
-                Map.of("asof", Phrases.date(facts.asOf()), "range", Phrases.date(facts.from()) + " to " + Phrases.date(facts.to())));
+                Map.of(
+                        "asof",
+                        Phrases.date(facts.asOf()),
+                        "range",
+                        Phrases.date(facts.from()) + " to " + Phrases.date(facts.to())));
         List<Point> points = new ArrayList<>();
         List<List<PromptFact>> cited = new ArrayList<>();
         for (Finding f : findings) {
-            List<PromptFact> used = f.keys().stream().map(byKey::get).filter(x -> x != null).toList();
+            List<PromptFact> used =
+                    f.keys().stream().map(byKey::get).filter(x -> x != null).toList();
             String action = Templates.fill(f.action().text(), Map.of("where", where(used)));
             String text = Templates.fill(
                     catalogue.template("finding"),
                     Map.of(
-                            "priority", catalogue.priorityLabel(f.priority()),
+                            "priority", Objects.requireNonNullElse(catalogue.priorityLabel(f.priority()), ""),
                             "facts", used.stream().map(Phrases::fact).collect(Collectors.joining("; ")),
                             "action", action));
             points.add(new Point(text, f.keys()));
             cited.add(used);
         }
         if (!watch.isEmpty()) {
-            List<PromptFact> used = watch.stream().map(byKey::get).filter(x -> x != null).toList();
+            List<PromptFact> used =
+                    watch.stream().map(byKey::get).filter(x -> x != null).toList();
             points.add(new Point(
                     Templates.fill(
                             catalogue.template("watch"),
@@ -324,6 +345,7 @@ final class StructuredValidator {
         if (aliases.size() == 1) {
             return " for " + aliases.get(0);
         }
-        return " for " + String.join(", ", aliases.subList(0, aliases.size() - 1)) + " and " + aliases.get(aliases.size() - 1);
+        return " for " + String.join(", ", aliases.subList(0, aliases.size() - 1)) + " and "
+                + aliases.get(aliases.size() - 1);
     }
 }

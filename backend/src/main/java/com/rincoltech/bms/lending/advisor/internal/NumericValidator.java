@@ -89,12 +89,12 @@ final class NumericValidator {
 
     /** True when the normalised text holds an email address, a phone number, an ID number shape or a UUID. */
     static boolean looksPersonal(String normalised) {
-        return normalised.length() <= 2000
-                && (EMAIL.matcher(normalised).find()
-                        || UGANDA_MOBILE.matcher(normalised).find()
-                        || INTERNATIONAL.matcher(normalised).find()
-                        || NIN.matcher(normalised).find()
-                        || UUID_SHAPE.matcher(normalised).find());
+        // Every pattern is bounded, so there is no length guard: a long text must never skip the screen.
+        return EMAIL.matcher(normalised).find()
+                || UGANDA_MOBILE.matcher(normalised).find()
+                || INTERNATIONAL.matcher(normalised).find()
+                || NIN.matcher(normalised).find()
+                || UUID_SHAPE.matcher(normalised).find();
     }
 
     /** A number, as written, for a violation: digits and symbols only, never a sentence. */

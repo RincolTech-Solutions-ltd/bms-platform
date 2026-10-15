@@ -154,6 +154,7 @@ public final class Facts {
                 .count("portfolio.active_loans", "Active loans", Polarity.NEUTRAL, 312, 4L, 15L)
                 .count("portfolio.written_off_count", "Loans written off", Polarity.HIGHER_IS_WORSE, 3, 0L, 1L)
                 .count("brief.new_arrears", "New arrears", Polarity.HIGHER_IS_WORSE, 7, null, null)
+                .count("members.new_members", "New members", Polarity.NEUTRAL, 18, null, null)
                 .money("revenue.contribution", "Profit contribution", Polarity.HIGHER_IS_BETTER, -500_000L, null, null)
                 .rate("portfolio.yield", "Portfolio yield (annualised)", Polarity.HIGHER_IS_BETTER, 4210, null, null)
                 .missing(

@@ -109,6 +109,45 @@ class InsightsQueries {
         return jdbc.sql(sql).params(p).query(Long.class).single();
     }
 
+    /**
+     * The distinct loans with a transaction of these types in the range on a day other than {@code day}, a reversed one
+     * excluded: the borrowers behind the range figure less that day's (ADR-037, nested windows).
+     */
+    long loansWithTransactionsOutsideDay(Scope s, String types, LocalDate day) {
+        if (s.empty()) {
+            return 0;
+        }
+        Map<String, Object> p = range(s);
+        p.put("day", Date.valueOf(day));
+        String sql = """
+                SELECT count(DISTINCT t.loan_id)
+                  FROM lending_loan_transactions t
+                  JOIN lending_loans l ON l.id = t.loan_id
+                 WHERE t.txn_type IN """ + types + " " + """
+                    AND t.value_date BETWEEN :from AND :to AND t.value_date <> :day
+                   AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)""" + s.loanFilter("l", p) + """
+
+                """;
+        return jdbc.sql(sql).params(p).query(Long.class).single();
+    }
+
+    /** The distinct loans with a schedule item due in the range on a day other than {@code day}. */
+    long loansDueOutsideDay(Scope s, LocalDate day) {
+        if (s.empty()) {
+            return 0;
+        }
+        Map<String, Object> p = range(s);
+        p.put("day", Date.valueOf(day));
+        String sql = """
+                SELECT count(DISTINCT si.loan_id)
+                  FROM lending_schedule_items si
+                  JOIN lending_loans l ON l.id = si.loan_id
+                 WHERE si.due_date BETWEEN :from AND :to AND si.due_date <> :day""" + ACTIVE_IN_RANGE + s.loanFilter("l", p) + """
+
+                """;
+        return jdbc.sql(sql).params(p).query(Long.class).single();
+    }
+
     /** The distinct loans behind each revenue account's posted lines in the range, by system key. */
     Map<String, Long> loansBehindRevenue(Scope s, LocalDate from, LocalDate to) {
         if (s.empty()) {

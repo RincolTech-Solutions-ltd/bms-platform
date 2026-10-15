@@ -284,21 +284,10 @@ class PortfolioFactsIT extends IntegrationTest {
         return false;
     }
 
-    /** One when the two nested counts differ by one to four (the larger window is hidden), else a large count. */
-    static long nest(long outer, long inner) {
-        long d = outer - inner;
-        return d > 0 && d < PortfolioFacts.MIN_GROUP ? 1 : 1000;
+    /** The distinct loans with a transaction of these types on the days of the window other than today. */
+    static long otherDaysWith(Set<String> types, LocalDate from) {
+        return loansWith(types, from, TODAY.minusDays(1), ALL_LOANS);
     }
-
-    static long txnsCollected(LocalDate from, LocalDate to) {
-        return model.txns.values().stream()
-                .filter(t -> COLLECTED.contains(t.type())
-                        && GoldenModel.between(t.valueDate(), from, to)
-                        && !model.reversed.contains(t.id()))
-                .count();
-    }
-
-    // ---- Facts equal the golden metrics ---------------------------------------------------------------------
 
     @Test
     void theFactsOfTheWholeBookEqualTheGoldenMetricsInTheirDisplayForms() {
@@ -342,18 +331,27 @@ class PortfolioFactsIT extends IntegrationTest {
                 set,
                 "portfolio.disbursed",
                 model.sumTxns(Set.of("disbursement"), FROM, TODAY, ALL_LOANS, false),
-                disbursedCount);
+                disbursedCount,
+                otherDaysWith(Set.of("disbursement"), FROM));
         expect(
                 set,
                 "portfolio.disbursed_count",
                 disbursedCount,
                 disbursedCount,
-                nest(disbursedCount, model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS)));
+                otherDaysWith(Set.of("disbursement"), FROM));
         long payers = loansWith(COLLECTED, FROM, TODAY, ALL_LOANS);
         assertThat(collectedCount).isGreaterThanOrEqualTo(payers);
-        expect(set, "portfolio.collected", model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true), active, payers);
-        expect(set, "portfolio.expected", expected, active);
-        expect(set, "portfolio.collection_rate", rate(onDue, expected), active, payers);
+        long otherPaying = otherDaysWith(COLLECTED, FROM);
+        long otherDue = model.loansDue(FROM, TODAY.minusDays(1), ALL_LOANS);
+        expect(
+                set,
+                "portfolio.collected",
+                model.sumTxns(COLLECTED, FROM, TODAY, ALL_LOANS, true),
+                active,
+                payers,
+                otherPaying);
+        expect(set, "portfolio.expected", expected, active, otherDue);
+        expect(set, "portfolio.collection_rate", rate(onDue, expected), active, payers, otherPaying, otherDue);
         long writeOffs = model.countTxns("write_off", FROM, TODAY, ALL_LOANS);
         long behindWriteOff = loansBehind("loan_write_off_expense", FROM, TODAY, ALL_LOANS);
         expect(set, "portfolio.written_off_count", writeOffs, writeOffs);
@@ -772,12 +770,19 @@ class PortfolioFactsIT extends IntegrationTest {
         List<Pos> held = model.live(
                 TODAY, l -> narrow.get(0).equals(l.officer()) && l.product().equals(narrow.get(1)));
         assertThat(held).hasSizeBetween(1, 4);
-        for (String key : List.of(
-                "portfolio.active_loans", "portfolio.principal_outstanding", "portfolio.arrears", "portfolio.par30")) {
+        // The stock figures, and PAR 30 as a share of them, are over the loans held, always one to four here. The
+        // arrears
+        // amount is over the late loans among them and is hidden exactly when those number one to four (an officer with
+        // a
+        // product of one to four loans may hold none that is late, which is then a zero and not a secret).
+        for (String key : List.of("portfolio.active_loans", "portfolio.principal_outstanding", "portfolio.par30")) {
             assertThat(figure(few, key).suppressed()).as(key).isTrue();
             assertThat(figure(few, key).display()).isEqualTo("fewer than 5");
             assertThat(figure(few, key).value()).as(key).isNull();
         }
+        assertThat(figure(few, "portfolio.arrears").suppressed())
+                .as("arrears over %d late loans", late(held, 0))
+                .isEqualTo(small(late(held, 0)));
         assertThat(few.facts()).noneMatch(f -> f.display().contains(FactDisplay.money(GoldenModel.po(held), "UGX")));
     }
 
@@ -1190,28 +1195,27 @@ class PortfolioFactsIT extends IntegrationTest {
         for (int back : new int[] {0, 1, 2, 3, 5, 8, 13, 21, 34, 55}) {
             LocalDate from = TODAY.minusDays(back);
             FactSet set = facts(user(user, ALL, null), from, TODAY, List.of(), null);
-            long outerDisbursed = model.countTxns("disbursement", from, TODAY, ALL_LOANS);
-            long innerDisbursed = model.countTxns("disbursement", TODAY, TODAY, ALL_LOANS);
-            long outerTxns = txnsCollected(from, TODAY);
-            long innerTxns = txnsCollected(TODAY, TODAY);
-            long outerItems = model.itemsDue(from, TODAY, ALL_LOANS);
-            long innerItems = model.itemsDue(TODAY, TODAY, ALL_LOANS);
+            // The loans that moved money on the days of the window other than today: today's figure plus the figure
+            // of those days is the window's, so when they number one to four the window's figure is hidden.
+            long otherDisbursed = otherDaysWith(Set.of("disbursement"), from);
+            long otherPaying = otherDaysWith(COLLECTED, from);
+            long otherDue = model.loansDue(from, TODAY.minusDays(1), ALL_LOANS);
             for (Object[] pair : new Object[][] {
-                {"portfolio.disbursed", "brief.disbursed_today", outerDisbursed, innerDisbursed},
-                {"portfolio.collected", "brief.collected_today", outerTxns, innerTxns},
-                {"portfolio.expected", "brief.expected_today", outerItems, innerItems}
+                {"portfolio.disbursed", "brief.disbursed_today", otherDisbursed},
+                {"portfolio.collected", "brief.collected_today", otherPaying},
+                {"portfolio.expected", "brief.expected_today", otherDue}
             }) {
                 Fact outer = figure(set, (String) pair[0]);
                 Fact inner = figure(set, (String) pair[1]);
-                long d = (long) pair[2] - (long) pair[3];
-                if (d > 0 && d < PortfolioFacts.MIN_GROUP) {
+                long others = (long) pair[2];
+                if (small(others)) {
                     assertThat(hidden(outer))
-                            .as("%s from %s: %d more than today", pair[0], from, d)
+                            .as("%s from %s: %d loans on other days", pair[0], from, others)
                             .isTrue();
                     checked++;
                 }
-                assertThat(!outer.suppressed() && !inner.suppressed() && d > 0 && d < PortfolioFacts.MIN_GROUP)
-                        .as("%s and %s both shown %d apart", pair[0], pair[1], d)
+                assertThat(!outer.suppressed() && !inner.suppressed() && small(others))
+                        .as("%s and %s both shown with %d loans on other days", pair[0], pair[1], others)
                         .isFalse();
             }
         }

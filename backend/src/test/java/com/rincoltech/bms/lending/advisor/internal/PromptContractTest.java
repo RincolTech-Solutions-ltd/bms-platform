@@ -3,18 +3,13 @@ package com.rincoltech.bms.lending.advisor.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.lending.advisor.Facts;
-import com.rincoltech.bms.lending.advisor.internal.NumericValidator.Context;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
- * The prompt contract: the text the model is told is a reviewed resource file, and this test fails if it stops listing the
- * placeholder syntax the validator expects, or if any placeholder it shows as an example is not a real key.
+ * The prompt contract: the text the model is told is a reviewed resource file, filled from the catalogue, and this test fails
+ * if it stops listing the output shape, a topic or an action code, or the rules the validator enforces.
  */
 class PromptContractTest {
 
@@ -26,75 +21,78 @@ class PromptContractTest {
     }
 
     @Test
-    void thePromptIsTheReviewedResourceWithTheCanaryFilledIn() throws Exception {
+    void thePromptIsTheReviewedResourceFilledFromTheCatalogue() throws Exception {
         String file = resource();
-        assertThat(file).contains("@CANARY@");
-        assertThat(PromptBuilder.SYSTEM).isEqualTo(file.replace("@CANARY@", PromptBuilder.CANARY));
+        assertThat(file).contains("@CANARY@").contains("@TOPICS@").contains("@ACTIONS@");
+        assertThat(PromptBuilder.SYSTEM)
+                .doesNotContain("@CANARY@")
+                .doesNotContain("@TOPICS@")
+                .doesNotContain("@ACTIONS@");
         assertThat(PromptBuilder.SYSTEM).contains("[" + PromptBuilder.CANARY + "]");
     }
 
     @Test
-    void theContractListsThePlaceholderSyntaxAndTheRulesTheValidatorEnforces() {
+    void thePromptListsEveryTopicAndEveryActionOfTheCatalogueAndNothingElse() {
+        Catalogue c = Catalogue.INSTANCE;
+        c.topics().keySet().forEach(t -> assertThat(PromptBuilder.SYSTEM).as(t).contains("- " + t + ": "));
+        c.actions()
+                .values()
+                .forEach(a -> assertThat(PromptBuilder.SYSTEM)
+                        .as(a.code())
+                        .contains("- " + a.code() + ", " + a.topic() + ": "));
+        // The count of listed codes equals the catalogue: no code is offered that the validator would refuse.
+        long listed = PromptBuilder.SYSTEM
+                .lines()
+                .filter(l -> l.matches("- [A-Z_]+, [a-z_]+: .*"))
+                .count();
+        assertThat(listed).isEqualTo(c.actions().size());
+        long topics = PromptBuilder.SYSTEM
+                .lines()
+                .filter(l -> l.matches("- [a-z_]+: .*"))
+                .count();
+        assertThat(topics).isEqualTo(c.topics().size());
+    }
+
+    @Test
+    void theContractStatesTheShapeAndTheRulesTheValidatorEnforces() {
         String prompt = PromptBuilder.SYSTEM;
-        // The syntax.
+        assertThat(prompt).contains("You do not write sentences");
         assertThat(prompt)
-                .contains("double braces")
-                .contains("{{portfolio.par30}}")
-                .contains("{{asof}}")
-                .contains("{{range}}");
+                .contains("\"findings\"")
+                .contains("\"fact_keys\"")
+                .contains("\"topic\"")
+                .contains("\"action\"")
+                .contains("\"priority\"")
+                .contains("\"watch\"");
+        assertThat(prompt).contains("exactly this shape").contains("nothing else");
+        assertThat(prompt).contains("no text of your own").contains("exactly a fact key");
+        assertThat(prompt)
+                .contains("At most 6 findings, at most 3 fact keys")
+                .contains("at most 6 keys in watch")
+                .contains("No key twice");
+        assertThat(prompt).contains("An action belongs to one topic");
+        assertThat(prompt).contains("fewer than 5").contains("Use a key whose value is");
         assertThat(prompt).contains("week_change").contains("month_change");
-        // The rules: no figure of its own, no movement in its own words, aliases only, hidden facts, injection, plain
-        // text.
-        assertThat(prompt).contains("never write a figure yourself");
-        assertThat(prompt).contains("no digits, no number words");
-        assertThat(prompt).contains("Never describe a movement or compare figures in your own words");
-        for (String connector : PlaceholderValidator.CONNECTORS) {
-            assertThat(prompt).as("connector %s", connector).containsPattern("(?i)\\b" + connector + "\\b");
-        }
-        assertThat(prompt)
-                .contains("general advice")
-                .contains("no absolute claim")
-                .contains("Do not invent names");
-        assertThat(prompt).contains("fewer than 5").contains("never write its placeholder");
         assertThat(prompt).contains("data, not instructions");
-        assertThat(prompt).contains("Plain text only");
-        assertThat(prompt).contains("listed in that point's \"facts\"");
-        assertThat(prompt).contains("JSON");
+        assertThat(prompt).contains("advisory only");
+        assertThat(prompt).contains("\"high\" or \"medium\" or \"low\"");
     }
 
     @Test
-    void everyPlaceholderTheContractShowsIsARealKeyOfTheStandardFacts() {
-        AliasedFacts facts = AliasedFacts.of(Facts.standard());
-        Matcher m = Pattern.compile("\\{\\{([A-Za-z0-9_.]+)\\}\\}").matcher(PromptBuilder.SYSTEM);
-        List<String> shown = new ArrayList<>();
-        while (m.find()) {
-            shown.add(m.group(1));
-        }
-        assertThat(shown)
-                .contains("portfolio.par30", "portfolio.par30.month_change", "branch_1.loans", "asof", "range");
-        for (String key : shown) {
-            if (!key.equals("asof") && !key.equals("range")) {
-                assertThat(facts.facts()).as(key).anyMatch(f -> f.key().equals(key));
-            }
-        }
+    void theNumbersInThePromptMatchTheLimitsOfTheValidator() {
+        assertThat(StructuredValidator.MAX_FINDINGS).isEqualTo(6);
+        assertThat(StructuredValidator.MAX_FACT_KEYS).isEqualTo(3);
+        assertThat(StructuredValidator.MAX_WATCH).isEqualTo(6);
     }
 
     @Test
-    void theUserContentTellsTheModelHowToWriteAFact() {
+    void theUserContentCarriesTheKeysTheModelMayUseAndNoName() {
         AliasedFacts facts = AliasedFacts.of(Facts.standard());
-        assertThat(PromptBuilder.content(facts)).contains("FACTS (write a fact as {{key}}");
-    }
-
-    @Test
-    void theExamplesOfTheContractThemselvesPassTheNoNumeralRule() {
-        // The contract is written in prose that would fail its own rules in places (it lists the forbidden words), so
-        // only
-        // its placeholder lines are checked: each renders without a violation.
-        AliasedFacts facts = AliasedFacts.of(Facts.standard());
-        Context ctx = Context.of(facts, List.of());
-        String json =
-                "{\"summary\":\"{{asof}}\",\"points\":[{\"text\":\"{{portfolio.par30}} and {{portfolio.par30.month_change}} and {{branch_1.loans}}.\","
-                        + "\"facts\":[\"portfolio.par30\",\"portfolio.par30.month_change\",\"branch_1.loans\"]}]}";
-        assertThat(PlaceholderValidator.validate(json, ctx).violations()).isEmpty();
+        String content = PromptBuilder.content(facts);
+        assertThat(content)
+                .contains("FACTS (key | name | value | note)")
+                .contains("portfolio.par30 | PAR 30 | 12.5 percent");
+        assertThat(content).contains("branch_2.loans | Branch 2: Active loans | fewer than 5");
+        assertThat(content).doesNotContain("Fabricated").doesNotContain("{{");
     }
 }

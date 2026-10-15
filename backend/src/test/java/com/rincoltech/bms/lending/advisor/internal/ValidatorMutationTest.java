@@ -16,15 +16,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Mutation checks of the golden evaluation (review items 6 and 9): each rule of the placeholder validator is switched off in
- * turn through its test switch ({@link PlaceholderValidator.Rules}) and the harness must then FAIL, with the very cases that
- * rule exists for being accepted. A rule whose removal changes nothing is a rule the golden set does not test.
+ * Mutation checks of the golden evaluation: each rule of the structured validator is switched off in turn through its test
+ * switch ({@link StructuredValidator.Rules}) and the harness must then FAIL, with the very cases that rule exists for being
+ * accepted. A rule whose removal changes nothing is a rule the golden set does not test.
  */
 class ValidatorMutationTest {
 
     @AfterEach
     void restoreTheRules() {
-        PlaceholderValidator.Rules.reset();
+        StructuredValidator.Rules.reset();
     }
 
     private static Report run() {
@@ -44,98 +44,64 @@ class ValidatorMutationTest {
     private static Map<String, Mutation> mutations() {
         Map<String, Mutation> m = new LinkedHashMap<>();
         m.put(
-                "rawNumerals",
+                "strictFields",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.rawNumerals = v,
-                        Set.of("correct-amount-written-by-the-model", "invented-amount", "years-as-a-count")));
-        m.put(
-                "numberWords",
-                new Mutation(
-                        v -> PlaceholderValidator.Rules.numberWords = v,
+                        v -> StructuredValidator.Rules.strictFields = v,
                         Set.of(
-                                "word-halved",
-                                "word-quadrupled",
-                                "word-tenfold",
-                                "word-sixfold",
-                                "word-a-fourth",
-                                "word-second",
-                                "word-a-couple",
-                                "swahili-kumi",
-                                "french-douze",
-                                "french-cent")));
+                                "shape-extra-root-field",
+                                "shape-extra-finding-field",
+                                "attack-001-extra-field",
+                                "attack-001-finding-extra-field")));
         m.put(
-                "roman",
+                "enumTopic",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.roman = v,
-                        Set.of("lowercase-roman", "small-roman-letter", "standalone-roman-letter")));
+                        v -> StructuredValidator.Rules.enumTopic = v,
+                        Set.of("topic-unknown", "topic-upper-case", "topic-padded", "attack-001-topic")));
         m.put(
-                "confusables",
-                new Mutation(v -> PlaceholderValidator.Rules.confusables = v, Set.of("look-alike-letters")));
-        m.put(
-                "strictListMarks",
+                "enumAction",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.strictListMarks = v,
+                        v -> StructuredValidator.Rules.enumAction = v,
+                        Set.of("action-unknown", "action-lower-case", "attack-001-action")));
+        m.put(
+                "enumPriority",
+                new Mutation(
+                        v -> StructuredValidator.Rules.enumPriority = v,
+                        Set.of("priority-unknown", "priority-upper-case", "attack-001-priority")));
+        m.put(
+                "actionBelongsToTopic",
+                new Mutation(
+                        v -> StructuredValidator.Rules.actionBelongsToTopic = v, Set.of("action-from-another-topic")));
+        m.put(
+                "factExists",
+                new Mutation(
+                        v -> StructuredValidator.Rules.factExists = v,
                         Set.of(
-                                "list-number-is-a-figure",
-                                "list-number-in-parentheses",
-                                "list-number-out-of-sequence",
-                                "list-number-not-first")));
+                                "fact-unknown",
+                                "fact-real-name",
+                                "fact-out-of-scope-alias",
+                                "fact-out-of-scope-product",
+                                "watch-unknown",
+                                "attack-001-fact-key",
+                                "attack-001-watch")));
         m.put(
-                "controlCharacters",
-                new Mutation(v -> PlaceholderValidator.Rules.controlCharacters = v, Set.of("control-character")));
-        m.put(
-                "freeMovement",
+                "factNotHidden",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.freeMovement = v,
-                        Set.of(
-                                "prose-ballooned",
-                                "prose-skyrocketed",
-                                "prose-collapsed",
-                                "prose-recovering",
-                                "prose-rising")));
+                        v -> StructuredValidator.Rules.factNotHidden = v,
+                        Set.of("fact-hidden-group", "fact-hidden-book", "watch-hidden")));
         m.put(
-                "comparison",
-                new Mutation(v -> PlaceholderValidator.Rules.comparison = v, Set.of("prose-highest", "prose-worst")));
-        m.put(
-                "absolutes",
+                "factFitsTopic",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.absolutes = v,
-                        Set.of("universal-every", "universal-no-loans", "universal-all", "universal-nobody")));
+                        v -> StructuredValidator.Rules.factFitsTopic = v,
+                        Set.of("fact-of-another-topic", "fact-of-another-topic-change")));
         m.put(
-                "properNouns",
-                new Mutation(v -> PlaceholderValidator.Rules.properNouns = v, Set.of("hallucinated-name")));
-        m.put(
-                "connectorsOnly",
-                new Mutation(v -> PlaceholderValidator.Rules.connectorsOnly = v, Set.of("denial-by-prose")));
-        m.put(
-                "unknownPlaceholders",
+                "noDuplicates",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.unknownPlaceholders = v,
-                        Set.of("malformed-placeholder", "unknown-placeholder-uncited")));
+                        v -> StructuredValidator.Rules.noDuplicates = v, Set.of("keys-duplicate", "watch-duplicate")));
         m.put(
-                "hiddenPlaceholders",
+                "limits",
                 new Mutation(
-                        v -> PlaceholderValidator.Rules.hiddenPlaceholders = v,
-                        Set.of("hidden-placeholder", "few-loans-placeholder")));
-        m.put(
-                "citedPlaceholders",
-                new Mutation(
-                        v -> PlaceholderValidator.Rules.citedPlaceholders = v, Set.of("uncited-fact", "no-citation")));
-        m.put(
-                "citedFactsExist",
-                new Mutation(
-                        v -> PlaceholderValidator.Rules.citedFactsExist = v,
-                        Set.of("unknown-fact-cited-no-placeholder")));
-        m.put(
-                "unknownAliases",
-                new Mutation(
-                        v -> PlaceholderValidator.Rules.unknownAliases = v,
-                        Set.of("invented-branch", "scope-other-branch")));
-        m.put(
-                "plainText",
-                new Mutation(
-                        v -> PlaceholderValidator.Rules.plainText = v,
-                        Set.of("bare-domain", "tld-pattern", "at-handle")));
+                        v -> StructuredValidator.Rules.limits = v,
+                        Set.of("keys-four", "keys-none", "findings-seven", "watch-seven")));
         return m;
     }
 
@@ -147,10 +113,11 @@ class ValidatorMutationTest {
 
     @Test
     void eachRuleIsTheOneThatRefusesItsCases() {
-        // The older numeric validator is the second line; with it off as well, nothing but the rule under test remains.
+        // The second line re-derives the numbers of the rendering; with it off as well, nothing but the rule under test
+        // remains.
         for (Map.Entry<String, Mutation> e : mutations().entrySet()) {
-            PlaceholderValidator.Rules.reset();
-            PlaceholderValidator.Rules.secondLine = false;
+            StructuredValidator.Rules.reset();
+            StructuredValidator.Rules.secondLine = false;
             e.getValue().setting().accept(false);
             Report report = run();
             assertThat(report.allPassed())
@@ -163,24 +130,30 @@ class ValidatorMutationTest {
     }
 
     @Test
-    void theSecondLineCatchesADefectOfTheSubstitution() {
-        // The substitution writes a wrong figure (a test switch): the older validator re-derives the numbers and
-        // refuses.
-        PlaceholderValidator.Rules.corruptRender = true;
+    void theSecondLineCatchesADefectOfTheRendering() {
+        // The phrases write a wrong figure (a test switch): the second line re-derives the numbers and refuses.
+        Phrases.corrupt = true;
         Report with = run();
-        List<Result> cleanWith = with.results().stream()
-                .filter(r -> r.category().equals("clean"))
+        List<Result> clean = with.results().stream()
+                .filter(r -> r.id().equals("clean-arrears-risk"))
                 .toList();
-        assertThat(cleanWith).as("clean answers with a corrupted rendering").anyMatch(r -> !r.accepted());
-        assertThat(cleanWith.stream().filter(r -> r.id().equals("clean-brief")))
-                .allSatisfy(r -> assertThat(r.codes()).contains("render_check_failed"));
+        assertThat(clean).singleElement().satisfies(r -> {
+            assertThat(r.accepted()).isFalse();
+            assertThat(r.codes()).contains("render_check_failed");
+            // And the person is shown the deterministic brief instead, which is written by the same phrases and so
+            // refused
+            // by nothing: it is what the corrupted phrases make, which is why the second line is a safety net and the
+            // golden
+            // set is the check on the templates.
+            assertThat(r.fallback()).isNotEmpty();
+        });
 
         // With the second line off, the same corrupted rendering is accepted: the second line is what stopped it.
-        PlaceholderValidator.Rules.secondLine = false;
+        StructuredValidator.Rules.secondLine = false;
         Report without = run();
-        assertThat(wronglyAccepted(without)).isEmpty();
-        assertThat(without.results().stream().filter(r -> r.id().equals("clean-brief")))
-                .allSatisfy(r -> {
+        assertThat(without.results().stream().filter(r -> r.id().equals("clean-arrears-risk")))
+                .singleElement()
+                .satisfies(r -> {
                     assertThat(r.accepted()).isTrue();
                     assertThat(r.shownPoints().get(0)).contains("(912.5 percent)");
                 });
@@ -188,12 +161,12 @@ class ValidatorMutationTest {
 
     @Test
     void theSecondLineIsRedundantOnTheGoldenSetByDesign() {
-        PlaceholderValidator.Rules.secondLine = false;
+        StructuredValidator.Rules.secondLine = false;
         assertThat(run().allPassed()).isTrue();
     }
 
     @Test
-    void everyRefusedCaseIsRefusedByAtLeastOneRuleAndNoCleanCaseIsRefusedByAny() {
+    void everyRefusedCaseIsRefusedAndNoCleanCaseIsRefusedByAnything() {
         List<Result> results = run().results();
         assertThat(results).allMatch(Result::passed);
         assertThat(results.stream().filter(r -> r.category().equals("clean")))

@@ -74,6 +74,7 @@ public final class AdvisorEvaluation {
      * @param shown the accepted answer's summary, placeholders rendered and aliases mapped back to names, for the person who
      *     asked; null if refused
      * @param shownPoints the accepted points, rendered the same way
+     * @param fallback for a refused answer, the deterministic brief shown instead; empty when accepted
      */
     public record Result(
             String id,
@@ -85,7 +86,8 @@ public final class AdvisorEvaluation {
             int inputTokens,
             int outputTokens,
             String shown,
-            List<String> shownPoints) {
+            List<String> shownPoints,
+            List<String> fallback) {
 
         @Override
         public String toString() {
@@ -177,7 +179,17 @@ public final class AdvisorEvaluation {
         EvaluationSupport.Prepared prepared = EvaluationSupport.prepare(c.facts(), c.planted());
         if (!prepared.clean()) {
             return new Result(
-                    c.id(), c.category(), false, false, List.of("request_not_clean"), false, 0, 0, null, List.of());
+                    c.id(),
+                    c.category(),
+                    false,
+                    false,
+                    List.of("request_not_clean"),
+                    false,
+                    0,
+                    0,
+                    null,
+                    List.of(),
+                    List.of());
         }
         LlmClient.Result answer;
         try {
@@ -197,6 +209,7 @@ public final class AdvisorEvaluation {
                     0,
                     0,
                     null,
+                    List.of(),
                     List.of());
         }
         EvaluationSupport.Verdict verdict = EvaluationSupport.validate(prepared, answer.text(), c.planted());
@@ -218,6 +231,7 @@ public final class AdvisorEvaluation {
                 in,
                 outTokens,
                 verdict.shown(),
-                verdict.shownPoints());
+                verdict.shownPoints(),
+                verdict.fallback());
     }
 }

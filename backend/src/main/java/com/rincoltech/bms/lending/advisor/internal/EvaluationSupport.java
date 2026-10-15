@@ -45,7 +45,8 @@ public final class EvaluationSupport {
     }
 
     /** The verdict on an answer: accepted or not, the distinct violation codes, and the text shown if accepted. */
-    public record Verdict(boolean accepted, List<String> codes, String shown, List<String> shownPoints) {}
+    public record Verdict(
+            boolean accepted, List<String> codes, String shown, List<String> shownPoints, List<String> fallback) {}
 
     /**
      * Builds the request for the facts and checks it: no real name of a group and none of the planted strings, no
@@ -71,7 +72,13 @@ public final class EvaluationSupport {
                 return false;
             }
         }
-        if (NumericValidator.looksPersonal(normalised)) {
+        // The shape screen runs over the facts the model is given; the system prompt is a reviewed resource that the
+        // catalogue test proves free of digits, addresses and markup, so it is not scanned for every case.
+        StringBuilder user = new StringBuilder();
+        request.messages().stream()
+                .filter(m -> !"system".equals(m.role()))
+                .forEach(m -> user.append(m.content()).append('\n'));
+        if (NumericValidator.looksPersonal(Text.normalise(user.toString()))) {
             return false;
         }
         if (DIGIT_RUN.matcher(ISO_DATE.matcher(normalised).replaceAll(" ")).find()) {
@@ -88,19 +95,19 @@ public final class EvaluationSupport {
 
     public static Verdict validate(Prepared prepared, String answer, List<String> planted) {
         NumericValidator.Result result =
-                PlaceholderValidator.validate(answer, NumericValidator.Context.of(prepared.facts, planted));
+                StructuredValidator.validate(answer, NumericValidator.Context.of(prepared.facts));
         List<String> codes = result.violations().stream()
                 .map(NumericValidator.Violation::code)
                 .distinct()
                 .toList();
-        String shown = result.valid()
-                ? prepared.facts.aliases().toNames(result.answer().summary())
-                : null;
-        List<String> points = result.valid()
-                ? result.answer().points().stream()
-                        .map(p -> prepared.facts.aliases().toNames(p.text()))
-                        .toList()
-                : List.of();
-        return new Verdict(result.valid(), codes, shown, points);
+        // A refused answer is replaced by the deterministic brief, which the person sees instead.
+        AdvisorAnswer brief = result.valid() ? result.answer() : Fallback.render(prepared.facts);
+        String shown = prepared.facts.aliases().toNames(brief.summary());
+        List<String> points = brief.points().stream()
+                .map(p -> prepared.facts.aliases().toNames(p.text()))
+                .toList();
+        return result.valid()
+                ? new Verdict(true, codes, shown, points, List.of())
+                : new Verdict(false, codes, null, List.of(), points);
     }
 }

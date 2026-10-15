@@ -140,14 +140,13 @@ class AdvisorCanaryIT extends IntegrationTest {
 
     static String answerAbout(PromptFact figure, PromptFact group) {
         ObjectNode root = JSON.createObjectNode();
-        root.put("summary", "Overview of the book.");
-        ArrayNode points = root.putArray("points");
-        ObjectNode a = points.addObject();
-        a.put("text", "{{" + figure.key() + "}}.");
-        a.putArray("facts").add(figure.key());
-        ObjectNode b = points.addObject();
-        b.put("text", "{{" + group.key() + "}}.");
-        b.putArray("facts").add(group.key());
+        ArrayNode findings = root.putArray("findings");
+        ObjectNode f = findings.addObject();
+        f.putArray("fact_keys").add(figure.key()).add(group.key());
+        f.put("topic", "concentration");
+        f.put("action", "CONCENTRATION_REVIEW_SPREAD");
+        f.put("priority", "medium");
+        root.putArray("watch");
         return root.toString();
     }
 
@@ -203,12 +202,12 @@ class AdvisorCanaryIT extends IntegrationTest {
         }
         assertThat(logged).doesNotContain(group.alias());
 
-        // The answer is valid, and shown with the real name in place of the alias.
+        // The answer is valid, rendered by our code, and shown with the real name in place of the alias.
         NumericValidator.Result verdict =
-                PlaceholderValidator.validate(result.text(), NumericValidator.Context.of(facts, CANARIES));
+                StructuredValidator.validate(result.text(), NumericValidator.Context.of(facts));
         assertThat(verdict.violations()).isEmpty();
         assertThat(verdict.valid()).isTrue();
-        String shown = facts.aliases().toNames(verdict.answer().points().get(1).text());
+        String shown = facts.aliases().toNames(verdict.answer().points().get(0).text());
         assertThat(shown)
                 .doesNotContain(group.alias())
                 .contains("Canary ")
@@ -216,31 +215,45 @@ class AdvisorCanaryIT extends IntegrationTest {
     }
 
     @Test
-    void anAnswerThatRepeatsACanaryOrInventsAFigureIsNotShown() {
+    void anAnswerWithFreeTextOrAnUnknownFactIsRefusedAndTheDeterministicBriefIsShown() {
         FactSet set = TenantContext.callAs(TENANT.tenantId(), portfolioFacts::forCaller);
         AliasedFacts facts = AliasedFacts.of(set);
         String name = set.names().get(0).name();
-        NumericValidator.Context ctx = NumericValidator.Context.of(facts, CANARIES);
-        ObjectNode leak = JSON.createObjectNode();
-        leak.put("summary", name + " is the weakest.");
-        leak.putArray("points");
-        NumericValidator.Result r = PlaceholderValidator.validate(leak.toString(), ctx);
-        assertThat(r.valid()).isFalse();
-        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("forbidden_text");
+        NumericValidator.Context ctx = NumericValidator.Context.of(facts);
 
-        PromptFact figure = facts.facts().stream()
-                .filter(f -> f.key().equals("portfolio.active_loans"))
-                .findFirst()
-                .orElseThrow();
-        ObjectNode invented = JSON.createObjectNode();
-        invented.put("summary", "Overview.");
-        invented.putArray("points")
-                .addObject()
-                .put("text", "There are 9,999 active loans.")
-                .putArray("facts")
-                .add(figure.key());
-        r = PlaceholderValidator.validate(invented.toString(), ctx);
+        // Free prose, even one that repeats a real name, is not JSON of the shape: refused, nothing of it shown.
+        NumericValidator.Result r = StructuredValidator.validate(name + " is the weakest.", ctx);
         assertThat(r.valid()).isFalse();
-        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("raw_number");
+        assertThat(r.answer()).isNull();
+        assertThat(r.violations()).extracting(NumericValidator.Violation::code).containsExactly("not_json");
+
+        // A field the schema does not have, however harmless it looks, is refused.
+        ObjectNode extra = JSON.createObjectNode();
+        extra.putArray("findings");
+        extra.putArray("watch");
+        extra.put("summary", name + " is the weakest.");
+        r = StructuredValidator.validate(extra.toString(), ctx);
+        assertThat(r.valid()).isFalse();
+        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("unknown_field");
+
+        // A fact key that was not given (a real name, an invented figure) is refused.
+        ObjectNode invented = JSON.createObjectNode();
+        ObjectNode f = invented.putArray("findings").addObject();
+        f.putArray("fact_keys").add(name);
+        f.put("topic", "concentration");
+        f.put("action", "CONCENTRATION_REVIEW_SPREAD");
+        f.put("priority", "low");
+        invented.putArray("watch");
+        r = StructuredValidator.validate(invented.toString(), ctx);
+        assertThat(r.valid()).isFalse();
+        assertThat(r.violations()).extracting(NumericValidator.Violation::code).contains("unknown_fact");
+
+        // What the person sees instead is made by our code from the facts alone and holds no canary.
+        AdvisorAnswer shownInstead = Fallback.render(facts);
+        String fallback = shownInstead.summary() + shownInstead.points();
+        assertThat(fallback).contains("Key figures:");
+        for (String canary : CANARIES) {
+            assertThat(fallback).doesNotContainIgnoringCase(canary);
+        }
     }
 }

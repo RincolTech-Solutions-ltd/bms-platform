@@ -349,7 +349,9 @@ and week-on-week and month-on-month changes, under the caller's scope or a store
 from `InsightsFigures.par`. A figure computed over one to four loans or members (the loans in arrears for arrears, the loans
 written off for write-offs, and so on) is replaced by `fewer than 5` together with every figure that would give it back by
 subtraction, and a branch or product under five loans is one such fact (spec 5.13). A scope read after midnight reads the
-snapshot of its day or is refused. It adds no figure of its own and no route.
+snapshot of its day or is refused. Windows that overlap today are protected by counting distinct loans: when the loans that
+moved money on the other days of a window number one to four, the window's figure is hidden. It adds no figure of its own and no
+route.
 
 ## 14.10 The reports pack and report runs (ADR-038, issue #111)
 

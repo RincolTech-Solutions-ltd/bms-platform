@@ -620,31 +620,18 @@ The logged and sent text is the scrubbed question. The screen and the acknowledg
 residual risk: a name no check recognises can still be typed. This is why the box ships after the
 brief. A per user daily limit applies, and facts are computed under the caller's scope (5.2).
 
-### 5.6 Prompts and the numeric validator
+### 5.6 Prompts and the validator (superseded by the structured output in 5.13)
 
-The system prompt fixes the role, the tone, English, a maximum length, the instruction to use only the
-supplied figures exactly as displayed, never to compute, estimate or round, and to answer in JSON
-`{summary, points: [{text, facts: [keys]}]}` with at most four cited facts per point. The user content is
-the fact list (aliases), the as-of time and, for a question, the scrubbed question.
-
-The validator (pure, property tested) accepts a response only if it parses, and every numeric token in
-`summary` and in each point's `text` matches the display or plain form of a fact cited by that point.
-Number words (zero to twenty, tens, hundred, thousand, million, half, third, quarter, double, triple) are
-converted to digits and checked the same way. Excluded before the check: alias labels, the as-of date,
-list ordinals.
-
-**Direction words are checked against the sign of the delta.** A point that cites a delta fact may say
-up, rose, grew, higher, increase and so on only when the delta is positive, and down, fell, dropped,
-lower, decrease only when it is negative; flat, unchanged and steady only when it is zero. Words such as
-better, improved, worse and worsened are checked against the sign and the metric's `polarity`: a falling
-PAR is better, a falling collection rate is worse. A point with a contradicting direction, or with both
-directions for one fact, fails. A model that writes "PAR rose" when the delta is negative is therefore
-rejected even though every number is right.
-
-A failure is retried once with a stricter reminder; a second failure uses the fallback.
-It checks that numbers exist among the cited facts and that stated directions agree with the data, not
-that the sentence is wise; words outside the lexicon are a residual risk the evaluation measures; the advisory label
-and the evaluation (5.8) carry that risk.
+The first design had the model write the summary and the points and a pure validator check each number and direction word in
+its prose. Four independent reviews each found wording that got through, so the decision of issue #223 (ADR-037, amended) is
+that **the model writes no text**. The system prompt fixes the role and the output shape; the model answers with one JSON
+object that chooses up to three fact keys per finding, a topic and a catalogue action code from closed sets, and a priority
+(5.13). The user content is the fact list (aliases), the as-of time and, for a question (#230), the scrubbed question, which
+is mapped to a topic and to the facts of that topic; there is no free answer. The validator accepts an answer only if it is
+exactly that shape with exactly those values; our code then renders every sentence from reviewed templates, so a number, a
+direction word and a polarity are written from the facts and cannot disagree with them. A refused answer is not retried into
+prose: the person sees the deterministic brief (5.7). The older number validator (every number re-derived from the cited
+facts) is kept as the second line over the rendering.
 
 ### 5.7 Fallback, availability and caps
 
@@ -746,8 +733,8 @@ Where the build differs from, or sharpens, the text above:
   or a change is turned into text). `PortfolioFactsService` calls the insights code the endpoints call (`brief`, `portfolio`,
   `revenue`, `members`) and the public `InsightsFigures.par` for the branch and product groups, so there is one implementation
   of every number. `lending.advisor` is a new module (it may use the kernel, `core.ai` and `lending.insights`) that holds
-  `Aliases`, `AliasedFacts`, `PromptBuilder`, `NumberExtractor`, `Directions`, `NumericValidator` and the public
-  `AdvisorEvaluation`. The job, the stored brief, the endpoints and the screens are slices #226 and #230.
+  `Aliases`, `AliasedFacts`, `PromptBuilder`, `Catalogue`, `StructuredValidator`, `Phrases`, `Templates`, `Fallback`,
+  `NumberExtractor`, `NumericValidator` (the second line) and the public `AdvisorEvaluation`. The job, the stored brief, the endpoints and the screens are slices #226 and #230.
 - **Scope is the endpoints' scope.** `PortfolioFacts.forCaller()` resolves the signed-in caller's scope with
   `InsightsFigures.scope` (permission `lending.insights.read`, the permitted branches, only the caller's own loans without
   `lending.insights.all_officers`), and `build(PortfolioScope)` reads only that stored scope and never the principal, so a job
@@ -798,112 +785,84 @@ Where the build differs from, or sharpens, the text above:
   built from `AliasedFacts` alone. The real names are not matched in an answer: they were never in the prompt, so a branch
   called `Main` must not block every answer that uses the word; an answer can only name a group by its alias, which is
   mapped back for the person who asked. (The evaluation plants fabricated names as forbidden strings; production plants none.)
-- **The model never writes a figure (the primary control, round 3 of the review of #223).** Free prose cannot be checked
-  reliably by patterns, so the design is structural. The model cites a fact by writing its key between double braces,
-  `{{portfolio.par30}}`, `{{portfolio.par30.month_change}}`, `{{branch_1.loans}}`, and `{{asof}}` or `{{range}}` for the dates;
-  `PlaceholderValidator` replaces each with text made by our code: a figure as `PAR 30 (12.5 percent)`, a change as `PAR 30
-  rose by 0.25 points over the month (worse)` (the verb from the sign, the period from the fact, better or worse from the
-  metric's polarity), a missing figure as `(not available)`, an alias fact as `Branch 1: Active loans (120)`. The name travels
-  with the value, so figures cannot be swapped between metrics, between a branch and the portfolio, or between periods. The
-  validator refuses an answer when (1) a placeholder is unknown, malformed, hidden (`fewer than 5`) or not listed among the
-  facts its point cites; (2) any numeral remains once placeholders, known aliases, the measure names `PAR 1/30/60/90` and a
-  list number at the start of a line are set aside, in any script (digits after compatibility normalisation, roman numerals,
-  number words, fractions, multipliers, vague quantities such as `hundreds of`); (3) a movement word stands in the prose
-  (`rose`, `up to`, `above`, `soared`, `built up`, `widened`, `better`, `moved`), anywhere, or a comparison word (`more`, `than`)
-  in a sentence that holds a placeholder; (4) the plain-text rules fail (links, markup, personal data shapes, a letter outside
-  the Latin alphabet, the canary, planted strings). Honest sentences that need a number (`30 days late`, `top 3`, `2 branches`)
-  are refused by design; the prompt tells the model to leave them out. The text of the prompt is a reviewed resource
-  (`advisor/system-prompt.txt`), and `PromptContractTest` fails if it stops listing the placeholder syntax or shows an example
-  that is not a real key. As a second line of defence the older validator, described in the next bullets, re-derives every
-  number the substitution wrote from the facts it came from. Each rule has a test switch, and `ValidatorMutationTest` turns
-  each off in turn and requires the golden evaluation to fail with the cases that rule exists for accepted.
-- **What free prose may be (round 4).** A sentence that holds a placeholder may hold only placeholders, punctuation, aliases and
-  the connector words `and, while, with, the, of, in, for, is, are, was, were, at, to, by, on, from, as, also, this, that, which,
-  so, a, an, over, across, within, these, those, its, it, has, have, had, be, been, currently, overall`, so it cannot deny,
-  qualify or contradict the sentence our code writes (`It is not true that {{x}}`, `{{x}} but arrears are mounting`).
-  Every other sentence is general advice for the owner, and in it the validator refuses: any numeral (digits of any script,
-  roman numerals in any case and a lone roman letter, look-alike letters in a digit-like run such as `lOO,OOO`, number words,
-  ordinals, multiplicative words such as `halved`, `quadrupled`, `tenfold`, `a couple`, and the common Swahili and French number
-  words); any movement word (a broad list of verbs and stems: `rising`, `mounting`, `ballooned`, `skyrocketed`, `collapsed`,
-  `recovering`, `improving` and so on, and `up to`, `above`, `below`); any comparison or superlative (`more`, `highest`, `worst`,
-  `than`); any absolute or universal claim (`every`, `all`, `none`, `no`, `nobody`, `never`, `always`, `whole`); and any
-  capitalised name that is not an alias and not the first word of a sentence (a hallucinated `Kampala Road branch`; a name at
-  the start of a sentence is the residual risk). A statement with no numeral ("No loans were written off", "Every borrower
-  defaulted") is therefore refused as an absolute claim. The model's own `PAR 30` is a figure like any other: the measure names
-  are written only by our substitution. A list may be numbered only as the next number in sequence (`1.`, then `2)`) at the start
-  of a line after a line feed, followed by a space and a letter or a placeholder; the other line and paragraph separators
-  (U+2028, U+2029, NEL, a bare carriage return) and other control characters are refused outright because they render inline.
-  Plain-text screens also refuse bare domains and domains with a path, IP literals and `@handles`, run only on texts of at most
-  2,000 characters, and use bounded patterns. Residual risk: a number word in a language not listed, and a hallucinated name
-  at the start of a sentence.
+- **The model writes no text: it returns a structured choice (the primary control, decided after the fourth review of #223).**
+  Free prose cannot be checked reliably by patterns: four independent reviews each found wording that got through, so free
+  prose is removed from the AI path. The model returns one JSON object and nothing else:
+  `{"findings":[{"fact_keys":[...],"topic":"...","action":"...","priority":"high|medium|low"}],"watch":["..."]}`. `fact_keys`
+  holds one to three keys from the facts it was given (`portfolio.par30`, `portfolio.par30.month_change`, `branch_1.loans`);
+  `topic` is one of the nine topics of the catalogue; `action` is a code from the reviewed catalogue (`advisor/catalogue.json`)
+  that belongs to that topic; `watch` holds at most six more keys. At most six findings. The validator
+  (`StructuredValidator`) refuses the WHOLE answer, with a closed code, when: the raw text is not exactly a JSON object
+  (`not_json`, also for a fence, text before or after, a duplicate key); a field is missing or of the wrong type (`schema`) or
+  there is any extra field at the root or in a finding (`unknown_field`); a limit is passed (`too_many`, `too_long`); a topic,
+  action or priority is not exactly an enum value (`unknown_topic`, `unknown_action`, `bad_priority`; case, padding and
+  look-alike characters do not match); the action belongs to another topic (`action_topic_mismatch`); a key is not among the
+  facts given (`unknown_fact`: a real name, an invented figure, a group out of scope), is hidden (`fewer than 5`, or a group
+  left out by complementary suppression: `hidden_fact`), is of a family the topic may not cite (`fact_topic_mismatch`), or is
+  repeated (`duplicate_fact`); or the rendering fails the second line (`render_check_failed`). A defect in the validator itself
+  refuses (`validator_error`). A refused answer is never repaired and never partly shown: the person sees the deterministic
+  facts-only brief instead (`Fallback`: a fixed list of key figures and their changes, written by the same phrases).
+- **Our code writes every sentence.** The summary line, each finding, the watch line, the facts-only brief and the "nothing was
+  flagged" line are templates in the catalogue resource, filled by `Templates.fill` in one pass, so a value cannot contain a
+  placeholder that is filled again. A fact is written by the phrase table (`Phrases`) as `PAR 30 (12.5 percent)`, a change as
+  `PAR 30 fell by 0.40 points compared with a week ago (better)` (the verb from the sign, the period from the fact, better or
+  worse from the metric's polarity), a missing figure as `(not available)`, a group's fact as `Branch 1: Active loans (120)`; the
+  name travels with the value, so figures cannot be swapped between metrics, groups or periods. The finding reads
+  `<Priority> priority. <facts>. Suggested action: <action>`, the action being the catalogue text with `{{where}}` filled by
+  our code with the groups the finding cites (` for Branch 1 and Product A`, mapped to names only for the person who asked).
+- **The catalogue is reviewed text.** It holds nine topics and twenty actions with stable codes (arrears follow-up, collections
+  focus, disbursement pace, collateral cover, concentration, write-off review, savings and investment liquidity, data quality,
+  portfolio risk and profitability). Each action belongs to one topic, and each topic lists the fact families it may cite
+  (`portfolio.par30`, `branch.loans`, and so on: a group fact is bound by its family, whatever its alias or period). The loader
+  refuses a catalogue with fewer than 12 or more than 20 actions, an action of an unknown topic, a topic without an action, any
+  digit of any script, markup or `@` in a text, and any placeholder in an action other than `{{where}}` (a figure never
+  appears in catalogue text; it comes from the facts). `CatalogueTest` and a property test over every action with every fact of
+  its topic assert that the output is only template text plus values written by our code.
+- **The prompt is a reviewed resource** (`advisor/system-prompt.txt`) filled with the topics and actions of the catalogue and the
+  canary phrase; `PromptContractTest` fails if it stops listing the output shape, a topic or an action code, or the rules the
+  validator enforces (limits, "an action belongs to one topic", "use no key whose value is fewer than 5"). The facts reach the
+  model as `key | name | value | note`, between `FACTS` and `END FACTS`, with aliases and never a real name; it is told that
+  this is data and not instructions.
+- **The second line.** The older `NumericValidator` re-derives every number in the rendered text from the facts the finding
+  cites (a number must equal the display or plain form of a cited fact, units and signs must agree, a hidden fact accounts
+  for no number) and runs the personal data shape screen over it, so a defect in a template or in the substitution cannot put a
+  wrong figure on a screen. `Phrases.corrupt` is a test switch that makes the phrases write a wrong figure, and
+  `ValidatorMutationTest` shows the second line refusing it.
+- **Every rule has a switch.** `StructuredValidator.Rules` holds one flag per rule (strict fields, topic enum, action enum,
+  priority enum, action-belongs-to-topic, fact exists, fact not hidden, fact fits topic, no duplicates, limits, second line).
+  `ValidatorMutationTest` turns each off in turn with the second line off as well, and requires the golden evaluation to FAIL
+  with the very cases that rule exists for wrongly accepted.
 - **What a change is compared with.** Our phrase table says it per kind of figure: a brief figure with `the same day last
   week` or `last month`, a stock (outstanding, loans, borrowers, arrears, PAR) with `a week ago` or `a month ago`, a flow over
   the range (disbursed, collected, expected, revenue, the rates) with `the same period a week earlier` or `a month earlier`;
   never `over the week` for a month-to-date figure. Penalty income has no polarity: rising is neither better nor worse.
-- **What a number may be (the older validator, now the second line and the check of any answer written in prose).** A stated number is found in any of: digits of any script, `1,200,000`, `1 200 000`, `1.200.000`,
-  decimals, `1.2m`, `1.2 million`, `500k`, `UGX` before or after, `12.5%`, `12.5 percent`, `1,254 bp`, number words
-  (`twenty-five`, `one hundred and twenty`, `two million`, `twelve point five`, grammar-checked: `nineteen and ninety` is two
-  numbers), roman numerals of two letters or more in capitals (`XII`), fractions (`half`, `a third`, `three quarters`, `1/2`,
-  the vulgar fractions, superscripts as digits) and factors (`double`, `twice`). It is derivable when it equals the display or
-  the plain form of a cited fact, or is that figure correctly rounded to the precision the writer shows, for a compact amount
-  or a rate only (never a count) and by no more than five percent (`1.3m` for 1,250,000 passes, `1m` does not); a rate to one
-  decimal is the display itself and always passes. A fraction word matches a rate within five percent; a factor matches only a
-  fact of that value. `1.200` has two readings (1.2 and 1200) and either may match. The unit must agree: percent only for a
-  rate, a currency only for an amount (a shilling for UGX, KES or TZS), `days` and `hours` for those kinds, and a number
-  followed by something counted (`12 active loans`) only for a count. A fact that is hidden (`fewer than 5`) accounts for no
-  number at all: `exactly 5` is a number nobody gave, and the words `fewer than 5` are set aside only when such a fact is
-  cited. The sign must agree with a change (`+0.4` for a fall fails); a plus sign on a figure fails; a negative figure needs a
-  minus sign or a word for a loss. Four digits are a year only after a word that makes them one (`in 2026`), not in `2026 active
-  loans`.
-- **A number belongs to its metric (older validator).** The nearest metric name in the number's clause (a clause ends at a full stop, `;`, a
-  comma before a space, or `and`, `but`, `while`, `whereas`, `then`) decides which metric it speaks of, with the alias of a branch
-  or product in the sentence. The number must be a figure of a cited fact of that metric or of its changes; otherwise it is
-  `metric_mismatch`: figures swapped between two metrics, or a figure of a metric nobody cited. With no metric named in the
-  clause, a number with no unit may only be a count; a compact amount, a fraction and a factor carry their own meaning.
 - **Not figures.** The dates given (the as-of date, the range, and both earlier ranges) in any written form, list markers and
-  ordinals, `PAR 1` to `PAR 90`, the names of facts that carry a digit, aliases, and a number glued to letters (`Q3`).
-  `Branch 7` when there are three is an `unknown_alias` violation, not ignored. `one` counts as a number only before something
-  counted (`one loan`, not `no one`).
-- **Direction (older validator; the lexicon is shared with the primary control).** The lexicon is a broad list of movement verbs, adverbs and their forms: up, rose, grew, higher, increase,
-  climbed, gained, jumped, surged, soared, rallied, spiked; down, fell, dropped, lower, decrease, declined, dipped, slipped, eased,
-  shrank, reduced, sank, plunged, tumbled, slumped, slid; flat, unchanged, steady, stable; better, improved, strengthened,
-  stronger; worse, worsened, deteriorated, weaker. `up to` is a movement like the others. Which change a word speaks of is
-  decided, never guessed in the model's favour: the metric names in the sentence (and the alias of a branch or product) pick
-  the subject, the nearest one winning; then the figure the sentence quotes nearest to the word, when it is one of the
-  subject's changes (`PAR 30 fell 0.25 points` speaks of the change of 0.25 whatever the other changes say), else the period
-  nearest to the word (`last week`, `last month`), else every change cited for the subject; the word must be supported by
-  **every** change left, so two changes of opposite sign left open by the sentence refuse the word. Polarity is the metric's:
-  a falling PAR is better, a falling collection rate is worse. A word with no change fact cited at all is
-  `direction_without_delta`; a negated word (`did not improve`, `no longer rising`) is `negated_direction`. Not movements and so
-  not checked: `set up`, `breakdown`, `down payment`, `follow up`, and a comparison of groups (`higher than Branch 2`, `lower
-  than the portfolio`). Residual risk: a movement worded outside the lexicon is not checked, and `higher than the average` is
-  read as a comparison of groups even when it means a time; the evaluation measures both.
-- **Plain text only, and nothing else in it.** An answer is also refused for a link or markup (`markup`), a phone number, an email,
-  an ID number shape or a UUID (`pii_shape`), a letter outside the Latin alphabet, which could disguise a direction word or a
-  number word (`unexpected_script`), a planted string or the system prompt's canary phrase (`forbidden_text`). Digits of other scripts, invisible characters and the minus sign and its lookalikes are normalised before
-  anything is checked, and an accepted answer is shown with digits as ASCII and the invisible characters removed.
-- **Closed codes.** `not_json`, `schema`, `too_long`, `too_many_facts`, `unknown_fact`, `invented_number`, `unit_mismatch`,
-  `sign_mismatch`, `unknown_alias`, `direction_contradiction`, `direction_without_delta`, `both_directions`, `markup`,
-  `pii_shape`, `unexpected_script`, `forbidden_text`, `metric_mismatch`, `negated_direction`, the placeholder codes `raw_number`,
-  `free_movement_word`, `free_comparison_word`, `unknown_placeholder`, `hidden_placeholder`, `uncited_placeholder`,
-  `malformed_placeholder`, `render_check_failed`, and `validator_error` (a defect in the validator fails closed). A violation carries the code, where (`summary` or `point N`) and at most a
-  figure or a lexicon word, never a sentence of the model's. The summary may rest on the facts that any point cites.
-- **The harness.** `AdvisorEvaluation.run(cases, source)` takes cases (a fabricated fact set, an answer, the verdict expected and
-  the code a refusal must give) and a source: `recorded()` answers each from the recording client, `with(client)` sends the same
-  cases to a real client. Before the call it checks the request that would leave the platform (no real name, no planted
-  string, no phone, email, ID or UUID shape, no run of six digits, no figure for a group that has a suppressed fact) and never
-  sends one that fails. The golden set (`GoldenCases`: clean answers, invented, derived and mis-formatted numbers, wrong
-  directions and signs, injection through a fake field and through the model, personal data, small groups, missing data, scope,
-  shape, a failing provider) must pass 100 percent in every category, and every refused case has a repaired twin (the same answer mended in the one place the rule looks at) that the harness
-  accepts, so a refusal is the rule's and not another check's; the cases of both reviews are all there as refusals because a
-  raw numeral, a free movement word or a bad placeholder appears, and the clean ones are placeholder answers whose rendering is
-  asserted word for word; the report is plain text with codes and counts, never a
-  sentence, and costs nothing. The canary test (`AdvisorCanaryIT`) runs the real gateway with the recording client over a seeded
-  book whose branches and products are named with canaries and asserts that none is in the request the client got, in the call log
-  or in the facts, and that the gateway's own input screen let the prompt through.
+  ordinals, `PAR 1` to `PAR 90`, the names of facts that carry a digit, aliases, and a number glued to letters (`Q3`) are not
+  figures for the second line.
+- **The harness.** `AdvisorEvaluation.run(cases, source)` takes cases (a fabricated fact set, a recorded answer, the verdict
+  expected and the code a refusal must give) and a source: `recorded()` answers each from the recording client, `with(client)`
+  sends the same cases to a real client. Before the call it checks the request that would leave the platform (no real name, no
+  planted string, no phone, email, ID or UUID shape in the facts, no run of six digits, no figure for a group that has a
+  suppressed fact) and never sends one that fails. The result of a case holds the codes, what is shown if accepted (the
+  rendered brief, names mapped back) and the facts-only brief shown if refused. The golden set (`GoldenCases`) has clean
+  structured answers whose rendering is asserted word for word, the shape and limit refusals, the enum and binding refusals, and
+  for every attack of rounds 1 to 4 (`AttackCorpus`, about 110 of them: invented, derived and mis-formatted numbers, wrong
+  directions, injection through a fake field and through the model, personal data, hallucinated names, free prose) the same
+  attack expressed in each field the model controls (topic, action, priority, fact key, watch, an extra field, a legacy prose
+  answer), each refused with its code. It must pass 100 percent in every category, and every refused case has a repaired twin
+  (the same answer mended in the one place the rule looks at) that the harness accepts, so a refusal is the rule's and not
+  another check's. The report is plain text with codes and counts, never a sentence, and costs nothing. The canary test
+  (`AdvisorCanaryIT`) runs the real gateway with the recording client over a seeded book whose branches and products are named
+  with canaries and asserts that none is in the request the client got, in the call log or in the facts, that the gateway's own
+  input screen let the prompt through, that a valid structured answer comes back rendered with the real names for the person who
+  asked, and that prose, an extra field and an unknown fact key are refused.
+- **Later slices use this path (#226, #230).** The daily brief (#226) asks for the same findings and watch list for one day, and
+  stores the rendered brief. A free-text question (#230) is scrubbed on input, then mapped to a topic of the enum and to the facts
+  of that topic; the answer is the same renderer's, never a free answer. A question outside the topics is answered by the
+  facts-only brief and a pointer to the screens.
 - **Fixed on the way.** `members.median_decision_hours` made the members endpoint answer 500 for a range with no decisions
   (the median of nothing is NULL); it is now an empty figure, as the dictionary says.
-- **Not in this slice.** Retry with a stricter reminder and the fallback (#226), the question scrub and the box (#230), the
+- **Not in this slice.** Retry with a stricter reminder (#226; the facts-only fallback exists here), the question scrub and the box (#230), the
   endpoints, the daily job and the stored brief (#226), the screens, and the run against a real provider and the comparison of
   models (#232).
 
@@ -1193,9 +1152,10 @@ changed. Items marked (changed) altered the design during this review; the other
     from the environment, provider sandbox, startup refusal tests (4.4).
 12. **"A forged delivery report."** Path token, source allow-list, forward-only status; at worst a log
     status changes (4.7).
-13. **"The AI will invent a number, or swap two real ones."** Cited-fact validation per point, number
-    words converted, at most four cited facts per point so citing everything is impossible, retry, then
-    fallback (5.6). Residual: a sentence can be unwise; the label and evaluation carry it.
+13. **"The AI will invent a number, or swap two real ones."** The model writes no number and no sentence: it chooses fact
+    keys, a topic, a catalogue action and a priority from closed sets, everything else refuses the whole answer, and our code
+    writes the figure with its name, period and polarity (5.13). Residual: the model may choose an unwise action from the
+    catalogue; the label and the evaluation carry it.
 14. **"Aliases leak: a model writes 'Branch 1' into 'Branch 10'."** Mapping back is by whole word, longest
     alias first (5.4).
 15. **"Staff will type a borrower's name into the box."** Scrub plus the member-name token check, the
@@ -1238,7 +1198,7 @@ addressed in the spec, ADR-035 to ADR-038, the SDD, the model and the issues; wh
 | 10 | A timed-out order creation strands the intent | One locked creator; never reuse the reference; a new intent follows; spike items added | 3.5, 3.12, ADR-035 d.2 |
 | 11 | One IPN id per credential pair | Every pair has its own IPN id and path token | 3.11, ADR-035 d.10 |
 | 12 | Officer aliases are personal data; the "no personal data by design" claim | Officer dimension dropped; groups under five suppressed; the claim restated as minimisation | 5.4, 5.11, ADR-037 d.3 |
-| 13 | The validator ignores direction words | Direction and polarity checked against the delta sign | 5.6, ADR-037 d.5 |
+| 13 | The validator ignores direction words | The model writes no text; direction and polarity are written by our code from the delta sign | 5.6, 5.13, ADR-037 d.5 |
 | 14 | AI go-live needs a platform control, not a tenant switch alone | `BMS_AI_ENABLED_TENANTS` allow-list | 5.2, ADR-037 d.7 |
 | 15 | The report pack on the Pi (224 MB heap) | Query, commit, then render from a spool; one run at a time on staging; per-report PDFs merged on disk; lower caps; `ReportMemoryIT` | 6.3, ADR-038 d.2, d.5, d.7 |
 | 16 | A3 depends on A5 | The unallocated posting moves into A3; A5 keeps the queue screen, allocation, reversals, reconciliation | 3.4, section 10 |

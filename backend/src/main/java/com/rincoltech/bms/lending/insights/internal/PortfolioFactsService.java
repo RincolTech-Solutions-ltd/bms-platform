@@ -64,13 +64,14 @@ class PortfolioFactsService implements PortfolioFacts {
     private static final String ACTIVE = "portfolio.active_loans";
     private static final String PAYERS = "loans.paying";
     private static final String PAYERS_TODAY = "loans.paying_today";
-    // Transactions and schedule items, whose counts nest (today inside the range).
-    private static final String TXN_DAY = "txn.collections_day";
-    private static final String TXN_RANGE = "txn.collections_range";
-    private static final String ITEMS_DAY = "items.due_day";
-    private static final String ITEMS_RANGE = "items.due_range";
-    private static final String DISBURSED_DAY = "brief.disbursed_loans_today";
-    private static final String DISBURSED_RANGE = "portfolio.disbursed_count";
+    // Today sits inside the range: the range figure less today's is the figure of the OTHER days, and the population of
+    // that
+    // difference is the distinct loans with activity on a day other than today (not the transactions: one loan paying
+    // six
+    // times on other days is one borrower, whose six payments the difference would give away).
+    private static final String OTHER_DISBURSED = "loans.disbursed_other_days";
+    private static final String OTHER_PAYING = "loans.paying_other_days";
+    private static final String OTHER_DUE = "loans.due_other_days";
     static final List<String> PAR_KEYS =
             List.of("portfolio.par1", "portfolio.par30", "portfolio.par60", "portfolio.par90");
     private static final String RECOVERERS = "loans.recovering";
@@ -90,31 +91,14 @@ class PortfolioFactsService implements PortfolioFacts {
      * and the other figures that would give it away (or that it would give away) if it were shown alone.
      */
     record Spec(
-            String key,
-            Polarity polarity,
-            boolean delta,
-            boolean stock,
-            List<String> populations,
-            List<String> deps,
-            String inner,
-            String outer) {}
+            String key, Polarity polarity, boolean delta, boolean stock, List<String> populations, List<String> deps) {}
 
     private static Spec spec(String key, Polarity polarity, boolean delta, boolean stock, String... populations) {
-        return new Spec(key, polarity, delta, stock, List.of(populations), List.of(), null, null);
+        return new Spec(key, polarity, delta, stock, List.of(populations), List.of());
     }
 
     private static Spec with(Spec s, String... deps) {
-        return new Spec(
-                s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), List.of(deps), s.inner(), s.outer());
-    }
-
-    /**
-     * A figure over a window that contains another window of the same measure (today inside the month): the two populations
-     * are nested, and when the outer holds one to four more than the inner their figures differ by exactly those few, so the
-     * outer (larger window) figure is hidden.
-     */
-    private static Spec nested(Spec s, String inner, String outer) {
-        return new Spec(s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), s.deps(), inner, outer);
+        return new Spec(s.key(), s.polarity(), s.delta(), s.stock(), s.populations(), List.of(deps));
     }
 
     private static final Polarity BETTER = Polarity.HIGHER_IS_BETTER;
@@ -144,13 +128,10 @@ class PortfolioFactsService implements PortfolioFacts {
             spec("portfolio.par30", WORSE, true, true, ACTIVE, OVER_30),
             spec("portfolio.par60", WORSE, true, true, ACTIVE, OVER_60),
             spec("portfolio.par90", WORSE, true, true, ACTIVE, OVER_90),
-            nested(spec("portfolio.disbursed", BETTER, true, false, DISBURSED_RANGE), DISBURSED_DAY, DISBURSED_RANGE),
-            nested(
-                    spec("portfolio.disbursed_count", BETTER, true, false, DISBURSED_RANGE),
-                    DISBURSED_DAY,
-                    DISBURSED_RANGE),
-            nested(spec("portfolio.collected", BETTER, true, false, ACTIVE, PAYERS), TXN_DAY, TXN_RANGE),
-            nested(spec("portfolio.expected", NEUTRAL, true, false, ACTIVE), ITEMS_DAY, ITEMS_RANGE),
+            spec("portfolio.disbursed", BETTER, true, false, "portfolio.disbursed_count", OTHER_DISBURSED),
+            spec("portfolio.disbursed_count", BETTER, true, false, "portfolio.disbursed_count", OTHER_DISBURSED),
+            spec("portfolio.collected", BETTER, true, false, ACTIVE, PAYERS, OTHER_PAYING),
+            spec("portfolio.expected", NEUTRAL, true, false, ACTIVE, OTHER_DUE),
             with(
                     spec("portfolio.collection_rate", BETTER, true, false, ACTIVE),
                     "portfolio.collected",
@@ -236,7 +217,7 @@ class PortfolioFactsService implements PortfolioFacts {
             return present.contains(s.key()) && (!s.stock() || stockKnown);
         }
 
-        /** True when the two counts differ by one to four: the figures over them differ by exactly those few. */
+        /** True when the two counts differ by one to four: the loans between them are exactly those few. */
         static boolean diffSmall(long outer, long inner) {
             long d = outer - inner;
             return d > 0 && d < MIN_GROUP;
@@ -273,13 +254,6 @@ class PortfolioFactsService implements PortfolioFacts {
                     return true;
                 }
             }
-            if (s.outer() != null) {
-                Long outer = values.get(s.outer());
-                Long inner = values.get(s.inner());
-                if (outer != null && inner != null && diffSmall(outer, inner)) {
-                    return true;
-                }
-            }
             int level = PAR_KEYS.indexOf(s.key());
             if (level >= 0 && parHidden(level)) {
                 return true;
@@ -311,16 +285,10 @@ class PortfolioFactsService implements PortfolioFacts {
             }
             Scope dayOnly = day.withRange(day.to(), day.to());
             w.put(PAYERS_TODAY, queries.loansWithTransactions(dayOnly, InsightsQueries.COLLECTED_TYPES));
-            w.put(
-                    TXN_DAY,
-                    queries.collectedByDay(dayOnly, InsightsQueries.COLLECTED_TYPES).stream()
-                            .mapToLong(InsightsQueries.DayTotal::count)
-                            .sum());
-            w.put(
-                    ITEMS_DAY,
-                    queries.expectedByDay(dayOnly).stream()
-                            .mapToLong(InsightsQueries.DayTotal::count)
-                            .sum());
+            LocalDate today = day.to();
+            w.put(OTHER_DISBURSED, queries.loansWithTransactionsOutsideDay(scope, "('disbursement')", today));
+            w.put(OTHER_PAYING, queries.loansWithTransactionsOutsideDay(scope, InsightsQueries.COLLECTED_TYPES, today));
+            w.put(OTHER_DUE, queries.loansDueOutsideDay(scope, today));
         }
         InsightsApi.PortfolioResponse portfolio = insights.portfolio(scope, null);
         for (Metric m : portfolio.metrics()) {
@@ -370,16 +338,6 @@ class PortfolioFactsService implements PortfolioFacts {
             w.put(m.key(), m.value());
         }
         w.put(PAYERS, queries.loansWithTransactions(scope, InsightsQueries.COLLECTED_TYPES));
-        w.put(
-                TXN_RANGE,
-                queries.collectedByDay(scope, InsightsQueries.COLLECTED_TYPES).stream()
-                        .mapToLong(InsightsQueries.DayTotal::count)
-                        .sum());
-        w.put(
-                ITEMS_RANGE,
-                queries.expectedByDay(scope).stream()
-                        .mapToLong(InsightsQueries.DayTotal::count)
-                        .sum());
         w.put(RECOVERERS, queries.loansWithTransactions(scope, "('recovery')"));
         return w;
     }

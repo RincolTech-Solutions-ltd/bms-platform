@@ -134,7 +134,7 @@ second, so it runs in every build. Fabricated data only: nothing here reads a te
    answer was accepted or refused, and the violation codes; then the score of each category; then the tokens (counted, not
    billed) and the line `Cost: none`. The report holds codes and counts only, never a sentence of an answer or a name.
 2. **The gate is 100 percent in every category** (clean answers accepted; invented, derived and mis-formatted numbers, wrong
-   directions and signs, injection, personal data, small groups, missing data, scope, shape and a failing provider each refused
+   directions and signs, injection, personal data, small groups, missing data, scope, shape, enum and binding and a failing provider each refused
    with the expected code). A `FAIL` on an adversarial case is a hole in the validator or the prompt, never a model having a bad
    day: fix the code, not the case. A `REQUEST NOT CLEAN` means the request built for that case would have carried a real name, a
    planted string, a phone, email, ID or UUID shape, a run of six digits or a figure for a group under five loans; it was not
@@ -142,16 +142,20 @@ second, so it runs in every build. Fabricated data only: nothing here reads a te
 3. **The canary at the gateway.** `cd backend && mvn -B verify -Dit.test=AdvisorCanaryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false`
    (needs Docker): a seeded book whose branches and products are named with canaries goes through the real gateway with the
    recording client; the test fails if a canary is in the request the client received, in an `ai_calls` row or in the facts.
-4. **The prompt contract.** The system prompt is the reviewed resource `backend/src/main/resources/advisor/system-prompt.txt`.
-   It tells the model never to write a figure and to cite facts by `{{key}}` placeholder, and `PromptContractTest` fails if it stops
-   listing that syntax. Change it in a pull request like code, and rerun section 9, step 1.
-5. **Mutation check.** `ValidatorMutationTest` switches each rule of the validator off in turn (raw numerals, number words,
-   roman numerals, look-alike letters, list numbers in sequence, control characters, free movement, comparisons, absolutes, proper
-   names, connectors beside a placeholder, unknown, hidden and uncited placeholders, cited facts existing, unknown aliases, plain
-   text) and requires the golden set to fail with the cases that rule exists for accepted; a separate switch corrupts the
-   substitution to prove the second line catches it. A rule that can be removed with the harness still green is untested.
+4. **The prompt contract and the catalogue.** The system prompt is the reviewed resource
+   `backend/src/main/resources/advisor/system-prompt.txt`, filled with the topics and actions of the reviewed catalogue
+   `backend/src/main/resources/advisor/catalogue.json` (every sentence the person reads is a template or an action text in that
+   file). The model is told to return one JSON object of fact keys, a topic, an action code and a priority and no text of its own;
+   `PromptContractTest` fails if the prompt stops listing the shape, a topic, an action or a rule, and `CatalogueTest` fails if a
+   catalogue text holds a digit, markup or a placeholder other than `{{where}}`. Change either in a pull request like code, and
+   rerun section 9, step 1. A new kind of advice is a new catalogue action: give it a topic, a text with no figure, and a golden case.
+5. **Mutation check.** `ValidatorMutationTest` switches each rule of `StructuredValidator` off in turn (strict fields, topic,
+   action and priority enums, action belongs to the topic, fact exists, fact not hidden, fact fits the topic, no duplicates,
+   limits) and requires the golden set to fail with the cases that rule exists for accepted; a separate switch corrupts the
+   phrase table to prove the second line (the number re-derivation) catches it. A rule that can be removed with the harness still
+   green is untested.
 6. **Adding a case.** Add it to `GoldenCases` with the answer a model might give and the code a refusal must produce; a new
-   word in the direction lexicon, a new number form or a looser tolerance needs a case that fails without it. Cases use invented
+   topic, action or fact family needs a case that fails without its binding. Cases use invented
    names, figures and phones only.
 7. **Against a real provider.** The same cases go to a client with `AdvisorEvaluation.with(client)`; the command that runs them
    against the configured provider, records tokens and cost per brief and compares two models is slice C5 (#232). Run it on

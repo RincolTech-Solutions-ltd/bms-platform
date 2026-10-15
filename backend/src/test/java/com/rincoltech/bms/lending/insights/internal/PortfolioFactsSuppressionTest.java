@@ -30,86 +30,90 @@ class PortfolioFactsSuppressionTest {
     // ---- Nested windows: today inside the month ------------------------------------------------------------
 
     @Test
-    void sixLoansThisMonthAndFiveTodayHideTheMonthBecauseTheDifferenceIsOneLoansExactPrincipal() {
-        Window w =
-                window("brief.disbursed_loans_today", 5, "portfolio.disbursed_count", 6, "portfolio.active_loans", 300);
-        // The month less today is one loan: the larger window's figures are hidden, today's stay.
-        assertThat(w.small(spec("portfolio.disbursed"))).isTrue();
-        assertThat(w.small(spec("portfolio.disbursed_count"))).isTrue();
-        assertThat(w.small(spec("brief.disbursed_today"))).isFalse();
-        assertThat(w.small(spec("brief.disbursed_loans_today"))).isFalse();
+    void oneLoanPayingSixTimesOnOtherDaysHidesTheMonthBecauseTheDifferenceIsThatBorrowersPayments() {
+        // Six payments on other days are one borrower: the month's amount less today's is that borrower's money. The
+        // population
+        // of the difference is the distinct loans with activity on a day other than today, not the transactions.
+        Window w = window(
+                "loans.paying_other_days",
+                1,
+                "loans.paying",
+                6,
+                "loans.paying_today",
+                5,
+                "portfolio.active_loans",
+                300);
+        assertThat(w.small(spec("portfolio.collected"))).isTrue();
+        assertThat(w.small(spec("portfolio.collection_rate"))).isTrue();
+        // Today's own figure is over five loans and stays.
+        assertThat(w.small(spec("brief.collected_today"))).isFalse();
     }
 
     @Test
-    void theDifferenceOfOneToFourHidesTheLargerWindowAndNothingElseDoes() {
-        for (int diff = 1; diff <= 4; diff++) {
-            Window w = window("brief.disbursed_loans_today", 7, "portfolio.disbursed_count", 7 + diff);
+    void theOtherDaysOfOneToFourLoansHideTheLargerWindowAndNothingElseDoes() {
+        for (int others = 1; others <= 4; others++) {
+            Window w = window(
+                    "loans.disbursed_other_days",
+                    others,
+                    "portfolio.disbursed_count",
+                    20,
+                    "portfolio.active_loans",
+                    300);
             assertThat(w.small(spec("portfolio.disbursed")))
-                    .as("difference %d", diff)
+                    .as("%d loans on other days", others)
                     .isTrue();
+            assertThat(w.small(spec("portfolio.disbursed_count"))).isTrue();
+            assertThat(w.small(spec("brief.disbursed_today"))).isFalse();
         }
-        for (int diff : new int[] {0, 5, 6, 40}) {
-            Window w = window("brief.disbursed_loans_today", 7, "portfolio.disbursed_count", 7 + diff);
+        for (int others : new int[] {0, 5, 6, 40}) {
+            Window w = window(
+                    "loans.disbursed_other_days",
+                    others,
+                    "portfolio.disbursed_count",
+                    45,
+                    "portfolio.active_loans",
+                    300);
             assertThat(w.small(spec("portfolio.disbursed")))
-                    .as("difference %d", diff)
+                    .as("%d loans on other days", others)
                     .isFalse();
         }
-        // Today with nothing and a month of three is small on its own; a month of six with nothing today is fine.
-        assertThat(window("brief.disbursed_loans_today", 0, "portfolio.disbursed_count", 3)
-                        .small(spec("portfolio.disbursed")))
-                .isTrue();
-        assertThat(window("brief.disbursed_loans_today", 0, "portfolio.disbursed_count", 6)
-                        .small(spec("portfolio.disbursed")))
-                .isFalse();
     }
 
     @Test
-    void collectedAndExpectedNestTheSameWayOnTheirTransactionAndItemCounts() {
-        Window collected = window(
-                "txn.collections_day", 5, "txn.collections_range", 6, "portfolio.active_loans", 300, "loans.paying", 6);
-        assertThat(collected.small(spec("portfolio.collected"))).isTrue();
-        assertThat(collected.small(spec("brief.collected_today"))).isFalse();
-        // The collection rate is derived from collected and expected, so it goes with them.
-        assertThat(collected.small(spec("portfolio.collection_rate"))).isTrue();
-
-        Window expected = window("items.due_day", 20, "items.due_range", 23, "portfolio.active_loans", 300);
+    void scheduleItemsDueOnOtherDaysAreCountedAsLoansToo() {
+        Window expected = window("loans.due_other_days", 3, "portfolio.active_loans", 300);
         assertThat(expected.small(spec("portfolio.expected"))).isTrue();
         assertThat(expected.small(spec("portfolio.collection_rate"))).isTrue();
         assertThat(expected.small(spec("brief.expected_today"))).isFalse();
         assertThat(expected.small(spec("brief.collection_rate_today")))
-                .as("today's rate rests on today's expected")
+                .as("today's rate rests on today's expected, shown")
                 .isFalse();
-
         Window apart = window(
-                "items.due_day",
-                20,
-                "items.due_range",
+                "loans.due_other_days",
                 60,
-                "txn.collections_day",
-                8,
-                "txn.collections_range",
-                90,
-                "portfolio.active_loans",
-                300,
+                "loans.paying_other_days",
+                80,
                 "loans.paying",
-                80);
+                80,
+                "portfolio.active_loans",
+                300);
         assertThat(apart.small(spec("portfolio.expected"))).isFalse();
         assertThat(apart.small(spec("portfolio.collected"))).isFalse();
         assertThat(apart.small(spec("portfolio.collection_rate"))).isFalse();
     }
 
     @Test
-    void aWindowWithNoBriefHasNoNestedPairToCheck() {
+    void aWindowWithNoBriefHasNoOtherDaysToCheck() {
         Window w = window("portfolio.disbursed_count", 6);
         assertThat(w.small(spec("portfolio.disbursed"))).isFalse();
     }
 
     @Test
     void anEarlierWindowIsCheckedTheSameWaySoTheChangeIsLeftOut() {
-        // The change is current minus the earlier window's figure: if the earlier window's month-less-today is small,
-        // the
-        // earlier figure (and so the change) must not be derivable.
-        Window earlier = window("brief.disbursed_loans_today", 9, "portfolio.disbursed_count", 12);
+        // The change is current minus the earlier window's figure: if the earlier window's other days are one to four
+        // loans,
+        // the earlier figure (and so the change) must not be derivable.
+        Window earlier = window("loans.disbursed_other_days", 2, "portfolio.disbursed_count", 12);
         assertThat(earlier.small(spec("portfolio.disbursed"))).isTrue();
     }
 

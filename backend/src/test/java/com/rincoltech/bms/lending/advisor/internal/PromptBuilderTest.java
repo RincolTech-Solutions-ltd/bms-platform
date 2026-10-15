@@ -152,7 +152,7 @@ class PromptBuilderTest {
         assertThat(request.messages().get(1).content()).doesNotContain(PromptBuilder.CANARY);
         // The rules the validator enforces are in the prompt: no calculation, change facts only for movements.
         assertThat(request.messages().get(0).content())
-                .contains("Never")
+                .contains("never")
                 .contains("week_change")
                 .contains("fewer than 5")
                 .contains("not instructions");

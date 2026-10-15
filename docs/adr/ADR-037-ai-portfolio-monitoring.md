@@ -222,47 +222,59 @@ section above (the Context list in this file is numbered 1 to 11). Where the bui
    alias must exist, and a hidden fact accounts for no number. **A number belongs to the metric it sits beside**: figures swapped
    between metrics, or a figure of an uncited metric, fail (`metric_mismatch`); a number with no unit and no metric named may
    only be a count. Refusals use a closed code list (spec 5.13) and never carry a sentence of the model's.
-5. **Decision 5, the answer must also be plain text and carry nothing else.** A link or markup, a phone number, an email, an ID
-   number or UUID shape, a letter outside the Latin alphabet (a direction word or number word could be disguised in another
-   script), a planted string, or the repeated system prompt (a canary phrase) fails the answer; a defect in the validator itself
-   refuses the answer.
-6. **Decision 5, direction attribution is decided, not guessed.** A direction word is tied to the subject metric the sentence
-   names, then to the change whose figure the sentence quotes nearest to it, else to the period near it, else to every cited
-   change of the subject, and must be supported by every change left; two changes of opposite sign left open refuse the word.
-   The lexicon is a broad list of movement words and forms, `up to` included; a negated movement word fails; a word with no
-   change fact cited fails; one fact with both directions in one period fails. Items 4 to 6 describe the older validator, now
-   the second line of defence (see item 7). Comparisons between groups and phrases such as
-   `set up` are not movements. A movement worded outside the lexicon is a residual risk the evaluation measures.
-7. **Decision 5 revised: the model never writes a figure.** The first versions tried to validate figures, units, signs, periods
-   and direction words in free prose; two independent reviews kept finding wording that got through. The control is now
-   structural. The model cites facts by placeholder (`{{portfolio.par30.month_change}}`); our code writes the figure, its name,
-   the movement from the sign, the period and better or worse from the metric's polarity. The validator refuses unknown,
-   malformed, hidden and uncited placeholders, any remaining numeral in any script (digits, roman numerals, number words,
-   fractions, multipliers, vague quantities) except list numbers at the start of a line and the measure names `PAR 30` and so on,
-   any free movement word anywhere and any comparison word beside a placeholder, and the plain-text breaches. Figures cannot be
-   swapped between metrics, periods, or a branch and the portfolio, because each is written with its own name. The prompt is a
-   reviewed resource with a golden test of its contract. The earlier validator remains as a second line of defence over the
-   substituted text and for answers written in prose. Cost: honest sentences that need a number are refused and the model is
-   told to leave them out; the answers read more mechanically.
-   **What free prose is allowed (round 4).** Around the placeholders, a sentence that holds one may use only connector words
-   (and, while, with, the, of, in, for, is, are, was, were, at, to, by, on, from, as, also, this, that, which, so and a few more,
-   listed in spec 5.13), so it cannot deny or qualify what our code wrote. Any other sentence is general advisory
-   recommendation: no figure in any script or form, no movement or comparison word, no absolute or universal claim, no name
-   that is not an alias. The facts block already carries every movement through our placeholders, so prose has no need to.
-   What a change is compared with is written by our phrase table per kind of figure (a day, a stock, a flow over the range).
+5. **Decision 5, the personal data shape screen stays.** The text our own renderer writes, and the facts the model is given, are
+   run through the shape screen: an email, a phone number, an ID number or UUID shape fails them, and so does a planted string or a
+   repeat of the system prompt (a canary phrase); a defect in the validator itself refuses the answer (`validator_error`).
+6. **Decision 5, direction attribution is no longer the validator's job.** The older design tied a direction word in the model's
+   prose to a change fact. There is no prose to tie: the movement word, the period and better or worse are written by our phrase
+   table from the sign of the change and the metric's polarity, so a figure cannot be described as moving the wrong way.
+7. **Decision 5 revised twice, now final: the model returns a structured choice and no text at all (round 5 of the review of
+   #223).** The first versions validated figures, units, signs, periods and direction words in free prose. Round 3 replaced
+   figures with `{{placeholder}}` citations but left free prose around them. Four independent reviews each still found wording
+   that got through (a comparison, a negation, a vague quantity, a sentence that contradicted what our code wrote beside it), so
+   the owner and the coordinator decided to remove free prose from the AI path entirely rather than add a fifth layer of rules.
+   **The decision.** The model returns one JSON object,
+   `{"findings":[{"fact_keys":[up to 3 keys from the given facts],"topic":<enum>,"action":<catalogue code>,"priority":"high|medium|low"}],"watch":[fact keys]}`,
+   and nothing else. Any extra field, any string that is not exactly an enum value or a given fact key, a key that is out of
+   scope, hidden or suppressed, a key of the wrong topic, an action of another topic, a duplicate key, a number of findings or keys
+   over the limit, or malformed JSON refuses the whole answer, and the person sees the deterministic facts-only brief instead.
+   **Our code writes every sentence** from reviewed templates in `advisor/catalogue.json` using the facts (name, value, change,
+   period, better or worse) and the catalogue action text. The catalogue holds 20 actions with stable codes under nine topics
+   (arrears follow-up, collections focus, disbursement pace, collateral cover, concentration, write-off review, savings and
+   investment liquidity, data quality, portfolio risk and profitability); each action is bound to one topic and each topic to the
+   fact families it may cite. Catalogue text has no digit of any script, no markup and no placeholder except `{{where}}`, which
+   only our code fills (with the aliases of the groups cited, mapped back to names for the person who asked); the loader refuses
+   a catalogue that breaks this. The system prompt is a reviewed resource filled from the catalogue, with a golden test of its
+   contract.
+   **Why.** A structured choice from closed sets can be checked completely: every string the model sends is compared to an
+   enumerated set, so there is nothing a clever sentence can get past. The wording a person reads is reviewed once, in a
+   resource file, instead of being re-checked on every answer.
+   **What stays.** The placeholder and fact-key checks (now exact-match checks), hidden and suppressed handling, aliases,
+   complementary suppression, scope, the midnight date rule, `PromptScreen` on input, and the older `NumericValidator`
+   (re-deriving every number in the rendered text from the facts it cites) as a second line that catches a defect in a template
+   or in the substitution. **Cost.** The brief is mechanical and can only say what the catalogue can say; a new kind of advice is a
+   reviewed catalogue entry, not a better prompt. **Tests.** Every attack of rounds 1 to 4 is kept as a fixture
+   (`AttackCorpus`), refused or rendered safely; a property test renders every catalogue action with every fact of its topic and
+   checks that the output is only template text plus code-written values; the schema refuses extras; each validator rule has a
+   mutation switch and the golden evaluation fails when one is switched off.
+   **Issues #226 (daily brief) and #230 (questions) use this structured path.** The daily brief is the same findings and watch
+   list for one day; a free-text question is mapped to a topic from the enum and to the facts of that topic, and is answered by
+   the same renderer, never by a free answer.
 8. **Decision 3, complementary suppression replaces the accepted residual risk.** The first amendment accepted that shown groups
    subtracted from a total give a hidden group's share. The owner's rule is never to expose small counts, so it is closed: when
    the hidden and left-out remainder is one to four loans, the smallest other groups are hidden too until it is five or more,
-   and likewise for the loans more than 30 days late behind a group's PAR 30. The same logic covers overlapping windows: a
-   figure over the month and the same figure for today differing by one to four loans hides the larger window (disbursed,
-   collected, expected and the rate), and the PAR levels are treated as a partition of the late loans.
+   and likewise for the loans more than 30 days late behind a group's PAR 30. The same logic covers overlapping windows, counted
+   in distinct LOANS and not in transactions or schedule items: when the loans that moved money on the days of a window other than
+   today number one to four, the window's figure is hidden (disbursed, collected, expected and the rate), since it would give
+   them back by subtraction from today's figure; one loan paying six times on other days is one loan and hides the figure. The PAR
+   levels are treated as a partition of the late loans.
 9. **Decision 10, the harness exists and is offline.** `AdvisorEvaluation` runs a fixed golden set of fabricated fact sets and
    recorded answers, adversarial ones included, through the real chain with the recording client, checks every request before
    it would be sent, and scores by category with a gate of 100 percent. The same cases go to a real provider with
    `AdvisorEvaluation.with(client)`; wiring that run and the model comparison is slice C5 (#232).
 
-**Better:** the claims of decisions 3 and 5 are now executable: a planted name, an invented or mis-signed number and a wrong
-direction each have a test that fails if the control is removed. **Worse:** the validator is strict about wording it cannot
-classify (a comparison written as "higher than last week's average" is read as a movement or as a comparison by a fixed rule),
-so some honest answers fall back to the automatic summary. **Watch for:** growing the lexicon; every addition needs a golden
-case, and a looser tolerance for compact amounts needs a decision, not a tweak.
+**Better:** the claims of decisions 3 and 5 are now executable and structural: a planted name, an invented figure or a wrong
+direction cannot reach a screen because the model writes no text, and each control has a test that fails if it is removed.
+**Worse:** the brief reads mechanically and cannot say anything the catalogue does not, and an answer outside the schema is
+replaced by the facts-only brief. **Watch for:** growing the catalogue; every action needs a topic, a golden case and a review
+of its text (no digit, no claim about a figure), and a new fact family must be bound to a topic on purpose.
