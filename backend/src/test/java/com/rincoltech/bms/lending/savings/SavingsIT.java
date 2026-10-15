@@ -482,6 +482,45 @@ class SavingsIT extends LoanFixtures {
 
     // ---- Reversal -----------------------------------------------------------------------------
 
+    /**
+     * FR-NTF-02 (issue #221): the receipt of a deposit and of a withdrawal is queued once each, and the reversal that a
+     * checker approves queues nothing of its own: the member keeps the receipt they were sent.
+     */
+    @Test
+    void frNtf02_aReversalQueuesNoReceiptOfItsOwnAndAReplayedDepositQueuesNoSecond() {
+        threshold(10_000_000);
+        smsOn();
+        String account = account(product("SMSREV", Map.of()));
+        String depositKey = key();
+        assertThat(deposit(account, 80_000, depositKey).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(deposit(account, 80_000, depositKey).getHeaders().getFirst("Idempotent-Replayed"))
+                .isEqualTo("true");
+        String withdrawal = withdraw(account, 30_000, key())
+                .getBody()
+                .get("transaction")
+                .get("id")
+                .asString();
+        String sms = "SELECT template_key FROM notification_outbox WHERE channel = 'sms' AND idempotency_key LIKE ?"
+                + " ORDER BY template_key";
+        String like = "lending.savings.sms:" + t.tenantId() + ":%";
+        assertThat(TestDatabase.owner().sql(sms).param(like).query(String.class).list())
+                .containsExactly("savings.deposit", "savings.withdrawal");
+
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/transactions/" + withdrawal + "/reverse",
+                withKey(asCashier(), key()),
+                Map.of("reason", "Recorded on the wrong account"));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(get(account).get("balance_minor").asLong()).isEqualTo(80_000);
+        assertThat(TestDatabase.owner().sql(sms).param(like).query(String.class).list())
+                .as("the reversal sent nothing")
+                .containsExactly("savings.deposit", "savings.withdrawal");
+    }
+
     @Test
     void reversalsAreCheckedMirrorTheJournalAndTakeTheFeeWithTheWithdrawal() {
         threshold(10_000_000);
