@@ -128,9 +128,15 @@ withdrawal). Rules to tell a tenant who asks:
 - The message goes to the member's own primary phone only, never a next of kin or a guarantor, and only when that
   number is one we can read without guessing (see Numbers). A member without one simply gets no text; the money is
   recorded all the same.
-- **A reversal sends nothing.** The member keeps the receipt they were sent; telling them about a correction is the
-  cashier's word.
-- Only what staff do sends a message. The fabricated seed and the data import never text a member.
+- **A reversal sends no correction.** Telling a member about a correction is the cashier's word. But the reversal
+  withdraws the message of the entry it reverses if that message is still waiting (it marks it failed
+  `cancelled_reversed` and clears the amount and receipt number), so a receipt for an entry made on the wrong account
+  does not reach the wrong person; a message the sender has already taken may be at the provider and cannot be recalled.
+- Only what staff do sends a message. The fabricated seed and the data import commands never text a member.
+- **Load a register (an import of old loans, repayments, deposits or investments) before switching SMS on.** If the
+  data goes in through the staff screens or the API after SMS is on, each request must carry `notify_member: false`
+  (the import scripts do); without it every entry dated within `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) days texts the
+  member. An entry dated further back is never texted, whatever the request says.
 - The balance is in a loan receipt (and a savings receipt) only when the tenant switched `include_balance` on, and
   never in wording the tenant wrote itself.
 - A message is written with the money, so a payment that is rolled back sends nothing and the same payment sent twice
@@ -139,7 +145,7 @@ withdrawal). Rules to tell a tenant who asks:
 - Over a cap a receipt is held, not sent, and expires after the hour: a tenant that reaches its cap early in the day
   loses the receipts after twice the cap. Watch the 80 percent alert and raise the operator's cap before it bites.
 - To find what happened to one payment: the outbox row key ends with the transaction id and the member id
-  (`sms:loan.repayment_received:<tenant>:<transaction>:<member>`), and `sms_deliveries` has the status, segments and
+  (`sms:<template>:<tenant>:<transaction>:<member>`, for savings receipts too), and `sms_deliveries` has the status, segments and
   cost of the row with the same outbox id. Numbers and texts are in neither.
 
 ## Numbers

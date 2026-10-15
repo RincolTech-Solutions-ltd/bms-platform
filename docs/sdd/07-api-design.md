@@ -639,6 +639,12 @@ approver submitted or appraised the loan, FR-APR-03), `above_requested_principal
 reason `approval_expired` (FR-ORG-08), audited with actor kind `system`. Both `approved_at` and
 the expiry bound come from the business clock (AGENTS.md rule 7), never the database's `now()`.
 
+Every request that records money a member is told about takes an optional `notify_member` (boolean, default true; issue #221,
+ADR-036 third amendment): loan `POST .../disbursements` and `.../repayments`, savings `.../deposits`, `.../withdrawals` and `.../close`,
+investment `.../funding`, `.../return-payouts`, `.../payout` and `.../early-withdrawal`. False records the movement without a text
+message to the member, whatever the tenant's SMS settings (a register import sends false); where a checker decides, the choice is kept in
+the approval's payload. An event whose value date is more than `BMS_SMS_EVENT_MAX_AGE_DAYS` (3) days old is never texted either.
+
 Built (#108, increment 5, ADR-026): disbursement, schedule, transactions, repayments, reversal,
 payoff quote and write-off. Every money-moving route requires `Idempotency-Key` (section 7.8; a
 replay answers `Idempotent-Replayed: true`). `POST .../disbursements` takes
