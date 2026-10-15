@@ -118,6 +118,30 @@ Staff area, SMS (`/staff/sms`; the tenant administrator, who holds `core.setting
 The old flat settings `sms_sender_name`, `sms_window_start`, `sms_window_end` and `sms_include_balance` of
 `PATCH /api/v1/settings` are gone (400); migration `V52` copied a tenant's window and balance values into the group once.
 
+## Which events send a message (issue #221)
+
+With both switches on a tenant's members get a text for: a loan disbursed, a repayment received (amount, date and
+receipt number), a loan fully paid, a savings deposit and withdrawal, an investment funded, an investment about to mature
+(a reminder, so held for the sending window) and a payout of an investment (a return, the maturity payout, an early
+withdrawal). Rules to tell a tenant who asks:
+
+- The message goes to the member's own primary phone only, never a next of kin or a guarantor, and only when that
+  number is one we can read without guessing (see Numbers). A member without one simply gets no text; the money is
+  recorded all the same.
+- **A reversal sends nothing.** The member keeps the receipt they were sent; telling them about a correction is the
+  cashier's word.
+- Only what staff do sends a message. The fabricated seed and the data import never text a member.
+- The balance is in a loan receipt (and a savings receipt) only when the tenant switched `include_balance` on, and
+  never in wording the tenant wrote itself.
+- A message is written with the money, so a payment that is rolled back sends nothing and the same payment sent twice
+  sends one message. If the provider is down, the payment is not affected: the message waits in the outbox, is retried
+  after 1 and 5 minutes, and a receipt that is an hour old is dropped (`expired`) rather than sent late.
+- Over a cap a receipt is held, not sent, and expires after the hour: a tenant that reaches its cap early in the day
+  loses the receipts after twice the cap. Watch the 80 percent alert and raise the operator's cap before it bites.
+- To find what happened to one payment: the outbox row key ends with the transaction id and the member id
+  (`sms:loan.repayment_received:<tenant>:<transaction>:<member>`), and `sms_deliveries` has the status, segments and
+  cost of the row with the same outbox id. Numbers and texts are in neither.
+
 ## Numbers
 
 A message goes only to a number we can read without guessing: `+256 7XX XXX XXX`, `2567XXXXXXXX` or
