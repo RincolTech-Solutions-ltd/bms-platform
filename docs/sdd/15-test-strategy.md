@@ -400,6 +400,15 @@ checker once their total passes it, and that a waiver is refused on a written-of
 from another branch. The second review added: a partly waived penalty still cancelled by a
 back-dated repayment (3,500 of 4,000), a waiver of a later penalty that never blocks paying an earlier
 one, the checker seeing the waiver's own amount, and the loan's officer refused as a decider.
+from another branch.
+
+Collections (#266). `PromisesTest` covers kept, open and broken without a database.
+`LoanServicingIT` reassigns two loans at once (audited, all or none against an unknown loan,
+refusing a cashier, an officer of another branch, an unknown user and a caller without the
+permission), lists the items due today and over a range with its limit, lists arrears by bucket,
+logs actions with each refusal, and lets the nightly run keep one promise, break one and leave one
+open, with the action guard refusing a change of note. A pending approval stays current across the
+nightly run (`frArr01_theNightlyRunLeavesPendingApprovalsCurrent`).
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.
