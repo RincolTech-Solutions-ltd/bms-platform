@@ -70,13 +70,19 @@ class SmsPureTest {
     void everyDefaultTemplateFitsOneSegmentOrDeclaresTwo() {
         OutboxTemplates templates = new OutboxTemplates();
         // Fabricated values at a realistic length: a 30 character business name, a 9 digit amount.
-        Map<String, String> params = Map.of(
-                "tenant_name", "Test Lender and Savings Society",
-                "currency", "UGX",
-                "amount", "123,456,789",
-                "account_no", "SV000001",
-                "receipt_no", "RC-HQ-000001",
-                "balance", "987,654,321");
+        Map<String, String> params = Map.ofEntries(
+                Map.entry("tenant_name", "Test Lender and Savings Society"),
+                Map.entry("currency", "UGX"),
+                Map.entry("amount", "123,456,789"),
+                Map.entry("account_no", "SV000001"),
+                Map.entry("receipt_no", "RC-HQ-000001"),
+                Map.entry("balance", "987,654,321"),
+                Map.entry("loan_no", "LN-HQ-000123"),
+                Map.entry("date", "15/10/2026"),
+                Map.entry("next_amount", "123,456,789"),
+                Map.entry("next_due_date", "15/11/2026"),
+                Map.entry("maturity_date", "15/10/2027"),
+                Map.entry("voucher_no", "VC-HQ-000001"));
         // The templates that may take two segments: the ones that carry a balance.
         for (String key : OutboxTemplates.keys("sms")) {
             int segments = SmsSegments.count(

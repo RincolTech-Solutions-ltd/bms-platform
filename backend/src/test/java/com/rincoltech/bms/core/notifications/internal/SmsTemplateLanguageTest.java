@@ -45,7 +45,15 @@ class SmsTemplateLanguageTest {
     void everyDefaultIsAValidTemplateOfItsOwnEventAndFitsOneSegmentWithSampleData() {
         assertThat(SmsTemplateEvents.ALL)
                 .extracting(Event::key)
-                .containsExactly("savings.deposit", "savings.withdrawal");
+                .containsExactly(
+                        "savings.deposit",
+                        "savings.withdrawal",
+                        "loan.disbursed",
+                        "loan.repayment_received",
+                        "loan.closed",
+                        "investment.funded",
+                        "investment.maturing",
+                        "investment.paid_out");
         for (Event event : SmsTemplateEvents.ALL) {
             Set<String> used = SmsTemplateLanguage.validate(event, event.defaultText());
             // The language reads exactly the placeholders the default template of OutboxTemplates uses.
@@ -68,8 +76,9 @@ class SmsTemplateLanguageTest {
     void renderingTheDefaultThroughTheLanguageGivesTheSameTextTheChannelSendsWithoutAnOverride() {
         OutboxTemplates templates = new OutboxTemplates();
         for (Event event : SmsTemplateEvents.ALL) {
-            String viaLanguage = SmsTemplateLanguage.render(event, event.defaultText(), VALUES);
-            String viaDefault = templates.render("sms", event.key(), VALUES).text();
+            Map<String, String> values = SmsTemplateLanguage.sampleValues(event, "Test Lender");
+            String viaLanguage = SmsTemplateLanguage.render(event, event.defaultText(), values);
+            String viaDefault = templates.render("sms", event.key(), values).text();
             assertThat(viaLanguage).isEqualTo(viaDefault);
         }
     }

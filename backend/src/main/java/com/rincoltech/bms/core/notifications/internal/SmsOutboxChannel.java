@@ -345,6 +345,9 @@ final class SmsOutboxChannel implements OutboxChannel {
         }
 
         Map<String, String> params = new HashMap<>(row.params());
+        // An SMS is plain text on one line: a value (the business name is the only free text) loses its control and
+        // direction-changing characters whichever wording is used, the default or the tenant's own.
+        params.replaceAll((name, value) -> SmsTemplateLanguage.clean(value));
         if (!config.includeBalance()) {
             params.remove("balance");
         }

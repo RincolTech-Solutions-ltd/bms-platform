@@ -50,6 +50,7 @@ class InvestmentServicer implements InvestmentServicing {
     private final CurrentTenant currentTenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final InvestmentNotices notices;
 
     InvestmentServicer(
             InvestmentRepository repo,
@@ -59,7 +60,8 @@ class InvestmentServicer implements InvestmentServicing {
             TenantSequences sequences,
             CurrentTenant currentTenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            InvestmentNotices notices) {
         this.repo = repo;
         this.members = members;
         this.books = books;
@@ -68,6 +70,7 @@ class InvestmentServicer implements InvestmentServicing {
         this.currentTenant = currentTenant;
         this.clock = clock;
         this.audit = audit;
+        this.notices = notices;
     }
 
     LocalDate today() {
@@ -146,6 +149,11 @@ class InvestmentServicer implements InvestmentServicing {
                                         inv.maturityDate().toString())),
                         null,
                         "system");
+                // Only the reminder before maturity messages the investor, and only on the day the job really runs:
+                // a replay of past dates (the fabricated history) texts nobody.
+                if (before && date.equals(today())) {
+                    notices.maturing(inv);
+                }
                 reminders++;
             }
         }
@@ -302,6 +310,9 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.branchId(),
                 Map.of("status", "pending_funding"),
                 after));
+        if (InvestmentNotices.sends(source)) {
+            notices.funded(inv, txnId, valueDate, maturity, receipt);
+        }
     }
 
     // ---- Accrual (FR-INV-04, FR-INV-09) ---------------------------------------------------
@@ -506,6 +517,9 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.id(),
                 inv.branchId(),
                 Map.of("amount_minor", amount, "voucher_no", voucher, "payment_method_key", paymentMethodKey)));
+        if (InvestmentNotices.sends(source)) {
+            notices.paidOut(inv, txnId, amount, valueDate, voucher);
+        }
         return txnId;
     }
 
@@ -581,6 +595,9 @@ class InvestmentServicer implements InvestmentServicing {
                         "return_minor", ret,
                         "voucher_no", voucher,
                         "payment_method_key", paymentMethodKey)));
+        if (InvestmentNotices.sends(source)) {
+            notices.paidOut(inv, txnId, total, today, voucher);
+        }
         return txnId;
     }
 
@@ -844,6 +861,7 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.branchId(),
                 Map.of("status", "active"),
                 after));
+        notices.paidOut(inv, txnId, s.cashMinor(), today, voucher);
         return txnId;
     }
 

@@ -58,6 +58,7 @@ class LoanServicer implements LoanServicing {
     private final BusinessClock clock;
     private final AuditLog audit;
     private final CollateralLookup collateral;
+    private final LoanNotices notices;
 
     LoanServicer(
             LoanRepository loans,
@@ -69,7 +70,8 @@ class LoanServicer implements LoanServicing {
             CurrentTenant currentTenant,
             BusinessClock clock,
             AuditLog audit,
-            CollateralLookup collateral) {
+            CollateralLookup collateral,
+            LoanNotices notices) {
         this.loans = loans;
         this.repo = repo;
         this.products = products;
@@ -80,6 +82,7 @@ class LoanServicer implements LoanServicing {
         this.clock = clock;
         this.audit = audit;
         this.collateral = collateral;
+        this.notices = notices;
     }
 
     LocalDate today() {
@@ -240,6 +243,9 @@ class LoanServicer implements LoanServicing {
         after.put("approval_request_id", approvalId);
         audit.record(new AuditLog.Entry(
                 "lending.loan.disbursed", SUBJECT, loan.id(), loan.branchId(), Map.of("status", "approved"), after));
+        if (LoanNotices.sends(source)) {
+            notices.disbursed(loan, txnId, date, principal, schedule.getFirst());
+        }
     }
 
     // ---- Repayment (FR-REP-01 to FR-REP-04, FR-LCL-01, FR-LCL-03) ------------------------
@@ -343,17 +349,33 @@ class LoanServicer implements LoanServicing {
                 loan.id(),
                 loan.branchId(),
                 after));
+        Position position = null;
         if (!recovery) {
-            Position position = refresh(loan.id(), items, today);
-            if (position.settled()) {
-                close(loan, valueDate, recordedBy);
-            }
+            position = refresh(loan.id(), items, today);
+        }
+        if (LoanNotices.sends(source)) {
+            // The receipt, then (below) the thanks if this repayment settled the loan, in the money's own transaction.
+            notices.repaymentReceived(
+                    loan,
+                    txnId,
+                    amountMinor,
+                    valueDate,
+                    receipt,
+                    position == null
+                            ? null
+                            : position.principalOutstandingMinor()
+                                    + position.interestOutstandingMinor()
+                                    + position.feesOutstandingMinor()
+                                    + position.penaltiesOutstandingMinor());
+        }
+        if (position != null && position.settled()) {
+            close(loan, valueDate, recordedBy, LoanNotices.sends(source) ? txnId : null);
         }
         return txnId;
     }
 
     /** FR-LCL-01: fully paid or waived; the pledges are released by the status move. */
-    private void close(Loan loan, LocalDate on, UUID by) {
+    private void close(Loan loan, LocalDate on, UUID by, UUID closingTxnId) {
         loans.move(loan.id(), "active", "closed", by, null, Map.of());
         repo.closedOn(loan.id(), on);
         audit.record(new AuditLog.Entry(
@@ -363,6 +385,9 @@ class LoanServicer implements LoanServicing {
                 loan.branchId(),
                 Map.of("status", "active"),
                 Map.of("status", "closed", "closed_on", on.toString())));
+        if (closingTxnId != null) {
+            notices.closed(loan, closingTxnId);
+        }
     }
 
     // ---- Reversal (FR-REP-05) -------------------------------------------------------------
@@ -609,7 +634,8 @@ class LoanServicer implements LoanServicing {
                 repo.closedOn(loan.id(), null);
                 restorePledges(loan, by, unsecuredItemsListedOnRequest);
             } else if (loan.status().equals("active") && position.settled()) {
-                close(loan, today, by);
+                // A reversal that settles the loan texts nobody: the member was told about every repayment already.
+                close(loan, today, by, null);
             }
         }
     }
