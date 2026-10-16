@@ -1,9 +1,12 @@
 package com.rincoltech.bms.core.notifications;
 
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.http.HttpStatus;
 
 /**
  * The one way a vertical queues a member SMS for a business event (FR-NTF-02, ADR-036 third amendment): a loan disbursed, a
@@ -28,6 +31,31 @@ import java.util.function.Supplier;
  * the tenant's own wording and the segment count. Personal data: the phone number is never logged.
  */
 public interface SmsEvents {
+
+    /** The one permission that may record a money event without telling the member: the business administrator's. */
+    String WITHHOLD_PERMISSION = "core.settings.manage";
+
+    /**
+     * What a request's {@code notify_member} means. Omitted or true: the member is told (where the tenant has SMS on).
+     * False is accepted only from a holder of {@value #WITHHOLD_PERMISSION}, which only the business administrator holds
+     * (a register import is run by one): any other caller gets 403, before anything is recorded. Otherwise a cashier
+     * could take money out of a member's account and the member would never be told. Call it in the request handler
+     * before any money moves; it needs the request's principal.
+     */
+    static boolean notifyMember(Boolean requested) {
+        if (!Boolean.FALSE.equals(requested)) {
+            return true;
+        }
+        if (!CurrentPrincipal.require().hasPermission(WITHHOLD_PERMISSION)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "notify_member_forbidden",
+                    "Permission denied",
+                    "Only a business administrator can record this without sending the member a text message. Leave"
+                            + " notify_member out, or ask an administrator.");
+        }
+        return false;
+    }
 
     /** The outcome of a call, for the caller's tests and logs; no caller needs to act on it. */
     enum Result {
@@ -104,6 +132,19 @@ public interface SmsEvents {
 
     /** {@code 15/10/2026}: day, month and year, the order Uganda writes them, the same length always. */
     String date(LocalDate date);
+
+    /**
+     * Whether an event with this value date is recent enough to be texted (not older than the cutoff). Guarded: a failure
+     * answers true, the safe side for a note that only records a decision.
+     */
+    boolean withinCutoff(LocalDate valueDate);
+
+    /**
+     * The words for the audit entry of a money event: whether the member was to be told ({@code notify_member}, after the
+     * source and the request's flag) and whether the value date is within the cutoff ({@code sms_within_cutoff}). A
+     * module puts them in the entry's after-map so that a movement recorded without a text can be found afterwards.
+     */
+    Map<String, Object> auditNote(boolean notifyMember, LocalDate valueDate);
 
     /** Writes the row in the caller's transaction (see the class comment). Never throws except for a JVM error. */
     Result queue(MemberSms message);

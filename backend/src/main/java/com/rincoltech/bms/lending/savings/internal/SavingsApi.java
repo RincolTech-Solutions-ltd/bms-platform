@@ -183,7 +183,7 @@ final class SavingsApi {
             @Schema(
                     description =
                             "False records the deposit without a text message to the member; omitted or true sends"
-                                    + " it where the tenant has SMS on. A register import sends false.")
+                                    + " it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(
@@ -197,7 +197,7 @@ final class SavingsApi {
             @Schema(
                     description =
                             "False records the withdrawal without a text message to the member; omitted or true sends"
-                                    + " it where the tenant has SMS on. A register import sends false.")
+                                    + " it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "SavingsCloseRequest")
@@ -209,7 +209,7 @@ final class SavingsApi {
             @Schema(
                     description =
                             "False closes the account without a text message to the member; omitted or true sends it"
-                                    + " where the tenant has SMS on. A register import sends false.")
+                                    + " where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "SavingsReasonRequest")

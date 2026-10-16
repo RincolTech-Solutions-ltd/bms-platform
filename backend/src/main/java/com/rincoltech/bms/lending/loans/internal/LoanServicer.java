@@ -255,6 +255,7 @@ class LoanServicer implements LoanServicing {
             after.put("fee_receipt_no", feeReceipt);
         }
         after.put("approval_request_id", approvalId);
+        after.putAll(notices.audit(source, notifyMember, date));
         audit.record(new AuditLog.Entry(
                 "lending.loan.disbursed", SUBJECT, loan.id(), loan.branchId(), Map.of("status", "approved"), after));
         if (LoanNotices.sends(source, notifyMember)) {
@@ -362,6 +363,7 @@ class LoanServicer implements LoanServicing {
         after.put("amount_minor", amountMinor);
         after.put("value_date", valueDate.toString());
         after.put("receipt_no", receipt);
+        after.putAll(notices.audit(source, notifyMember, valueDate));
         if (!recovery) {
             repo.insertAllocations(txnId, txnId, applied.allocations());
             repo.saveItems(items, today);

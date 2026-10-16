@@ -6,6 +6,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.lending.loans.LoanFixtures;
+import com.rincoltech.bms.testsupport.MovableClock;
 import com.rincoltech.bms.testsupport.MovableClockConfig;
 import com.rincoltech.bms.testsupport.SmsTenants;
 import java.sql.Timestamp;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
@@ -38,6 +40,7 @@ import tools.jackson.databind.json.JsonMapper;
  * days and a tenant without SMS queue nothing. All figures and numbers fabricated.
  */
 @Import(MovableClockConfig.class)
+@ResourceLock(MovableClockConfig.LOCK)
 class InvestmentEventSmsIT extends LoanFixtures {
 
     static final String INV = "/api/v1/lending/investments";
@@ -45,6 +48,9 @@ class InvestmentEventSmsIT extends LoanFixtures {
 
     @Autowired
     BusinessClock clock;
+
+    @Autowired
+    MovableClock movable;
 
     @Autowired
     TenantJobs tenantJobs;
@@ -68,7 +74,7 @@ class InvestmentEventSmsIT extends LoanFixtures {
         cashierPerms = permissionsOf("cashier");
         accountantPerms = permissionsOf("accountant");
         // One minute before Kampala's midnight on 2026-10-15: the business date is the 15th.
-        MovableClockConfig.CLOCK.set(MovableClockConfig.BEFORE_MIDNIGHT);
+        movable.set(MovableClockConfig.BEFORE_MIDNIGHT);
     }
 
     LocalDate today() {
@@ -120,6 +126,15 @@ class InvestmentEventSmsIT extends LoanFixtures {
         return "test-" + UUID.randomUUID();
     }
 
+    /** The cashier; with {@code notify_member: false} a business administrator's standing is added (only that may say it). */
+    HttpHeaders cashierFor(Boolean notify) {
+        return as(
+                cashier,
+                Boolean.FALSE.equals(notify) ? cashierPerms + ",core.settings.manage" : cashierPerms,
+                "*",
+                null);
+    }
+
     HttpHeaders withKey(HttpHeaders h, String key) {
         h.add("Idempotency-Key", key);
         return h;
@@ -136,8 +151,7 @@ class InvestmentEventSmsIT extends LoanFixtures {
         if (notify != null) {
             body.put("notify_member", notify);
         }
-        return send(
-                HttpMethod.POST, INV + "/" + id + "/funding", withKey(as(cashier, cashierPerms, "*", null), key), body);
+        return send(HttpMethod.POST, INV + "/" + id + "/funding", withKey(cashierFor(notify), key), body);
     }
 
     ResponseEntity<JsonNode> decide(String approvalId, UUID user, String perms) {
@@ -445,14 +459,11 @@ class InvestmentEventSmsIT extends LoanFixtures {
         ResponseEntity<JsonNode> paid = send(
                 HttpMethod.POST,
                 INV + "/" + monthly + "/return-payouts",
-                withKey(as(cashier, cashierPerms, "*", null), key()),
+                withKey(cashierFor(false), key()),
                 Map.of("payment_method_key", "cash", "notify_member", false));
         assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
-        // (The nightly run also reminded the investor of the first investment, which matures tomorrow: a job, not a
-        // request.)
-        assertThat(templates())
-                .as("no payout message")
-                .containsExactlyInAnyOrder("investment.funded", "investment.maturing");
+        // (The first investment, funded with notify_member false and maturing tomorrow, is not reminded either.)
+        assertThat(templates()).as("no payout message, no reminder").containsExactly("investment.funded");
     }
 
     @Test
@@ -480,6 +491,90 @@ class InvestmentEventSmsIT extends LoanFixtures {
         assertThat(inv(id).get("status").asString()).isEqualTo("cancelled");
         assertThat(cancelled()).containsExactly("investment.funded");
         assertThat(templates()).as("nothing new was queued").containsExactly("investment.funded");
+    }
+
+    @Test
+    void frNtf20_aCashierCannotPayOutOrFundWithoutTellingTheInvestorAndTheAdministratorsChoiceIsAudited() {
+        smsOn();
+        String monthly = open(product("SMSA", Map.of()), 1_000_000, 6);
+        fund(monthly, today().minusMonths(3));
+        runDaily(today());
+        long paidBefore = inv(monthly).get("return_paid_minor").asLong();
+
+        // A cashier that says no text on a payout: refused before the money moves.
+        ResponseEntity<JsonNode> refused = send(
+                HttpMethod.POST,
+                INV + "/" + monthly + "/return-payouts",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("payment_method_key", "cash", "notify_member", false));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("notify_member_forbidden");
+        assertThat(inv(monthly).get("return_paid_minor").asLong()).isEqualTo(paidBefore);
+        // And on a funding request: no approval is raised.
+        String unfunded = open(product("SMSA2", Map.of()), 1_000_000, 6);
+        ResponseEntity<JsonNode> refusedFunding = send(
+                HttpMethod.POST,
+                INV + "/" + unfunded + "/funding",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of("value_date", today().toString(), "payment_method_key", "cash", "notify_member", false));
+        assertThat(refusedFunding.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(inv(unfunded).get("status").asString()).isEqualTo("pending_funding");
+
+        // The same cashier, saying nothing or true, is told; an administrator's no is audited.
+        assertThat(pay(monthly, "return-payouts", key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(templates()).contains("investment.paid_out");
+        ResponseEntity<JsonNode> quiet = requestFunding(unfunded, today(), key(), false);
+        assertThat(decide(quiet.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        Map<String, Object> audit = TestDatabase.owner()
+                .sql(
+                        "SELECT data -> 'after' ->> 'notify_member' AS notify, data -> 'after' ->> 'sms_within_cutoff' AS cutoff"
+                                + " FROM audit_log WHERE tenant_id = ? AND action = 'lending.investment.funded' AND entity_id = ?::uuid")
+                .params(t.tenantId(), unfunded)
+                .query()
+                .singleRow();
+        assertThat(audit.get("notify")).isEqualTo("false");
+        assertThat(audit.get("cutoff")).isEqualTo("true");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data -> 'after' ->> 'notify_member' FROM audit_log WHERE tenant_id = ?"
+                                + " AND action = 'lending.investment.return_paid'")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("true");
+    }
+
+    /**
+     * An investment loaded with notify_member false (or by the seed or import port) keeps that choice: the nightly job
+     * never reminds its investor that it matures, and a rollover inherits it; one funded as usual is reminded.
+     */
+    @Test
+    void frNtf20_anInvestmentRecordedWithoutNotifyingItsInvestorIsNeverRemindedLater() {
+        smsOn();
+        String p = product("SMSN", Map.of("payout_frequency", "at_maturity"));
+        String quiet = open(p, 1_000_000, 3);
+        ResponseEntity<JsonNode> r =
+                requestFunding(quiet, today().minusMonths(3).plusDays(3), key(), false);
+        assertThat(decide(r.getBody().get("approval_request_id").asString(), manager, managerPerms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        String told = open(p, 1_000_000, 3);
+        fund(told, today().minusMonths(3).plusDays(3));
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT notify_member FROM lending_investments WHERE id = ?::uuid")
+                        .param(quiet)
+                        .query(Boolean.class)
+                        .single())
+                .isFalse();
+
+        assertThat(runDaily(today()))
+                .as("both are due a reminder; the job marks both")
+                .isEqualTo(2);
+
+        assertThat(rows(t)).as("only the one whose investor may be told").hasSize(1);
+        assertThat(params(only("investment.maturing")).get("account_no").asString())
+                .isEqualTo(inv(told).get("account_no").asString());
     }
 
     // ---- What queues nothing -------------------------------------------------------------------------------

@@ -38,6 +38,11 @@ class SavingsNotices {
         return "staff".equals(source) && notifyMember;
     }
 
+    /** What the audit entry of a money event records about the text: whether the member was to be told, and the cutoff. */
+    Map<String, Object> audit(String source, boolean notifyMember, LocalDate valueDate) {
+        return sms.auditNote(sends(source, notifyMember), valueDate);
+    }
+
     void receipt(
             String templateKey,
             AccountRow a,

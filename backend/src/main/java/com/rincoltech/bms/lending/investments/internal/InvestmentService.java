@@ -3,6 +3,7 @@ package com.rincoltech.bms.lending.investments.internal;
 import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.notifications.SmsEvents;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.Branches;
@@ -179,7 +180,7 @@ class InvestmentService {
             payload.put(FundingAction.DATE, r.valueDate().toString());
             payload.put(FundingAction.METHOD, r.paymentMethodKey());
             payload.put(FundingAction.REFERENCE, blankToNull(r.externalReference()));
-            payload.put(FundingAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
+            payload.put(FundingAction.NOTIFY, SmsEvents.notifyMember(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     FundingAction.TYPE,
                     inv.branchId(),
@@ -204,7 +205,7 @@ class InvestmentService {
                     blankToNull(r.externalReference()),
                     CurrentPrincipal.require().userId(),
                     "staff",
-                    !Boolean.FALSE.equals(r.notifyMember()));
+                    SmsEvents.notifyMember(r.notifyMember()));
             return result(id, txn);
         });
     }
@@ -221,7 +222,7 @@ class InvestmentService {
                     blankToNull(r.externalReference()),
                     CurrentPrincipal.require().userId(),
                     "staff",
-                    !Boolean.FALSE.equals(r.notifyMember()));
+                    SmsEvents.notifyMember(r.notifyMember()));
             return result(id, txn);
         });
     }
@@ -268,7 +269,7 @@ class InvestmentService {
             payload.put(EarlyWithdrawalAction.METHOD, r.paymentMethodKey());
             payload.put(EarlyWithdrawalAction.REFERENCE, blankToNull(r.externalReference()));
             payload.put(EarlyWithdrawalAction.REASON, r.reason().trim());
-            payload.put(EarlyWithdrawalAction.NOTIFY, !Boolean.FALSE.equals(r.notifyMember()));
+            payload.put(EarlyWithdrawalAction.NOTIFY, SmsEvents.notifyMember(r.notifyMember()));
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     EarlyWithdrawalAction.TYPE,
                     inv.branchId(),

@@ -157,7 +157,7 @@ class InvestmentServicer implements InvestmentServicing {
                         "system");
                 // Only the reminder before maturity messages the investor, and only on the day the job really runs:
                 // a replay of past dates (the fabricated history) texts nobody.
-                if (notifyMembers && before && date.equals(today())) {
+                if (notifyMembers && before && date.equals(today()) && repo.notifyMember(inv.id())) {
                     notices.maturing(inv);
                 }
                 reminders++;
@@ -323,6 +323,8 @@ class InvestmentServicer implements InvestmentServicing {
         after.put("payment_method_key", paymentMethodKey);
         after.put("approval_request_id", approvalId);
         after.put("checker_id", checkerId);
+        after.putAll(notices.audit(source, notifyMember, valueDate));
+        repo.notifyMember(inv.id(), InvestmentNotices.sends(source, notifyMember));
         audit.record(new AuditLog.Entry(
                 "lending.investment.funded",
                 SUBJECT,
@@ -543,12 +545,12 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.returnDueMinor(),
                 inv.returnPaidMinor() + amount,
                 inv.closedOn());
-        audit.record(AuditLog.Entry.created(
-                "lending.investment.return_paid",
-                SUBJECT,
-                inv.id(),
-                inv.branchId(),
-                Map.of("amount_minor", amount, "voucher_no", voucher, "payment_method_key", paymentMethodKey)));
+        Map<String, Object> paid = new LinkedHashMap<>();
+        paid.put("amount_minor", amount);
+        paid.put("voucher_no", voucher);
+        paid.put("payment_method_key", paymentMethodKey);
+        paid.putAll(notices.audit(source, notifyMember, valueDate));
+        audit.record(AuditLog.Entry.created("lending.investment.return_paid", SUBJECT, inv.id(), inv.branchId(), paid));
         if (InvestmentNotices.sends(source, notifyMember)) {
             notices.paidOut(inv, txnId, amount, valueDate, voucher);
         }
@@ -633,16 +635,23 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.id(),
                 inv.branchId(),
                 Map.of("status", "matured"),
-                Map.of(
-                        "status", "paid_out",
-                        "principal_minor", principal,
-                        "return_minor", ret,
-                        "voucher_no", voucher,
-                        "payment_method_key", paymentMethodKey)));
+                paidOutEntry(principal, ret, voucher, paymentMethodKey, notices.audit(source, notifyMember, today))));
         if (InvestmentNotices.sends(source, notifyMember)) {
             notices.paidOut(inv, txnId, total, today, voucher);
         }
         return txnId;
+    }
+
+    private static Map<String, Object> paidOutEntry(
+            long principal, long ret, String voucher, String paymentMethodKey, Map<String, Object> smsNote) {
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("status", "paid_out");
+        after.put("principal_minor", principal);
+        after.put("return_minor", ret);
+        after.put("voucher_no", voucher);
+        after.put("payment_method_key", paymentMethodKey);
+        after.putAll(smsNote);
+        return after;
     }
 
     // ---- Rollover (FR-INV-05) -------------------------------------------------------------
@@ -759,6 +768,7 @@ class InvestmentServicer implements InvestmentServicing {
                 inv.returnPaidMinor() + ret,
                 start);
         repo.rolledOver(inv.id(), newId);
+        repo.notifyMember(newId, repo.notifyMember(inv.id()));
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("status", "rolled_over");
         after.put("mode", mode);
@@ -912,6 +922,7 @@ class InvestmentServicer implements InvestmentServicing {
         after.put("reason", reason);
         after.put("approval_request_id", approvalId);
         after.put("checker_id", checkerId);
+        after.putAll(notices.audit("staff", notifyMember, today));
         audit.record(new AuditLog.Entry(
                 "lending.investment.withdrawn_early",
                 SUBJECT,

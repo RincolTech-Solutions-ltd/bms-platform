@@ -11,8 +11,11 @@ import com.rincoltech.bms.lending.loans.LoanFixtures;
 import com.rincoltech.bms.lending.loans.LoanServicing;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import com.rincoltech.bms.lending.members.MemberLookup;
+import com.rincoltech.bms.testsupport.MovableClock;
 import com.rincoltech.bms.testsupport.MovableClockConfig;
 import com.rincoltech.bms.testsupport.SmsTenants;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +25,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,10 +50,14 @@ import tools.jackson.databind.JsonNode;
  * proved with the real channel in {@code SmsEventsIT}. All figures and numbers fabricated.
  */
 @Import(MovableClockConfig.class)
+@ResourceLock(MovableClockConfig.LOCK)
 class LoanEventSmsIT extends LoanFixtures {
 
     @Autowired
     BusinessClock clock;
+
+    @Autowired
+    MovableClock movable;
 
     @Autowired
     PlatformTransactionManager transactionManager;
@@ -86,7 +94,7 @@ class LoanEventSmsIT extends LoanFixtures {
         cashierPerms = permissionsOf("cashier");
         // Twenty-nine seconds of a minute before Kampala's midnight: the business date is the 15th, and the test moves
         // it.
-        MovableClockConfig.CLOCK.set(MovableClockConfig.BEFORE_MIDNIGHT);
+        movable.set(MovableClockConfig.BEFORE_MIDNIGHT);
     }
 
     LocalDate today() {
@@ -167,6 +175,15 @@ class LoanEventSmsIT extends LoanFixtures {
         return "test-" + UUID.randomUUID();
     }
 
+    /** The cashier; with {@code notify_member: false} a business administrator's standing is added (only that may say it). */
+    HttpHeaders cashierFor(Boolean notify) {
+        return as(
+                cashier,
+                Boolean.FALSE.equals(notify) ? cashierPerms + ",core.settings.manage" : cashierPerms,
+                "*",
+                null);
+    }
+
     HttpHeaders withKey(HttpHeaders h, String key) {
         h.add("Idempotency-Key", key);
         return h;
@@ -184,11 +201,8 @@ class LoanEventSmsIT extends LoanFixtures {
         if (notify != null) {
             body.put("notify_member", notify);
         }
-        ResponseEntity<JsonNode> r = send(
-                HttpMethod.POST,
-                LOANS + "/" + loan + "/disbursements",
-                withKey(as(cashier, cashierPerms, "*", null), key()),
-                body);
+        ResponseEntity<JsonNode> r =
+                send(HttpMethod.POST, LOANS + "/" + loan + "/disbursements", withKey(cashierFor(notify), key()), body);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         ResponseEntity<JsonNode> d = send(
                 HttpMethod.POST,
@@ -210,11 +224,7 @@ class LoanEventSmsIT extends LoanFixtures {
         if (notify != null) {
             body.put("notify_member", notify);
         }
-        return send(
-                HttpMethod.POST,
-                LOANS + "/" + loan + "/repayments",
-                withKey(as(cashier, cashierPerms, "*", null), key),
-                body);
+        return send(HttpMethod.POST, LOANS + "/" + loan + "/repayments", withKey(cashierFor(notify), key), body);
     }
 
     JsonNode repaid(String loan, long amount) {
@@ -489,7 +499,7 @@ class LoanEventSmsIT extends LoanFixtures {
         disburse(loan);
         assertThat(params(only("loan.disbursed")).get("date").asString()).isEqualTo("15/10/2026");
 
-        MovableClockConfig.CLOCK.set(MovableClockConfig.AFTER_MIDNIGHT);
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
         assertThat(today()).isEqualTo(LocalDate.parse("2026-10-16"));
         repaid(loan, 100_000);
 
@@ -557,7 +567,7 @@ class LoanEventSmsIT extends LoanFixtures {
         // Past midnight the cutoff moves with the Kampala date: on the 16th the 12th is four days old and is not
         // texted,
         // the 13th is three days old and is.
-        MovableClockConfig.CLOCK.set(MovableClockConfig.AFTER_MIDNIGHT);
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
         LocalDate twelfth = LocalDate.parse("2026-10-12");
         String other = approved(instalmentProduct("SMSO4"), 1_200_000, 3, 15);
         disburse(other, twelfth, null);
@@ -569,51 +579,158 @@ class LoanEventSmsIT extends LoanFixtures {
 
     // ---- A reversal withdraws the message that has not gone ---------------------------------------------------
 
+    /**
+     * Three receipts, each reversed: one nobody has taken, one that failed once and waits to be retried (attempts 1, pending,
+     * a retry time, no lease: it would still go out), and one a sender holds right now (a live lease: it may be at the
+     * provider). The first two are withdrawn; the third is left, whatever the reversal says.
+     */
     @Test
-    void frNtf01_aReversalWithdrawsTheReceiptOfTheEntryItReversesIfTheSenderHasNotClaimedItAndLeavesAClaimedOne() {
+    void frNtf01_aReversalWithdrawsAnUnclaimedAndARetryPendingReceiptAndLeavesOneASenderHolds() {
         smsOn();
         String loan = approved(instalmentProduct("SMSV"), 1_200_000, 3, 16);
         disburse(loan);
-        JsonNode first = repaid(loan, 100_000).get("transaction");
-        JsonNode second = repaid(loan, 150_000).get("transaction");
-        // The sender has claimed the first receipt (an attempt counted, a lease taken): it may be at the provider.
+        JsonNode held = repaid(loan, 100_000).get("transaction");
+        JsonNode retrying = repaid(loan, 150_000).get("transaction");
+        JsonNode fresh = repaid(loan, 200_000).get("transaction");
+        Instant now = MovableClockConfig.BEFORE_MIDNIGHT;
+        // A sender holds the first: the claim counted an attempt and took a lease of two minutes.
         TestDatabase.owner()
-                .sql("UPDATE notification_outbox SET attempts = 1 WHERE tenant_id = ? AND idempotency_key LIKE ?")
+                .sql("UPDATE notification_outbox SET attempts = 1, leased_until = ?, next_attempt_at = ?"
+                        + " WHERE tenant_id = ? AND idempotency_key LIKE ?")
                 .params(
+                        Timestamp.from(now.plusSeconds(120)),
+                        Timestamp.from(now.plusSeconds(120)),
                         t.tenantId(),
-                        "sms:loan.repayment_received:%:" + first.get("id").asString() + ":%")
+                        keyOf(held))
+                .update();
+        // The second failed once (a provider 503): pending again with a retry time and no lease.
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE notification_outbox SET attempts = 1, leased_until = NULL, last_error = 'provider_http_503',"
+                                + " next_attempt_at = ? WHERE tenant_id = ? AND idempotency_key LIKE ?")
+                .params(Timestamp.from(now.plusSeconds(60)), t.tenantId(), keyOf(retrying))
                 .update();
 
-        reverse(loan, second.get("id").asString());
-        assertThat(cancelled()).containsExactly("loan.repayment_received");
-        Map<String, Object> gone = TestDatabase.owner()
-                .sql("SELECT status, last_error, params::text AS params FROM notification_outbox"
-                        + " WHERE idempotency_key LIKE ?")
-                .param("sms:loan.repayment_received:%:" + second.get("id").asString() + ":%")
+        reverse(loan, fresh.get("id").asString());
+        reverse(loan, retrying.get("id").asString());
+        assertThat(cancelled()).containsExactlyInAnyOrder("loan.repayment_received", "loan.repayment_received");
+        for (JsonNode txn : new JsonNode[] {fresh, retrying}) {
+            Map<String, Object> gone = TestDatabase.owner()
+                    .sql("SELECT status, last_error, params::text AS params FROM notification_outbox"
+                            + " WHERE idempotency_key LIKE ?")
+                    .param(keyOf(txn))
+                    .query()
+                    .singleRow();
+            assertThat(gone.get("status")).isEqualTo("failed");
+            assertThat(gone.get("last_error")).isEqualTo("cancelled_reversed");
+            assertThat(gone.get("params"))
+                    .as("the amount and receipt number are cleared")
+                    .isEqualTo("{}");
+        }
+
+        reverse(loan, held.get("id").asString());
+        assertThat(cancelled()).as("the one a sender holds is left alone").hasSize(2);
+        Map<String, Object> kept = TestDatabase.owner()
+                .sql("SELECT status, attempts FROM notification_outbox WHERE idempotency_key LIKE ?")
+                .param(keyOf(held))
                 .query()
                 .singleRow();
-        assertThat(gone.get("status")).isEqualTo("failed");
-        assertThat(gone.get("last_error")).isEqualTo("cancelled_reversed");
-        assertThat(gone.get("params"))
-                .as("the amount and receipt number are cleared")
-                .isEqualTo("{}");
-
-        reverse(loan, first.get("id").asString());
-        assertThat(cancelled()).as("the claimed one is left alone").containsExactly("loan.repayment_received");
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT status FROM notification_outbox WHERE idempotency_key LIKE ?")
-                        .param("sms:loan.repayment_received:%:"
-                                + first.get("id").asString() + ":%")
-                        .query(String.class)
-                        .single())
-                .isEqualTo("pending");
+        assertThat(kept.get("status")).isEqualTo("pending");
+        assertThat(kept.get("attempts")).isEqualTo(1);
         // The operator's list of failed messages does not offer a withdrawn one for "send again".
         assertThat(TestDatabase.owner()
-                        .sql(
-                                "SELECT count(*) FROM notification_outbox_failures(1000) WHERE last_error = 'cancelled_reversed'")
+                        .sql("SELECT count(*) FROM notification_outbox_failures(1000)"
+                                + " WHERE last_error = 'cancelled_reversed'")
                         .query(Long.class)
                         .single())
                 .isZero();
+    }
+
+    String keyOf(JsonNode txn) {
+        return "sms:loan.repayment_received:%:" + txn.get("id").asString() + ":%";
+    }
+
+    // ---- Only an administrator may record a movement without telling the member ---------------------------------
+
+    @Test
+    void frNtf20_aCashierCannotRecordAMovementWithoutTellingTheMemberButAnAdministratorCanAndItIsAudited() {
+        smsOn();
+        String loan = approved(instalmentProduct("SMSA"), 1_200_000, 3, 18);
+        // A disbursement request from a cashier that says no text: refused in plain words, no approval is raised.
+        Map<String, Object> disbursement = new LinkedHashMap<>();
+        disbursement.put("disbursement_date", today().toString());
+        disbursement.put("payment_method_key", "cash");
+        disbursement.put("notify_member", false);
+        ResponseEntity<JsonNode> refusedDisbursement = send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/disbursements",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                disbursement);
+        assertThat(refusedDisbursement.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refusedDisbursement.getBody().get("code").asString()).isEqualTo("notify_member_forbidden");
+        assertThat(refusedDisbursement.getBody().get("detail").asString())
+                .contains("Only a business administrator")
+                .contains("notify_member");
+        assertThat(get(loan, "").get("status").asString()).isEqualTo("approved");
+        disburse(loan);
+
+        // A repayment from a cashier that says no text: refused before anything is recorded.
+        ResponseEntity<JsonNode> refused = send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/repayments",
+                withKey(as(cashier, cashierPerms, "*", null), key()),
+                Map.of(
+                        "amount_minor",
+                        100_000,
+                        "value_date",
+                        today().toString(),
+                        "payment_method_key",
+                        "cash",
+                        "notify_member",
+                        false));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("notify_member_forbidden");
+        assertThat(get(loan, "/transactions").get("items").findValuesAsString("txn_type"))
+                .as("no money moved")
+                .containsExactly("disbursement");
+
+        // The default is unchanged: omitted or true by the same cashier is told.
+        repaid(loan, 100_000, today(), null);
+        repaid(loan, 100_000, today(), true);
+        assertThat(templates()).containsExactly("loan.disbursed", "loan.repayment_received", "loan.repayment_received");
+
+        // An administrator may say no, and the entry says so, with the cutoff decision.
+        JsonNode quiet = repaid(loan, 100_000, today(), false).get("transaction");
+        assertThat(templates()).as("nothing new for the quiet one").hasSize(3);
+        Map<String, Object> audit = TestDatabase.owner()
+                .sql(
+                        "SELECT data -> 'after' ->> 'notify_member' AS notify, data -> 'after' ->> 'sms_within_cutoff' AS cutoff,"
+                                + " data -> 'after' ->> 'receipt_no' AS receipt FROM audit_log"
+                                + " WHERE tenant_id = ? AND action = 'lending.loan.repayment_recorded'"
+                                + " AND data -> 'after' ->> 'receipt_no' = ?")
+                .params(t.tenantId(), quiet.get("receipt_no").asString())
+                .query()
+                .singleRow();
+        assertThat(audit.get("notify")).isEqualTo("false");
+        assertThat(audit.get("cutoff")).isEqualTo("true");
+        // And the told ones say true; an old value date says it was past the cutoff.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ?"
+                                + " AND action IN ('lending.loan.repayment_recorded', 'lending.loan.disbursed')"
+                                + " AND data -> 'after' ->> 'notify_member' = 'true'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3);
+        String other = approved(instalmentProduct("SMSA2"), 1_200_000, 3, 19);
+        disburse(other, today().minusDays(10), null);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data -> 'after' ->> 'sms_within_cutoff' FROM audit_log WHERE tenant_id = ?"
+                                + " AND action = 'lending.loan.disbursed' AND entity_id = ?::uuid")
+                        .params(t.tenantId(), other)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("false");
     }
 
     // ---- A failure of any collaborator of the message never loses the money ------------------------------------

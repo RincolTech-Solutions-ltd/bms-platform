@@ -51,6 +51,11 @@ class LoanNotices {
         return "staff".equals(source) && notifyMember;
     }
 
+    /** What the audit entry of a money event records about the text: whether the member was to be told, and the cutoff. */
+    java.util.Map<String, Object> audit(String source, boolean notifyMember, LocalDate valueDate) {
+        return sms.auditNote(sends(source, notifyMember), valueDate);
+    }
+
     /** @param paidOutMinor the principal less the fees deducted at disbursement: what the member actually receives */
     void disbursed(Loan loan, UUID txnId, LocalDate date, long paidOutMinor, ScheduleCalculator.Item first) {
         queue(DISBURSED, loan, txnId, date, () -> {

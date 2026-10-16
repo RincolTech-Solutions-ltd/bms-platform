@@ -219,12 +219,10 @@ class SavingsServicer implements SavingsServicing {
                 source,
                 by));
         repo.moved(a.id(), balance, valueDate);
-        audit.record(AuditLog.Entry.created(
-                "lending.savings.deposit_recorded",
-                SUBJECT,
-                a.id(),
-                a.branchId(),
-                movement(txnId, amountMinor, valueDate, receipt)));
+        Map<String, Object> recorded = movement(txnId, amountMinor, valueDate, receipt);
+        recorded.putAll(notices.audit(source, notifyMember, valueDate));
+        audit.record(
+                AuditLog.Entry.created("lending.savings.deposit_recorded", SUBJECT, a.id(), a.branchId(), recorded));
         if (SavingsNotices.sends(source, notifyMember)) {
             notices.receipt("savings.deposit", a, txnId, amountMinor, balance, receipt, valueDate);
         }
@@ -344,6 +342,7 @@ class SavingsServicer implements SavingsServicing {
         after.put("fee_minor", fee);
         after.put("approval_request_id", approvalId);
         after.put("checker_id", checkerId);
+        after.putAll(notices.audit(source, notifyMember, valueDate));
         audit.record(
                 AuditLog.Entry.created("lending.savings.withdrawal_recorded", SUBJECT, a.id(), a.branchId(), after));
         if (SavingsNotices.sends(source, notifyMember)) {
@@ -607,6 +606,7 @@ class SavingsServicer implements SavingsServicing {
         after.put("reason", reason);
         after.put("approval_request_id", approvalId);
         after.put("checker_id", by);
+        after.putAll(notices.audit("staff", notifyMember, today));
         audit.record(new AuditLog.Entry(
                 "lending.savings_account.closed", SUBJECT, a.id(), a.branchId(), Map.of("status", a.status()), after));
         if (txnId != null && notifyMember) {

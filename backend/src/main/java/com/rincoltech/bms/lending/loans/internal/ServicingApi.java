@@ -32,8 +32,9 @@ final class ServicingApi {
             @Size(max = 100) String externalReference,
 
             @Schema(
-                    description = "False records the disbursement without a text message to the borrower; omitted or"
-                            + " true sends it where the tenant has SMS on. A register import sends false.")
+                    description =
+                            "False records the disbursement without a text message to the borrower; omitted or"
+                                    + " true sends it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "RepaymentRequest")
@@ -52,7 +53,7 @@ final class ServicingApi {
             @Schema(
                     description =
                             "False records the repayment without a receipt text message to the borrower; omitted or"
-                                    + " true sends it where the tenant has SMS on. A register import sends false.")
+                                    + " true sends it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "LoanReasonRequest")

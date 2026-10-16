@@ -49,6 +49,11 @@ class InvestmentNotices {
         return "staff".equals(source) && notifyMember;
     }
 
+    /** What the audit entry of a money event records about the text: whether the member was to be told, and the cutoff. */
+    Map<String, Object> audit(String source, boolean notifyMember, LocalDate valueDate) {
+        return sms.auditNote(sends(source, notifyMember), valueDate);
+    }
+
     void funded(Inv inv, UUID txnId, LocalDate valueDate, LocalDate maturity, String receiptNo) {
         queue(FUNDED, inv, txnId.toString(), Outbox.TRANSACTIONAL, valueDate, () -> {
             Map<String, String> params = base(inv, inv.principalMinor());

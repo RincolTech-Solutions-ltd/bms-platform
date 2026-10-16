@@ -195,8 +195,9 @@ final class InvestmentApi {
             @Size(max = 100) String externalReference,
 
             @Schema(
-                    description = "False records the funding without a text message to the investor; omitted or true"
-                            + " sends it where the tenant has SMS on. A register import sends false.")
+                    description =
+                            "False records the funding without a text message to the investor; omitted or true"
+                                    + " sends it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "InvestmentPaymentRequest")
@@ -205,8 +206,9 @@ final class InvestmentApi {
             @Size(max = 100) String externalReference,
 
             @Schema(
-                    description = "False records the payout without a text message to the investor; omitted or true"
-                            + " sends it where the tenant has SMS on. A register import sends false.")
+                    description =
+                            "False records the payout without a text message to the investor; omitted or true"
+                                    + " sends it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "InvestmentRolloverRequest")
@@ -221,8 +223,9 @@ final class InvestmentApi {
             @NotBlank @Size(max = 500) String reason,
 
             @Schema(
-                    description = "False records the withdrawal without a text message to the investor; omitted or true"
-                            + " sends it where the tenant has SMS on. A register import sends false.")
+                    description =
+                            "False records the withdrawal without a text message to the investor; omitted or true"
+                                    + " sends it where the tenant has SMS on. False is accepted only from a business administrator (403 otherwise); a register import sends it.")
             Boolean notifyMember) {}
 
     @Schema(name = "InvestmentReasonRequest")

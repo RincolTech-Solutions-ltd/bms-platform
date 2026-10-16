@@ -8,6 +8,8 @@ import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.lending.loans.LoanFixtures;
 import com.rincoltech.bms.lending.members.MemberLookup;
+import com.rincoltech.bms.testsupport.MovableClock;
+import com.rincoltech.bms.testsupport.MovableClockConfig;
 import com.rincoltech.bms.testsupport.SmsTenants;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -18,9 +20,11 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -40,6 +44,8 @@ import tools.jackson.databind.JsonNode;
  * is checked against chapter 6 section 6.6.3, and after each test the member savings control
  * account equals each account's balance. All figures fabricated.
  */
+@Import(MovableClockConfig.class)
+@ResourceLock(MovableClockConfig.LOCK)
 class SavingsIT extends LoanFixtures {
 
     static final String PRODUCTS = "/api/v1/lending/savings-products";
@@ -47,6 +53,9 @@ class SavingsIT extends LoanFixtures {
 
     @Autowired
     BusinessClock clock;
+
+    @Autowired
+    MovableClock movable;
 
     @Autowired
     SavingsServicing servicing;
@@ -73,10 +82,18 @@ class SavingsIT extends LoanFixtures {
     @BeforeEach
     void users() {
         cashierPerms = permissionsOf("cashier");
+        // One minute before Kampala's midnight on 2026-10-15; no test here moves it, so the date cannot change under
+        // one.
+        movable.set(MovableClockConfig.BEFORE_MIDNIGHT);
         today = clock.today(BusinessClock.DEFAULT_ZONE);
     }
 
     // ---- Fixtures -------------------------------------------------------------------------
+
+    /** A business administrator's standing on top of the cashier's: the only kind that may say {@code notify_member: false}. */
+    HttpHeaders asCashierWhoMaySayNoText() {
+        return as(cashier, cashierPerms + ",core.settings.manage", "*", null);
+    }
 
     HttpHeaders asCashier() {
         return as(cashier, cashierPerms, "*", null);
@@ -394,13 +411,16 @@ class SavingsIT extends LoanFixtures {
         assertThat(deposit(account, 5_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         List<String> params = TestDatabase.owner()
                 .sql("SELECT params::text FROM notification_outbox WHERE channel = 'sms' AND idempotency_key LIKE ?"
-                        + " ORDER BY created_at DESC")
+                        + " ORDER BY 1")
                 .param(like)
                 .query(String.class)
                 .list();
         assertThat(params).hasSize(2);
-        assertThat(params.getFirst()).contains("balance", "45,000");
-        assertThat(params.getLast()).doesNotContain("balance");
+        // (The clock is fixed, so the rows share a time; they are told apart by what they hold.)
+        assertThat(params.stream().filter(x -> x.contains("balance")))
+                .singleElement()
+                .satisfies(x -> assertThat(x).contains("45,000"));
+        assertThat(params.stream().filter(x -> !x.contains("balance"))).hasSize(1);
     }
 
     /** The operator switches SMS on for this test's tenant, with a cap well above what a test sends. */
@@ -514,7 +534,11 @@ class SavingsIT extends LoanFixtures {
         if (notify != null) {
             body.put("notify_member", notify);
         }
-        return send(HttpMethod.POST, ACCOUNTS + "/" + account + "/deposits", withKey(asCashier(), key()), body);
+        return send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/deposits",
+                withKey(Boolean.FALSE.equals(notify) ? asCashierWhoMaySayNoText() : asCashier(), key()),
+                body);
     }
 
     @Test
@@ -541,7 +565,7 @@ class SavingsIT extends LoanFixtures {
         ResponseEntity<JsonNode> quiet = send(
                 HttpMethod.POST,
                 ACCOUNTS + "/" + account + "/withdrawals",
-                withKey(asCashier(), key()),
+                withKey(asCashierWhoMaySayNoText(), key()),
                 Map.of("amount_minor", 10_000, "payment_method_key", "mtn_momo", "notify_member", false));
         assertThat(quiet.getStatusCode()).as("%s", quiet.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(smsRows()).hasSize(1);
@@ -552,10 +576,71 @@ class SavingsIT extends LoanFixtures {
         ResponseEntity<JsonNode> closed = send(
                 HttpMethod.POST,
                 ACCOUNTS + "/" + account + "/close",
-                withKey(asCashier(), key()),
+                withKey(asCashierWhoMaySayNoText(), key()),
                 Map.of("payment_method_key", "cash", "notify_member", false));
         assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isIn(HttpStatus.CREATED, HttpStatus.ACCEPTED);
         assertThat(smsRows()).as("no third message").hasSize(2);
+    }
+
+    /**
+     * Before this feature every staff movement texted the member. A cashier must not be able to take money out of an
+     * account with {@code notify_member: false} and leave the member in the dark: only a business administrator may say it,
+     * and the entry records that it was said.
+     */
+    @Test
+    void frNtf20_aCashierCannotWithdrawOrDepositWithoutTellingTheMemberAndAnAdministratorsNoIsAudited() {
+        threshold(10_000_000);
+        smsOn();
+        String account = account(product("SMSA", Map.of()));
+        assertThat(deposit(account, 80_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        long balance = get(account).get("balance_minor").asLong();
+
+        ResponseEntity<JsonNode> refusedWithdrawal = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/withdrawals",
+                withKey(asCashier(), key()),
+                Map.of("amount_minor", 30_000, "payment_method_key", "mtn_momo", "notify_member", false));
+        assertThat(refusedWithdrawal.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(refusedWithdrawal.getBody().get("code").asString()).isEqualTo("notify_member_forbidden");
+        assertThat(refusedWithdrawal.getBody().get("detail").asString()).contains("Only a business administrator");
+        ResponseEntity<JsonNode> refusedDeposit = send(
+                HttpMethod.POST,
+                ACCOUNTS + "/" + account + "/deposits",
+                withKey(asCashier(), key()),
+                Map.of("amount_minor", 5_000, "payment_method_key", "cash", "notify_member", false));
+        assertThat(refusedDeposit.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(get(account).get("balance_minor").asLong())
+                .as("no money moved")
+                .isEqualTo(balance);
+
+        // Omitted or true by the same cashier: told, as before.
+        assertThat(withdraw(account, 10_000, key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(depositWith(account, 5_000, null, true).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).hasSize(3);
+        // The administrator's no goes through, is not texted, and is on the audit entry with the cutoff decision.
+        ResponseEntity<JsonNode> quiet = depositWith(account, 7_000, null, false);
+        assertThat(quiet.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(smsRows()).hasSize(3);
+        Map<String, Object> audit = TestDatabase.owner()
+                .sql(
+                        "SELECT data -> 'after' ->> 'notify_member' AS notify, data -> 'after' ->> 'sms_within_cutoff' AS cutoff"
+                                + " FROM audit_log WHERE tenant_id = ? AND action = 'lending.savings.deposit_recorded'"
+                                + " AND data -> 'after' ->> 'transaction_id' = ?")
+                .params(
+                        t.tenantId(),
+                        quiet.getBody().get("transaction").get("id").asString())
+                .query()
+                .singleRow();
+        assertThat(audit.get("notify")).isEqualTo("false");
+        assertThat(audit.get("cutoff")).isEqualTo("true");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ?"
+                                + " AND action IN ('lending.savings.deposit_recorded', 'lending.savings.withdrawal_recorded')"
+                                + " AND data -> 'after' ->> 'notify_member' = 'true'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(3);
     }
 
     @Test

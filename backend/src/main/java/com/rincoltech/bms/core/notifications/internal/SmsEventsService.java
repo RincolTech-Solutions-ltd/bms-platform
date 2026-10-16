@@ -163,6 +163,21 @@ class SmsEventsService implements SmsEvents {
         }
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean withinCutoff(LocalDate valueDate) {
+        return guarded("cutoff", Boolean.TRUE, () -> !tooOld(valueDate));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Map<String, Object> auditNote(boolean notifyMember, LocalDate valueDate) {
+        Map<String, Object> note = new LinkedHashMap<>();
+        note.put("notify_member", notifyMember);
+        note.put("sms_within_cutoff", withinCutoff(valueDate));
+        return note;
+    }
+
     private boolean tooOld(LocalDate valueDate) {
         return valueDate != null
                 && valueDate.isBefore(clock.today(tenant.profile().timezone()).minusDays(maxAgeDays));
