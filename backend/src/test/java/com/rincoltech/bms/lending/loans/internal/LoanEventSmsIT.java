@@ -595,13 +595,10 @@ class LoanEventSmsIT extends LoanFixtures {
         Instant now = MovableClockConfig.BEFORE_MIDNIGHT;
         // A sender holds the first: the claim counted an attempt and took a lease of two minutes.
         TestDatabase.owner()
-                .sql("UPDATE notification_outbox SET attempts = 1, leased_until = ?, next_attempt_at = ?"
-                        + " WHERE tenant_id = ? AND idempotency_key LIKE ?")
-                .params(
-                        Timestamp.from(now.plusSeconds(120)),
-                        Timestamp.from(now.plusSeconds(120)),
-                        t.tenantId(),
-                        keyOf(held))
+                .sql(
+                        "UPDATE notification_outbox SET attempts = 1, leased_until = clock_timestamp() + interval '2 minutes',"
+                                + " next_attempt_at = ? WHERE tenant_id = ? AND idempotency_key LIKE ?")
+                .params(Timestamp.from(now.plusSeconds(120)), t.tenantId(), keyOf(held))
                 .update();
         // The second failed once (a provider 503): pending again with a retry time and no lease.
         TestDatabase.owner()

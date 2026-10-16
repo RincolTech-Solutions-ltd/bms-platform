@@ -703,13 +703,15 @@ text above:
   `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) before the tenant's today is never texted. The runbook says to import before switching
   SMS on. Every audit entry of a money event records `notify_member` and `sms_within_cutoff`. The maturity reminder has no value
   date, so an investment remembers its investor may not be told (`lending_investments.notify_member`, inherited by a rollover) and
-  the nightly job skips it. The Pesapal repayment of #216 will carry its own receipt-notice flag.
+  the nightly job skips it; the migration backfills the flag for existing investments (false for any not funded by a staff request
+  and for any funded more than 3 days ago), so switching SMS on reminds no investor of a register loaded before it. The Pesapal repayment of #216 will carry its own receipt-notice flag.
 - **Reversals.** A reversal queues no correction (the issue asks for none). It does withdraw the message of the transaction it
   reverses while no sender holds it (`V53`, `notification_outbox_cancel_unclaimed`: every pending row whatever its attempt count,
   so a receipt waiting for its retry goes too, except a row under a live lease; the claim records the lease in
   `notification_outbox.leased_until`; marked failed `cancelled_reversed`, parameters cleared; hidden from the operator's "send
   again" list), because a receipt for an entry made on the wrong account would tell the wrong person. A row a sender holds may be at
-  the provider and stays. A reversal that
+  the provider and stays; the lease is on the database's clock, the channel looks once more immediately before the provider
+  call and does not send a row cancelled meanwhile (the residual is in ADR-036). A reversal that
   settles a loan queues no thanks either.
 - **What each message holds.** The business name, the loan or account number and amounts and dates (`dd/MM/yyyy`). The disbursement
   names **the amount paid out** (the principal less the fees deducted at disbursement) and the first instalment and its due date;

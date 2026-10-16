@@ -140,7 +140,10 @@ withdrawal). Rules to tell a tenant who asks:
   dark; run an import as an administrator. Without the flag every entry dated within `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) days texts the
   member. An entry dated further back is never texted, whatever the request says. An investment recorded with the flag
   false is never reminded of its maturity either (it remembers the choice, and a rollover inherits it); one recorded with
-  it true is reminded, even if its funding date is old, because the reminder is about a future date.
+  it true is reminded, even if its funding date is old, because the reminder is about a future date. When the release with
+  this feature is deployed, every investment that already exists is marked not to be reminded unless staff funded it in the
+  last 3 days, so switching SMS on afterwards reminds no investor of the register you loaded; to have one reminded, fund it
+  through the staff screens (or ask for its flag to be set).
 - The balance is in a loan receipt (and a savings receipt) only when the tenant switched `include_balance` on, and
   never in wording the tenant wrote itself.
 - A message is written with the money, so a payment that is rolled back sends nothing and the same payment sent twice

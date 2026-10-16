@@ -376,7 +376,11 @@ decisions 9 and 14 (templates, content and staleness; the events of spec 4.11) a
   to it; instead an investment remembers whether its investor may be told (`lending_investments.notify_member`, set at funding to
   the decision above and inherited by a rollover), and the nightly job never reminds an investor of an investment recorded without
   telling them. An investment funded with the flag true but dated long ago is still reminded of its maturity: that reminder is about
-  a future date and is wanted.
+  a future date and is wanted. **The migration backfills the flag** for every investment that exists when it runs: false when its
+  funding did not come from a staff request (the seed, an import, the portal, the gateway) and when it was funded more than 3 days
+  ago on the tenant's calendar (the default cutoff), so the day SMS is switched on no investor of an already loaded register is
+  reminded; true for one funded by staff in the last 3 days and for one still waiting for its funding. `MigrationOrderIT` replays
+  a populated V52 database through it.
 - **A reversal sends no correction, and withdraws the message it makes wrong.** The issue asks for no correction message. But a
   receipt for an entry made on the wrong account, still in the outbox when the entry is reversed, would tell the wrong person: the
   reversal cancels the rows of the reversed transaction that no sender holds (`notification_outbox_cancel_unclaimed`, migration
@@ -386,7 +390,15 @@ decisions 9 and 14 (templates, content and staleness; the events of spec 4.11) a
   added), the result releases it, and a lease that has run out (the sender died) no longer protects a row; `FOR UPDATE SKIP LOCKED`
   also skips a row being claimed at that moment. A cancelled row is marked failed `cancelled_reversed` with the parameters cleared;
   the tenant is the bound one; the operator's failed list does not offer it for "send again". A row held by a sender may be at the
-  provider and stays. Cancelling is guarded like the rest and never fails the reversal.
+  provider and stays. Cancelling is guarded like the rest and never fails the reversal. **The lease is on the database's
+  clock** (`leased_until = clock_timestamp() + the lease length the sender asked for`, and the cancel compares with
+  `clock_timestamp()`), so application servers whose clocks differ cannot disagree about whether a row is held; the due and retry
+  times stay on the application clock as before. **The channel looks once more immediately before the provider call**
+  (`notification_outbox_is_pending`): a send that ran past its two minute lease (the provider call itself is capped at 15
+  seconds, a quarter of the lease, and tested so) and was cancelled meanwhile is not sent, and the delivery log says
+  `cancelled_reversed`. **The residual, honestly:** a cancel that commits in the few milliseconds between that look and the
+  provider call, on a send already past its lease, still goes out, and then the outbox says `cancelled_reversed` while the
+  delivery log says `sent`; a cancel racing a claim is exclusive (`SKIP LOCKED`, tested in both orders).
 - **The disbursement message states what was paid out**, the principal less the fees deducted at disbursement, not the principal.
 - **Eight events can be reworded.** Each event brings its placeholder whitelist and required placeholders; none offers a balance; the
   receipts that can carry one have a `.with_balance` default variant chosen only when the tenant's `include_balance` is on.

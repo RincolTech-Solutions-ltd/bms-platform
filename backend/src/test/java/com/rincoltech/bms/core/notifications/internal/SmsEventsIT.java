@@ -654,6 +654,55 @@ class SmsEventsIT extends IntegrationTest {
                 .update();
     }
 
+    /**
+     * A send that ran past its two minute lease can have been withdrawn by a reversal meanwhile. The channel asks once more
+     * immediately before the provider call: a row that is no longer pending is not sent, and the delivery log says why.
+     */
+    @Test
+    void frNtf01_aRowCancelledWhileTheSendWasInFlightIsNotSentToTheProvider() throws Exception {
+        Rig rig = new Rig(BASE);
+        TestDatabase.Fixture t = tenant(1000);
+        UUID member = UUID.randomUUID();
+        assertThat(receipt(rig, t, member, "0700000195", "late")).isEqualTo(Result.QUEUED);
+        Map<String, Object> row = TestDatabase.owner()
+                .sql("SELECT id, idempotency_key, created_at, expires_at FROM notification_outbox"
+                        + " WHERE tenant_id = ? AND channel = 'sms'")
+                .param(t.tenantId())
+                .query()
+                .singleRow();
+        // The reversal withdraws it (nobody holds a lease), as the sender is about to call the provider.
+        Integer withdrawn = TenantContext.callAs(
+                t.tenantId(),
+                () -> new TransactionTemplate(transactionManager).execute(tx -> rig.outbox.cancelUnclaimed("late")));
+        assertThat(withdrawn).isEqualTo(1);
+
+        OutboxChannel.Result result = rig.channel.send(new OutboxChannel.Delivery(
+                "+256700000195",
+                null,
+                null,
+                (String) row.get("idempotency_key"),
+                new OutboxChannel.RowContext(
+                        (UUID) row.get("id"),
+                        t.tenantId(),
+                        Outbox.TRANSACTIONAL,
+                        "member",
+                        member,
+                        "loan.repayment_received",
+                        java.util.stream.Stream.concat(
+                                        RECEIPT.entrySet().stream(),
+                                        Map.of("tenant_name", "Test Lender").entrySet().stream())
+                                .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
+                        1,
+                        at(row.get("created_at")),
+                        at(row.get("expires_at")))));
+
+        assertThat(result).isEqualTo(OutboxChannel.Result.refused("cancelled_reversed"));
+        assertThat(rig.provider.sent()).as("the provider was not called").isEmpty();
+        Map<String, Object> d = delivery(t);
+        assertThat(d.get("status")).isEqualTo("failed");
+        assertThat(d.get("failure_reason")).isEqualTo("cancelled_reversed");
+    }
+
     // ---- Opt-out, other tenants, backlog --------------------------------------------------------------------
 
     @Test

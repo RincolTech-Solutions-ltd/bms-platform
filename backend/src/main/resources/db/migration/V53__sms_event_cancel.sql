@@ -12,22 +12,43 @@
 --
 -- Lock notes (honest). Flyway runs this file in one transaction. SET LOCAL lock_timeout bounds any wait for a lock to 5
 -- seconds, so a busy system fails this migration cleanly (and it is run again) instead of queueing behind long
--- transactions.
---   * ALTER TABLE notification_outbox ADD COLUMN leased_until (nullable, no default) takes ACCESS EXCLUSIVE on the outbox
---     until this transaction commits, and rewrites nothing. The outbox is a small, hot table (rows are deleted 30 days
---     after sending); the sender job and the enqueue wait for the milliseconds this migration runs.
---   * ALTER TABLE lending_investments ADD COLUMN notify_member boolean NOT NULL DEFAULT true takes ACCESS EXCLUSIVE on
---     the investments table until commit. A constant default is stored in the catalogue (PostgreSQL 11 and later), so no
---     row is rewritten and no scan runs.
+-- transactions. The statements are ordered so that the hot table is locked last and the shortest time: every lock taken
+-- here is held until commit.
+--   * ALTER TABLE lending_investments ADD COLUMN notify_member boolean NOT NULL DEFAULT true takes ACCESS EXCLUSIVE on the
+--     investments table (small: hundreds of rows a tenant, read by the staff screens and the nightly job) until commit. A
+--     constant default is stored in the catalogue (PostgreSQL 11 and later), so no row is rewritten by the ALTER. The
+--     backfill UPDATE that follows reads the table once and rewrites only the rows it changes.
+--   * ALTER TABLE notification_outbox ADD COLUMN leased_until (nullable, no default) is the last table statement: it takes
+--     ACCESS EXCLUSIVE on the outbox, rewrites nothing, and the lock is held only for the function statements after it (no
+--     table work). The outbox is a small, hot table (rows are deleted 30 days after sending); the sender job and the enqueue
+--     wait for those milliseconds.
 --   * CREATE FUNCTION and CREATE OR REPLACE FUNCTION take no lock on any table.
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE notification_outbox ADD COLUMN leased_until timestamptz;
+-- The small table first.
 ALTER TABLE lending_investments ADD COLUMN notify_member boolean NOT NULL DEFAULT true;
 
+-- Backfill: an investment that exists before this release was recorded without a text in mind, so its investor must not
+-- get a maturity reminder the day SMS is switched on. False for any investment whose funding did not come from a staff
+-- request (the seed, an import, the portal or the gateway) and for any funded more than 3 days ago on the tenant's own
+-- calendar (the default of BMS_SMS_EVENT_MAX_AGE_DAYS: the same cutoff that stops an old event being texted). An
+-- investment still waiting for its funding keeps true, as does one funded in the last 3 days by staff.
+UPDATE lending_investments i
+   SET notify_member = false
+ WHERE i.start_date IS NOT NULL
+   AND (EXISTS (SELECT 1 FROM lending_investment_transactions x
+                 WHERE x.tenant_id = i.tenant_id AND x.investment_id = i.id AND x.txn_type = 'funding'
+                   AND x.source <> 'staff')
+        OR i.start_date < (now() AT TIME ZONE coalesce((SELECT t.timezone FROM tenants t WHERE t.id = i.tenant_id),
+                                                       'Africa/Kampala'))::date - 3);
+
+-- The hot table last.
+ALTER TABLE notification_outbox ADD COLUMN leased_until timestamptz;
+
 -- ---------------------------------------------------------------------------------------------
--- 1. The claim records its lease. Body as in V50 plus one assignment: leased_until = p_lease_until. A row is "held by a
---    sender" while leased_until is in the future; a row waiting to be retried (a clean failure recorded, pending again
+-- 1. The claim records its lease. Body as in V50 plus one assignment: leased_until = the database's clock now plus the length of
+--    the lease the sender asked for (p_lease_until - p_now), so that the lease and the cancel's comparison use one clock, the
+--    database's, whatever the application servers' clocks say. A row is "held by a sender" while leased_until is in the future; a row waiting to be retried (a clean failure recorded, pending again
 --    with a retry time) is not held, and neither is one whose sender died and whose lease ran out.
 -- ---------------------------------------------------------------------------------------------
 
@@ -74,7 +95,8 @@ BEGIN
            FOR UPDATE OF x SKIP LOCKED
     )
     UPDATE notification_outbox o
-       SET attempts = o.attempts + 1, next_attempt_at = p_lease_until, leased_until = p_lease_until, updated_at = p_now
+       SET attempts = o.attempts + 1, next_attempt_at = p_lease_until,
+           leased_until = clock_timestamp() + (p_lease_until - p_now), updated_at = p_now
       FROM picked
      WHERE o.id = picked.pid
     RETURNING o.id, o.channel, o.recipient::text, o.template_key::text, o.params, o.idempotency_key::text, o.attempts,
@@ -155,7 +177,7 @@ BEGIN
     WITH c AS (
         SELECT x.id FROM notification_outbox x
          WHERE x.channel = 'sms' AND x.tenant_id = v_tenant AND x.status = 'pending'
-           AND (x.leased_until IS NULL OR x.leased_until <= p_now)
+           AND (x.leased_until IS NULL OR x.leased_until <= clock_timestamp())
            AND split_part(x.idempotency_key, ':', 1) = 'sms'
            AND split_part(x.idempotency_key, ':', 3) = v_tenant::text
            AND split_part(x.idempotency_key, ':', 4) = p_event_ref
@@ -174,7 +196,22 @@ REVOKE ALL ON FUNCTION notification_outbox_cancel_unclaimed(text, timestamptz) F
 GRANT EXECUTE ON FUNCTION notification_outbox_cancel_unclaimed(text, timestamptz) TO bms_app;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. The operator's list of failed messages does not show a cancelled one: it was withdrawn on purpose, and "send
+-- 4. Whether a row is still waiting to be sent. The SMS channel asks immediately before it calls the provider: a send that
+--    has run past its lease can have been cancelled in the meantime by a reversal, and must then not go out. Answers only
+--    true or false for an id; the channel's own row.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE FUNCTION notification_outbox_is_pending(p_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT EXISTS (SELECT 1 FROM notification_outbox o WHERE o.id = p_id AND o.status = 'pending')
+$$;
+
+REVOKE ALL ON FUNCTION notification_outbox_is_pending(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION notification_outbox_is_pending(uuid) TO bms_app;
+
+-- ---------------------------------------------------------------------------------------------
+-- 5. The operator's list of failed messages does not show a cancelled one: it was withdrawn on purpose, and "send
 --    again" must never be offered for a message about a reversed entry. Same signature and columns as V50.
 -- ---------------------------------------------------------------------------------------------
 
