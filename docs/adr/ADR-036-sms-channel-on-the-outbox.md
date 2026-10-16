@@ -6,7 +6,7 @@ Accepted. Designed in issue #210 (spec `docs/specs/client-extras.md` section 4);
 and 8 to 14 except the tenant screens, is built by issue #212 (see the first Amendment below), and the tenant settings,
 the sender id allow-list, the opt-out screens and the template overrides by issue #218 (see the second Amendment).
 Delivery reports (decision 7) come with #215, reminders with #227. The loan, savings and investment events (spec 4.11) are queued
-by issue #221 (see the third Amendment below; migration `V54`).
+by issue #221 (see the third Amendment below; migration `V53`).
 Settles the SMS half of what chapter 12 section 12.3.3 carried as pending ADR-013; USSD remains pending ADR-013.
 Builds on ADR-008 (jobs), ADR-016 (definer functions), ADR-024 (the outbox), ADR-032 (savings
 receipts queued as SMS that expire unsent). Implements FR-NTF-02 to FR-NTF-07 and the SMS events of
@@ -346,7 +346,7 @@ networks before the operator approves it here (the runbook), because approval on
 
 ## Amendment (issue #221, the loan, savings and investment events)
 
-Decided and built by issue #221 (spec `docs/specs/client-extras.md` section 4.17; migration `V54`, one new function). It adds to
+Decided and built by issue #221 (spec `docs/specs/client-extras.md` section 4.17; migration `V53`: two columns and one new function, three function bodies replaced). It adds to
 decisions 9 and 14 (templates, content and staleness; the events of spec 4.11) and changes nothing else.
 
 - **One port for every member event, with one guard.** `core.notifications.SmsEvents` (public; implementation internal) queues a
@@ -364,16 +364,29 @@ decisions 9 and 14 (templates, content and staleness; the events of spec 4.11) a
   second row. `investment.maturing` is keyed by the investment and its maturity date and is also stamped on the investment.
 - **Who is told, and when never.** Only staff events: a disbursement, repayment, funding, payout, deposit or withdrawal from the seed
   or import ports sends nothing, and the nightly job run for the seed (`runDaily(date, false)`) queues no maturity reminder. Three
-  more rules close the register import, which uses the public routes as staff: (a) a request may say `notify_member: false`, honoured
-  on the server (kept in the approval payload for the requests that wait for a checker); (b) an event whose value date is more than
-  `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) before the tenant's today is never texted; (c) the runbook says to import before
-  switching SMS on. Both (a) and (b) apply to every event the port queues.
+  more rules close the register import, which uses the public routes as staff: (a) a request may say `notify_member: false`,
+  honoured on the server (kept in the approval payload for the requests that wait for a checker) **and accepted only from a holder of
+  `core.settings.manage`, which only the business administrator holds: anyone else gets 403 `notify_member_forbidden` in plain words
+  before anything is recorded**, because otherwise a cashier could take money out of a member's account under the approval
+  threshold and the member would never be told (before this change every staff movement texted); no permission is added; (b) an
+  event whose value date is more than `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) before the tenant's today is never texted; (c) the
+  runbook says to import before switching SMS on. (a) and (b) apply to every event the port queues, and **every audit entry of a money
+  event records `notify_member` (the effective decision, after the source and the request) and `sms_within_cutoff`**, so a movement
+  recorded without a text can be found afterwards. (d) The maturity reminder has no value date of its own, so the cutoff cannot apply
+  to it; instead an investment remembers whether its investor may be told (`lending_investments.notify_member`, set at funding to
+  the decision above and inherited by a rollover), and the nightly job never reminds an investor of an investment recorded without
+  telling them. An investment funded with the flag true but dated long ago is still reminded of its maturity: that reminder is about
+  a future date and is wanted.
 - **A reversal sends no correction, and withdraws the message it makes wrong.** The issue asks for no correction message. But a
   receipt for an entry made on the wrong account, still in the outbox when the entry is reversed, would tell the wrong person: the
-  reversal cancels the unclaimed rows of the reversed transaction (`notification_outbox_cancel_unclaimed`, migration `V54`: pending
-  and no attempt counted, skipping a row a sender is claiming at that moment; marked failed `cancelled_reversed` with the parameters
-  cleared; the tenant is the bound one; the operator's failed list does not offer it for "send again"). A row already claimed may be
-  at the provider and stays. Cancelling is guarded like the rest and never fails the reversal.
+  reversal cancels the rows of the reversed transaction that no sender holds (`notification_outbox_cancel_unclaimed`, migration
+  `V53`): every pending row **whatever its attempt count**, because a receipt that failed once and waits for its retry would still go
+  out and a receipt lives only an hour, about as long as a cashier takes to notice a wrong entry; except a row under a live lease. The
+  claim now records its lease (`notification_outbox.leased_until`, the claim and result functions replaced with that one assignment
+  added), the result releases it, and a lease that has run out (the sender died) no longer protects a row; `FOR UPDATE SKIP LOCKED`
+  also skips a row being claimed at that moment. A cancelled row is marked failed `cancelled_reversed` with the parameters cleared;
+  the tenant is the bound one; the operator's failed list does not offer it for "send again". A row held by a sender may be at the
+  provider and stays. Cancelling is guarded like the rest and never fails the reversal.
 - **The disbursement message states what was paid out**, the principal less the fees deducted at disbursement, not the principal.
 - **Eight events can be reworded.** Each event brings its placeholder whitelist and required placeholders; none offers a balance; the
   receipts that can carry one have a `.with_balance` default variant chosen only when the tenant's `include_balance` is on.
@@ -390,8 +403,9 @@ phone, and never because of a replay, a seed run, a register import (with the fl
 a wrong entry's receipt is recalled while it can be; the log of segments and cost per message is exact.
 
 **Worse:** the loan and investment modules now depend on `core.notifications` (as savings does); two small reads on a money event for
-a tenant without SMS; a receipt held by a cap past its hour is lost; a text already claimed by the sender cannot be recalled; a staff
-member who forgets `notify_member: false` on an import after SMS is on still texts anyone whose value date is within three days.
+a tenant without SMS; a receipt held by a cap past its hour is lost; a text already claimed by the sender cannot be recalled; an
+administrator who forgets `notify_member: false` on an import after SMS is on still texts anyone whose value date is within three days
+(and only an administrator can remember it, which is also why a cashier-run import must go in before SMS is switched on).
 
 **Watch for:** an event that carries a new value must add the placeholder to its whitelist (a test renders every default and its worst
 case); the Pesapal repayment (#216) must pass its own receipt-notice decision to the loan port and queue through `SmsEvents`, not around

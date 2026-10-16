@@ -135,8 +135,12 @@ withdrawal). Rules to tell a tenant who asks:
 - Only what staff do sends a message. The fabricated seed and the data import commands never text a member.
 - **Load a register (an import of old loans, repayments, deposits or investments) before switching SMS on.** If the
   data goes in through the staff screens or the API after SMS is on, each request must carry `notify_member: false`
-  (the import scripts do); without it every entry dated within `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) days texts the
-  member. An entry dated further back is never texted, whatever the request says.
+  (the import scripts do). **Only a business administrator may send `notify_member: false`**: from anyone else the request
+  is refused with 403 and nothing is recorded, so a cashier cannot take money out of an account and leave the member in the
+  dark; run an import as an administrator. Without the flag every entry dated within `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) days texts the
+  member. An entry dated further back is never texted, whatever the request says. An investment recorded with the flag
+  false is never reminded of its maturity either (it remembers the choice, and a rollover inherits it); one recorded with
+  it true is reminded, even if its funding date is old, because the reminder is about a future date.
 - The balance is in a loan receipt (and a savings receipt) only when the tenant switched `include_balance` on, and
   never in wording the tenant wrote itself.
 - A message is written with the money, so a payment that is rolled back sends nothing and the same payment sent twice

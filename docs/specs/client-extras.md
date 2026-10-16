@@ -676,7 +676,7 @@ findings 4, 6 and 8 hold). Where the build differs from, or sharpens, the text a
 
 ### 4.17 As built in slice #221 (loan, savings and investment events)
 
-The events of 4.11 are built (migration `V54`, one function; no permission, no route, no screen; ADR-036 third amendment carries the
+The events of 4.11 are built (migration `V53`, two columns, one function and three function bodies replaced; no permission, no route, no screen; ADR-036 third amendment carries the
 decisions; review answers 11.1 findings 4, 6, 7, 8 and 21 hold and are re-tested). Where the build differs from, or sharpens, the
 text above:
 
@@ -697,13 +697,19 @@ text above:
   reminder of the replayed days is not queued (a test seeds a tenant with SMS on and asserts its outbox is empty). The register
   import uses the public routes as staff, so two more rules apply to every event: a request may say `notify_member: false`
   (loan disbursement and repayment, savings deposit, withdrawal and closure, investment funding, payouts and early withdrawal; kept
-  in the approval payload where a checker decides; honoured on the server), and an event whose value date is more than
+  in the approval payload where a checker decides; honoured on the server; **accepted only from a holder of `core.settings.manage`,
+  the business administrator: anyone else gets 403 `notify_member_forbidden` before anything is recorded**, so a cashier cannot take
+  money out of an account and leave the member uninformed), and an event whose value date is more than
   `BMS_SMS_EVENT_MAX_AGE_DAYS` (default 3) before the tenant's today is never texted. The runbook says to import before switching
-  SMS on. The Pesapal repayment of #216 will carry its own receipt-notice flag.
+  SMS on. Every audit entry of a money event records `notify_member` and `sms_within_cutoff`. The maturity reminder has no value
+  date, so an investment remembers its investor may not be told (`lending_investments.notify_member`, inherited by a rollover) and
+  the nightly job skips it. The Pesapal repayment of #216 will carry its own receipt-notice flag.
 - **Reversals.** A reversal queues no correction (the issue asks for none). It does withdraw the message of the transaction it
-  reverses while the sender has not claimed it (`V54`, `notification_outbox_cancel_unclaimed`: pending, no attempt counted; marked
-  failed `cancelled_reversed`, parameters cleared; hidden from the operator's "send again" list), because a receipt for an entry
-  made on the wrong account would tell the wrong person. A row already claimed may be at the provider and stays. A reversal that
+  reverses while no sender holds it (`V53`, `notification_outbox_cancel_unclaimed`: every pending row whatever its attempt count,
+  so a receipt waiting for its retry goes too, except a row under a live lease; the claim records the lease in
+  `notification_outbox.leased_until`; marked failed `cancelled_reversed`, parameters cleared; hidden from the operator's "send
+  again" list), because a receipt for an entry made on the wrong account would tell the wrong person. A row a sender holds may be at
+  the provider and stays. A reversal that
   settles a loan queues no thanks either.
 - **What each message holds.** The business name, the loan or account number and amounts and dates (`dd/MM/yyyy`). The disbursement
   names **the amount paid out** (the principal less the fees deducted at disbursement) and the first instalment and its due date;
