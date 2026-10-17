@@ -17,6 +17,10 @@ const BY_CODE: Record<string, string> = {
   invalid_nin: 'A national ID number starts with CM or CF and has 14 letters and digits in all.',
   next_of_kin_required: 'A member whose details are complete keeps at least one next of kin.',
   version_conflict: 'Someone else changed this since you opened it. Your entries are kept. Reload to see their change, then save again.',
+  duplicate_nin: 'This national ID number is already registered to another member.',
+  invalid_status_transition: 'This is not possible in the state it is in now. Reload the page to see where it stands.',
+  approval_already_pending: 'A request for this is already waiting in the approvals inbox.',
+  self_approval_forbidden: 'Someone else must approve this.',
   precondition_required: 'This could not be saved safely. Reload the page and try again.',
   collateral_already_pledged: 'An item of this type with this reference number is already registered and not released.',
   collateral_type_disabled: 'This business does not accept that kind of collateral.',
@@ -40,9 +44,19 @@ const FIELD_BY_CODE: Record<string, string> = {
 
 /** The message for a failed call in plain words. */
 export function formMessage(problem: RetailProblem | undefined, status: number): string {
+  if (problem?.code === 'duplicate_nin' && problem.detail) return problem.detail;
   const known = problem?.code ? BY_CODE[problem.code] : undefined;
   return known ?? lendingMessage(problem, status);
 }
+
+/** Refusals that the server sends without a field list, tied to the input that caused them. */
+const FIELD_OF_CODE: Record<string, string> = {
+  duplicate_nin: 'national_id',
+  duplicate_phone: 'phone',
+  invalid_nin: 'national_id',
+  invalid_phone: 'phone',
+  collateral_already_pledged: 'reference_no',
+};
 
 /** The API's field problems as plain words per field. A code with no words of its own shows a short, neutral line. */
 export function fieldMessages(problem: RetailProblem | undefined): FieldMessages {
@@ -51,7 +65,18 @@ export function fieldMessages(problem: RetailProblem | undefined): FieldMessages
     if (!e.field || out[e.field]) continue;
     out[e.field] = (e.code && FIELD_BY_CODE[e.code]) || 'Check this entry.';
   }
+  const own = problem?.code ? FIELD_OF_CODE[problem.code] : undefined;
+  if (own && !out[own]) {
+    // A duplicate names the other record in the server's detail (a member number), which helps; the rest use the plain line.
+    const named = problem?.code === 'duplicate_nin' || problem?.code === 'duplicate_phone';
+    out[own] = (named && problem?.detail) || BY_CODE[problem?.code ?? ''] || 'Check this entry.';
+  }
   return out;
+}
+
+/** True when the call may or may not have been saved (no answer, a timeout, a server error): look the record up before sending it again. */
+export function unknownOutcome(e: unknown): boolean {
+  return e instanceof FormError && (e.status === 0 || e.status >= 500);
 }
 
 /** A failed call: the message, the server's code and the problems per field. */
@@ -95,6 +120,10 @@ export function postFile<T>(
 ): Promise<T> {
   const once = (): Promise<{ status: number; body: unknown }> =>
     new Promise((resolve, reject) => {
+      if (opts.signal?.aborted) {
+        reject(new FormError('The upload was stopped.', 0, 'aborted'));
+        return;
+      }
       const xhr = new XMLHttpRequest();
       xhr.open('POST', path);
       for (const [k, v] of Object.entries(tenantHeaders())) xhr.setRequestHeader(k, v);

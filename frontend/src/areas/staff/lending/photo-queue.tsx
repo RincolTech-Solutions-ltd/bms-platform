@@ -84,6 +84,7 @@ export function usePhotoQueue(codec: Codec = browserCodec): PhotoQueue {
   states.current = items;
   const next = useRef(1);
   const aborts = useRef(new Set<AbortController>());
+  const inFlight = useRef(new Set<number>());
   useEffect(() => () => aborts.current.forEach((a) => a.abort()), []);
 
   const add = useCallback(
@@ -105,7 +106,9 @@ export function usePhotoQueue(codec: Codec = browserCodec): PhotoQueue {
 
   const send = useCallback(async (id: number, sender: Sender<unknown>) => {
     const prepared = held.current.get(id);
-    if (!prepared) return false;
+    // A second tap on "Send again" while the first is on its way would upload the picture twice.
+    if (!prepared || inFlight.current.has(id)) return false;
+    inFlight.current.add(id);
     const controller = new AbortController();
     aborts.current.add(controller);
     dispatch({ type: 'sending', id });
@@ -118,6 +121,7 @@ export function usePhotoQueue(codec: Codec = browserCodec): PhotoQueue {
       return false;
     } finally {
       aborts.current.delete(controller);
+      inFlight.current.delete(id);
     }
   }, []);
 

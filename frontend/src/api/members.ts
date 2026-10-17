@@ -64,8 +64,9 @@ export const realMembers: MembersApi = {
   },
 
   async create(body, idempotencyKey) {
-    // The server answers a repeated phone or national ID with a refusal, so a retry cannot register twice; the key is sent so
-    // that the day the route honours it (chapter 7 section 7.8) a retry replays the first answer.
+    // The route does not read Idempotency-Key today (it is not a money route, chapter 7 section 7.8), so the key is only sent for
+    // the day it does. What stops a second registration is the phone and national ID checks plus the screen: after an answer that
+    // may have been lost, it looks the member up (duplicateCheck) before it allows another try.
     return unwrapForm(await api.POST('/api/v1/lending/members', { body, headers: { 'Idempotency-Key': idempotencyKey } }));
   },
 

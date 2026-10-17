@@ -32,7 +32,7 @@ export function phoneProblem(raw: string): string | null {
   if (text === '') return null;
   const bare = text.replace(/[\s-]/g, '');
   if (/^7\d{8}$/.test(bare)) return 'Start the number with 0 or +256, for example 0712 345 678.';
-  return normaliseUganda(text) === null ? 'Use a Uganda mobile number: 07... or +256 7... (ten digits after the 0).' : null;
+  return normaliseUganda(text) === null ? 'Use a Uganda mobile number: 07... or +256 7... (ten digits starting 07).' : null;
 }
 
 /** The number written to read: +256 712 345 678. */
@@ -117,18 +117,26 @@ export function draftOf(m: MemberRecord): MemberDraft {
     village: m.village ?? '',
     location: m.location ?? '',
     occupation: m.occupation ?? '',
-    monthlyIncome: m.monthly_income_minor ? String(m.monthly_income_minor) : '',
+    monthlyIncome: m.monthly_income_minor != null ? String(m.monthly_income_minor) : '',
     confirmedNotDuplicate: false,
   };
 }
 
 const iso = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A calendar date that exists (not 30 February). */
+function realDate(text: string): boolean {
+  if (!iso.test(text)) return false;
+  const [y, m, d] = text.split('-').map(Number) as [number, number, number];
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d;
+}
+
 /**
  * What is wrong with the draft, per field and in plain words; empty when it can be sent. `today` is the local
  * calendar date (YYYY-MM-DD), passed in so a test needs no clock. `editing` relaxes nothing but the branch.
  */
-export function memberProblems(d: MemberDraft, today: string, editing = false): FieldMessages {
+export function memberProblems(d: MemberDraft, today: string, editing = false, original?: MemberDraft): FieldMessages {
   const out: FieldMessages = {};
   if (!editing && d.branchId === '') out.branch_id = 'Choose the branch the member belongs to.';
   if (d.fullName.trim() === '') out.full_name = 'Type the member\'s full name.';
@@ -146,11 +154,14 @@ export function memberProblems(d: MemberDraft, today: string, editing = false): 
     else if (normaliseNin(d.nationalId) === null) out.national_id = 'A national ID number starts with CM or CF and has 14 letters and digits in all.';
   } else if (d.idType !== 'none' && d.otherIdNumber.trim() === '') out.other_id_number = 'Type the number on the ID.';
   if (d.dateOfBirth !== '') {
-    if (!iso.test(d.dateOfBirth) || Number.isNaN(Date.parse(d.dateOfBirth))) out.date_of_birth = 'Enter the date as day, month and year.';
+    if (!realDate(d.dateOfBirth)) out.date_of_birth = 'Enter the date as day, month and year.';
     else if (d.dateOfBirth >= today) out.date_of_birth = 'The date of birth must be before today.';
     else if (d.dateOfBirth < '1900-01-01') out.date_of_birth = 'Check the year.';
   }
   if (d.monthlyIncome.trim() !== '' && parseMinor(d.monthlyIncome, 'UGX') === null) out.monthly_income_minor = 'Type the amount in shillings, with no letters or decimals.';
+  // The server keeps what it has when a field is left out, so a saved date of birth or income cannot be emptied: say so, not nothing.
+  if (original && original.dateOfBirth !== '' && d.dateOfBirth === '') out.date_of_birth = 'A saved date of birth cannot be removed. Correct it instead.';
+  if (original && original.monthlyIncome !== '' && d.monthlyIncome.trim() === '') out.monthly_income_minor = 'A saved income cannot be removed. Type 0 if the member has no regular income.';
   return out;
 }
 
@@ -197,8 +208,9 @@ export function updateBody(before: MemberRecord, d: MemberDraft): UpdateMemberBo
   if (d.idType === 'nin' && (d.nationalId !== was.nationalId || d.idType !== was.idType)) body.national_id = d.nationalId.trim();
   if (d.idType !== 'nin' && d.idType !== 'none' && (d.otherIdNumber !== was.otherIdNumber || d.idType !== was.idType)) body.other_id_number = d.otherIdNumber.trim();
   if (d.dateOfBirth !== was.dateOfBirth && d.dateOfBirth !== '') body.date_of_birth = d.dateOfBirth;
-  text('gender', 'gender');
-  text('maritalStatus', 'marital_status');
+  // The server has no empty choice: "not said" is its unspecified and unknown.
+  if (d.gender !== was.gender) body.gender = d.gender === '' ? 'unspecified' : d.gender;
+  if (d.maritalStatus !== was.maritalStatus) body.marital_status = d.maritalStatus === '' ? 'unknown' : d.maritalStatus;
   text('district', 'district');
   text('village', 'village');
   text('location', 'location');

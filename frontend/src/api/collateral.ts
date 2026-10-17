@@ -69,8 +69,9 @@ export const realCollateral: CollateralApi = {
   },
 
   async create(body, idempotencyKey) {
-    // A reference number already registered is refused by the server, so a retry of a reference-bearing item cannot register
-    // twice; the key is sent for the day the route honours it (chapter 7 section 7.8).
+    // The route does not read Idempotency-Key today (chapter 7 section 7.8), so the key is only sent for the day it does. An item
+    // with a reference number cannot register twice (the server refuses it); for any item the screen lists the member's
+    // collateral after an answer that may have been lost, before it allows another try.
     return unwrapForm(await api.POST('/api/v1/lending/collateral', { body, headers: { 'Idempotency-Key': idempotencyKey } }));
   },
 

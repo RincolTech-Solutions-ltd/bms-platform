@@ -16,7 +16,8 @@ const KEEP_BYTES = 1_500_000;
 const TARGET_BYTES = Math.floor(MAX_UPLOAD_BYTES * 0.9);
 
 /** What the file picker offers. A phone offers its camera for images. */
-export const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf';
+// HEIC is not offered: most browsers cannot draw it, and a phone given only JPEG and PNG to choose from hands over a JPEG.
+export const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
 
 export interface Picked {
   name: string;
