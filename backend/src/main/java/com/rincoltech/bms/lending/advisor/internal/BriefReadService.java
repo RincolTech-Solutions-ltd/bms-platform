@@ -67,10 +67,14 @@ class BriefReadService {
         this.jdbc = jdbc;
     }
 
-    @Transactional(readOnly = true)
     BriefView today() {
         // The business date is read once for the whole request.
-        LocalDate date = clock.today(BusinessClock.DEFAULT_ZONE);
+        return forDate(clock.today(BusinessClock.DEFAULT_ZONE));
+    }
+
+    /** The brief for one business date (the date read once by {@link #today}); a test chooses it. */
+    @Transactional(readOnly = true)
+    BriefView forDate(LocalDate date) {
         Principal principal = CurrentPrincipal.require();
         boolean on = settings.status().enabled();
         Optional<Stored> stored = on ? store.find(date) : Optional.empty();
@@ -101,7 +105,7 @@ class BriefReadService {
         return new BriefView(
                 true,
                 "fallback",
-                "unavailable",
+                reason,
                 LABEL_AUTOMATIC,
                 clock.now(),
                 null,

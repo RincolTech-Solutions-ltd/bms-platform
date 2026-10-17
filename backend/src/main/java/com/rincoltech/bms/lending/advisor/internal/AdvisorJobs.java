@@ -9,7 +9,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -44,21 +46,29 @@ class AdvisorJobs {
     @Bean
     RecurringTask<Void> advisorDailyBrief(TenantJobs tenantJobs, DailyBriefService briefs, JdbcClient jdbc) {
         return Tasks.recurring(DAILY_BRIEF, Schedules.fixedDelay(Duration.ofMinutes(15)))
-                .execute((instance, context) -> runFor(context.getExecution().executionTime, tenantJobs, briefs, jdbc));
+                .execute((instance, context) ->
+                        runFor(context.getExecution().executionTime, () -> lendingTenants(jdbc), tenantJobs, briefs));
     }
 
-    /** One run, for the date its due time falls on. Public to the package so a test can drive it with a chosen time. */
-    static void runFor(Instant dueAt, TenantJobs tenantJobs, DailyBriefService briefs, JdbcClient jdbc) {
+    private static List<UUID> lendingTenants(JdbcClient jdbc) {
+        return jdbc.sql("SELECT app_list_active_tenants_with_module(?)")
+                .param("lending")
+                .query(UUID.class)
+                .list();
+    }
+
+    /**
+     * One run, for the date its due time falls on, over the tenants the lister names. Package visible so a test can drive
+     * it with a chosen due time and its own tenant.
+     */
+    static void runFor(Instant dueAt, Supplier<List<UUID>> tenants, TenantJobs tenantJobs, DailyBriefService briefs) {
         LocalDate date = businessDateFor(dueAt);
         if (date == null) {
             return;
         }
         int failures = 0;
         // Not forEachActiveTenant: that wraps each tenant in one transaction and the gateway must run outside one.
-        for (UUID tenantId : jdbc.sql("SELECT app_list_active_tenants_with_module(?)")
-                .param("lending")
-                .query(UUID.class)
-                .list()) {
+        for (UUID tenantId : tenants.get()) {
             try {
                 tenantJobs.callAs(tenantId, () -> briefs.generate(date));
             } catch (RuntimeException e) {
