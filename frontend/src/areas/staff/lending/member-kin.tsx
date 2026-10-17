@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { FormError } from '../../../api/lending-forms';
+import { asFormError, unknownOutcome } from '../../../api/lending-forms';
 import { useMembersApi } from '../../../api/lending-context';
 import type { NextOfKin } from '../../../api/members';
 import { Problem } from '../retail/ui';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
 import { blankKin, kinBody, kinProblems, RELATIONSHIPS, relationshipWords, type KinDraft } from './member-state';
-import { showPhone } from './member-state';
+import { normaliseUganda, showPhone } from './member-state';
+import { SaveGuardNotice, useSaveGuard } from './save-guard';
 
 // Next of kin on a member's page (FR-MEM-06, FR-MEM-07): add, change, remove, and say yes or no to a suggested link to
 // another member. A change or a removal carries the person's version as If-Match, so two officers cannot overwrite each other.
@@ -21,6 +22,12 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
     : blankKin()));
   const form = useFormErrors(kinProblems(draft), kin ? `nk-${kin.id}` : 'nk-new');
   const [failure, setFailure] = useState<string | null>(null);
+  const guard = useSaveGuard<NextOfKin>();
+  /** A next of kin already on the member with this name and phone. Rejects when the look itself fails. */
+  const lookUp = async (): Promise<NextOfKin | null> => {
+    const phone = normaliseUganda(draft.phone);
+    return (await api.listKin(memberId)).find((k) => k.phone_e164 === phone && k.full_name?.trim().toLowerCase() === draft.fullName.trim().toLowerCase()) ?? null;
+  };
   const save = useMutation({
     mutationFn: () => (kin ? api.updateKin(kin.id ?? '', kin.version ?? 0, kinBody(draft)) : api.addKin(memberId, kinBody(draft))),
     onSuccess: () => {
@@ -28,17 +35,18 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
       void queryClient.invalidateQueries({ queryKey: ['members', 'one', memberId] });
       onDone();
     },
-    onError: (e) => {
-      if (e instanceof FormError) {
-        form.refuse(e.fields, ORDER);
-        setFailure(Object.keys(e.fields).length > 0 ? null : e.message);
-      } else setFailure('Something went wrong. Try again.');
+    onError: (raw) => {
+      const e = asFormError(raw);
+      form.refuse(e.fields, ORDER);
+      setFailure(Object.keys(e.fields).length > 0 ? null : e.message);
+      // No other save of a new next of kin until a look at the list has worked: the answer may have been lost.
+      if (!kin && unknownOutcome(e)) void guard.check(lookUp);
     },
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setFailure(null);
-    if (save.isPending || !form.attempt(ORDER)) return;
+    if (save.isPending || guard.blocked || !form.attempt(ORDER)) return;
     save.mutate();
   };
   return (
@@ -53,8 +61,9 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
           The first person to call
         </label>
       </Group>
+      <SaveGuardNotice guard={guard} what="next of kin" found={() => <button type="button" className="btn-sm" onClick={onDone}>Close</button>} />
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Save" busyLabel="Saving" busy={save.isPending} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
+      <SaveBar label="Save" busyLabel="Saving" busy={save.isPending} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
 }

@@ -23,6 +23,9 @@ import { MembersGate } from './member-ui';
 // checked, the check itself for staff who may do it, next of kin, documents, the relationship panel, their loans, savings and
 // collateral, and the text-message choice. Everything shown is the server's, in the member's branch scope.
 
+/** The ID number is shown in full only to staff who change or check members; others see the last four characters. */
+const maskUnless = (may: boolean, value: string | undefined): string | undefined => (may || !value ? value : `${'*'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`);
+
 function Line({ label, value }: { label: string; value?: string | number | null }) {
   if (value === undefined || value === null || value === '') return null;
   return (
@@ -159,7 +162,7 @@ export function MemberView({ member }: { member: MemberRecord }) {
         <dl className="ln-facts">
           <Line label="Phone" value={showPhone(member.phone_e164)} />
           <Line label="Other phone" value={member.alt_phone_e164 ? showPhone(member.alt_phone_e164) : undefined} />
-          <Line label="ID" value={member.id_type === 'nin' ? member.national_id : member.other_id_number} />
+          <Line label="ID" value={maskUnless(edit || mayVerifyKyc(me, member.branch_id), member.id_type === 'nin' ? member.national_id : member.other_id_number)} />
           <Line label="Date of birth" value={member.date_of_birth} />
           <Line label="Work" value={member.occupation} />
           <Line label="Usual income a month" value={member.monthly_income_minor != null ? money(member.monthly_income_minor, member.currency) : undefined} />

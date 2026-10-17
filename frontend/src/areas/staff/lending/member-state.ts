@@ -165,6 +165,13 @@ export function memberProblems(d: MemberDraft, today: string, editing = false, o
   return out;
 }
 
+/**
+ * What goes over the wire for a phone or a national ID: the normalised form, not the typed text. JavaScript's trim strips characters
+ * (a no-break space from a pasted number) that Java's does not, so sending typed text could pass the form and fail on the server.
+ */
+export const sendPhone = (typed: string): string => normaliseUganda(typed) ?? typed.trim();
+export const sendNin = (typed: string): string => normaliseNin(typed) ?? typed.trim();
+
 const blank = (s: string): string | undefined => (s.trim() === '' ? undefined : s.trim());
 
 /** The registration request. Call only when `memberProblems` is empty. */
@@ -173,10 +180,10 @@ export function createBody(d: MemberDraft): CreateMemberBody {
   return {
     branch_id: d.branchId,
     full_name: d.fullName.trim(),
-    phone: d.phone.trim(),
-    alt_phone: blank(d.altPhone),
+    phone: sendPhone(d.phone),
+    alt_phone: d.altPhone.trim() === '' ? undefined : sendPhone(d.altPhone),
     id_type: d.idType,
-    national_id: d.idType === 'nin' ? d.nationalId.trim() : undefined,
+    national_id: d.idType === 'nin' ? sendNin(d.nationalId) : undefined,
     other_id_number: d.idType !== 'nin' && d.idType !== 'none' ? d.otherIdNumber.trim() : undefined,
     date_of_birth: blank(d.dateOfBirth),
     gender: blank(d.gender),
@@ -202,10 +209,10 @@ export function updateBody(before: MemberRecord, d: MemberDraft): UpdateMemberBo
     if (d[key] !== was[key]) (body as Record<string, unknown>)[field] = send.trim();
   };
   text('fullName', 'full_name');
-  text('phone', 'phone');
-  text('altPhone', 'alt_phone');
+  if (d.phone !== was.phone) body.phone = sendPhone(d.phone);
+  if (d.altPhone !== was.altPhone) body.alt_phone = d.altPhone.trim() === '' ? '' : sendPhone(d.altPhone);
   if (d.idType !== was.idType) body.id_type = d.idType;
-  if (d.idType === 'nin' && (d.nationalId !== was.nationalId || d.idType !== was.idType)) body.national_id = d.nationalId.trim();
+  if (d.idType === 'nin' && (d.nationalId !== was.nationalId || d.idType !== was.idType)) body.national_id = sendNin(d.nationalId);
   if (d.idType !== 'nin' && d.idType !== 'none' && (d.otherIdNumber !== was.otherIdNumber || d.idType !== was.idType)) body.other_id_number = d.otherIdNumber.trim();
   if (d.dateOfBirth !== was.dateOfBirth && d.dateOfBirth !== '') body.date_of_birth = d.dateOfBirth;
   // The server has no empty choice: "not said" is its unspecified and unknown.
@@ -281,7 +288,7 @@ export function kinProblems(d: KinDraft): FieldMessages {
 }
 
 export function kinBody(d: KinDraft): KinBody {
-  return { full_name: d.fullName.trim(), phone: d.phone.trim(), relationship: d.relationship, location: blank(d.location), is_primary: d.isPrimary };
+  return { full_name: d.fullName.trim(), phone: sendPhone(d.phone), relationship: d.relationship, location: blank(d.location), is_primary: d.isPrimary };
 }
 
 // --- Status in words --------------------------------------------------------------------------------

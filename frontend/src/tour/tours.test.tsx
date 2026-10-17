@@ -203,6 +203,8 @@ const OFFICER: Me = {
 const CLERK: Me = {
   ...OFFICER,
   full_name: 'Test Clerk 01',
+  // A payload without scopes counts as every branch.
+  permission_scopes: undefined,
   permissions: [
     ...(OFFICER.permissions ?? []), 'lending.members.create', 'lending.members.update', 'lending.collateral.read', 'lending.collateral.manage', 'lending.collateral.release_request',
   ],

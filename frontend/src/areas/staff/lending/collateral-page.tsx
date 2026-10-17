@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
 import type { CollateralDetail, CollateralItem } from '../../../api/collateral';
-import { FormError } from '../../../api/lending-forms';
+import { asFormError, openInNewTab, unknownOutcome } from '../../../api/lending-forms';
 import { useCollateralApi } from '../../../api/lending-context';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
@@ -16,6 +16,7 @@ import { localDate, money } from './loan-state';
 import { mayManageCollateral, mayReleaseCollateral } from './member-permissions';
 import { CollateralGate } from './member-ui';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
+import { SaveGuardNotice, useSaveGuard } from './save-guard';
 
 // One collateral item (FR-COL-01 to FR-COL-04): the facts, the photos and scans, valuations over time, the custody history
 // with the changes that are allowed from where the item is now, and the request to give it back. Giving an item back is not
@@ -54,8 +55,7 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
   const open = async (documentId: string) => {
     setError(null);
     try {
-      const url = await api.documentUrl(documentId);
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+      await openInNewTab(() => api.documentUrl(documentId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The file could not be opened.');
     }
@@ -91,10 +91,16 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const form = useFormErrors(valuationProblems(d, today), 'cv');
+  const guard = useSaveGuard<unknown>();
+  /** A valuation of the same day and market value already on the item. Rejects when the look itself fails. */
+  const lookUp = async (): Promise<unknown | null> => {
+    const body = valuationBody(d);
+    return (await api.get(id)).valuations?.find((v) => v.valued_on === body.valued_on && v.market_value_minor === body.market_value_minor) ?? null;
+  };
   const ORDER = ['valued_on', 'market_value_minor', 'forced_sale_value_minor'];
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy || !form.attempt(ORDER)) return;
+    if (busy || guard.blocked || !form.attempt(ORDER)) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -102,11 +108,11 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       setOpen(false);
       setD(blankValuation(today));
-    } catch (error) {
-      if (error instanceof FormError) {
-        form.refuse(error.fields, ORDER);
-        setFailure(Object.keys(error.fields).length > 0 ? null : error.message);
-      } else setFailure('Something went wrong. Try again.');
+    } catch (raw) {
+      const error = asFormError(raw);
+      form.refuse(error.fields, ORDER);
+      setFailure(Object.keys(error.fields).length > 0 ? null : error.message);
+      if (unknownOutcome(error)) await guard.check(lookUp);
     } finally {
       setBusy(false);
     }
@@ -135,8 +141,9 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
               hint="When given, this is the value used for loan cover." />
             <TextField name="note" label="Note" form={form} type="textarea" value={d.note} onChange={(v) => setD((x) => ({ ...x, note: v }))} maxLength={1000} />
           </Group>
+          <SaveGuardNotice guard={guard} what="valuation" found={() => <button type="button" className="btn-sm" onClick={() => { setOpen(false); void queryClient.invalidateQueries({ queryKey: ['collateral'] }); guard.release(); }}>Close</button>} />
           <Problem error={failure ? new Error(failure) : null} />
-          <SaveBar label="Save valuation" busyLabel="Saving" busy={busy} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
+          <SaveBar label="Save valuation" busyLabel="Saving" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
         </form>
       )}
     </section>
@@ -164,11 +171,10 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
       await api.recordEvent(id, version, eventBody(type, location, counterparty, note));
       void queryClient.invalidateQueries({ queryKey: ['collateral'] });
       onDone();
-    } catch (error) {
-      if (error instanceof FormError) {
-        form.refuse(error.fields, ORDER);
-        setFailure(Object.keys(error.fields).length > 0 ? null : error.message);
-      } else setFailure('Something went wrong. Try again.');
+    } catch (raw) {
+      const error = asFormError(raw);
+      form.refuse(error.fields, ORDER);
+      setFailure(Object.keys(error.fields).length > 0 ? null : error.message);
     } finally {
       setBusy(false);
     }

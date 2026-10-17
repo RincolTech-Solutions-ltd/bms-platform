@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { FormError, unknownOutcome } from '../../../api/lending-forms';
+import { asFormError, unknownOutcome } from '../../../api/lending-forms';
 import { useMembersApi } from '../../../api/lending-context';
 import type { DuplicateCandidate, MemberRecord } from '../../../api/members';
 import { branchLabel } from '../../../auth/branch';
@@ -11,6 +11,7 @@ import { Problem } from '../retail/ui';
 import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fields';
 import { localDate } from './loan-state';
 import { MembersGate } from './member-ui';
+import { SaveGuardNotice, useSaveGuard } from './save-guard';
 import { mayCreateMember, mayEditMember, memberBranches } from './member-permissions';
 import {
   blankMember, createBody, draftOf, duplicateHold, GENDERS, ID_TYPES, isEmpty, MARITAL, memberProblems, normaliseNin, normaliseUganda, reasonWords,
@@ -33,7 +34,7 @@ const STATUSES = [
 ];
 
 /** The likely duplicates of what is typed, asked after a short pause and only once the entries are worth asking about. */
-function useDuplicates(draft: MemberDraft, selfId?: string): { candidates: DuplicateCandidate[]; checking: boolean } {
+function useDuplicates(draft: MemberDraft, selfId: string | undefined, allowed: boolean): { candidates: DuplicateCandidate[]; checking: boolean } {
   const api = useMembersApi();
   const phone = normaliseUganda(draft.phone) ?? undefined;
   const nin = draft.idType === 'nin' ? (normaliseNin(draft.nationalId) ?? undefined) : undefined;
@@ -43,7 +44,8 @@ function useDuplicates(draft: MemberDraft, selfId?: string): { candidates: Dupli
     const t = setTimeout(() => setSettled({ phone, nin, name }), 400);
     return () => clearTimeout(t);
   }, [phone, nin, name]);
-  const ask = settled.phone !== undefined || settled.nin !== undefined || settled.name !== undefined;
+  // The check is a create-permission route: a user who may only change members gets no check (and no silent refusal).
+  const ask = allowed && (settled.phone !== undefined || settled.nin !== undefined || settled.name !== undefined);
   const found = useQuery({
     queryKey: ['members', 'duplicates', settled.phone ?? '', settled.nin ?? '', settled.name ?? ''],
     queryFn: ({ signal }) => api.duplicateCheck({ full_name: settled.name, phone: settled.phone, national_id: settled.nin }, signal),
@@ -55,18 +57,20 @@ function useDuplicates(draft: MemberDraft, selfId?: string): { candidates: Dupli
   return { candidates, checking: ask && found.isFetching };
 }
 
-export function DuplicateList({ candidates, hold, confirmed, onConfirm }: {
+export function DuplicateList({ candidates, hold, confirmed, onConfirm, phoneShared = false }: {
+  /** The server refused the phone as shared, so the box shows even when the check found nobody (or was not allowed). */
+  phoneShared?: boolean;
   candidates: readonly DuplicateCandidate[];
   hold: 'nin' | 'phone' | null;
   confirmed: boolean;
   onConfirm: (yes: boolean) => void;
 }) {
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0 && !phoneShared) return null;
   const ninHeld = hold === 'nin';
-  const phoneOnly = candidates.some((c) => (c.match_reasons ?? []).includes('phone'));
+  const phoneOnly = phoneShared || candidates.some((c) => (c.match_reasons ?? []).includes('phone'));
   return (
     <section className="alert alert-warning mf-dups" role="status" aria-labelledby="mf-dups-title" data-tour="member-duplicates">
-      <h2 id="mf-dups-title">Someone like this is already registered</h2>
+      <h2 id="mf-dups-title">{candidates.length > 0 ? 'Someone like this is already registered' : 'This phone number is already on another member'}</h2>
       <ul className="ln-list">
         {candidates.map((c) => (
           <li key={c.id ?? c.member_no}>
@@ -88,11 +92,13 @@ export function DuplicateList({ candidates, hold, confirmed, onConfirm }: {
   );
 }
 
-export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved?: (m: MemberRecord) => void }) {
+export function MemberForm({ member: loaded, onSaved }: { member?: MemberRecord; onSaved?: (m: MemberRecord) => void }) {
   const { me, branch } = useStaff();
   const api = useMembersApi();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // The member as last read: a stale version can be replaced by the latest without touching what was typed.
+  const [member, setBase] = useState(loaded);
   const editing = member !== undefined;
   const allowed = memberBranches(me);
   const startBranch = allowed.find((b) => b.id === branch)?.id ?? (allowed.length === 1 ? allowed[0]?.id : undefined) ?? '';
@@ -102,15 +108,22 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
-  const [maybeSaved, setMaybeSaved] = useState<DuplicateCandidate | null>(null);
+  const guard = useSaveGuard<DuplicateCandidate>();
+  const [serverPhone, setServerPhone] = useState(false);
   const [saved, setSaved] = useState<MemberRecord | null>(null);
   const idFront = usePhotoQueue();
   const idBack = usePhotoQueue();
   const original = useMemo(() => (member ? draftOf(member) : undefined), [member]);
   const problems = memberProblems(draft, localDate(), editing, original);
   const form = useFormErrors(problems, 'mf');
-  const { candidates, checking } = useDuplicates(draft, member?.id);
-  const hold = duplicateHold(candidates, draft.confirmedNotDuplicate);
+  const mayCheck = !editing || (me.permissions ?? []).includes('lending.members.create');
+  const found = useDuplicates(draft, member?.id, mayCheck);
+  const { checking } = found;
+  // On an edit, a phone the member already has is not a shared phone: the box and the hold apply only when the phone was changed.
+  const phoneChanged = !editing || normaliseUganda(draft.phone) !== normaliseUganda(original?.phone ?? '');
+  const candidates = phoneChanged ? found.candidates : found.candidates.filter((c) => !(c.match_reasons ?? []).includes('phone') || (c.match_reasons ?? []).includes('nin'));
+  const phoneShared = serverPhone && phoneChanged;
+  const hold = duplicateHold(candidates, draft.confirmedNotDuplicate) ?? (phoneShared && !draft.confirmedNotDuplicate ? 'phone' : null);
   const set = <K extends keyof MemberDraft>(key: K, value: MemberDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   const sendPhotos = async (id: string): Promise<boolean> => {
@@ -120,10 +133,20 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
     return a.failed + b.failed === 0;
   };
 
+  const photosBusy = idFront.busy || idBack.busy;
+
   const finish = (m: MemberRecord) => {
     void queryClient.invalidateQueries({ queryKey: ['members'] });
     if (onSaved) onSaved(m);
     else void navigate({ to: '/staff/lending/members/$memberId', params: { memberId: m.id ?? '' } });
+  };
+
+  /** The member this form may already have saved: the same phone and the same name. Rejects when the look itself fails. */
+  const lookUp = async (): Promise<DuplicateCandidate | null> => {
+    const phone = normaliseUganda(draft.phone);
+    if (!phone) return null;
+    const candidates = await api.duplicateCheck({ phone });
+    return candidates.find((c) => (c.match_reasons ?? []).includes('phone') && c.full_name?.trim().toLowerCase() === draft.fullName.trim().toLowerCase()) ?? null;
   };
 
   async function submit(e: FormEvent) {
@@ -131,7 +154,7 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
     if (busy) return;
     setFailure(null);
     if (!form.attempt(ORDER)) return;
-    if (hold) return;
+    if (hold || guard.blocked || photosBusy) return;
     setBusy(true);
     try {
       if (member) {
@@ -147,34 +170,31 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
       const created = await api.create(createBody(draft), idempotencyKey);
       setSaved(created);
       if (idFront.waiting + idBack.waiting === 0 || (await sendPhotos(created.id ?? ''))) finish(created);
-    } catch (error) {
-      if (error instanceof FormError) {
-        form.refuse(error.fields, ORDER);
-        if (error.code === 'version_conflict') setStale(true);
-        setFailure(Object.keys(error.fields).length > 0 && error.code !== 'version_conflict' ? null : error.message);
-        // The answer may have been lost: look the member up before another save is allowed.
-        if (!editing && unknownOutcome(error)) {
-          const phone = normaliseUganda(draft.phone);
-          const found = phone ? await api.duplicateCheck({ phone }).catch(() => []) : [];
-          const same = found.find((c) => (c.match_reasons ?? []).includes('phone') && c.full_name?.trim().toLowerCase() === draft.fullName.trim().toLowerCase());
-          if (same) setMaybeSaved(same);
-        }
-      } else setFailure('Something went wrong. Try again.');
+    } catch (raw) {
+      const error = asFormError(raw);
+      form.refuse(error.fields, ORDER);
+      if (error.code === 'version_conflict') setStale(true);
+      if (error.code === 'duplicate_phone') setServerPhone(true);
+      if (error.code === 'duplicate_phone' || error.code === 'duplicate_nin') void queryClient.invalidateQueries({ queryKey: ['members', 'duplicates'] });
+      setFailure(Object.keys(error.fields).length > 0 && error.code !== 'version_conflict' ? null : error.message);
+      // The answer may have been lost: look the member up, and allow no other save until that look has worked.
+      if (!editing && unknownOutcome(error)) await guard.check(lookUp);
     } finally {
       setBusy(false);
     }
   }
 
   const branchName = branchLabel((me.branches ?? []).find((b) => b.id === draft.branchId));
-  const blocked = hold === 'nin' ? 'This national ID is already registered.' : hold === 'phone' ? 'Tick the box above to say this is a different person.' : maybeSaved ? 'This member looks already saved.' : undefined;
-  const photoSender: Sender<unknown> | undefined = saved ? (p, o) => api.uploadDocument(saved.id ?? '', 'id_front', p.blob, p.fileName, o) : undefined;
+  const blocked = hold === 'nin' ? 'This national ID is already registered.' : hold === 'phone' ? 'Tick the box above to say this is a different person.' : guard.blocked ? 'Wait for the check above before saving again.' : photosBusy ? 'Wait for the photo to be ready.' : undefined;
+  const photoSender = (kind: 'id_front' | 'id_back'): Sender<unknown> | undefined => (saved ? (p, o) => api.uploadDocument(saved.id ?? '', kind, p.blob, p.fileName, o) : undefined);
 
   if (saved) {
     return (
       <section className="rt-card stack" aria-live="polite">
         <h2>{saved.full_name} is saved</h2>
         <p>Member number {saved.member_no}. A photo did not go through. Send it again, or open the member and add it later.</p>
-        <PhotoQueueControl id="mf-front-retry" label="Photo of the front of the ID" queue={idFront} sender={photoSender} />
+        <PhotoQueueControl id="mf-front-retry" label="Photo of the front of the ID" queue={idFront} sender={photoSender('id_front')} />
+        <PhotoQueueControl id="mf-back-retry" label="Photo of the back of the ID" queue={idBack} sender={photoSender('id_back')} />
         <Link to="/staff/lending/members/$memberId" params={{ memberId: saved.id ?? '' }} className="btn btn-block rt-primary">Open the member</Link>
       </section>
     );
@@ -188,15 +208,10 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
       {stale && (
         <div role="alert" className="alert alert-warning">
           <p>Someone else changed this member since you opened it. What you typed is kept.</p>
-          <button type="button" className="btn-sm" onClick={() => void queryClient.invalidateQueries({ queryKey: ['members', 'one', member?.id] })}>Reload their version</button>
+          <button type="button" className="btn-sm" onClick={() => void api.get(member?.id ?? '').then((latest) => { setBase(latest); setStale(false); }).catch(() => setFailure('The latest version could not be loaded. Check the connection.'))}>Use their changes and keep mine</button>
         </div>
       )}
-      {maybeSaved && (
-        <div role="alert" className="alert alert-warning">
-          <p>The answer did not come back, and a member with this name and phone is already saved.</p>
-          <Link to="/staff/lending/members/$memberId" params={{ memberId: maybeSaved.id ?? '' }}>Open {maybeSaved.member_no}</Link>
-        </div>
-      )}
+      <SaveGuardNotice guard={guard} what="member" found={(c) => <Link to="/staff/lending/members/$memberId" params={{ memberId: c.id ?? '' }}>Open {c.member_no}</Link>} />
       <Group title="Who is the member" tourId="member-who">
         {editing ? (
           <p className="field-hint">Branch: {branchName}. To move a member to another branch, ask an administrator.</p>
@@ -205,7 +220,7 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
             options={allowed.map((b) => ({ value: b.id ?? '', label: branchLabel(b) }))} blankLabel="Choose a branch" />
         )}
         <TextField name="full_name" label="Full name" form={form} required value={draft.fullName} onChange={(v) => set('fullName', v)} autoComplete="off" maxLength={200} />
-        <TextField name="phone" label="Phone number" form={form} required type="tel" inputMode="tel" value={draft.phone} onChange={(v) => set('phone', v)}
+        <TextField name="phone" label="Phone number" form={form} required type="tel" inputMode="tel" value={draft.phone} onChange={(v) => { setServerPhone(false); set('phone', v); }}
           hint="For example 0712 345 678. A +256 number works too." />
         <TextField name="alt_phone" label="Another phone number (if any)" form={form} type="tel" inputMode="tel" value={draft.altPhone} onChange={(v) => set('altPhone', v)} />
       </Group>
@@ -219,7 +234,7 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
           <TextField name="other_id_number" label="ID number" form={form} required value={draft.otherIdNumber} onChange={(v) => set('otherIdNumber', v)} maxLength={40} />
         )}
       </Group>
-      <DuplicateList candidates={candidates} hold={hold} confirmed={draft.confirmedNotDuplicate} onConfirm={(yes) => set('confirmedNotDuplicate', yes)} />
+      <DuplicateList candidates={candidates} phoneShared={phoneShared} hold={hold} confirmed={draft.confirmedNotDuplicate} onConfirm={(yes) => set('confirmedNotDuplicate', yes)} />
       {checking && candidates.length === 0 && <p className="field-hint" role="status">Checking whether this member is already registered</p>}
       <Group title="About the member">
         <TextField name="date_of_birth" label="Date of birth" form={form} type="date" value={draft.dateOfBirth} onChange={(v) => set('dateOfBirth', v)} max={localDate()} />
@@ -243,8 +258,7 @@ export function MemberForm({ member, onSaved }: { member?: MemberRecord; onSaved
       )}
       {editing && (
         <Group title="Status">
-          <SelectField name="status" label="Member status" form={form} value={status} onChange={setStatus} options={STATUSES}
-            hint="A member with an open loan or account cannot be set to left the business." />
+          <SelectField name="status" label="Member status" form={form} value={status} onChange={setStatus} options={STATUSES} />
         </Group>
       )}
       <Problem error={failure ? new Error(failure) : null} />
@@ -275,7 +289,7 @@ function EditMember() {
     <MembersGate title="Change member details" tourId="member-edit">
       {member.isPending && <p className="loading">Loading the member</p>}
       <Problem error={member.error} />
-      {member.data && (mayEditMember(me, member.data.branch_id) ? <MemberForm key={member.data.version} member={member.data} /> : <p className="empty-state">You do not have access to change this member.</p>)}
+      {member.data && (mayEditMember(me, member.data.branch_id) ? <MemberForm member={member.data} /> : <p className="empty-state">You do not have access to change this member.</p>)}
     </MembersGate>
   );
 }

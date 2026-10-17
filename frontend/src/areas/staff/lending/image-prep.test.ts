@@ -6,15 +6,23 @@ const blobOf = (size: number, type: string, name = 'pic'): Blob & { name: string
 /** A codec that records what was asked, and answers with a size from `sizeAt`. */
 function fake(width: number, height: number, sizeAt: (w: number, h: number, q: number) => number | null) {
   const calls: { w: number; h: number; q: number }[] = [];
+  const state = { decodes: 0, closes: 0 };
   const codec: Codec = {
-    decode: async () => ({ width, height }),
-    encode: async (_f, w, h, q) => {
-      calls.push({ w, h, q });
-      const n = sizeAt(w, h, q);
-      return n === null ? null : new Blob([new Uint8Array(n)], { type: 'image/jpeg' });
+    decode: async () => {
+      state.decodes++;
+      return {
+        width,
+        height,
+        close: () => { state.closes++; },
+        encode: async (w, h, q) => {
+          calls.push({ w, h, q });
+          const n = sizeAt(w, h, q);
+          return n === null ? null : new Blob([new Uint8Array(n)], { type: 'image/jpeg' });
+        },
+      };
     },
   };
-  return { codec, calls };
+  return { codec, calls, state };
 }
 
 describe('checkPicked', () => {
@@ -60,11 +68,14 @@ describe('prepareFile', () => {
     const tries = fake(4000, 3000, (w) => (w < 1000 ? 100_000 : 20_000_000));
     expect((await prepareFile(blobOf(9_000_000, 'image/jpeg'), tries.codec)).blob.size).toBe(100_000);
     expect(tries.calls.length).toBeGreaterThan(1);
+    // The picture is read once however many sizes are tried, and let go of afterwards.
+    expect(tries.state.decodes).toBe(1);
+    expect(tries.state.closes).toBe(1);
     const never = fake(4000, 3000, () => 20_000_000);
     await expect(prepareFile(blobOf(9_000_000, 'image/jpeg'), never.codec)).rejects.toThrow(/still too big/);
   });
   it('refuses with words a picture the browser cannot read or draw', async () => {
-    const unreadable: Codec = { decode: async () => null, encode: async () => null };
+    const unreadable: Codec = { decode: async () => null };
     await expect(prepareFile(blobOf(100, 'image/png'), unreadable)).rejects.toBeInstanceOf(PrepareError);
     const cannotDraw = fake(4000, 3000, () => null);
     await expect(prepareFile(blobOf(9_000_000, 'image/jpeg'), cannotDraw.codec)).rejects.toThrow(/could not be made smaller/);

@@ -16,7 +16,7 @@ const BY_CODE: Record<string, string> = {
   invalid_phone: 'That does not look like a Uganda mobile number. Use 07..., +256 7... or 2567...',
   invalid_nin: 'A national ID number starts with CM or CF and has 14 letters and digits in all.',
   next_of_kin_required: 'A member whose details are complete keeps at least one next of kin.',
-  version_conflict: 'Someone else changed this since you opened it. Your entries are kept. Reload to see their change, then save again.',
+  version_conflict: 'Someone else changed this since you opened it. Your entries are kept. Open the latest version to compare, then save again.',
   duplicate_nin: 'This national ID number is already registered to another member.',
   invalid_status_transition: 'This is not possible in the state it is in now. Reload the page to see where it stands.',
   approval_already_pending: 'A request for this is already waiting in the approvals inbox.',
@@ -74,9 +74,33 @@ export function fieldMessages(problem: RetailProblem | undefined): FieldMessages
   return out;
 }
 
-/** True when the call may or may not have been saved (no answer, a timeout, a server error): look the record up before sending it again. */
+/**
+ * True when the call may or may not have been saved: no answer (a dropped connection, a timeout, a stopped request), a server
+ * error, or anything that is not an answer from the server at all. Look the record up before sending it again.
+ */
 export function unknownOutcome(e: unknown): boolean {
-  return e instanceof FormError && (e.status === 0 || e.status >= 500);
+  if (e instanceof FormError) return e.status === 0 || e.status >= 500;
+  return e instanceof Error;
+}
+
+/** What a failed fetch (a dropped connection, a stopped request) becomes: no answer was seen, so the outcome is unknown. */
+export function asFormError(e: unknown): FormError {
+  if (e instanceof FormError) return e;
+  const stopped = (e as { name?: string } | null)?.name === 'AbortError';
+  return stopped
+    ? new FormError('The request was stopped.', 0, 'aborted')
+    : new FormError('The connection dropped before an answer came back. Check the connection.', 0, 'network');
+}
+
+/** The same client with every call's failures as FormError, so a screen sees a lost answer as one (status 0), never a raw TypeError. */
+export function guarded<T extends object>(client: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [name, fn] of Object.entries(client)) {
+    out[name] = typeof fn === 'function'
+      ? (...args: unknown[]) => Promise.resolve().then(() => (fn as (...a: unknown[]) => unknown)(...args)).catch((e: unknown) => { throw asFormError(e); })
+      : fn;
+  }
+  return out as T;
 }
 
 /** A failed call: the message, the server's code and the problems per field. */
@@ -130,6 +154,8 @@ export function postFile<T>(
       const token = getAccessToken();
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.responseType = 'text';
+      xhr.timeout = 120_000;
+      xhr.ontimeout = () => reject(new FormError('The upload took too long. Check the connection and try again.', 0, 'timeout'));
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) opts.onProgress?.(e.loaded, e.total);
       };
@@ -157,4 +183,23 @@ export function postFile<T>(
     const problem = (r.body ?? {}) as RetailProblem;
     throw new FormError(formMessage(problem, r.status), r.status, problem.code, fieldMessages(problem), problem.detail);
   })();
+}
+
+/**
+ * Open a file from its short-lived signed address in a new tab. The tab is opened first, in the tap itself (a phone browser blocks one
+ * opened after a wait), and pointed at the address once it is known; it is closed again when the address could not be had.
+ */
+export async function openInNewTab(getUrl: () => Promise<string>): Promise<void> {
+  const tab = window.open('about:blank', '_blank');
+  try {
+    const url = await getUrl();
+    if (!url) throw new FormError('The file could not be opened.', 0, 'no_url');
+    if (tab) {
+      tab.opener = null;
+      tab.location.href = url;
+    } else window.location.assign(url);
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }

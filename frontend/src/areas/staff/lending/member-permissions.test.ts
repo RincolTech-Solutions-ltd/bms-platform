@@ -28,6 +28,14 @@ describe('permission helpers with branch scope', () => {
     expect(mayManageCollateral(me, BR2)).toBe(false);
     expect(mayManageCollateral(me, BR1)).toBe(true);
   });
+  it('counts a permission held for every branch in any branch, and one held for a list only for that list', () => {
+    const wide = officer({ permission_scopes: { 'lending.members.create': { all_branches: true, branch_ids: [] }, 'lending.members.read': { all_branches: true, branch_ids: [] } } });
+    expect(holds(wide, 'lending.members.create', BR2)).toBe(true);
+    expect(holds(wide, 'lending.members.create', 'any-other-branch')).toBe(true);
+    const narrow = officer({ permission_scopes: { 'lending.members.create': { all_branches: false, branch_ids: [BR1] } } });
+    expect(holds(narrow, 'lending.members.create', BR1)).toBe(true);
+    expect(holds(narrow, 'lending.members.create', BR2)).toBe(false);
+  });
   it('counts a payload without scopes as every branch, and a missing permission as none', () => {
     expect(holds(officer({ permission_scopes: undefined }), 'lending.members.create', BR2)).toBe(true);
     expect(holds(officer(), 'lending.members.update', BR1)).toBe(false);
@@ -58,6 +66,8 @@ describe('form errors in plain words', () => {
     expect(unknownOutcome(new FormError('x', 0, 'network'))).toBe(true);
     expect(unknownOutcome(new FormError('x', 503, undefined))).toBe(true);
     expect(unknownOutcome(new FormError('x', 409, 'duplicate_phone'))).toBe(false);
-    expect(unknownOutcome(new Error('x'))).toBe(false);
+    // A failure that is not an answer at all (a raw TypeError from a dropped connection) is a lost answer too.
+    expect(unknownOutcome(new TypeError('Failed to fetch'))).toBe(true);
+    expect(unknownOutcome('not an error')).toBe(false);
   });
 });

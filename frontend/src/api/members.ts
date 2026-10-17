@@ -1,5 +1,5 @@
 import { api } from './client';
-import { postFile, unwrapForm, type UploadProgress } from './lending-forms';
+import { guarded, postFile, unwrapForm, type UploadProgress } from './lending-forms';
 import type { components } from './schema';
 
 // The members client for the staff member screens (issue #280, chapter 7 section 7.11.11), typed by the
@@ -51,7 +51,7 @@ export interface MembersApi {
 
 const ifMatch = (version: number) => ({ 'If-Match': String(version) });
 
-export const realMembers: MembersApi = {
+const rawMembers: MembersApi = {
   async list(q) {
     return unwrapForm(
       await api.GET('/api/v1/lending/members', {
@@ -130,3 +130,5 @@ export const realMembers: MembersApi = {
     return out.url ?? '';
   },
 };
+
+export const realMembers: MembersApi = guarded(rawMembers);

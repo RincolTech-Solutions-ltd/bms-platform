@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState, type FormEvent } from 'react';
 import type { CollateralItem } from '../../../api/collateral';
-import { FormError, unknownOutcome } from '../../../api/lending-forms';
+import { asFormError, unknownOutcome } from '../../../api/lending-forms';
 import { useCollateralApi, useMembersApi } from '../../../api/lending-context';
 import { useStaff } from '../context';
 import { newIdempotencyKey } from '../retail/idempotency';
@@ -13,6 +13,7 @@ import { Group, SaveBar, SelectField, TextField, useFormErrors } from './form-fi
 import { mayManageCollateral } from './member-permissions';
 import { MemberPicker } from './member-picker';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
+import { SaveGuardNotice, useSaveGuard } from './save-guard';
 
 // Register or change a collateral item (issue #280, FR-COL-01, FR-COL-05): the member it belongs to (found by searching), the
 // kind, a description, the title, logbook or plate number, who owns it, what it is worth, whether the owner keeps it or we
@@ -22,18 +23,20 @@ import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 
 const ORDER = ['member_id', 'description', 'reference_no', 'owner_name', 'estimated_value_minor', 'storage_location'] as const;
 
-export function CollateralForm({ item, memberId }: { item?: CollateralItem; memberId?: string }) {
+export function CollateralForm({ item: loaded, memberId }: { item?: CollateralItem; memberId?: string }) {
   const api = useCollateralApi();
   const members = useMembersApi();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [item, setBase] = useState(loaded);
   const editing = item !== undefined;
   const [draft, setDraft] = useState<CollateralDraft>(() => (item ? draftOf(item) : blankCollateral(memberId)));
   const [chosen, setChosen] = useState<{ id: string; name: string; no: string } | null>(null);
   const [idempotencyKey] = useState(newIdempotencyKey);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [maybeSaved, setMaybeSaved] = useState<CollateralItem | null>(null);
+  const guard = useSaveGuard<CollateralItem>();
+  const [stale, setStale] = useState(false);
   const [saved, setSaved] = useState<CollateralItem | null>(null);
   const photos = usePhotoQueue();
   const original = useMemo(() => (item ? draftOf(item) : undefined), [item]);
@@ -50,9 +53,15 @@ export function CollateralForm({ item, memberId }: { item?: CollateralItem; memb
     void navigate({ to: '/staff/lending/collateral/$collateralId', params: { collateralId: c.id ?? '' } });
   };
 
+  /** An item of this kind and description already on the member. Rejects when the look itself fails. */
+  const lookUp = async (): Promise<CollateralItem | null> => {
+    const list = await api.list({ memberId: draft.memberId });
+    return list.items?.find((c) => c.collateral_type === draft.type && c.description?.trim() === draft.description.trim()) ?? null;
+  };
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || guard.blocked || photos.busy) return;
     setFailure(null);
     if (!form.attempt(ORDER)) return;
     setBusy(true);
@@ -66,16 +75,14 @@ export function CollateralForm({ item, memberId }: { item?: CollateralItem; memb
       setSaved(created);
       if (photos.waiting === 0) done(created);
       else if ((await photos.sendAll(sender(created.id ?? ''))).failed === 0) done(created);
-    } catch (error) {
-      if (error instanceof FormError) {
-        form.refuse(error.fields, ORDER);
-        setFailure(Object.keys(error.fields).length > 0 ? null : error.message);
-        if (!editing && unknownOutcome(error)) {
-          const list = await api.list({ memberId: draft.memberId }).catch(() => undefined);
-          const same = list?.items?.find((c) => c.collateral_type === draft.type && c.description?.trim() === draft.description.trim());
-          if (same) setMaybeSaved(same);
-        }
-      } else setFailure('Something went wrong. Try again.');
+    } catch (raw) {
+      const error = asFormError(raw);
+      form.refuse(error.fields, ORDER);
+      if (error.code === 'version_conflict') setStale(true);
+      setFailure(Object.keys(error.fields).length > 0 && error.code !== 'version_conflict' ? null : error.message);
+      // The answer may have been lost, and an item with no reference number has nothing on the server to stop a second one:
+      // look at the member's collateral, and allow no other save until that look has worked.
+      if (!editing && unknownOutcome(error)) await guard.check(lookUp);
     } finally {
       setBusy(false);
     }
@@ -95,12 +102,13 @@ export function CollateralForm({ item, memberId }: { item?: CollateralItem; memb
   return (
     <form className="mf" onSubmit={(e) => void submit(e)} noValidate aria-label={editing ? 'Change collateral' : 'Register collateral'} data-tour="collateral-form">
       {form.count(ORDER) > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked below.</p>}
-      {maybeSaved && (
+      {stale && (
         <div role="alert" className="alert alert-warning">
-          <p>The answer did not come back, and an item like this is already registered for the member.</p>
-          <Link to="/staff/lending/collateral/$collateralId" params={{ collateralId: maybeSaved.id ?? '' }}>Open it</Link>
+          <p>Someone else changed this item since you opened it. What you typed is kept.</p>
+          <button type="button" className="btn-sm" onClick={() => void api.get(item?.id ?? '').then((d) => { setBase(d.item); setStale(false); }).catch(() => setFailure('The latest version could not be loaded. Check the connection.'))}>Use their changes and keep mine</button>
         </div>
       )}
+      <SaveGuardNotice guard={guard} what="item" canRelease found={(c) => <Link to="/staff/lending/collateral/$collateralId" params={{ collateralId: c.id ?? '' }}>Open it</Link>} />
       <Group title="The item" tourId="collateral-item">
         {!editing && <MemberPicker id={form.idOf('member_id')} chosen={shown} error={form.error('member_id')} errorId={`${form.idOf('member_id')}-error`}
           onChoose={(m) => { setChosen(m); set('memberId', m?.id ?? ''); }} />}
@@ -112,7 +120,7 @@ export function CollateralForm({ item, memberId }: { item?: CollateralItem; memb
           hint="The same number cannot be registered twice while the item is still held." />
       </Group>
       <Group title="Who owns it and what it is worth" tourId="collateral-owner">
-        <SelectField name="owner_relationship" label="Who owns it" form={form} value={draft.ownerRelationship} onChange={(v) => set('ownerRelationship', v)} options={OWNERS} />
+        <SelectField name="owner_relationship" label="Who owns it" form={form} value={draft.ownerRelationship} onChange={(v) => setDraft((d) => ({ ...d, ownerRelationship: v, ownerName: v === 'self' ? '' : d.ownerName }))} options={OWNERS} />
         {owned && <TextField name="owner_name" label="Owner's name" form={form} required={draft.ownerRelationship === 'other'} value={draft.ownerName} onChange={(v) => set('ownerName', v)} maxLength={200} />}
         <TextField name="estimated_value_minor" label="What it is worth (UGX, your estimate)" form={form} inputMode="numeric" value={draft.value} onChange={(v) => set('value', v)}
           hint="A valuation can be added later. Until then the loan cover uses this estimate." />
@@ -129,7 +137,7 @@ export function CollateralForm({ item, memberId }: { item?: CollateralItem; memb
         </Group>
       )}
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label={editing ? 'Save changes' : 'Register collateral'} busyLabel="Saving" busy={busy} blocked={maybeSaved ? 'This item looks already saved.' : undefined}
+      <SaveBar label={editing ? 'Save changes' : 'Register collateral'} busyLabel="Saving" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : photos.busy ? 'Wait for the photo to be ready.' : undefined}
         cancel={<Link to="/staff/lending/collateral" className="btn btn-ghost">Cancel</Link>} tourId="collateral-save" />
     </form>
   );
@@ -159,7 +167,7 @@ function EditCollateral() {
     <CollateralGate title="Change collateral" tourId="collateral-edit">
       {detail.isPending && <p className="loading">Loading the item</p>}
       <Problem error={detail.error} />
-      {item && (mayManageCollateral(me, item.branch_id) ? <CollateralForm key={item.version} item={item} /> : <p className="empty-state">You do not have access to change this item.</p>)}
+      {item && (mayManageCollateral(me, item.branch_id) ? <CollateralForm item={item} /> : <p className="empty-state">You do not have access to change this item.</p>)}
     </CollateralGate>
   );
 }

@@ -1,5 +1,5 @@
 import { api } from './client';
-import { postFile, unwrapForm, type UploadProgress } from './lending-forms';
+import { guarded, postFile, unwrapForm, type UploadProgress } from './lending-forms';
 import type { components } from './schema';
 
 // The collateral client for the staff collateral register (issue #280, chapter 7 section 7.11.14), typed
@@ -45,7 +45,7 @@ export interface CollateralApi {
 
 const ifMatch = (version: number) => ({ 'If-Match': String(version) });
 
-export const realCollateral: CollateralApi = {
+const rawCollateral: CollateralApi = {
   async list(q) {
     return unwrapForm(
       await api.GET('/api/v1/lending/collateral', {
@@ -111,3 +111,5 @@ export const realCollateral: CollateralApi = {
     return out.url ?? '';
   },
 };
+
+export const realCollateral: CollateralApi = guarded(rawCollateral);

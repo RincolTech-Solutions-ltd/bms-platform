@@ -125,7 +125,16 @@ export const memberPage: Tour = {
       target: 'member-documents',
       module: 'lending',
       title: 'Photos and papers',
-      body: 'Add the ID photos here, or any other paper. Tap Open to look at one.',
+      body: 'The photos and papers kept for the member. Tap Open to look at one.',
+    },
+    {
+      id: 'documents-add',
+      target: 'member-doc-add',
+      module: 'lending',
+      needs: [MEMBERS_UPDATE],
+      optional: true,
+      title: 'Add a photo',
+      body: 'Tap Take a photo to add the front or back of the ID, or any other paper.',
     },
     {
       id: 'loans',
@@ -220,7 +229,7 @@ export const collateralItemPage: Tour = {
       target: 'collateral-valuations',
       module: 'lending',
       title: 'Valuations',
-      body: 'Each valuation is kept. The quick sale value of the latest one is what counts for loan cover.',
+      body: 'Each valuation is kept. For loan cover we use the quick sale value of the latest valuation that has one. If none has one, we use your estimate.',
     },
     {
       id: 'history',

@@ -72,10 +72,15 @@ describe('memberProblems', () => {
 describe('request bodies', () => {
   it('sends a registration with the typed phone and NIN, and no empty strings', () => {
     const body = createBody({ ...blankMember('b1'), fullName: ' Test Borrower 01 ', phone: '0700 000 001', nationalId: 'cm000000000001', monthlyIncome: '200000' });
-    expect(body).toMatchObject({ branch_id: 'b1', full_name: 'Test Borrower 01', phone: '0700 000 001', id_type: 'nin', national_id: 'cm000000000001', monthly_income_minor: 200000 });
+    expect(body).toMatchObject({ branch_id: 'b1', full_name: 'Test Borrower 01', phone: '+256700000001', id_type: 'nin', national_id: 'CM000000000001', monthly_income_minor: 200000 });
     expect(body.gender).toBeUndefined();
     expect(body.other_id_number).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain('""');
+  });
+  it('sends the normalised phone and national ID, so a pasted no-break space cannot pass here and fail on the server', () => {
+    const body = createBody({ ...blankMember('b1'), fullName: 'T', phone: '0700\u00a0000\u00a0001', altPhone: '+256\u202f700 000 002', nationalId: 'cm\u00a0000000000001' });
+    expect(body).toMatchObject({ phone: '+256700000001', alt_phone: '+256700000002', national_id: 'CM000000000001' });
+    expect(JSON.stringify(body)).not.toMatch(/[\u00a0\u202f]/);
   });
   it('sends only what changed on an edit', () => {
     const m = member();

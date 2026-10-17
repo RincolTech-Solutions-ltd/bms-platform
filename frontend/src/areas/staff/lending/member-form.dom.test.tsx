@@ -101,7 +101,7 @@ describe('the new member form', () => {
     expect(save().disabled).toBe(false);
     fireEvent.click(save());
     await waitFor(() => expect(saved).toHaveBeenCalled());
-    expect(mock.calls.create[0]?.body).toMatchObject({ confirmed_not_duplicate: true, phone: '0700 000 001' });
+    expect(mock.calls.create[0]?.body).toMatchObject({ confirmed_not_duplicate: true, phone: '+256700000001' });
   });
 
   it('keeps one Idempotency-Key across a retry, and shows a refused national ID on its own input with the member number', async () => {

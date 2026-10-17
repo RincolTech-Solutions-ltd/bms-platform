@@ -49,12 +49,19 @@ export function fitWithin(width: number, height: number, max: number = MAX_SIDE)
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
-/** The browser's part, replaced by a fake in tests. */
-export interface Codec {
-  /** The picture's size, or null when the browser cannot read this kind of picture. */
-  decode(file: Blob): Promise<{ width: number; height: number } | null>;
+/** A picture the browser has read once: its size, and a way to draw it smaller. Closed when done. */
+export interface Decoded {
+  width: number;
+  height: number;
   /** The picture drawn at a size and written as JPEG at a quality (0 to 1), or null when that fails. */
-  encode(file: Blob, width: number, height: number, quality: number): Promise<Blob | null>;
+  encode(width: number, height: number, quality: number): Promise<Blob | null>;
+  close(): void;
+}
+
+/** The browser's part, replaced by a fake in tests. The picture is read once and drawn as often as needed. */
+export interface Codec {
+  /** The decoded picture, or null when the browser cannot read this kind of picture. */
+  decode(file: Blob): Promise<Decoded | null>;
 }
 
 export interface Prepared {
@@ -79,45 +86,50 @@ export async function prepareFile(file: Blob & { name?: string }, codec: Codec):
   if (checked.kind === 'pdf') return { blob: file, fileName: name };
   const size = await codec.decode(file);
   if (!size) throw new PrepareError('This picture could not be read. Take the photo again, or choose a JPEG or PNG file.');
-  const plainType = file.type === 'image/jpeg' || file.type === 'image/png';
-  if (plainType && file.size <= KEEP_BYTES && Math.max(size.width, size.height) <= MAX_SIDE) return { blob: file, fileName: name };
-  let target = fitWithin(size.width, size.height);
-  for (const [quality, shrink] of [[0.85, 1], [0.7, 1], [0.6, 0.75], [0.5, 0.6], [0.45, 0.45]] as const) {
-    const w = Math.max(1, Math.round(target.width * shrink));
-    const h = Math.max(1, Math.round(target.height * shrink));
-    const out = await codec.encode(file, w, h, quality);
-    if (!out) throw new PrepareError('This picture could not be made smaller. Take the photo again.');
-    if (out.size <= TARGET_BYTES) return { blob: out, fileName: `${baseName(name)}.jpg` };
+  try {
+    const plainType = file.type === 'image/jpeg' || file.type === 'image/png';
+    if (plainType && file.size <= KEEP_BYTES && Math.max(size.width, size.height) <= MAX_SIDE) return { blob: file, fileName: name };
+    const target = fitWithin(size.width, size.height);
+    for (const [quality, shrink] of [[0.85, 1], [0.7, 1], [0.6, 0.75], [0.5, 0.6], [0.45, 0.45]] as const) {
+      const w = Math.max(1, Math.round(target.width * shrink));
+      const h = Math.max(1, Math.round(target.height * shrink));
+      const out = await size.encode(w, h, quality);
+      if (!out) throw new PrepareError('This picture could not be made smaller. Take the photo again.');
+      if (out.size <= TARGET_BYTES) return { blob: out, fileName: `${baseName(name)}.jpg` };
+    }
+    throw new PrepareError('This picture is still too big after making it smaller. Take it again from further away, or choose another.');
+  } finally {
+    size.close();
   }
-  throw new PrepareError('This picture is still too big after making it smaller. Take it again from further away, or choose another.');
 }
 
 /** The real codec, on the browser's own decoder and a canvas. */
 export const browserCodec: Codec = {
   async decode(file) {
+    let bitmap: ImageBitmap;
     try {
-      const bitmap = await createImageBitmap(file);
-      const size = { width: bitmap.width, height: bitmap.height };
-      bitmap.close();
-      return size;
+      // The browser turns a phone photo the right way up (its default orientation is "from-image").
+      bitmap = await createImageBitmap(file);
     } catch {
       return null;
     }
-  },
-  async encode(file, width, height, quality) {
-    try {
-      // The browser turns a phone photo the right way up (its default orientation is "from-image"), so the sizes agree with decode.
-      const bitmap = await createImageBitmap(file);
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) return null;
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close();
-      return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-    } catch {
-      return null;
-    }
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      close: () => bitmap.close(),
+      async encode(width, height, quality) {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext('2d');
+          if (!context) return null;
+          context.drawImage(bitmap, 0, 0, width, height);
+          return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+        } catch {
+          return null;
+        }
+      },
+    };
   },
 };

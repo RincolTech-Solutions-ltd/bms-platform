@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { openInNewTab } from '../../../api/lending-forms';
 import { useMembersApi } from '../../../api/lending-context';
 import type { DocKind } from '../../../api/members';
 import { Problem } from '../retail/ui';
@@ -25,9 +26,7 @@ function OpenButton({ documentId, label }: { documentId: string; label: string }
     setBusy(true);
     setError(null);
     try {
-      const url = await api.documentUrl(documentId);
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
-      else setError('The file could not be opened.');
+      await openInNewTab(() => api.documentUrl(documentId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The file could not be opened.');
     } finally {

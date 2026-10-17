@@ -75,6 +75,8 @@ export interface PhotoQueue {
   sendAll(sender: Sender<unknown>): Promise<{ saved: number; failed: number }>;
   /** Pictures held that are not saved yet. */
   waiting: number;
+  /** A picture is still being shrunk or is on its way: saving the record now would leave it behind. */
+  busy: boolean;
 }
 
 export function usePhotoQueue(codec: Codec = browserCodec): PhotoQueue {
@@ -146,7 +148,8 @@ export function usePhotoQueue(codec: Codec = browserCodec): PhotoQueue {
   }, []);
 
   const waiting = items.filter((i) => i.state.phase === 'ready' || i.state.phase === 'failed' && i.state.prepared !== null).length;
-  return { items, add, remove, send, sendAll, waiting };
+  const busy = items.some((i) => i.state.phase === 'preparing' || i.state.phase === 'sending');
+  return { items, add, remove, send, sendAll, waiting, busy };
 }
 
 function Preview({ prepared }: { prepared: Prepared }) {
@@ -210,7 +213,7 @@ export function PhotoQueueControl({ id, label, hint, queue, sender, max = 1, dis
   const files = useRef<HTMLInputElement>(null);
   const listed = queue.items.filter((i) => i.state.phase !== 'failed' || i.state.prepared !== null).length;
   const full = listed >= max;
-  const busy = queue.items.some((i) => i.state.phase === 'preparing' || i.state.phase === 'sending');
+  const busy = queue.busy;
   const pick = async (input: HTMLInputElement) => {
     const picked = Array.from(input.files ?? []).slice(0, Math.max(1, max - listed));
     input.value = '';

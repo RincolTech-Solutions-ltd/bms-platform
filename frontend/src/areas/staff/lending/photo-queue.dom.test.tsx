@@ -11,8 +11,8 @@ import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 
 afterEach(cleanup);
 
-const small = { decode: vi.fn(async () => ({ width: 4000, height: 3000 })), encode: vi.fn(async () => new Blob([new Uint8Array(300_000)], { type: 'image/jpeg' })) };
-const codec = (): Codec => small;
+const small = { encode: vi.fn(async () => new Blob([new Uint8Array(300_000)], { type: 'image/jpeg' })) };
+const codec = (): Codec => ({ decode: async () => ({ width: 4000, height: 3000, close: () => undefined, encode: small.encode }) });
 
 function Harness({ sender }: { sender: Sender<unknown> }) {
   const queue = usePhotoQueue(codec());

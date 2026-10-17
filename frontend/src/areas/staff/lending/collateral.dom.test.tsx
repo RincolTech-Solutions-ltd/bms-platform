@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { openInNewTab } from '../../../api/lending-forms';
 import type { CollateralItem } from '../../../api/collateral';
 import type { Me } from '../../../api/client';
 import { LendingApiContext } from '../../../api/lending-context';
@@ -171,6 +172,49 @@ describe('the member page', () => {
   it('shows a sent-for-checking member without the ID photos to someone who may not see them, with a line saying so', async () => {
     mount(<MemberView member={holder} />);
     expect(await screen.findByText(/Photos of the ID are shown only to staff who check/)).toBeTruthy();
+  });
+});
+
+describe('details of one person', () => {
+  it('shows the national ID in full only to staff who change or check members, and the last four to others', () => {
+    const readOnly: Me = { ...officer(), permissions: ['lending.members.read'] };
+    mount(<MemberView member={holder} />, { me: readOnly });
+    expect(document.body.textContent).toContain('**********0001');
+    expect(document.body.textContent).not.toContain('CM000000000001');
+    cleanup();
+    mount(<MemberView member={holder} />);
+    expect(document.body.textContent).toContain('CM000000000001');
+  });
+
+  it('clears the owner\'s name when the owner is changed back to the member', () => {
+    mount(<CollateralForm memberId={holder.id} />);
+    type(/^Who owns it/, 'other');
+    type(/^Owner's name/, 'Test Owner 02');
+    type(/^Who owns it/, 'self');
+    type(/^Who owns it/, 'other');
+    expect((screen.getByLabelText(/^Owner's name/) as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('opening a file', () => {
+  it('opens the tab in the tap, before the address is known, then points it at the address', async () => {
+    const tab = { opener: {} as unknown, location: { href: '' }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    let give: (u: string) => void = () => undefined;
+    const done = openInNewTab(() => new Promise<string>((resolve) => { give = resolve; }));
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(tab.location.href).toBe('');
+    give('https://files.example.test/d1');
+    await done;
+    expect(tab.location.href).toBe('https://files.example.test/d1');
+    expect(tab.opener).toBeNull();
+  });
+
+  it('closes the tab again when the address could not be had', async () => {
+    const tab = { opener: null, location: { href: '' }, close: vi.fn() };
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    await expect(openInNewTab(async () => { throw new Error('no'); })).rejects.toThrow('no');
+    expect(tab.close).toHaveBeenCalled();
   });
 });
 
