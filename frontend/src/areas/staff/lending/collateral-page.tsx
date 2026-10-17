@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute, getRouteApi } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
-import type { CollateralItem } from '../../../api/collateral';
+import type { CollateralDetail, CollateralItem } from '../../../api/collateral';
 import { FormError } from '../../../api/lending-forms';
 import { useCollateralApi } from '../../../api/lending-context';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
@@ -234,54 +234,59 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
   );
 }
 
+export function CollateralView({ detail, collateralId }: { detail: CollateralDetail; collateralId: string }) {
+  const { me } = useStaff();
+  const [panel, setPanel] = useState<'change' | 'release' | null>(null);
+  const c: CollateralItem = detail.item ?? {};
+  const manage = mayManageCollateral(me, c.branch_id);
+  const release = mayReleaseCollateral(me, c.branch_id) && canRequestRelease(c.custody_status);
+  return (
+    <>
+      <section className="rt-card ln-head" aria-label="Item" data-tour="collateral-header">
+        <p className="ln-item-head"><strong>{typeWords(c.collateral_type)}</strong><span className={custodyBadge(c.custody_status)}>{custodyWords(c.custody_status)}</span></p>
+        <Facts c={c} />
+        <p className="cluster" data-tour="collateral-actions">
+          {c.member_id && <Link to="/staff/lending/members/$memberId" params={{ memberId: c.member_id }} className="btn btn-ghost">Open the member</Link>}
+          {manage && <Link to="/staff/lending/collateral/$collateralId/edit" params={{ collateralId }} className="btn rt-primary">Change details</Link>}
+          {manage && panel === null && eventsFrom(c.custody_status).length > 0 && <button type="button" className="btn-ghost" onClick={() => setPanel('change')}>Record a change</button>}
+          {release && panel === null && <button type="button" className="btn-ghost" onClick={() => setPanel('release')}>Ask to give it back</button>}
+        </p>
+        {panel === 'change' && <CustodyChange id={collateralId} version={c.version ?? 0} custody={c.custody_status} onDone={() => setPanel(null)} />}
+        {panel === 'release' && <ReleaseRequest id={collateralId} version={c.version ?? 0} onDone={() => setPanel(null)} />}
+      </section>
+      <Photos id={collateralId} canAdd={manage} />
+      <Valuations id={collateralId} currency={c.currency} valuations={detail.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
+      <section className="rt-card stack" aria-labelledby="col-hist" data-tour="collateral-history">
+        <h2 id="col-hist">History</h2>
+        {(detail.events ?? []).length === 0 && <p className="empty-state">No changes recorded yet.</p>}
+        <ul className="ln-list">
+          {(detail.events ?? []).map((ev) => (
+            <li key={ev.id} className="rt-card">
+              <p><strong>{EVENT_WORDS[ev.event_type as EventType] ?? ev.event_type}</strong>{ev.occurred_at ? `, ${ev.occurred_at.slice(0, 10)}` : ''}</p>
+              {ev.to_status && ev.from_status !== ev.to_status && <p>Now: {custodyWords(ev.to_status)}</p>}
+              {ev.location && <p>At {ev.location}</p>}
+              {ev.note && <p className="hint">{ev.note}</p>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
+  );
+}
+
 const route = getRouteApi('/staff/lending/collateral/$collateralId');
 
 function CollateralPage() {
   const { collateralId } = route.useParams();
-  const { me } = useStaff();
   const detail = useDetail(collateralId);
-  const [panel, setPanel] = useState<'change' | 'release' | null>(null);
   const c = detail.data?.item;
   useCrumbLabel(c ? typeWords(c.collateral_type) : undefined);
-  const manage = c ? mayManageCollateral(me, c.branch_id) : false;
-  const release = c ? mayReleaseCollateral(me, c.branch_id) && canRequestRelease(c.custody_status) : false;
   return (
     <CollateralGate title={c?.description ?? 'Collateral'} tourId="collateral-page">
       <Link to="/staff/lending/collateral" className="btn btn-ghost">Back to collateral</Link>
       {detail.isPending && <p className="loading">Loading the item</p>}
       <Problem error={detail.error} />
-      {c && detail.data && (
-        <>
-          <section className="rt-card ln-head" aria-label="Item" data-tour="collateral-header">
-            <p className="ln-item-head"><strong>{typeWords(c.collateral_type)}</strong><span className={custodyBadge(c.custody_status)}>{custodyWords(c.custody_status)}</span></p>
-            <Facts c={c} />
-            <p className="cluster" data-tour="collateral-actions">
-              {c.member_id && <Link to="/staff/lending/members/$memberId" params={{ memberId: c.member_id }} className="btn btn-ghost">Open the member</Link>}
-              {manage && <Link to="/staff/lending/collateral/$collateralId/edit" params={{ collateralId }} className="btn rt-primary">Change details</Link>}
-              {manage && panel === null && eventsFrom(c.custody_status).length > 0 && <button type="button" className="btn-ghost" onClick={() => setPanel('change')}>Record a change</button>}
-              {release && panel === null && <button type="button" className="btn-ghost" onClick={() => setPanel('release')}>Ask to give it back</button>}
-            </p>
-            {panel === 'change' && <CustodyChange id={collateralId} version={c.version ?? 0} custody={c.custody_status} onDone={() => setPanel(null)} />}
-            {panel === 'release' && <ReleaseRequest id={collateralId} version={c.version ?? 0} onDone={() => setPanel(null)} />}
-          </section>
-          <Photos id={collateralId} canAdd={manage} />
-          <Valuations id={collateralId} currency={c.currency} valuations={detail.data.valuations ?? []} canAdd={manage && c.custody_status !== 'disposed'} />
-          <section className="rt-card stack" aria-labelledby="col-hist" data-tour="collateral-history">
-            <h2 id="col-hist">History</h2>
-            {(detail.data.events ?? []).length === 0 && <p className="empty-state">No changes recorded yet.</p>}
-            <ul className="ln-list">
-              {(detail.data.events ?? []).map((ev) => (
-                <li key={ev.id} className="rt-card">
-                  <p><strong>{EVENT_WORDS[ev.event_type as EventType] ?? ev.event_type}</strong>{ev.occurred_at ? `, ${ev.occurred_at.slice(0, 10)}` : ''}</p>
-                  {ev.to_status && ev.from_status !== ev.to_status && <p>Now: {custodyWords(ev.to_status)}</p>}
-                  {ev.location && <p>At {ev.location}</p>}
-                  {ev.note && <p className="hint">{ev.note}</p>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        </>
-      )}
+      {detail.data && <CollateralView detail={detail.data} collateralId={collateralId} />}
     </CollateralGate>
   );
 }
