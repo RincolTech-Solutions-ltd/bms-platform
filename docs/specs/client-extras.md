@@ -1089,6 +1089,48 @@ Where the build differs from, or sharpens, the text above:
   endpoints, the daily job and the stored brief (#226), the screens, and the run against a real provider and the comparison of
   models (#232).
 
+### 5.14 As built in slice #226 (the daily brief, the stored brief, the card and the settings)
+
+Migration `V56` (the number is taken above main and every open pull request and renumbered by the coordinator at merge): the table
+`lending_ai_briefs` and the permissions `lending.advisor.use` (tenant admin, branch manager, accountant, auditor) and
+`lending.advisor.configure` (tenant admin). Where the build differs from, or sharpens, the text above:
+
+- **The job.** `lending.advisor-daily-brief` runs every 15 minutes and does nothing before 06:00 on the Africa/Kampala clock. It reads
+  the business date ONCE per run, from the time the run was due (db-scheduler's execution time), so a run queued at 23:50 and served
+  after midnight is the earlier date's, and hands that date to every tenant. For each active lending tenant with the assistant on it
+  reads the facts of that date for every branch and every officer (`PortfolioScope(first of month, date, date, all, all, all)`, no
+  principal), builds the prompt, calls the gateway with purpose `brief`, validates with `StructuredValidator`, renders from the
+  catalogue and stores one row by `ON CONFLICT DO NOTHING`. Because the scope carries its own date, a run after midnight reads that
+  day's snapshot (422 `snapshot_unavailable` before the night's snapshot is written: nothing is stored and a later run of the same
+  date may retry, which in practice means the day gets no AI brief). With the switch off a tenant costs one settings read: no facts,
+  no request, no row.
+- **What is stored.** `source` `model` (the rendered text of an accepted answer) or `fallback` (the facts-only brief) with the reason:
+  `validation` when the structured answer was refused, otherwise the gateway's own word (`timeout`, `provider_error`, `breaker_open`,
+  `tenant_token_cap`, `not_allowed`, and so on). Aliases are mapped back to branch and product names, since the row is shown only to
+  people who may see every branch. A fallback is final for the day. A refused answer was paid for: its tokens and cost are in
+  `ai_calls` and in the day's caps.
+- **Who gets it.** `GET /lending/advisor/brief` returns the stored brief only when the caller holds `lending.insights.all_officers` and
+  their scope for `lending.advisor.use`, `lending.insights.read` and `lending.insights.all_officers` each covers every branch of the
+  tenant (all branches, or a list that contains every branch id). Otherwise the automatic summary for the caller's own scope is
+  computed on the spot (`PortfolioFacts.forCaller`, never stored or shared) with reason `scope`. With the assistant off the same
+  summary comes back with reason `off`, and before the day's job has run with reason `not_ready`: the route never answers 404 for
+  the switch, and a failure to read the figures is a summary that says so, never an error (403 for a caller without
+  `lending.insights.read` excepted).
+- **The card.** The Insights page's Today tab carries a card for users with `lending.advisor.use`: the label (`AI assistant (advisory)`
+  or `Automatic summary`), the as-of time, the summary and points, chips for the figures used (a chip with an insights metric opens
+  that metric's rows), the reason when it is the automatic summary, and the line "Generated from your portfolio figures. Check
+  before acting. It does not change any record." (for the automatic summary: "Written from your portfolio figures by fixed rules. No
+  AI was used."). The server sends the label and the line, so every AI text carries them.
+- **The settings.** `GET` and `PUT /lending/advisor/settings` and the screen `/staff/assistant` (menu entry "AI assistant" for
+  `lending.advisor.configure`): the switch with the notice and its tick box (the notice's version is stored with the user and the
+  time), the daily token cap, and today's use. Not built: the cost cap box, the call list, the question box (#230).
+- **Tests.** `DailyBriefIT` (no call and no row with the switch off; the allow-list, the acknowledgement and the permissions; an
+  accepted answer stored as rendered text and never the model's, and a rerun that changes nothing; a refused answer stored as the
+  facts-only brief with reason `validation` and still counted in tokens, cost and the daily cap; the fallback on a provider error,
+  a timeout, a network failure, a rate limit, a bad response, an open breaker, a cap and an input the screen refuses; the call log
+  holding no prompt, response, fact value or name; a job queued before midnight and served after it; the 20:59 and 21:01 UTC edge;
+  who may read the stored brief), `BriefBuilderTest`, `AdvisorJobsTest`, and the card and settings markup tests.
+
 ## 6. The reports pack (ADR-038)
 
 ### 6.1 Summary
