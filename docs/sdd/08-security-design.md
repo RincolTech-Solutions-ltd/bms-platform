@@ -194,6 +194,8 @@ platform API and holds no tenant permissions.
 | `lending.insights.read` | Y | Y | Y | | Y | Y | | |
 | `lending.insights.all_officers` | Y | Y | | | Y | Y | | |
 | `lending.insights.export` | Y | Y | Y | | Y | Y | | |
+| `lending.advisor.use` | Y | Y | | | Y | Y | | |
+| `lending.advisor.configure` | Y | | | | | | | |
 | `member.self.read` | | | | | | | Y | |
 | `member.self.apply` | | | | | | | Y | |
 | `member.self.pay` | | | | | | | Y | |
