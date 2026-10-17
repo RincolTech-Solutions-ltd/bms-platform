@@ -15,7 +15,8 @@ import { useStaff } from '../context';
 import { Problem } from '../retail/ui';
 import { BarList, ColumnChart, LineChart, type BarRow } from './charts';
 import { formatValue, presetRange, words } from './format';
-import { canExport, canManageDigest, ownPortfolioOnly, showInsights } from './permissions';
+import { AdvisorCard } from './advisor';
+import { canExport, canManageDigest, canUseAdvisor, ownPortfolioOnly, showInsights } from './permissions';
 import { MetricCard, MetricGrid, drillOf, type DrillTarget } from './ui';
 
 // Insights (#153, expectation 7): the morning brief, the loan portfolio, revenue from the ledger
@@ -110,6 +111,13 @@ function InsightsPage() {
     }
   }
 
+  // A chip of the assistant card opens the rows behind its metric, when the page holds that metric.
+  function openMetric(key: string) {
+    const all = [...(brief.data?.metrics ?? []), ...(portfolio.data?.metrics ?? [])];
+    const target = drillOf(all.find((m) => m.key === key) ?? {});
+    if (target) setDrill(target);
+  }
+
   const products = portfolio.data?.breakdowns?.find((b) => b.dimension === 'product')?.rows ?? [];
   const officers = portfolio.data?.breakdowns?.find((b) => b.dimension === 'officer')?.rows ?? [];
   const updated = brief.dataUpdatedAt ? new Date(brief.dataUpdatedAt) : null;
@@ -198,6 +206,7 @@ function InsightsPage() {
 
       {tab === 'brief' && (
         <section aria-label="Morning brief">
+          {canUseAdvisor(me) && <AdvisorCard onChip={openMetric} />}
           <Problem error={brief.error} />
           {brief.data && (
             <>
