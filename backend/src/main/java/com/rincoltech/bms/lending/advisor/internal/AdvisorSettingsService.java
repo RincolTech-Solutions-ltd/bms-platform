@@ -32,6 +32,13 @@ class AdvisorSettingsService {
                     + " you act. The platform keeps a log of each call that holds counts and cost, never the text. Daily limits"
                     + " apply, and when the provider is down or a limit is reached the automatic summary is shown instead.";
 
+    /**
+     * What is stored with the acknowledgement: the public version and a digest of the exact wording shown, so the record
+     * identifies the text even after the wording changes. The client still echoes only the public version, so this is a
+     * recorded acknowledgement, not proof of what was on a screen (said in the ADR-037 amendment).
+     */
+    static final String ACK_RECORD = ACK_TEXT_VERSION + "+" + digest(ACK_TEXT);
+
     static final String MANAGE = "core.settings.manage";
 
     /** What a change asks for; null fields are unchanged. */
@@ -51,9 +58,9 @@ class AdvisorSettingsService {
     @Transactional
     SettingsView update(String ifMatch, Change change) {
         int expected = Versions.fromIfMatch(ifMatch);
-        int current = settings.status().version();
-        if (current != expected) {
-            throw Versions.conflict(current);
+        Status before = settings.status();
+        if (before.version() != expected) {
+            throw Versions.conflict(before.version());
         }
         if (change.enabled() != null && !CurrentPrincipal.require().hasPermission(MANAGE)) {
             throw new ApiException(
@@ -67,7 +74,7 @@ class AdvisorSettingsService {
                     "acknowledgement_only_when_switching_on", "The acknowledgement is taken only when switching on.");
         }
         int version = expected;
-        if (Boolean.TRUE.equals(change.enabled()) && !settings.status().enabled()) {
+        if (Boolean.TRUE.equals(change.enabled()) && !before.enabled()) {
             if (!ACK_TEXT_VERSION.equals(change.acknowledgedTextVersion())) {
                 throw new ApiException(
                         HttpStatus.UNPROCESSABLE_CONTENT,
@@ -75,8 +82,8 @@ class AdvisorSettingsService {
                         "Acknowledgement required",
                         "Switching the assistant on needs the acknowledgement of the text that was shown.");
             }
-            version = settings.enable(ACK_TEXT_VERSION, version).version();
-        } else if (Boolean.FALSE.equals(change.enabled()) && settings.status().enabled()) {
+            version = settings.enable(ACK_RECORD, version).version();
+        } else if (Boolean.FALSE.equals(change.enabled()) && before.enabled()) {
             version = settings.disable(version).version();
         }
         if (change.dailyTokenCap() != null || change.dailyCostCapMicro() != null) {
@@ -84,6 +91,16 @@ class AdvisorSettingsService {
                     .version();
         }
         return view(settings.status());
+    }
+
+    private static String digest(String text) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(hash, 0, 6);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is part of every Java platform", e);
+        }
     }
 
     private static SettingsView view(Status s) {

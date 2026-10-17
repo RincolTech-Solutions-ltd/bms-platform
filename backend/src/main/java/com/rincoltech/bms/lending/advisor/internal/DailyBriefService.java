@@ -12,6 +12,7 @@ import com.rincoltech.bms.lending.insights.PortfolioFacts;
 import com.rincoltech.bms.lending.insights.PortfolioFacts.FactSet;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -32,7 +33,7 @@ class DailyBriefService {
 
     /** What one run did, for the job's log and the tests. */
     enum Outcome {
-        /** The assistant is off for the tenant: no facts were read and no call was made. */
+        /** The assistant is not active for the tenant (its switch is off, or it is not on the platform list): no facts, no call. */
         OFF,
         /** A brief for the date exists already. */
         EXISTS,
@@ -40,9 +41,29 @@ class DailyBriefService {
         NO_FACTS,
         /** A brief rendered from an accepted model answer was stored. */
         STORED_MODEL,
-        /** The facts-only brief was stored. */
-        STORED_FALLBACK
+        /** The facts-only brief was stored: a paid call that gave no usable answer, so the day is final. */
+        STORED_FALLBACK,
+        /** The state said no (switch, list, provider, open breaker) and nothing was paid for: nothing stored, a later run retries. */
+        NOT_STORED
     }
+
+    /** Reasons that describe the state of the platform, not of the day: nothing was sent, so the day is not locked. */
+    private static final Set<AiGateway.Reason> STATE_REFUSALS = Set.of(
+            AiGateway.Reason.NOT_ENABLED,
+            AiGateway.Reason.NOT_ALLOWED,
+            AiGateway.Reason.PROVIDER_OFF,
+            AiGateway.Reason.BREAKER_OPEN,
+            AiGateway.Reason.INTERNAL_ERROR);
+
+    /** Reasons where a network call was made: the row's model and call id are kept for the cost trail. */
+    private static final Set<AiGateway.Reason> CALLED = Set.of(
+            AiGateway.Reason.TIMEOUT,
+            AiGateway.Reason.NETWORK,
+            AiGateway.Reason.RATE_LIMITED,
+            AiGateway.Reason.PROVIDER_ERROR,
+            AiGateway.Reason.AUTH_ERROR,
+            AiGateway.Reason.BAD_RESPONSE,
+            AiGateway.Reason.BAD_REQUEST);
 
     private static final Logger log = LoggerFactory.getLogger(DailyBriefService.class);
 
@@ -70,7 +91,8 @@ class DailyBriefService {
 
     /** Makes and stores the brief of {@code date} for the bound tenant, once. Call outside a transaction. */
     Outcome generate(LocalDate date) {
-        if (!settings.status().enabled()) {
+        // The cheap read: this runs for every tenant on every tick. Off includes not being on the platform list.
+        if (!settings.active()) {
             return Outcome.OFF;
         }
         if (store.exists(date)) {
@@ -86,10 +108,28 @@ class DailyBriefService {
         }
         AliasedFacts facts = AliasedFacts.of(set);
         AiResult result = gateway.complete("brief", null, PromptBuilder.brief(facts));
+        if (result.callId() == null || (result.reason() != null && STATE_REFUSALS.contains(result.reason()))) {
+            // Nothing was paid for and the answer is not the day's: do not lock the day with a stand-in, try again
+            // later.
+            log.info("daily brief not stored date={} reason={}", date, result.reason());
+            return Outcome.NOT_STORED;
+        }
         Brief brief = BriefBuilder.build(facts, result);
+        boolean called = result.answered() || CALLED.contains(result.reason());
         Instant now = clock.now();
-        boolean called = result.callId() != null;
-        store.insertOnce(date, brief, now, called ? llm.model() : null, result.callId());
+        try {
+            store.insertOnce(date, brief, now, called ? llm.model() : null, called ? result.callId() : null);
+        } catch (RuntimeException e) {
+            // The call is paid for: do not let the next tick pay again. Try a minimal facts-only row; if even that
+            // cannot be
+            // written the failure goes to the job, which logs it (the type only, never a message).
+            log.error(
+                    "daily brief store failed date={} error={}",
+                    date,
+                    e.getClass().getSimpleName());
+            brief = BriefBuilder.fallback(facts, "internal_error");
+            store.insertOnce(date, brief, now, null, null);
+        }
         log.info("daily brief stored date={} source={} reason={}", date, brief.source(), brief.reason());
         return brief.model() ? Outcome.STORED_MODEL : Outcome.STORED_FALLBACK;
     }

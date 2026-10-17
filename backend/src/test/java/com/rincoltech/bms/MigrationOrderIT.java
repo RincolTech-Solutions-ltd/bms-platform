@@ -1460,7 +1460,8 @@ class MigrationOrderIT {
                 .isEqualTo(before);
         // V48 adds no permission; V56 (the AI assistant, #226) adds the two advisor ones, which are not V48's to answer
         // for.
-        assertThat(owner.sql("SELECT count(*) FROM permissions WHERE key NOT LIKE 'lending.advisor.%'")
+        assertThat(owner.sql(
+                                "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")

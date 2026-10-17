@@ -69,7 +69,13 @@ class AdvisorController {
                     "Today's brief: the stored AI brief for a caller who may see every branch, else the automatic summary",
             operationId = "getAdvisorBrief")
     ResponseEntity<BriefView> brief() {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(briefs.today());
+        // 204 when the assistant is not active for the tenant: nothing is read and the card is not drawn.
+        return briefs.today()
+                .map(b ->
+                        ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(b))
+                .orElseGet(() -> ResponseEntity.noContent()
+                        .cacheControl(CacheControl.noStore())
+                        .build());
     }
 
     @GetMapping("/settings")

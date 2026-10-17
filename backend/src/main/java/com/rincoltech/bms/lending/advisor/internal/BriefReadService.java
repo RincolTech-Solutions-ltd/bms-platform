@@ -1,6 +1,7 @@
 package com.rincoltech.bms.lending.advisor.internal;
 
 import com.rincoltech.bms.core.ai.AiSettings;
+import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
@@ -21,7 +22,6 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,40 +52,47 @@ class BriefReadService {
     private final BriefStore store;
     private final PortfolioFacts portfolioFacts;
     private final BusinessClock clock;
-    private final JdbcClient jdbc;
+    private final Branches branches;
 
     BriefReadService(
             AiSettings settings,
             BriefStore store,
             PortfolioFacts portfolioFacts,
             BusinessClock clock,
-            JdbcClient jdbc) {
+            Branches branches) {
         this.settings = settings;
         this.store = store;
         this.portfolioFacts = portfolioFacts;
         this.clock = clock;
-        this.jdbc = jdbc;
+        this.branches = branches;
     }
 
-    BriefView today() {
+    /**
+     * Today's brief, or empty when the assistant is not active for the tenant (its switch is off or it is not on the platform
+     * list): then nothing is read and the card is not drawn. The transaction is opened here, at the entry the controller
+     * calls, because the tenant is bound when a transaction begins.
+     */
+    @Transactional(readOnly = true)
+    Optional<BriefView> today() {
         // The business date is read once for the whole request.
         return forDate(clock.today(BusinessClock.DEFAULT_ZONE));
     }
 
     /** The brief for one business date (the date read once by {@link #today}); a test chooses it. */
     @Transactional(readOnly = true)
-    BriefView forDate(LocalDate date) {
+    Optional<BriefView> forDate(LocalDate date) {
+        if (!settings.active()) {
+            return Optional.empty();
+        }
         Principal principal = CurrentPrincipal.require();
-        boolean on = settings.status().enabled();
-        Optional<Stored> stored = on ? store.find(date) : Optional.empty();
+        Optional<Stored> stored = store.find(date);
         if (stored.isPresent() && coversEveryBranch(principal)) {
-            return view(
+            return Optional.of(view(
                     stored.get().brief(),
                     stored.get().generatedAt(),
-                    reasonOf(stored.get().brief()));
+                    reasonOf(stored.get().brief())));
         }
-        String reason = !on ? "off" : stored.isPresent() ? "scope" : "not_ready";
-        return deterministic(reason);
+        return Optional.of(deterministic(stored.isPresent() ? "scope" : "not_ready"));
     }
 
     /** The facts-only brief for the caller's own scope; computed per request, never stored or shared. */
@@ -158,8 +165,14 @@ class BriefReadService {
         if (!principal.hasPermission(ALL_OFFICERS)) {
             return false;
         }
-        Set<UUID> every =
-                Set.copyOf(jdbc.sql("SELECT id FROM branches").query(UUID.class).list());
+        // Every ACTIVE branch: an inactive branch has no loans being worked and no user is scoped to it, so a branch
+        // list that
+        // names all the active branches covers the tenant. (Counting inactive ones would keep such a list from ever
+        // passing.)
+        Set<UUID> every = branches.all().stream()
+                .filter(Branches.Branch::active)
+                .map(Branches.Branch::id)
+                .collect(java.util.stream.Collectors.toSet());
         for (String permission : List.of(ADVISOR_USE, INSIGHTS_READ, ALL_OFFICERS)) {
             Optional<Principal.BranchScope> scope = principal.scopeOf(permission);
             if (scope.isEmpty()

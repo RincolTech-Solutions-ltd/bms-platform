@@ -50,7 +50,7 @@ class AdvisorJobs {
                         runFor(context.getExecution().executionTime, () -> lendingTenants(jdbc), tenantJobs, briefs));
     }
 
-    private static List<UUID> lendingTenants(JdbcClient jdbc) {
+    static List<UUID> lendingTenants(JdbcClient jdbc) {
         return jdbc.sql("SELECT app_list_active_tenants_with_module(?)")
                 .param("lending")
                 .query(UUID.class)
