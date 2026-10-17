@@ -23,7 +23,7 @@ export function asOfText(iso: string): string {
 }
 
 /** The brief as it is drawn; apart from the query so it can be rendered with a fixed brief. */
-export function AdvisorBriefView({ brief, onChip }: { brief: AdvisorBrief; onChip?: (metric: string) => void }) {
+export function AdvisorBriefView({ brief, onChip }: { brief: AdvisorBrief; onChip?: (metric: string, factsAsOf: string | null) => void }) {
   const automatic = brief.source !== 'model';
   const why = brief.reason ? WHY[brief.reason] : undefined;
   return (
@@ -44,7 +44,7 @@ export function AdvisorBriefView({ brief, onChip }: { brief: AdvisorBrief; onChi
         <p className="cluster" aria-label="Figures used">
           {brief.facts.map((f) =>
             f.metric && onChip ? (
-              <button key={f.key} type="button" className="btn-ghost btn-sm" onClick={() => onChip(f.metric as string)}>
+              <button key={f.key} type="button" className="btn-ghost btn-sm" onClick={() => onChip(f.metric as string, brief.facts_as_of)}>
                 {f.label}: {f.display}
               </button>
             ) : (
@@ -61,16 +61,36 @@ export function AdvisorBriefView({ brief, onChip }: { brief: AdvisorBrief; onChi
   );
 }
 
-/** The card: loads the brief and never lets a failure break the page (a failed load shows one quiet line). */
-export function AdvisorCard({ onChip }: { onChip?: (metric: string) => void }) {
+/**
+ * The card: loads the brief. While it loads it shows a plain placeholder with no label (nothing is claimed yet); when the
+ * assistant is off for the business (the server answers 204) nothing is drawn; a failed load shows one quiet line, never the
+ * "Automatic summary" label (the summary was not produced), and never breaks the page.
+ */
+export function AdvisorCard({ onChip }: { onChip?: (metric: string, factsAsOf: string | null) => void }) {
   const query = useQuery({ queryKey: ['advisor', 'brief'], queryFn: advisor.brief, staleTime: 60_000 });
-  if (query.data) return <AdvisorBriefView brief={query.data} onChip={onChip} />;
-  return (
-    <section className="iv-card iv-advisor" aria-label="Automatic summary" data-tour="advisor-card">
-      <p className="iv-card-label">
-        <span className="badge">Automatic summary</span>
-      </p>
-      <p className="ln-muted">{query.isPending ? 'Loading the summary' : 'The summary is not available right now. The figures below are.'}</p>
-    </section>
-  );
+  return <AdvisorCardState pending={query.isPending} failed={query.isError} brief={query.data} onChip={onChip} />;
+}
+
+export function AdvisorCardState({ pending, failed, brief, onChip }: {
+  pending: boolean;
+  failed: boolean;
+  brief: AdvisorBrief | null | undefined;
+  onChip?: (metric: string, factsAsOf: string | null) => void;
+}) {
+  if (brief) return <AdvisorBriefView brief={brief} onChip={onChip} />;
+  if (pending) {
+    return (
+      <section className="iv-card iv-advisor" aria-busy="true" aria-label="Summary loading" data-tour="advisor-card">
+        <p className="ln-muted">Loading the summary</p>
+      </section>
+    );
+  }
+  if (failed) {
+    return (
+      <section className="iv-card iv-advisor" aria-label="Summary not available" data-tour="advisor-card">
+        <p className="ln-muted">The summary is not available right now. The figures below are.</p>
+      </section>
+    );
+  }
+  return null;
 }

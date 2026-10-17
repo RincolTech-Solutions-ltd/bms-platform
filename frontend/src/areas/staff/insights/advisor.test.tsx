@@ -4,7 +4,7 @@ import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { AdvisorBrief, AdvisorSettings } from '../../../api/advisor';
 import { AssistantCaps, AssistantSwitch } from '../assistant/page';
-import { AdvisorBriefView } from './advisor';
+import { AdvisorBriefView, AdvisorCardState } from './advisor';
 import { canConfigureAdvisor, canUseAdvisor } from './permissions';
 
 const renderToString = (node: ReactElement) =>
@@ -92,6 +92,30 @@ describe('the AI assistant card', () => {
     expect(canUseAdvisor({ permissions: ['lending.insights.read'], modules: ['lending'] })).toBe(false);
     expect(canConfigureAdvisor({ permissions: ['lending.advisor.configure'], modules: ['lending'] })).toBe(true);
     expect(canConfigureAdvisor({ permissions: ['lending.advisor.use'], modules: ['lending'] })).toBe(false);
+  });
+});
+
+describe('the AI assistant card states', () => {
+  it('shows a plain placeholder while loading, with no label and no claim', () => {
+    const html = renderToString(<AdvisorCardState pending failed={false} brief={undefined} />);
+    expect(html).toContain('Loading the summary');
+    expect(html).not.toContain('Automatic summary');
+    expect(html).not.toContain('AI assistant (advisory)');
+  });
+
+  it('shows one quiet line when the load failed, never a label', () => {
+    const html = renderToString(<AdvisorCardState pending={false} failed brief={undefined} />);
+    expect(html).toContain('The summary is not available right now');
+    expect(html).not.toContain('Automatic summary');
+    expect(html).not.toContain('AI assistant (advisory)');
+  });
+
+  it('draws nothing when the assistant is off for the business (the server answered 204)', () => {
+    expect(renderToString(<AdvisorCardState pending={false} failed={false} brief={null} />)).toBe('');
+  });
+
+  it('draws the brief once it is there', () => {
+    expect(renderToString(<AdvisorCardState pending={false} failed={false} brief={model} />)).toContain('AI assistant (advisory)');
   });
 });
 

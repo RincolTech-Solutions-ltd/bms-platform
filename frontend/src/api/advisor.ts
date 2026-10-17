@@ -105,8 +105,11 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }, fa
 const ifMatch = (version: number) => `"${version}"`;
 
 export const advisor = {
-  async brief(): Promise<AdvisorBrief> {
-    return unwrap(await api.GET('/api/v1/lending/advisor/brief'), 'Could not load the summary.') as AdvisorBrief;
+  /** Null when the assistant is off for the business (204): the card is not drawn at all. */
+  async brief(): Promise<AdvisorBrief | null> {
+    const result = await api.GET('/api/v1/lending/advisor/brief');
+    if (result.response.status === 204) return null;
+    return unwrap(result, 'Could not load the summary.') as AdvisorBrief;
   },
 
   async settings(): Promise<AdvisorSettings> {
