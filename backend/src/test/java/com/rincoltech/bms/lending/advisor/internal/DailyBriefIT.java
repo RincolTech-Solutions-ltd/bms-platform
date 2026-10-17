@@ -590,6 +590,8 @@ class DailyBriefIT extends IntegrationTest {
 
     @Test
     void theTwentyFiftyNineAndTwentyOneOhOneUtcEdge() {
+        // The day after `day` is skipped here, so no other test has a brief for it.
+        nextDay();
         LocalDate day = nextDay();
         // 20:59 UTC is 23:59 in Kampala: the run is for that date. 21:01 UTC is 00:01 of the next: nothing before
         // 06:00.
