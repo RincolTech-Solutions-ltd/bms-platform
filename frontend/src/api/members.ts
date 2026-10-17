@@ -19,6 +19,7 @@ export type CreateMemberBody = S['CreateMemberRequest'];
 export type UpdateMemberBody = S['UpdateMemberRequest'];
 export type KinBody = S['CreateNextOfKinRequest'];
 export type KinPatch = S['UpdateNextOfKinRequest'];
+export type MemberRelationships = S['MemberRelationships'];
 export type DocKind = 'id_front' | 'id_back' | 'photo' | 'other';
 
 export interface MemberQuery {
@@ -41,6 +42,7 @@ export interface MembersApi {
   updateKin(id: string, version: number, body: KinPatch): Promise<NextOfKin>;
   removeKin(id: string, version: number): Promise<void>;
   decideKinLink(id: string, version: number, decision: 'confirm' | 'reject'): Promise<NextOfKin>;
+  relationships(memberId: string): Promise<MemberRelationships>;
   listDocuments(memberId: string): Promise<MemberDocument[]>;
   uploadDocument(memberId: string, kind: DocKind, file: Blob, fileName: string, opts?: { onProgress?: UploadProgress; signal?: AbortSignal }): Promise<MemberDocument>;
   /** A 5 minute signed address for a stored document. */
@@ -109,6 +111,10 @@ export const realMembers: MembersApi = {
     return unwrapForm(
       await api.POST('/api/v1/lending/next-of-kin/{kin_id}/link', { params: { path: { kin_id: id }, header: ifMatch(version) }, body: { decision } }),
     );
+  },
+
+  async relationships(memberId) {
+    return unwrapForm(await api.GET('/api/v1/lending/members/{member_id}/relationships', { params: { path: { member_id: memberId } } }));
   },
 
   async listDocuments(memberId) {
