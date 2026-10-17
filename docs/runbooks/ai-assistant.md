@@ -166,7 +166,7 @@ second, so it runs in every build. Fabricated data only: nothing here reads a te
 
 Each morning (from 06:00 Kampala time, checked every 15 minutes) the job `lending.advisor-daily-brief` makes one brief per tenant
 that has the assistant on, over every branch, and stores it in `lending_ai_briefs`; the Insights page shows it to the users who may
-see every branch and the automatic summary to everyone else. Nothing is made, and no call is sent, for a tenant that has it off.
+see every branch and the automatic summary to everyone else. Nothing is made, and no call is sent, for a tenant that has it off or is not on `BMS_AI_ENABLED_TENANTS`, and its Insights page shows no card (the route answers 204).
 
 ```sql
 -- What was stored today and why, per tenant (the text is never the model's own words).
@@ -177,7 +177,8 @@ SELECT tenant_id, brief_date, source, reason, facts_as_of, generated_at, call_id
 | Sign | Likely cause | Do |
 |---|---|---|
 | `source = fallback`, `reason = validation` | The model's structured answer was refused (outside the schema, an unknown fact key) | Nothing for one day. If it repeats, report it to the dev lead with the date and the `call_id` (the answer is not stored); the call was paid for |
-| `reason = timeout`, `provider_error`, `breaker_open` | The provider | Section 5a; the day stays the automatic summary, there is no retry for that date |
+| `reason = timeout`, `provider_error`, `rate_limited` | The provider failed after a call was paid for | Section 5a; the day stays the automatic summary, there is no retry for that date |
+| No row while the breaker was open or the provider off | A refusal that sent nothing is not stored | Nothing: the next 15 minute tick tries again |
 | `reason = tenant_token_cap` and similar | A cap was spent before the morning run | Raise the tenant's cap in `/staff/assistant` (at most the platform ceiling) for tomorrow |
 | No row for a date, the tenant being on | A run of that date came after midnight, before the night's snapshot was written (nothing is stored then) | Nothing: the card says "not ready" and shows the automatic summary; the next day's run makes its brief |
 | A user says they see the automatic summary | Their scope does not cover every branch, or they lack `lending.insights.all_officers`: reason `scope` | Expected. A branch manager never receives the all-branches brief |
