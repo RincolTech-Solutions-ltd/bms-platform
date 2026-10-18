@@ -68,6 +68,11 @@ class PesapalGatewayContractTest {
     static final String IPN_ID = "aaaaaaaa-0000-4000-8000-000000000001";
     static final Account TENANT = Account.tenant(UUID.fromString("00000000-0000-4000-8000-0000000000a1"));
     static final Account PLATFORM = Account.platform();
+    static final Account SECOND = Account.tenant(UUID.fromString("00000000-0000-4000-8000-0000000000a2"));
+
+    /** The credentials each account has, as the stored rows of the lenders would give them. */
+    final Map<Account, PesapalSettings.Pair> accounts = new ConcurrentHashMap<>();
+
     static final String RETURN_URL = "https://callbacks.example.test/api/v1/payments/return/pesapal";
     static final String PHONE = "+256700000123";
     static final String D1 = "aaaaaaaa-0000-4000-8000-0000000000d1";
@@ -109,6 +114,7 @@ class PesapalGatewayContractTest {
             return Reply.json(fixture("auth-token-ok").replace("FABRICATED.TOKEN.NOT.A.REAL.JWT", "FAB.TOKEN." + n));
         });
         breaker = new CircuitBreaker(5, Duration.ofSeconds(60), clock::get);
+        accounts.put(TENANT, new PesapalSettings.Pair(KEY, SECRET, IPN_ID, null));
         gateway = gateway(Duration.ofSeconds(3));
         Logger logger = (Logger) LoggerFactory.getLogger(PesapalGateway.class);
         logger.setLevel(Level.DEBUG);
@@ -127,9 +133,7 @@ class PesapalGatewayContractTest {
     PesapalGateway gateway(Duration budget) {
         return new PesapalGateway(
                 base,
-                account -> account.equals(TENANT)
-                        ? Optional.of(new PesapalSettings.Pair(KEY, SECRET, IPN_ID, null))
-                        : Optional.empty(),
+                account -> Optional.ofNullable(accounts.get(account)),
                 RETURN_URL,
                 mapper,
                 clock::get,
@@ -757,6 +761,102 @@ class PesapalGatewayContractTest {
             assertThat(e.kind()).isEqualTo(Kind.TRANSIENT);
             assertThat(e.code()).isEqualTo("connect");
         });
+    }
+
+    // ---- a lender's own account: connect and test connection (issue #233) -------------------------------------------
+
+    @Test
+    void testConnectionGetsATokenWithTheLendersOwnKeyAndRegistersItsNotificationAddress() throws Exception {
+        accounts.put(
+                SECOND, new PesapalSettings.Pair("second-lender-key-0001", "second-lender-secret-0001", null, null));
+        route("POST /pesapalv3/api/URLSetup/RegisterIPN", "ipn-register-get-ok");
+        IpnRegistration r = gateway.registerIpn(
+                SECOND, "https://callbacks.example.test/api/v1/payments/callbacks/pesapal/LENDERTOKEN", IpnType.GET);
+        assertThat(r.ipnId()).isEqualTo("aaaaaaaa-0000-4000-8000-000000000001");
+        Recorded tokenRequest = requests.stream()
+                .filter(q -> q.route().equals("POST /pesapalv3/api/Auth/RequestToken"))
+                .findFirst()
+                .orElseThrow();
+        JsonNode sent = mapper.readTree(tokenRequest.body());
+        assertThat(sent.get("consumer_key").asString()).isEqualTo("second-lender-key-0001");
+        assertThat(sent.get("consumer_secret").asString()).isEqualTo("second-lender-secret-0001");
+        assertThat(requests.getLast().headers()).containsEntry("authorization", "Bearer FAB.TOKEN.1");
+        // No log line carries either value.
+        assertThat(logs.list.stream().map(Object::toString).toList())
+                .noneMatch(l -> l.contains("second-lender-secret-0001") || l.contains("second-lender-key-0001"));
+    }
+
+    @Test
+    void eachAccountHasItsOwnTokenAndAReplacedSecretIsUsedAtOnce() throws Exception {
+        accounts.put(
+                SECOND, new PesapalSettings.Pair("second-lender-key-0001", "second-lender-secret-0001", IPN_ID, null));
+        status(fixture("status-pending"));
+        gateway.queryStatus(TENANT, D1);
+        gateway.queryStatus(SECOND, D1);
+        assertThat(authCalls).hasValue(2);
+        gateway.queryStatus(TENANT, D1);
+        gateway.queryStatus(SECOND, D1);
+        assertThat(authCalls).hasValue(2);
+        // The second lender pastes a new secret: the cached token belongs to the old one and is not used again.
+        accounts.put(
+                SECOND, new PesapalSettings.Pair("second-lender-key-0001", "a-replaced-secret-0002", IPN_ID, null));
+        gateway.queryStatus(SECOND, D1);
+        assertThat(authCalls).hasValue(3);
+        assertThat(requests.stream()
+                        .filter(q -> q.route().equals("POST /pesapalv3/api/Auth/RequestToken"))
+                        .map(q -> q.body())
+                        .filter(b -> b.contains("a-replaced-secret-0002"))
+                        .count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aLendersRefusedCredentialsAreAnAuthFailureThatNeverOpensTheSharedBreakerOrStopsAnotherLender()
+            throws Exception {
+        accounts.put(SECOND, new PesapalSettings.Pair("wrong-key-000000001", "wrong-secret-000000001", null, null));
+        routes.put(
+                "POST /pesapalv3/api/Auth/RequestToken",
+                r -> r.body().contains("wrong-key-000000001")
+                        ? Reply.json(fixture("auth-invalid-credentials"))
+                        : Reply.json(fixture("auth-token-ok")));
+        route("POST /pesapalv3/api/URLSetup/RegisterIPN", "ipn-register-get-ok");
+        for (int i = 0; i < 8; i++) {
+            clock.updateAndGet(t -> t.plusSeconds(40));
+            assertThatThrownBy(() -> gateway.registerIpn(SECOND, "https://callbacks.example.test/x", IpnType.GET))
+                    .isInstanceOfSatisfying(GatewayException.class, e -> {
+                        assertThat(e.kind()).isEqualTo(Kind.AUTH);
+                        assertThat(e.code()).isEqualTo("invalid_consumer_key_or_secret_provided");
+                    });
+        }
+        assertThat(breaker.state()).isEqualTo(CircuitBreaker.State.CLOSED);
+        // Another lender collects as before.
+        assertThat(gateway.registerIpn(TENANT, "https://callbacks.example.test/y", IpnType.GET)
+                        .ipnId())
+                .isNotBlank();
+    }
+
+    @Test
+    void anAccountWithNoCredentialsMakesNoCallAndNeverBorrowsAnotherAccountsOrThePlatforms() {
+        accounts.put(
+                PLATFORM, new PesapalSettings.Pair("platform-key-0000001", "platform-secret-0000001", IPN_ID, "x"));
+        Account none = Account.tenant(UUID.fromString("00000000-0000-4000-8000-0000000000a3"));
+        assertThat(gateway.available(none)).isFalse();
+        assertThat(gateway.available(PLATFORM)).isTrue();
+        assertThatThrownBy(() -> gateway.createOrder(none, order()))
+                .isInstanceOfSatisfying(
+                        GatewayException.class, e -> assertThat(e.kind()).isEqualTo(Kind.UNAVAILABLE));
+        assertThatThrownBy(() -> gateway.queryStatus(none, D1)).isInstanceOf(GatewayException.class);
+        assertThatThrownBy(() -> gateway.registerIpn(none, "https://callbacks.example.test/x", IpnType.GET))
+                .isInstanceOf(GatewayException.class);
+        assertThat(requests).isEmpty();
+        // A saved but untested account (no notification registration yet) can be tested but cannot make an order.
+        accounts.put(
+                SECOND, new PesapalSettings.Pair("second-lender-key-0001", "second-lender-secret-0001", null, null));
+        assertThat(gateway.available(SECOND)).isFalse();
+        assertThatThrownBy(() -> gateway.createOrder(SECOND, order()))
+                .isInstanceOfSatisfying(
+                        GatewayException.class, e -> assertThat(e.kind()).isEqualTo(Kind.UNAVAILABLE));
+        assertThat(requests).isEmpty();
     }
 
     // ---- the breaker --------------------------------------------------------------------------------------------
