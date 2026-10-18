@@ -57,14 +57,17 @@ that blocks the LAN and overlay network. Tools the host lacks run as containers
 across both repositories, so a job may queue.
 
 `deploy.yml` runs on a separate runner, `bms-deploy-pi` (ADR-040, which supersedes the hosted-runner rule of
-ADR-018 finding H1 for these jobs): a repository-scoped runner on the staging host under its own user
-`bmsdeploy`, not the `ghrunner` user and not the CI runners. The organisation's hosted Actions budget is
+ADR-018 finding H1 for these jobs): a runner on the staging host under its own user `bmsdeploy`, not the
+`ghrunner` user and not the CI runners, in the organisation runner group `bms-deploy`, which is visible to
+this repository only and restricted to `deploy.yml` at `refs/heads/main`, so no pull request, branch workflow
+or other repository can run a job there. The organisation's hosted Actions budget is
 exhausted and will not be raised, so no job may depend on hosted minutes. The finding H1 risk, a persistent
 runner that PR code and a `packages: write` token share, is answered differently: that runner holds NO
 signing key and no deploy secret, only the per-job `GITHUB_TOKEN` (which GitHub invalidates when the job
-ends); its rootless Docker state, credential files and work area are wiped before and after every job by
-root-owned hooks; its network is walled to the public internet; it is memory-capped so the OpenEMS edge on
-the same host is not at risk; and the build is trusted only through the signature, which is made
+ends); a root-owned hook fails any job that is not `deploy.yml` on `main`; its rootless Docker state,
+credential files and work area are wiped before and after every job; its network is walled to the public
+internet; it is memory-capped (and `user.slice` as a whole is capped) so the OpenEMS edge on the same host is
+not at risk; and the build is trusted only through the signature, which is made
 elsewhere (below). `deploy-production` is the one job that stays on `ubuntu-latest`, because it holds the
 production SSH key and only runs for a release tag after the production VM exists.
 
@@ -109,18 +112,19 @@ unless `BMS_SMS_CONTRACT=true`, so it does nothing in `mvn verify`.
   a time (`max-parallel: 1`) to stay inside the runner's memory cap.
 - **Signing (ADR-018 finding H2, as amended by ADR-040).** The private key lives only in the
   maintainer's Keychain (items `bms-cosign-key`, `bms-cosign-password`); it is no longer a repository
-  secret and no runner ever sees it. Each build job records `image`, `digest` and `revision` in a
-  `bms-image-digest` annotation. A launchd job on the maintainer's Mac, `deploy/signer/bms_signer.py`
+  secret and no runner ever sees it. Each build job writes `image`, `digest` and `revision` in a
+  `bms-image-digest` line of its own log. A launchd job on the maintainer's Mac, `deploy/signer/bms_signer.py`
   (runbook `docs/runbooks/deploy-signer.md`), signs `image@digest` with `cosign sign --key ...
   --tlog-upload=false` only when the run is this repository's `deploy.yml`, a push to `main`, its commit is
-  on `main`, the three build jobs succeeded on `bms-deploy-pi` at that commit, the annotation digest
-  matches and the image labels name that commit. The signer takes the digest from the annotation and never
-  from a tag, so a tag moved after the build cannot get a signature. `--tlog-upload=false` keeps the
+  on `main`, the three build jobs succeeded on `bms-deploy-pi` at that commit, the log holds exactly one matching
+  digest line and the image labels name that commit on both platforms, and the Keychain key equals
+  `deploy/cosign.pub`. The signer takes the digest from the job log and never from a tag, so a tag moved
+  after the build cannot get a signature; it uses cosign v2.4.1, the version the puller verifies with. `--tlog-upload=false` keeps the
   signature out of the public Rekor transparency log: this repository is private, and a log entry would
   publish its name and commit shas. The staging host marks a release failed for good when a signature does
   not verify, so `staging-pointer` first waits (up to 20 minutes) until `cosign verify --key
-  deploy/cosign.pub` passes for all three digests, and only then retags (`docker buildx imagetools create`
-  copies no content, so nothing needs signing twice). If the signer is off the pointer simply does not move.
+  deploy/cosign.pub` passes for all three digests, and only then creates the `staging` tags from those
+  verified digests (`docker buildx imagetools create` copies no content, so nothing needs signing twice). If the signer is off the pointer simply does not move.
 - Only `build`, `staging-pointer` and `promote` have `packages: write`, and only on `bms-deploy-pi`
   (ADR-040): the CI runners (`ci.yml` and the guards, on `CI_RUNS_ON`) never hold this permission or a
   deploy secret.

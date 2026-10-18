@@ -123,16 +123,17 @@ jobs:
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
-      # H2, as amended by ADR-040: this job does NOT sign. It records the pushed digest where only this
-      # run can write it (the job's own annotations), and the signer on the maintainer's Mac signs
+      # H2, as amended by ADR-040: this job does NOT sign. It records the pushed digest in its own log
+      # (a run's log cannot be edited from another run), and the signer on the maintainer's Mac signs
       # image@digest after checking the run: main, this runner, this commit, labels naming this commit.
       - name: Record the pushed digest for the signer
         env:
           IMAGE: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          case "$DIGEST" in sha256:????????????????????????????????????????????????????????????????) ;; *) echo "::error::no digest from the push"; exit 1 ;; esac
-          echo "::notice title=bms-image-digest::image=${IMAGE} digest=${DIGEST} revision=${GITHUB_SHA}"
+          printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "::error::no digest from the push"; exit 1; }
+          # The signer reads this line from the job's own log (not an annotation another workflow could edit).
+          echo "::notice title=bms-image-digest::bms-image-digest image=${IMAGE} digest=${DIGEST} revision=${GITHUB_SHA}"
 
   staging-pointer:
     name: Point staging at ${{ needs.meta.outputs.sha_tag }}
@@ -167,19 +168,21 @@ jobs:
         env:
           SHA_TAG: ${{ needs.meta.outputs.sha_tag }}
         run: |
+          : > verified-digests.txt
           for image in api web proxy; do
             ref="${IMAGE_PREFIX}-${image}:${SHA_TAG}"
             digest="$(docker buildx imagetools inspect "$ref" --format '{{ .Manifest.Digest }}')"
-            case "$digest" in sha256:????????????????????????????????????????????????????????????????) ;; *) echo "::error::no digest for $ref"; exit 1 ;; esac
+            printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "::error::no digest for $ref"; exit 1; }
             ok=""
-            for attempt in $(seq 1 60); do
+            for _ in $(seq 1 60); do
               if cosign verify --key deploy/cosign.pub --insecure-ignore-tlog=true "${IMAGE_PREFIX}-${image}@${digest}" > /dev/null 2>&1; then ok=yes; break; fi
               sleep 20
             done
             if [ -z "$ok" ]; then
-              echo "::error::${image}@${digest} was not signed within 20 minutes: is the signer on the maintainer's Mac running? (docs/runbooks/deploy-signer.md)"
+              echo "::error::${image}@${digest} was not signed in time: is the signer on the maintainer's Mac running? (docs/runbooks/deploy-signer.md)"
               exit 1
             fi
+            echo "${image} ${digest}" >> verified-digests.txt
             echo "::notice::${image} signed: ${digest}"
           done
       - name: Move the staging tag to the images just built (no rebuild)
@@ -208,9 +211,11 @@ jobs:
           # or re-push content, so the cosign signature made against the sha-<short> digest in the
           # build job already covers whatever tag names that same digest, staging included. Nothing
           # to re-sign here.
-          for image in api web proxy; do
-            docker buildx imagetools create --tag "${IMAGE_PREFIX}-${image}:staging" "${IMAGE_PREFIX}-${image}:${SHA_TAG}"
-          done
+          # Created from the DIGESTS verified above, never from the mutable sha tag: a tag swapped after the
+          # verification cannot reach the pointer (ADR-040).
+          while read -r image digest; do
+            docker buildx imagetools create --tag "${IMAGE_PREFIX}-${image}:staging" "${IMAGE_PREFIX}-${image}@${digest}"
+          done < verified-digests.txt
           echo "::notice title=Staging pointer::staging now names ${SHA_TAG}; the staging host deploys it within a few minutes (docs/runbooks/deploy.md)."
 
   promote:

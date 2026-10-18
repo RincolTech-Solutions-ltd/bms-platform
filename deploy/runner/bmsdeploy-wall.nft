@@ -32,7 +32,7 @@ table inet bmsdeploy_wall {
 	# cups, VNC, the OpenEMS edge (Felix console 8080 and its other API ports), InfluxDB, ZeroTier.
 	set host_lo_tcp {
 		type inet_service
-		elements = { 22, 111, 502, 631, 5900, 8079, 8080, 8081, 8084, 8085, 8086, 9993 }
+		elements = { 22, 111, 502, 631, 5900, 8079, 8080, 8081, 8084, 8085, 8086, 9993, 41019 }
 	}
 	set host_lo_udp {
 		type inet_service

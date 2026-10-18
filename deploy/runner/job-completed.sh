@@ -19,7 +19,9 @@ if docker info >/dev/null 2>&1; then
   docker system prune -af --volumes >/dev/null 2>&1
 fi
 rm -rf "$HOME_BD/.docker" "$HOME_BD/.ssh" "$HOME_BD/.gitconfig" "$HOME_BD/.npmrc" "$HOME_BD/.config/git" \
-       "$HOME_BD/.cache" "$HOME_BD/.m2" "$HOME_BD/.npm" 2>/dev/null
+       "$HOME_BD/.config/docker" "$HOME_BD/.cosign" "$HOME_BD/.cache" "$HOME_BD/.m2" "$HOME_BD/.npm" \
+       "$HOME_BD/.local/bin" "$HOME_BD/.local/lib" "$HOME_BD/.local/state" 2>/dev/null
+find /tmp /var/tmp -mindepth 1 -maxdepth 1 -user bmsdeploy -exec rm -rf {} + 2>/dev/null
 WORK="$HOME_BD/actions-runner/_work"
 if [ -d "$WORK" ]; then
   find "$WORK" -mindepth 1 -maxdepth 1 ! -name _temp -exec rm -rf {} + 2>/dev/null

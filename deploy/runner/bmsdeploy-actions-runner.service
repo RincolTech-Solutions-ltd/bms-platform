@@ -1,6 +1,6 @@
 # /etc/systemd/system/bmsdeploy-actions-runner.service
-# GitHub Actions self-hosted runner `bms-deploy-pi` for RincolTech-Solutions-ltd/bms-platform
-# (repository scope, labels self-hosted,Linux,ARM64,bms-deploy). BMS ADR-040, derived from the AGA
+# GitHub Actions self-hosted runner `bms-deploy-pi`, registered in the organisation runner group `bms-deploy`:
+# visible to bms-platform only and restricted to `deploy.yml` on `refs/heads/main` (labels self-hosted,Linux,ARM64,bms-deploy). BMS ADR-040, derived from the AGA
 # ADR-030 unit of `ghrunner` on the same host. It runs the deploy workflow's build, pointer and
 # promote jobs; it holds no signing key and no deploy secret. Walls, the controls that matter:
 #   - user bmsdeploy: no sudo, not in docker/dialout, cron denied, its own uid 1002
@@ -22,7 +22,7 @@ User=bmsdeploy
 Group=bmsdeploy
 Slice=user-1002.slice
 WorkingDirectory=/home/bmsdeploy/actions-runner
-ExecStart=/home/bmsdeploy/actions-runner/runsvc.sh
+ExecStart=/home/bmsdeploy/actions-runner/bin/runsvc.sh
 Environment=XDG_RUNTIME_DIR=/run/user/1002
 Environment=DOCKER_HOST=unix:///run/user/1002/docker.sock
 # Root-owned job hooks: a PR job cannot disable or rewrite them (the unit and the hooks are root-owned).

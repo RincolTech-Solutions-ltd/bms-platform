@@ -16,6 +16,17 @@ log "job-started: repo=${GITHUB_REPOSITORY:-unknown} event=${GITHUB_EVENT_NAME:-
 export DOCKER_HOST="${DOCKER_HOST:-unix:///run/user/1002/docker.sock}"
 HOME_BD=/home/bmsdeploy
 
+# Second line behind the organisation runner group (which already admits only deploy.yml on main): refuse any
+# job that is not this repository's deploy workflow at refs/heads/main on a push. A non-zero exit fails the
+# job before any step runs. Unset variables count as a refusal: if the hook cannot see what is running, nothing
+# runs.
+if [ "${GITHUB_WORKFLOW_REF:-}" != "RincolTech-Solutions-ltd/bms-platform/.github/workflows/deploy.yml@refs/heads/main" ] \
+   || [ "${GITHUB_EVENT_NAME:-}" != "push" ]; then
+  log "REFUSED: workflow ref '${GITHUB_WORKFLOW_REF:-unset}' event '${GITHUB_EVENT_NAME:-unset}'"
+  echo "bms-deploy-pi runs only deploy.yml on main (ADR-040)" >&2
+  exit 1
+fi
+
 if docker info >/dev/null 2>&1; then
   cids="$(docker ps -aq 2>/dev/null || true)"
   # shellcheck disable=SC2086
@@ -52,7 +63,9 @@ done
 log "stray-process sweep: killed=$killed"
 
 rm -rf "$HOME_BD/.ssh" "$HOME_BD/.docker" "$HOME_BD/.gitconfig" "$HOME_BD/.npmrc" "$HOME_BD/.config/git" \
-       "$HOME_BD/.cache" "$HOME_BD/.m2" "$HOME_BD/.npm" "$HOME_BD/.local/share/containers" 2>/dev/null
+       "$HOME_BD/.config/docker" "$HOME_BD/.cosign" "$HOME_BD/.cache" "$HOME_BD/.m2" "$HOME_BD/.npm" \
+       "$HOME_BD/.local/bin" "$HOME_BD/.local/lib" "$HOME_BD/.local/state" "$HOME_BD/.local/share/containers" 2>/dev/null
+find /tmp /var/tmp -mindepth 1 -maxdepth 1 -user bmsdeploy -exec rm -rf {} + 2>/dev/null
 log "reset: removed credential and tool-cache directories"
 log "job-started: done"
 exit 0

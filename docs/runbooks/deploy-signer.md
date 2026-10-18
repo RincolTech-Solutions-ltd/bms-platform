@@ -7,21 +7,26 @@ the image digests a deploy run built; no GitHub runner can sign.
 
 Every 30 seconds `deploy/signer/bms_signer.py` lists the latest `deploy.yml` runs of this repository
 (push to `main`). For a run whose three `Build and push api|web|proxy` jobs succeeded on the runner
-`bms-deploy-pi`, it reads each job's `bms-image-digest` annotation and signs `image@digest` with the
-Keychain key (`cosign sign --tlog-upload=false`). Before signing it checks that the commit is on `main`,
-the digest is valid, the annotation names the run's commit and the image labels name that commit. Anything
-else is refused and logged. A signed run is remembered in `~/bms-ops/signer/state.json`. The `staging-pointer`
+`bms-deploy-pi`, it reads each job's own log for the one `bms-image-digest image=... digest=... revision=...`
+line and signs `image@digest` with the Keychain key (`cosign sign --tlog-upload=false`). Before signing it
+checks that the commit is on `main`, the revision is the run's commit, the image labels name that commit on
+both platforms, and the public half of the Keychain key equals `deploy/cosign.pub` on main. Anything else is
+refused and logged once. A signed run attempt is remembered in `~/bms-ops/signer/state.json` (a re-run is a
+new attempt and is signed again). The `staging-pointer`
 job then sees the signatures (it verifies with `deploy/cosign.pub`) and moves `staging`.
 
 ## Install or update
 
 ```sh
-brew install cosign crane gh        # once; cosign v2.4.x, the puller verifies with that version
+brew install crane gh               # once
 gh auth status                      # a token with write:packages
-deploy/signer/install.sh            # copies the script to ~/bms-ops/signer and loads the launchd agent
+deploy/signer/install.sh            # downloads the pinned cosign v2.4.1, copies the script, loads the launchd agent
 ```
 
-Re-run `install.sh` after the script changes (the agent runs the copy, not the repository).
+Do not use a newer cosign: v3 writes signatures the staging puller (cosign v2.4.1) cannot read, and it would
+mark every release failed for good. `install.sh` installs v2.4.1 into `~/bms-ops/signer/bin` with a pinned hash
+and the signer refuses to run with any other version. Re-run `install.sh` after the script changes (the agent
+runs the copy, not the repository).
 
 ## Check it
 
@@ -39,7 +44,7 @@ re-run the failed `staging-pointer` job (or the whole run) from the Actions page
 
 ## Rotate the key
 
-1. `cosign generate-key-pair` on the Mac; store `cosign.key` (base64) and the password in the Keychain items
+1. `~/bms-ops/signer/bin/cosign generate-key-pair` on the Mac (v2.4.1); store `cosign.key` (base64) and the password in the Keychain items
    `bms-cosign-key` and `bms-cosign-password`; delete the local files.
 2. Commit the new `cosign.pub` as `deploy/cosign.pub`, and install it as `/opt/bms/cosign.pub` on the staging
    host (docs/runbooks/provision-host.md section 8.4). Do both before the next deploy: the host marks a release
