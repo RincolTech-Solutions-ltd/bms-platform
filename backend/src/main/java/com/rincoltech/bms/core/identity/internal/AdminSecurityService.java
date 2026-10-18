@@ -50,9 +50,16 @@ class AdminSecurityService implements AdminSecurity, SealedSecrets {
 
     @Override
     public int resealBoundTenant() {
+        return resealBoundTenantOf(null);
+    }
+
+    /** As {@link #resealBoundTenant}, restricted to one tenant when given (a connection that bypasses row-level security). */
+    int resealBoundTenantOf(UUID onlyTenant) {
         int changed = 0;
         var rows = jdbc.sql("SELECT user_id, totp_secret_enc, totp_pending_secret_enc FROM user_credentials"
-                        + " WHERE totp_secret_enc IS NOT NULL OR totp_pending_secret_enc IS NOT NULL FOR UPDATE")
+                        + " WHERE (totp_secret_enc IS NOT NULL OR totp_pending_secret_enc IS NOT NULL)"
+                        + " AND (CAST(? AS uuid) IS NULL OR tenant_id = CAST(? AS uuid)) FOR UPDATE")
+                .params(onlyTenant, onlyTenant)
                 .query((rs, n) -> new Object[] {
                     rs.getObject("user_id", UUID.class),
                     rs.getBytes("totp_secret_enc"),

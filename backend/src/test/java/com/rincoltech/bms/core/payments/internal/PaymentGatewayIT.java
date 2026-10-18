@@ -2140,4 +2140,77 @@ class PaymentGatewayIT extends IntegrationTest {
         tick();
         assertThat(statusOf(id)).isIn("paid", "booked");
     }
+
+    @Autowired
+    AccountCredentials credentials;
+
+    @Test
+    void theStoredCredentialsAreReadThroughTheDatabaseForTheBoundTenantOnly() {
+        // The adapter's own read (a transaction of its own, bound to the tenant of the thread): the decrypted pair of
+        // the
+        // bound tenant, and nothing for another tenant's account asked for from this tenant's thread.
+        String suffix = BOUND.slug().substring(BOUND.slug().length() - 8);
+        var own = tenantJobs.callAs(
+                BOUND.tenantId(), () -> credentials.find(PaymentGateway.Account.tenant(BOUND.tenantId())));
+        assertThat(own).isPresent();
+        assertThat(own.get().key()).isEqualTo("invented-key-" + suffix);
+        assertThat(own.get().ipnId()).isNotBlank();
+        var theirs = tenantJobs.callAs(
+                BOUND.tenantId(), () -> credentials.find(PaymentGateway.Account.tenant(OTHER.tenantId())));
+        assertThat(theirs).isEmpty();
+        // With no tenant bound at all, nothing either (and no error).
+        assertThat(credentials.find(PaymentGateway.Account.tenant(BOUND.tenantId())))
+                .isEmpty();
+    }
+
+    @Test
+    void theOperatorsStatusAndReleaseAnswerOnlyToAConnectionWithNoTenantBound() throws Exception {
+        TestDatabase.Fixture t = TestDatabase.tenant("pay-operator", true);
+        UUID admin = user(t);
+        connect(t, admin);
+        org.springframework.jdbc.core.simple.JdbcClient app =
+                org.springframework.jdbc.core.simple.JdbcClient.create(TestDatabase.appDataSource());
+        assertThat(app.sql("SELECT status FROM app_payment_account_status(?)")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .list())
+                .containsExactly("verified");
+        // From inside a tenant's own transaction (any tenant) the same functions return nothing and delete nothing.
+        try (java.sql.Connection c = TestDatabase.appDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (java.sql.Statement st = c.createStatement()) {
+                st.execute("SELECT set_config('app.tenant_id', '" + BOUND.tenantId() + "', true)");
+                try (java.sql.ResultSet rs =
+                        st.executeQuery("SELECT * FROM app_payment_account_status('" + t.tenantId() + "')")) {
+                    assertThat(rs.next()).isFalse();
+                }
+                try (java.sql.ResultSet rs =
+                        st.executeQuery("SELECT app_release_payment_account('" + t.tenantId() + "')")) {
+                    assertThat(rs.next() && rs.getString(1) == null).isTrue();
+                }
+            }
+            c.rollback();
+        }
+        assertThat(count(t)).isEqualTo(1);
+        // The platform's connection releases it and is told what it was.
+        assertThat(app.sql("SELECT app_release_payment_account(?)")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("verified");
+        assertThat(count(t)).isZero();
+        assertThat(app.sql("SELECT app_release_payment_account(?)")
+                        .param(t.tenantId())
+                        .query(String.class)
+                        .optional())
+                .isEmpty();
+    }
+
+    long count(TestDatabase.Fixture t) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM payment_gateway_accounts WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
 }
