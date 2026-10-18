@@ -64,17 +64,9 @@ class AccountKeyRotation {
         int resealed = 0;
         int failures = 0;
         for (UUID tenantId : tenants) {
-            try {
-                // Not callForTenant: that refuses a suspended tenant. The id is the platform's own worklist, never a
-                // request's.
-                resealed += tenantJobs.callAs(tenantId, () -> tx.execute(status -> resealHere(current)));
-            } catch (RuntimeException e) {
-                failures++;
-                log.error(
-                        "sealed secrets of tenant {} could not be re-sealed: {}",
-                        tenantId,
-                        e.getClass().getSimpleName());
-            }
+            Outcome o = resealTenant(tenantId, current);
+            resealed += o.resealed();
+            failures += o.failures();
         }
         try {
             resealed += tx.execute(status -> secrets.resealPlatformUsers());
@@ -100,8 +92,43 @@ class AccountKeyRotation {
         return resealed;
     }
 
+    /** What one tenant's re-seal did. */
+    record Outcome(int resealed, int failures) {}
+
+    /**
+     * One tenant: its payment accounts and its users' second-factor seeds, each in a transaction of its own and as that tenant
+     * (suspended ones too: not callForTenant, which refuses them; the id is the platform's own worklist, never a request's),
+     * so a problem with a payment account never rolls back the re-seal of the seeds, and the reverse.
+     */
+    Outcome resealTenant(UUID tenantId, String current) {
+        Integer accounts = piece(tenantId, "payment accounts", () -> tx.execute(s -> resealAccounts(current)));
+        Integer seeds = piece(tenantId, "second-factor seeds", () -> tx.execute(s -> secrets.resealBoundTenant()));
+        return new Outcome(
+                (accounts == null ? 0 : accounts) + (seeds == null ? 0 : seeds),
+                (accounts == null ? 1 : 0) + (seeds == null ? 1 : 0));
+    }
+
+    /** One part of one tenant's re-seal, as that tenant; null (and a log line by type) when it failed. */
+    private Integer piece(UUID tenantId, String what, java.util.function.Supplier<Integer> work) {
+        try {
+            return tenantJobs.callAs(tenantId, work);
+        } catch (RuntimeException e) {
+            log.error(
+                    "{} of tenant {} could not be re-sealed: {}",
+                    what,
+                    tenantId,
+                    e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
     /** The bound tenant's secrets sealed with another key: payment accounts and second-factor seeds. */
     int resealHere(String current) {
+        return resealAccounts(current) + secrets.resealBoundTenant();
+    }
+
+    /** The bound tenant's payment accounts sealed with another key (in the caller's transaction). */
+    int resealAccounts(String current) {
         int count = 0;
         for (AccountStore.Account row : store.sealedWithOtherKey(current)) {
             String key = new String(keys.open(row.consumerKeyBox()), StandardCharsets.UTF_8);
@@ -116,6 +143,6 @@ class AccountKeyRotation {
                     current);
             count++;
         }
-        return count + secrets.resealBoundTenant();
+        return count;
     }
 }

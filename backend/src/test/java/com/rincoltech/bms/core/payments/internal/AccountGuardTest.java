@@ -71,6 +71,13 @@ class AccountGuardTest {
         }
 
         @Override
+        public java.util.List<String> blindIndexes(String purpose, String value) {
+            java.util.List<String> all = new java.util.ArrayList<>(List.of(blindIndex(purpose, value)));
+            retired.forEach(id -> all.add((purpose + "|" + id + "|" + value).replaceAll("[^a-z0-9]", "0")));
+            return all;
+        }
+
+        @Override
         public String blindIndex(String purpose, String value) {
             return (purpose + "|" + current + "|" + value).replaceAll("[^a-z0-9]", "0");
         }
@@ -270,5 +277,45 @@ class AccountGuardTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void aProblemWithOnePaymentAccountNeverRollsBackTheSecondFactorSeedsOfTheSameTenant() {
+        DataKeys old = new FakeKeys("k1");
+        DataKeys rotated = new FakeKeys("k2", "k1");
+        AccountStore store = mock(AccountStore.class);
+        AccountStore.Account row = row(old, "verified", "lender-key-000001", "lender-secret-000001");
+        when(store.sealedWithOtherKey("k2")).thenReturn(List.of(row));
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DuplicateKeyException("duplicate"))
+                .when(store)
+                .reseal(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+        TenantJobs jobs = mock(TenantJobs.class);
+        when(jobs.callAs(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(1)).get());
+        SealedSecrets secrets = mock(SealedSecrets.class);
+        when(secrets.resealBoundTenant()).thenReturn(3);
+        AccountKeyRotation rotation =
+                new AccountKeyRotation(null, jobs, store, rotated, secrets, CLOCK, transactions());
+
+        AccountKeyRotation.Outcome outcome = rotation.resealTenant(LENDER, "k2");
+
+        // The accounts piece failed and is counted; the seeds were still re-sealed, in a transaction of their own.
+        assertThat(outcome.failures()).isEqualTo(1);
+        assertThat(outcome.resealed()).isEqualTo(3);
+        verify(secrets).resealBoundTenant();
+    }
+
+    @Test
+    void theBlindIndexesCoverTheCurrentAndEveryRetiredKeySoARowSealedBeforeARotationStillClashes() {
+        FakeKeys rotated = new FakeKeys("k2", "k1");
+        List<String> all = rotated.blindIndexes("p", "key-0001");
+        assertThat(all).hasSize(2).first().isEqualTo(rotated.blindIndex("p", "key-0001"));
+        assertThat(all.get(1)).isEqualTo(new FakeKeys("k1").blindIndex("p", "key-0001"));
     }
 }

@@ -211,6 +211,9 @@ bms:
     provider: ${BMS_PESAPAL_PROVIDER:}
     base-url: ${BMS_PESAPAL_BASE_URL:}
     callback-base-url: ${BMS_PESAPAL_CALLBACK_BASE_URL:}
+    # SHA-256 (hex, comma separated) of every consumer key the platform operator owns, current and retired: no lender may enter one
+    # as its own account. Production refuses to start with the gateway on and this empty (docs/runbooks/payments.md).
+    refused-key-digests: ${BMS_PESAPAL_REFUSED_KEY_DIGESTS:}
     platform:
       consumer-key: ${BMS_PESAPAL_PLATFORM_CONSUMER_KEY:}
       consumer-secret: ${BMS_PESAPAL_PLATFORM_CONSUMER_SECRET:}

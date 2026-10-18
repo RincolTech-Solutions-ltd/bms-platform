@@ -26,13 +26,30 @@ import java.util.regex.Pattern;
  *
  * Messages name the variable and never print a value, a key, a secret or a token.
  */
-record PesapalSettings(String environment, Kind provider, URI baseUrl, Pair platformPair, URI callbackBase) {
+record PesapalSettings(
+        String environment,
+        Kind provider,
+        URI baseUrl,
+        Pair platformPair,
+        URI callbackBase,
+        java.util.Set<String> refusedKeyDigests) {
+
+    /** True when the consumer key is one of the platform operator's own (by SHA-256), so no lender may enter it. */
+    boolean isRefusedKey(String consumerKey) {
+        return consumerKey != null
+                && (refusedKeyDigests.contains(java.util.HexFormat.of().formatHex(sha256(consumerKey)))
+                        || (platformPair.key() != null
+                                && MessageDigest.isEqual(
+                                        platformPair.key().getBytes(StandardCharsets.UTF_8),
+                                        consumerKey.getBytes(StandardCharsets.UTF_8))));
+    }
 
     static final String SANDBOX_HOST = "cybqa.pesapal.com";
     static final String SANDBOX_PATH = "/pesapalv3";
     static final String LIVE_HOST = "pay.pesapal.com";
     static final String LIVE_PATH = "/v3";
 
+    private static final Pattern DIGEST = Pattern.compile("^[0-9a-f]{64}$");
     private static final Pattern TOKEN = Pattern.compile("^[A-Za-z0-9_-]{24,128}$");
     private static final Pattern PRIVATE_HOST = Pattern.compile(
             "^(localhost|0\\.0\\.0\\.0|\\[::1?]|(127|10)(\\.\\d{1,3}){3}|192\\.168(\\.\\d{1,3}){2}|169\\.254(\\.\\d{1,3}){2}"
@@ -154,7 +171,22 @@ record PesapalSettings(String environment, Kind provider, URI baseUrl, Pair plat
         if (trimmed(p.callbackBaseUrl()) != null) {
             callback = callbackOrigin(trimmed(p.callbackBaseUrl()));
         }
-        return new PesapalSettings(env, kind, resolvedBase, platform, callback);
+        java.util.Set<String> refused = new java.util.LinkedHashSet<>();
+        if (trimmed(p.refusedKeyDigests()) != null) {
+            for (String d : trimmed(p.refusedKeyDigests()).split(",")) {
+                String digest = d.trim().toLowerCase(Locale.ROOT);
+                if (!DIGEST.matcher(digest).matches()) {
+                    throw refuse("BMS_PESAPAL_REFUSED_KEY_DIGESTS must be comma separated SHA-256 digests in hex");
+                }
+                refused.add(digest);
+            }
+        }
+        if (production && kind != Kind.OFF && refused.isEmpty()) {
+            throw refuse(
+                    "production needs BMS_PESAPAL_REFUSED_KEY_DIGESTS: the SHA-256 of every consumer key the platform"
+                            + " operator owns, so no lender can be connected to the platform's own merchant account");
+        }
+        return new PesapalSettings(env, kind, resolvedBase, platform, callback, java.util.Set.copyOf(refused));
     }
 
     private static Kind kind(String raw, boolean credentials) {

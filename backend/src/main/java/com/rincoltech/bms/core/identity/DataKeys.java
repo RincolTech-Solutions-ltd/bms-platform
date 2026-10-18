@@ -29,6 +29,12 @@ public interface DataKeys {
      */
     String blindIndex(String purpose, String value);
 
+    /**
+     * The digests of one value under the current key and under every retired key still configured, current first: what to
+     * look a stored digest up by, since a row sealed before a rotation keeps the digest of its old key until it is re-sealed.
+     */
+    java.util.List<String> blindIndexes(String purpose, String value);
+
     /** True when the box was sealed with a key other than the current one, so a rotation job should re-seal it. */
     default boolean needsRewrap(byte[] box) {
         return !currentKeyId().equals(keyIdOf(box));

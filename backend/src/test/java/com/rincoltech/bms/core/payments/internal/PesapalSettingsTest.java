@@ -37,8 +37,12 @@ class PesapalSettingsTest {
                         "invented-platform-key",
                         "invented-platform-secret",
                         "aaaaaaaa-0000-4000-8000-000000000002",
-                        PLATFORM_TOKEN));
+                        PLATFORM_TOKEN),
+                OWNED_DIGEST);
     }
+
+    /** The SHA-256 of the invented consumer key "invented-owned-key-0001", which the platform operator owns. */
+    static final String OWNED_DIGEST = "afbfcf8c44d688e3497cbcab588619eb0f2864ecf18c7d6800da4745d4eaa5d6";
 
     static PesapalProperties bare(String provider, String baseUrl) {
         return new PesapalProperties(provider, baseUrl, null, null);
@@ -204,7 +208,7 @@ class PesapalSettingsTest {
         // host cannot be set up to give one lender's account to whoever switches collections on first.
         assertThat(java.util.Arrays.stream(PesapalProperties.class.getRecordComponents())
                         .map(java.lang.reflect.RecordComponent::getName))
-                .containsExactlyInAnyOrder("provider", "baseUrl", "callbackBaseUrl", "platform");
+                .containsExactlyInAnyOrder("provider", "baseUrl", "callbackBaseUrl", "platform", "refusedKeyDigests");
         assertThat(java.util.Arrays.stream(PesapalSettings.class.getRecordComponents())
                         .map(java.lang.reflect.RecordComponent::getName))
                 .doesNotContain("tenantPair", "boundTenant");
@@ -278,6 +282,54 @@ class PesapalSettingsTest {
         PesapalSettings noPlatform = PesapalSettings.resolve("staging", bare("pesapal", null));
         assertThat(noPlatform.isPlatformToken("")).isFalse();
         assertThat(noPlatform.isPlatformToken(PLATFORM_TOKEN)).isFalse();
+    }
+
+    // ---- the platform operator's own keys can never be a lender's (issue #233, review round 2)
+    // -------------------------
+
+    @Test
+    void productionWithTheGatewayOnRefusesToStartWithoutTheListOfKeysNoLenderMayEnter() {
+        PesapalProperties none = new PesapalProperties(
+                "pesapal",
+                null,
+                "https://callbacks.example.test",
+                new PesapalProperties.Platform(null, null, null, null));
+        assertThatThrownBy(() -> PesapalSettings.resolve("production", none))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("BMS_PESAPAL_REFUSED_KEY_DIGESTS");
+        // Off needs none, and outside production an empty list is allowed.
+        assertThat(PesapalSettings.resolve("production", bare("off", null)).provider())
+                .isEqualTo(Kind.OFF);
+        assertThat(PesapalSettings.resolve("staging", none).refusedKeyDigests()).isEmpty();
+        PesapalSettings ok = PesapalSettings.resolve("production", props("pesapal", LIVE));
+        assertThat(ok.refusedKeyDigests()).containsExactly(OWNED_DIGEST);
+    }
+
+    @Test
+    void aRefusedKeyIsRefusedWhetherOrNotThePlatformPairIsInUseAndAMalformedDigestStopsTheStart() {
+        // The platform pair is unset (every host until subscriptions exist) but the operator's key is on the list.
+        PesapalProperties unsetPair = new PesapalProperties(
+                "pesapal",
+                null,
+                "https://callbacks.example.test",
+                new PesapalProperties.Platform(null, null, null, null),
+                OWNED_DIGEST.toUpperCase() + " , " + "0".repeat(64));
+        PesapalSettings s = PesapalSettings.resolve("staging", unsetPair);
+        assertThat(s.isRefusedKey("invented-owned-key-0001")).isTrue();
+        assertThat(s.isRefusedKey("invented-owned-key-0002")).isFalse();
+        assertThat(s.isRefusedKey(null)).isFalse();
+        // The configured platform key is refused too, with or without the list.
+        assertThat(PesapalSettings.resolve("staging", props("pesapal", null)).isRefusedKey("invented-platform-key"))
+                .isTrue();
+        for (String bad : new String[] {"not-hex", "abc", "z".repeat(64)}) {
+            PesapalProperties p = new PesapalProperties(
+                    "pesapal", null, null, new PesapalProperties.Platform(null, null, null, null), bad);
+            assertThatThrownBy(() -> PesapalSettings.resolve("staging", p))
+                    .as(bad)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("BMS_PESAPAL_REFUSED_KEY_DIGESTS")
+                    .hasMessageNotContaining(bad);
+        }
     }
 
     // ---- no value in any message or printed form ---------------------------------------------------------------

@@ -64,7 +64,8 @@ import tools.jackson.databind.JsonNode;
             "bms.pesapal.platform.consumer-key=invented-platform-key",
             "bms.pesapal.platform.consumer-secret=invented-platform-secret",
             "bms.pesapal.platform.ipn-id=aaaaaaaa-0000-4000-8000-000000000002",
-            "bms.pesapal.platform.ipn-token=" + PaymentGatewayIT.PLATFORM_TOKEN
+            "bms.pesapal.platform.ipn-token=" + PaymentGatewayIT.PLATFORM_TOKEN,
+            "bms.pesapal.refused-key-digests=fd7b571e25333d58599ee989f5fe9b901bead180a0d1b8d839c2bb59d078db49"
         })
 class PaymentGatewayIT extends IntegrationTest {
 
@@ -2253,5 +2254,76 @@ class PaymentGatewayIT extends IntegrationTest {
                 .update();
         tick();
         assertThat(statusOf(id)).isIn("paid", "booked");
+    }
+
+    @Test
+    void aKeyOnTheOperatorsRefusedListIsRefusedEvenThoughItIsNotThePlatformPairAndOnlyAfterTheCode() {
+        // "rincol-owned-key-0000001" is on the list (its SHA-256) but is not the configured platform pair.
+        TestDatabase.Fixture t = TestDatabase.tenant("pay-refused", true);
+        UUID admin = user(t);
+        ResponseEntity<JsonNode> refused = as(
+                HttpMethod.PUT,
+                "/api/v1/payments/merchant-account",
+                t,
+                admin,
+                PERMS,
+                creds("rincol-owned-key-0000001", SECRET_TEXT));
+        assertThat(refused.getStatusCode().value()).isEqualTo(409);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("merchant_account_in_use");
+        assertThat(count(t)).isZero();
+        // Someone who has not passed the second factor is told nothing about the key.
+        ResponseEntity<JsonNode> noCode = as(
+                HttpMethod.PUT,
+                "/api/v1/payments/merchant-account",
+                t,
+                admin,
+                PERMS,
+                Map.of(
+                        "consumer_key",
+                        "rincol-owned-key-0000001",
+                        "consumer_secret",
+                        SECRET_TEXT,
+                        "totp_code",
+                        "111111"));
+        assertThat(noCode.getStatusCode().value()).isEqualTo(422);
+        assertThat(noCode.getBody().get("code").asString()).isEqualTo("invalid_code");
+    }
+
+    @Test
+    void aKeyHeldByAnotherTenantUnderARetiredKeysDigestIsStillACLash() {
+        // A row sealed before a rotation keeps the digest of its old key: the lookup passes the digests under the
+        // current
+        // key and under each retired one, and finds it.
+        TestDatabase.Fixture a = TestDatabase.tenant("pay-rot-a", true);
+        UUID adminA = user(a);
+        String oldDigest = "ab".repeat(32);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO payment_gateway_accounts (id, tenant_id, consumer_key_enc, consumer_secret_enc,
+                                                              consumer_key_hmac, key_hint, data_key_id, status, updated_by)
+                        VALUES (?, ?, ?, ?, ?, 'abcd', 'old-key', 'saved', ?)
+                        """)
+                .params(UUID.randomUUID(), a.tenantId(), new byte[40], new byte[40], oldDigest, adminA)
+                .update();
+        org.springframework.jdbc.core.simple.JdbcClient app =
+                org.springframework.jdbc.core.simple.JdbcClient.create(TestDatabase.appDataSource());
+        UUID someoneElse = UUID.randomUUID();
+        String currentDigest = "cd".repeat(32);
+        assertThat(app.sql("SELECT app_payment_account_key_in_use('pesapal', ARRAY[?, ?], ?)")
+                        .params(currentDigest, oldDigest, someoneElse)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+        assertThat(app.sql("SELECT app_payment_account_key_in_use('pesapal', ARRAY[?], ?)")
+                        .params(currentDigest, someoneElse)
+                        .query(Boolean.class)
+                        .single())
+                .isFalse();
+        // Its own tenant is never a clash with itself.
+        assertThat(app.sql("SELECT app_payment_account_key_in_use('pesapal', ARRAY[?], ?)")
+                        .params(oldDigest, a.tenantId())
+                        .query(Boolean.class)
+                        .single())
+                .isFalse();
     }
 }

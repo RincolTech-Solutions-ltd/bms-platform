@@ -165,9 +165,9 @@ class AccountStore {
     }
 
     /** True when another tenant is already connected to the merchant account with this consumer key (by its digest). */
-    boolean keyInUseElsewhere(String keyHmac, UUID tenantId) {
-        return jdbc.sql("SELECT app_payment_account_key_in_use(?, ?, ?)")
-                .params(PROVIDER, keyHmac, tenantId)
+    boolean keyInUseElsewhere(java.util.List<String> keyHmacs, UUID tenantId) {
+        return jdbc.sql("SELECT app_payment_account_key_in_use(?, CAST(? AS text[]), ?)")
+                .params(PROVIDER, keyHmacs.toArray(new String[0]), tenantId)
                 .query(Boolean.class)
                 .single();
     }

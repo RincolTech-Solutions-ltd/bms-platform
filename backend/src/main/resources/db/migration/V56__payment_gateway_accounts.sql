@@ -129,11 +129,12 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
                AND substring(totp_pending_secret_enc FROM 3 FOR get_byte(totp_pending_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
 $$;
 
--- Whether a consumer key (by its digest) is already connected, by any tenant other than this one.
-CREATE FUNCTION app_payment_account_key_in_use(p_provider text, p_key_hmac text, p_tenant uuid) RETURNS boolean
+-- Whether a consumer key is already connected by any tenant other than this one. The caller passes the digest of the key under the
+-- current data key and under every retired one: a row sealed before a rotation keeps its old digest until it is re-sealed.
+CREATE FUNCTION app_payment_account_key_in_use(p_provider text, p_key_hmacs text[], p_tenant uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT EXISTS (SELECT 1 FROM payment_gateway_accounts a
-                    WHERE a.provider = p_provider AND a.consumer_key_hmac = p_key_hmac AND a.tenant_id <> p_tenant)
+                    WHERE a.provider = p_provider AND a.consumer_key_hmac = ANY (p_key_hmacs) AND a.tenant_id <> p_tenant)
 $$;
 
 -- As the four-argument form of V54 (dropped below), and additionally: when the notification came in on a lender's own
@@ -184,12 +185,12 @@ REVOKE ALL ON FUNCTION app_payment_account_status(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_payment_account_status(uuid) TO bms_app;
 REVOKE ALL ON FUNCTION app_tenants_with_sealed_secrets_to_reseal(text, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_count_sealed_secrets_to_reseal(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_payment_account_key_in_use(text, text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_payment_account_key_in_use(text, text[], uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_resolve_payment_intent(text, text, text, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_resolve_payment_account(text, text) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_tenants_with_sealed_secrets_to_reseal(text, integer) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_count_sealed_secrets_to_reseal(text) TO bms_app;
-GRANT EXECUTE ON FUNCTION app_payment_account_key_in_use(text, text, uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_payment_account_key_in_use(text, text[], uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_resolve_payment_intent(text, text, text, text, uuid) TO bms_app;
 
 -- The old four-argument resolver matched an order with no check of whose notification address it arrived on.

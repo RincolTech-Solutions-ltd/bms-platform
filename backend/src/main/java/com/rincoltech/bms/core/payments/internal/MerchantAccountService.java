@@ -15,7 +15,6 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -207,19 +206,20 @@ class MerchantAccountService {
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
-        if (samePlatformKey(key)) {
+        // The second factor first, outside the transaction: a wrong code counts toward the lockout and rolls nothing
+        // back, and nothing about the key (is it the platform's?) is told to someone who has not passed it.
+        security.requireTotp(input.totpCode());
+        if (settings.isRefusedKey(key)) {
             throw inUse();
         }
-        // The second factor first, outside the transaction: a wrong code counts toward the lockout and rolls nothing
-        // back.
-        security.requireTotp(input.totpCode());
         UUID user = CurrentPrincipal.require().userId();
         String hmac = keys.blindIndex(KEY_INDEX, key);
         View saved;
         try {
             saved = tx.execute(status -> {
                 AccountStore.Account before = store.lock().orElse(null);
-                if (store.keyInUseElsewhere(hmac, tenant.profile().id())) {
+                if (store.keyInUseElsewhere(
+                        keys.blindIndexes(KEY_INDEX, key), tenant.profile().id())) {
                     throw inUse();
                 }
                 if (before != null && store.hasWorkInFlight() && !sameKey(before, key)) {
@@ -254,13 +254,6 @@ class MerchantAccountService {
         }
         log.info("payment account credentials saved");
         return saved;
-    }
-
-    private boolean samePlatformKey(String key) {
-        String platformKey = settings.platformPair().key();
-        return platformKey != null
-                && MessageDigest.isEqual(
-                        platformKey.getBytes(StandardCharsets.UTF_8), key.getBytes(StandardCharsets.UTF_8));
     }
 
     private static ApiException inUse() {

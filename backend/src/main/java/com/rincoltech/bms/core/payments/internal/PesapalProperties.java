@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.payments.internal;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * The Pesapal gateway's environment values (ADR-035 decision 10, spec 3.11, 9.1). Raw strings exactly as the host
@@ -13,13 +14,23 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     complete, else off
  * @param baseUrl {@code BMS_PESAPAL_BASE_URL}: the sandbox or the live API base; outside production only the sandbox
  * @param callbackBaseUrl {@code BMS_PESAPAL_CALLBACK_BASE_URL}: the public https origin of the callback host
+ * @param refusedKeyDigests {@code BMS_PESAPAL_REFUSED_KEY_DIGESTS}: comma separated SHA-256 digests (lower case hex) of every consumer
+ *     key the platform operator owns, current and retired, which no lender may enter as its own account, whether or not the
+ *     platform pair is in use here. Production refuses to start with the gateway on and this empty
  * @param platform the platform operator's own pair, for subscription payments (slice #228). A lender's own merchant
  *     account is not here: it is entered by the lender's administrator, stored encrypted per tenant and never read from
  *     the environment (ADR-035 amendment of 2026-10-18, issue #233)
  */
 @ConfigurationProperties("bms.pesapal")
-record PesapalProperties(String provider, String baseUrl, String callbackBaseUrl, Platform platform) {
+record PesapalProperties(
+        String provider, String baseUrl, String callbackBaseUrl, Platform platform, String refusedKeyDigests) {
 
+    /** Without a refused-key list (development, tests). */
+    PesapalProperties(String provider, String baseUrl, String callbackBaseUrl, Platform platform) {
+        this(provider, baseUrl, callbackBaseUrl, platform, null);
+    }
+
+    @ConstructorBinding
     PesapalProperties {
         platform = platform == null ? new Platform(null, null, null, null) : platform;
     }

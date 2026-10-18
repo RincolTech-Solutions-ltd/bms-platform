@@ -57,7 +57,19 @@ final class SecretBox implements DataKeys {
     }
 
     @Override
+    public java.util.List<String> blindIndexes(String purpose, String value) {
+        java.util.List<String> all = new java.util.ArrayList<>();
+        all.add(digest(key, purpose, value));
+        retired.values().forEach(k -> all.add(digest(k, purpose, value)));
+        return all;
+    }
+
+    @Override
     public String blindIndex(String purpose, String value) {
+        return digest(key, purpose, value);
+    }
+
+    private static String digest(byte[] key, String purpose, String value) {
         try {
             javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(key, "HmacSHA256"));
