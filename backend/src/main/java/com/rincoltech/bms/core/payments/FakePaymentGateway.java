@@ -58,6 +58,7 @@ public final class FakePaymentGateway implements PaymentGateway {
     private volatile Runnable afterCancel = () -> {};
     private final List<Account> accountsUsed = new ArrayList<>();
     private volatile GatewayException registerFailure;
+    private final Map<Account, String> registeredUrls = new LinkedHashMap<>();
 
     @Override
     public String providerKey() {
@@ -143,6 +144,7 @@ public final class FakePaymentGateway implements PaymentGateway {
         if (registerFailure != null) {
             throw registerFailure;
         }
+        registeredUrls.put(account, url);
         return new IpnRegistration("aaaaaaaa-0000-4000-8000-0000000000f0", url, type);
     }
 
@@ -192,6 +194,11 @@ public final class FakePaymentGateway implements PaymentGateway {
         return List.copyOf(accountsUsed);
     }
 
+    /** The notification url last registered for an account (it ends in the account's path token), or null. */
+    public synchronized String registeredUrl(Account account) {
+        return registeredUrls.get(account);
+    }
+
     public void failCreate(GatewayException failure) {
         this.createFailure = failure;
     }
@@ -233,6 +240,7 @@ public final class FakePaymentGateway implements PaymentGateway {
         byMerchantReference.clear();
         calls.clear();
         accountsUsed.clear();
+        registeredUrls.clear();
         registerFailure = null;
         queries.set(0);
         createFailure = null;
