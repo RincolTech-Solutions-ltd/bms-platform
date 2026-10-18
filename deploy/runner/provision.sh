@@ -75,10 +75,16 @@ done
 echo "== rootless Docker for ${USER_NAME}"
 RL_ENV=("XDG_RUNTIME_DIR=/run/user/${USER_UID}" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${USER_UID}/bus")
 if [ ! -f "${HOME_DIR}/.config/systemd/user/docker.service" ]; then
+  # The Debian package ships the setup tool without a `docker` binary beside it, so its last self-check
+  # ("docker version") fails after the daemon is already installed and running; the daemon is checked below.
   runuser -u "${USER_NAME}" -- env "${RL_ENV[@]}" PATH="/usr/share/docker.io/contrib:/usr/sbin:/usr/bin:/bin" \
-    /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh install
+    /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh install || true
 fi
 runuser -u "${USER_NAME}" -- env "${RL_ENV[@]}" systemctl --user enable --now docker.service
+runuser -u "${USER_NAME}" -- env "${RL_ENV[@]}" systemctl --user is-active --quiet docker.service \
+  || { echo "the rootless Docker daemon of ${USER_NAME} is not running" >&2; exit 1; }
+runuser -u "${USER_NAME}" -- env "${RL_ENV[@]}" DOCKER_HOST="unix:///run/user/${USER_UID}/docker.sock" docker version --format '{{.Server.Version}}' \
+  || { echo "docker does not answer for ${USER_NAME}" >&2; exit 1; }
 # The unit directory is root-owned afterwards: a job cannot add a user unit that survives it.
 chown -R root:"${USER_NAME}" "${HOME_DIR}/.config/systemd/user"
 find "${HOME_DIR}/.config/systemd/user" -type d -exec chmod 755 {} \;
@@ -92,6 +98,7 @@ if [ ! -f "${RUNNER_DIR}/.runner" ]; then
   chmod 755 "${work}"
   trap 'rm -rf "${work}"' EXIT
   curl -fsSL -o "${work}/${asset}" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${asset}"
+  chmod 644 "${work}/${asset}"   # extracted by ${USER_NAME} below, whatever umask this script runs under
   want="$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v${RUNNER_VERSION}" \
     | python3 -c "import json,sys; d=json.load(sys.stdin); print([a['digest'] for a in d['assets'] if a['name']=='${asset}'][0].split(':',1)[1])")"
   have="$(sha256sum "${work}/${asset}" | cut -d' ' -f1)"
