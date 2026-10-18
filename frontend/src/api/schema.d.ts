@@ -2053,6 +2053,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/merchant-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether this business receives payments into its own account (status only, never the secret) */
+        get: operations["getMerchantAccount"];
+        /** Save the consumer key and secret of this business's own account; no call is made to the provider */
+        put: operations["saveMerchantAccount"];
+        post?: never;
+        /** Remove the saved account; refused while payments still need it */
+        delete: operations["removeMerchantAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/merchant-account/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test connection: get a token and register this account's notification address */
+        post: operations["testMerchantAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/settings": {
         parameters: {
             query?: never;
@@ -2473,6 +2509,23 @@ export interface paths {
         get?: never;
         /** Switch modules on or off; data is kept (FR-TEN-03) */
         put: operations["platformSetModules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/payment-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether a tenant has connected its own payment account (status only) */
+        get: operations["platformGetTenantPaymentAccount"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -7128,6 +7181,23 @@ export interface components {
             /** Format: date-time */
             since?: string;
         };
+        MerchantAccount: {
+            /** @description Credentials are saved but not yet tested */
+            credentials_saved?: boolean;
+            /** @description A closed word saying why the last test failed: invalid_credentials or registration_refused */
+            failure_reason?: string;
+            /** @description The host can make the calls a test needs (a callback address is configured) */
+            host_ready?: boolean;
+            /** @description The last four characters of the consumer key, or null */
+            key_hint?: string;
+            /**
+             * Format: date-time
+             * @description When the last test was made, or null
+             */
+            last_checked_at?: string;
+            /** @description not_connected, verified or failed */
+            status?: string;
+        };
         MfaConfirmRequest: {
             code: string;
             mfa_token?: string;
@@ -7282,12 +7352,12 @@ export interface components {
             collections_enabled?: boolean;
             /** Format: int64 */
             daily_ceiling_minor?: number;
-            /** @description The host holds the credentials for this business's merchant account */
+            /** @description The host can serve a business's own payment account (a provider and a callback address) */
             gateway_available?: boolean;
             /** @description The gateway payment method posts to an active ledger account */
             gateway_method_mapped?: boolean;
-            /** @description This business is the one the platform's merchant account is bound to */
-            merchant_bound?: boolean;
+            /** @description This business has connected and tested its own payment account (Receive payments) */
+            merchant_account_verified?: boolean;
             /** Format: int32 */
             version?: number;
         };
@@ -12002,6 +12072,15 @@ export interface components {
         RoleCatalogue: {
             items?: components["schemas"]["Role"][];
         };
+        SaveMerchantAccountRequest: {
+            /** @description The consumer key of the lender's own Pesapal merchant account */
+            consumer_key?: string;
+            /**
+             * Format: password
+             * @description The consumer secret. Write-only: it is sealed on arrival and never returned
+             */
+            consumer_secret?: string;
+        };
         SaveSmsTemplateRequest: {
             /** @description The wording with {placeholders} from the event's list; 422 with the code of the first problem */
             text: string;
@@ -12655,6 +12734,14 @@ export interface components {
         };
         TenantModulesRequest: {
             modules: string[];
+        };
+        TenantPaymentAccountStatus: {
+            /** @description A closed word: invalid_credentials or registration_refused */
+            failure_reason?: string;
+            /** Format: date-time */
+            last_checked_at?: string;
+            /** @description not_connected, verified or failed */
+            status?: string;
         };
         TenantSettings: {
             allow_loans_before_kyc_verified?: boolean;
@@ -16625,6 +16712,90 @@ export interface operations {
             };
         };
     };
+    getMerchantAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantAccount"];
+                };
+            };
+        };
+    };
+    saveMerchantAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveMerchantAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantAccount"];
+                };
+            };
+        };
+    };
+    removeMerchantAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantAccount"];
+                };
+            };
+        };
+    };
+    testMerchantAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantAccount"];
+                };
+            };
+        };
+    };
     getPaymentsSettings: {
         parameters: {
             query?: never;
@@ -17237,6 +17408,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
+    platformGetTenantPaymentAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPaymentAccountStatus"];
                 };
             };
         };
