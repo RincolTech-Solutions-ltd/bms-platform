@@ -1818,7 +1818,10 @@ class PaymentGatewayIT extends IntegrationTest {
                 .sql("UPDATE payment_gateway_accounts SET data_key_id = 'old-key' WHERE tenant_id = ?")
                 .param(t.tenantId())
                 .update();
-        assertThat(rotation.run()).isGreaterThanOrEqualTo(1);
+        // This tenant only: rows left by other runs of a shared database were sealed by another process's ephemeral
+        // key.
+        assertThat(tenantJobs.callForTenant(t.tenantId(), () -> rotation.resealHere(currentKeyId())))
+                .isEqualTo(1);
         assertThat(TestDatabase.owner()
                         .sql("SELECT data_key_id FROM payment_gateway_accounts WHERE tenant_id = ?")
                         .param(t.tenantId())
