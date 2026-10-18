@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.core.payments.PaymentGateway;
-import com.rincoltech.bms.core.payments.PaymentGateway.Scope;
 import com.rincoltech.bms.core.payments.internal.PesapalSettings.Kind;
 import com.rincoltech.bms.kernel.BusinessClock;
 import java.time.Clock;
@@ -28,17 +27,11 @@ class PesapalSettingsTest {
     static final String SECRET = "invented-consumer-secret-0001";
     static final String TOKEN = "invented-tenant-path-token-0001";
     static final String PLATFORM_TOKEN = "invented-platform-path-token-0002";
-    static final String BOUND = "9d3f6a44-2b0c-4c63-8f0d-5b2f1d0a7e11";
 
     static PesapalProperties props(String provider, String baseUrl) {
         return new PesapalProperties(
                 provider,
                 baseUrl,
-                KEY,
-                SECRET,
-                "aaaaaaaa-0000-4000-8000-000000000001",
-                TOKEN,
-                BOUND,
                 "https://callbacks.example.test",
                 new PesapalProperties.Platform(
                         "invented-platform-key",
@@ -48,7 +41,7 @@ class PesapalSettingsTest {
     }
 
     static PesapalProperties bare(String provider, String baseUrl) {
-        return new PesapalProperties(provider, baseUrl, null, null, null, null, null, null, null);
+        return new PesapalProperties(provider, baseUrl, null, null);
     }
 
     // ---- outside production: the sandbox only, in every mode ---------------------------------------------------
@@ -153,8 +146,8 @@ class PesapalSettingsTest {
                 .isInstanceOf(IllegalStateException.class);
         PesapalSettings live = PesapalSettings.resolve("production", props("pesapal", LIVE));
         assertThat(live.baseUrl().getHost()).isEqualTo("pay.pesapal.com");
-        assertThat(live.configured(Scope.TENANT)).isTrue();
-        assertThat(live.configured(Scope.PLATFORM)).isTrue();
+        assertThat(live.tenantAccountsEnabled()).isTrue();
+        assertThat(live.platformConfigured()).isTrue();
     }
 
     // ---- the rest of the configuration -------------------------------------------------------------------------
@@ -163,32 +156,31 @@ class PesapalSettingsTest {
     void nothingConfiguredMeansTheGatewayIsOffAndNothingFails() {
         PesapalSettings off = PesapalSettings.resolve("staging", bare(null, null));
         assertThat(off.provider()).isEqualTo(Kind.OFF);
-        assertThat(off.configured(Scope.TENANT)).isFalse();
-        assertThat(off.configured(Scope.PLATFORM)).isFalse();
-        assertThat(off.boundTenant()).isNull();
-        assertThat(PesapalSettings.resolve("production", bare("off", null)).configured(Scope.TENANT))
+        assertThat(off.tenantAccountsEnabled()).isFalse();
+        assertThat(off.platformConfigured()).isFalse();
+        assertThat(PesapalSettings.resolve("production", bare("off", null)).tenantAccountsEnabled())
                 .isFalse();
     }
 
     @Test
-    void credentialsWithoutAnExplicitProviderMeanPesapalAndAHalfConfiguredPairIsNotConfigured() {
+    void aCallbackAddressWithoutAnExplicitProviderMeansPesapalAndALendersAccountNeedsTheAddress() {
         assertThat(PesapalSettings.resolve("staging", props(null, null)).provider())
                 .isEqualTo(Kind.PESAPAL);
-        PesapalProperties noCallbackHost = new PesapalProperties(
-                "pesapal", null, KEY, SECRET, "aaaaaaaa-0000-4000-8000-000000000001", TOKEN, BOUND, null, null);
-        assertThat(PesapalSettings.resolve("staging", noCallbackHost).configured(Scope.TENANT))
-                .isFalse();
+        assertThat(PesapalSettings.resolve("staging", props(null, null)).tenantAccountsEnabled())
+                .isTrue();
+        // No callback address and no platform pair: nothing to register a notification url on, so the gateway is off.
+        assertThat(PesapalSettings.resolve("staging", bare(null, null)).provider())
+                .isEqualTo(Kind.OFF);
+        // The real adapter with no callback address cannot serve a lender's account: Test connection needs the address.
+        PesapalSettings noCallbackHost = PesapalSettings.resolve("staging", bare("pesapal", null));
+        assertThat(noCallbackHost.tenantAccountsEnabled()).isFalse();
+        // The platform pair is half configured without its secret: not usable.
         PesapalProperties noSecret = new PesapalProperties(
                 "pesapal",
                 null,
-                KEY,
-                null,
-                "aaaaaaaa-0000-4000-8000-000000000001",
-                TOKEN,
-                BOUND,
                 "https://callbacks.example.test",
-                null);
-        assertThat(PesapalSettings.resolve("staging", noSecret).configured(Scope.TENANT))
+                new PesapalProperties.Platform("k", null, "aaaaaaaa-0000-4000-8000-000000000002", PLATFORM_TOKEN));
+        assertThat(PesapalSettings.resolve("staging", noSecret).platformConfigured())
                 .isFalse();
     }
 
@@ -196,7 +188,7 @@ class PesapalSettingsTest {
     void theFakeIsConfiguredWithoutAnyCredentialsOutsideProduction() {
         PesapalSettings fake = PesapalSettings.resolve("staging", bare("fake", null));
         assertThat(fake.provider()).isEqualTo(Kind.FAKE);
-        assertThat(fake.configured(Scope.TENANT)).isTrue();
+        assertThat(fake.tenantAccountsEnabled()).isTrue();
     }
 
     @Test
@@ -207,14 +199,15 @@ class PesapalSettingsTest {
     }
 
     @Test
-    void theBoundTenantMustBeATenantIdAndIsKept() {
-        assertThat(PesapalSettings.resolve("staging", props("pesapal", null)).boundTenant())
-                .isEqualTo(UUID.fromString(BOUND));
-        PesapalProperties typo = new PesapalProperties(
-                "pesapal", null, KEY, SECRET, "aaaaaaaa-0000-4000-8000-000000000001", TOKEN, "demo-tenant", null, null);
-        assertThatThrownBy(() -> PesapalSettings.resolve("staging", typo))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("BMS_PESAPAL_TENANT_ID");
+    void aLendersMerchantAccountIsNotReadFromTheEnvironmentAtAll() {
+        // The own-account rule (issue #233): the properties carry no tenant key, secret, registration or binding, so a
+        // host cannot be set up to give one lender's account to whoever switches collections on first.
+        assertThat(java.util.Arrays.stream(PesapalProperties.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName))
+                .containsExactlyInAnyOrder("provider", "baseUrl", "callbackBaseUrl", "platform");
+        assertThat(java.util.Arrays.stream(PesapalSettings.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName))
+                .doesNotContain("tenantPair", "boundTenant");
     }
 
     @Test
@@ -235,22 +228,12 @@ class PesapalSettingsTest {
             "https://callbacks.example.test?x=1",
             "https://callbacks.example.test#frag"
         }) {
-            PesapalProperties p = new PesapalProperties(
-                    "pesapal", null, KEY, SECRET, "aaaaaaaa-0000-4000-8000-000000000001", TOKEN, BOUND, bad, null);
+            PesapalProperties p = new PesapalProperties("pesapal", null, bad, null);
             assertThatThrownBy(() -> PesapalSettings.resolve("staging", p))
                     .as(bad)
                     .isInstanceOf(IllegalStateException.class);
         }
-        PesapalProperties ok = new PesapalProperties(
-                "pesapal",
-                null,
-                KEY,
-                SECRET,
-                "aaaaaaaa-0000-4000-8000-000000000001",
-                TOKEN,
-                BOUND,
-                "https://callbacks.example.test/",
-                null);
+        PesapalProperties ok = new PesapalProperties("pesapal", null, "https://callbacks.example.test/", null);
         assertThat(PesapalSettings.resolve("staging", ok).callbackBase().toString())
                 .isEqualTo("https://callbacks.example.test");
         assertThat(PesapalSettings.publicHttps(java.net.URI.create("https://172.15.0.1/x")))
@@ -260,69 +243,41 @@ class PesapalSettingsTest {
     }
 
     @Test
-    void anIpnPathTokenMustBeLongAndPathSafeAndTheTwoPairsMustDiffer() {
+    void anIpnPathTokenMustBeLongAndPathSafe() {
         for (String bad : new String[] {
             "short", "has space in it 0123456789abcdef", "slash/inside/0123456789abcdefgh", "q?uery0123456789abcdefghij"
         }) {
             PesapalProperties p = new PesapalProperties(
-                    "pesapal", null, KEY, SECRET, "aaaaaaaa-0000-4000-8000-000000000001", bad, BOUND, null, null);
+                    "pesapal",
+                    null,
+                    null,
+                    new PesapalProperties.Platform("k", "s", "aaaaaaaa-0000-4000-8000-000000000002", bad));
             assertThatThrownBy(() -> PesapalSettings.resolve("staging", p))
                     .as(bad)
                     .isInstanceOf(IllegalStateException.class);
         }
-        PesapalProperties sameToken = new PesapalProperties(
-                "pesapal",
-                null,
-                KEY,
-                SECRET,
-                "aaaaaaaa-0000-4000-8000-000000000001",
-                TOKEN,
-                BOUND,
-                null,
-                new PesapalProperties.Platform("k", "s", "aaaaaaaa-0000-4000-8000-000000000002", TOKEN));
-        assertThatThrownBy(() -> PesapalSettings.resolve("staging", sameToken))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("different IPN path tokens");
-        PesapalProperties sameIpnId = new PesapalProperties(
-                "pesapal",
-                null,
-                KEY,
-                SECRET,
-                "aaaaaaaa-0000-4000-8000-000000000001",
-                TOKEN,
-                BOUND,
-                null,
-                new PesapalProperties.Platform("k", "s", "aaaaaaaa-0000-4000-8000-000000000001", PLATFORM_TOKEN));
-        assertThatThrownBy(() -> PesapalSettings.resolve("staging", sameIpnId))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("different IPN ids");
     }
 
     @Test
-    void thePathTokenSelectsTheCredentialPairInConstantTimeAndNothingElseMatches() {
+    void thePathTokenSelectsThePlatformPairInConstantTimeAndNothingElseMatches() {
         PesapalSettings s = PesapalSettings.resolve("staging", props("pesapal", null));
-        assertThat(s.scopeOfToken(TOKEN)).contains(Scope.TENANT);
-        assertThat(s.scopeOfToken(PLATFORM_TOKEN)).contains(Scope.PLATFORM);
-        for (String other :
-                new String[] {null, "", "x", TOKEN + "x", TOKEN.substring(1), TOKEN.toUpperCase(), "x".repeat(300)}) {
-            assertThat(s.scopeOfToken(other)).as("%s", other).isEmpty();
+        assertThat(s.isPlatformToken(PLATFORM_TOKEN)).isTrue();
+        for (String other : new String[] {
+            null,
+            "",
+            "x",
+            PLATFORM_TOKEN + "x",
+            PLATFORM_TOKEN.substring(1),
+            PLATFORM_TOKEN.toUpperCase(),
+            "x".repeat(300)
+        }) {
+            assertThat(s.isPlatformToken(other)).as("%s", other).isFalse();
         }
         // A host with no platform pair has no platform token: an empty configured value never matches an empty
         // presented one.
-        PesapalSettings noPlatform = PesapalSettings.resolve(
-                "staging",
-                new PesapalProperties(
-                        "pesapal",
-                        null,
-                        KEY,
-                        SECRET,
-                        "aaaaaaaa-0000-4000-8000-000000000001",
-                        TOKEN,
-                        BOUND,
-                        null,
-                        null));
-        assertThat(noPlatform.scopeOfToken("")).isEmpty();
-        assertThat(noPlatform.scopeOfToken(PLATFORM_TOKEN)).isEmpty();
+        PesapalSettings noPlatform = PesapalSettings.resolve("staging", bare("pesapal", null));
+        assertThat(noPlatform.isPlatformToken("")).isFalse();
+        assertThat(noPlatform.isPlatformToken(PLATFORM_TOKEN)).isFalse();
     }
 
     // ---- no value in any message or printed form ---------------------------------------------------------------
@@ -330,14 +285,7 @@ class PesapalSettingsTest {
     @Test
     void noRefusalAndNoPrintedFormNamesAKeyASecretATokenOrAUrl() {
         List<String> secrets = List.of(
-                KEY,
-                SECRET,
-                TOKEN,
-                PLATFORM_TOKEN,
-                "invented-platform-key",
-                "invented-platform-secret",
-                "evil.test",
-                BOUND);
+                KEY, SECRET, TOKEN, PLATFORM_TOKEN, "invented-platform-key", "invented-platform-secret", "evil.test");
         List<Throwable> refusals = List.of(
                 catchRefusal(() -> PesapalSettings.resolve("staging", props("pesapal", "https://evil.test/v3"))),
                 catchRefusal(() -> PesapalSettings.resolve("production", props("pesapal", SANDBOX))),
@@ -347,25 +295,14 @@ class PesapalSettingsTest {
                         new PesapalProperties(
                                 "pesapal",
                                 null,
-                                KEY,
-                                SECRET,
-                                "aaaaaaaa-0000-4000-8000-000000000001",
-                                "has space " + TOKEN,
-                                BOUND,
                                 null,
-                                null))),
+                                new PesapalProperties.Platform(
+                                        "k",
+                                        "s",
+                                        "aaaaaaaa-0000-4000-8000-000000000002",
+                                        "has space " + PLATFORM_TOKEN)))),
                 catchRefusal(() -> PesapalSettings.resolve(
-                        "staging",
-                        new PesapalProperties(
-                                "pesapal",
-                                null,
-                                KEY,
-                                SECRET,
-                                "aaaaaaaa-0000-4000-8000-000000000001",
-                                TOKEN,
-                                BOUND,
-                                "https://evil.test/path",
-                                null))));
+                        "staging", new PesapalProperties("pesapal", null, "https://evil.test/path", null))));
         for (Throwable t : refusals) {
             for (String secret : secrets) {
                 assertThat(t.getMessage()).doesNotContain(secret);
@@ -373,11 +310,7 @@ class PesapalSettingsTest {
         }
         PesapalSettings s = PesapalSettings.resolve("staging", props("pesapal", null));
         for (Object printed : new Object[] {
-            s,
-            s.tenantPair(),
-            s.platformPair(),
-            props("pesapal", null),
-            props("pesapal", null).platform()
+            s, s.platformPair(), props("pesapal", null), props("pesapal", null).platform()
         }) {
             for (String secret : secrets) {
                 assertThat(printed.toString()).doesNotContain(secret);
@@ -400,6 +333,7 @@ class PesapalSettingsTest {
         return new ApplicationContextRunner()
                 .withUserConfiguration(PaymentsConfiguration.class)
                 .withBean(BusinessClock.class, () -> new BusinessClock(Clock.systemUTC()))
+                .withBean(AccountCredentials.class, () -> org.mockito.Mockito.mock(AccountCredentials.class))
                 .withBean(
                         tools.jackson.databind.ObjectMapper.class,
                         () -> JsonMapper.builder().build())
@@ -412,8 +346,8 @@ class PesapalSettingsTest {
         runner(
                         "staging",
                         "bms.pesapal.base-url=" + LIVE,
-                        "bms.pesapal.consumer-key=" + KEY,
-                        "bms.pesapal.consumer-secret=" + SECRET)
+                        "bms.pesapal.platform.consumer-key=" + KEY,
+                        "bms.pesapal.platform.consumer-secret=" + SECRET)
                 .run(context -> {
                     assertThat(context).hasFailed();
                     assertThat(rootMessage(context.getStartupFailure()))
@@ -436,23 +370,23 @@ class PesapalSettingsTest {
         runner("staging").run(context -> {
             assertThat(context).hasNotFailed();
             PaymentGateway gateway = context.getBean(PaymentGateway.class);
-            assertThat(gateway.available(Scope.TENANT)).isFalse();
+            assertThat(gateway.available(PaymentGateway.Account.tenant(UUID.randomUUID())))
+                    .isFalse();
             assertThat(gateway).isInstanceOf(PaymentsConfiguration.UnavailableGateway.class);
         });
         runner(
                         "staging",
                         "bms.pesapal.base-url=" + SANDBOX,
-                        "bms.pesapal.consumer-key=" + KEY,
-                        "bms.pesapal.consumer-secret=" + SECRET,
-                        "bms.pesapal.ipn-id=aaaaaaaa-0000-4000-8000-000000000001",
-                        "bms.pesapal.ipn-token=" + TOKEN,
                         "bms.pesapal.callback-base-url=https://callbacks.example.test")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     PaymentGateway gateway = context.getBean(PaymentGateway.class);
                     assertThat(gateway).isInstanceOf(PesapalGateway.class);
-                    assertThat(gateway.available(Scope.TENANT)).isTrue();
-                    assertThat(gateway.available(Scope.PLATFORM)).isFalse();
+                    // The mocked credentials hold nothing: no account is available, and none is ever invented.
+                    assertThat(gateway.available(PaymentGateway.Account.tenant(UUID.randomUUID())))
+                            .isFalse();
+                    assertThat(gateway.available(PaymentGateway.Account.platform()))
+                            .isFalse();
                     assertThat(gateway.toString())
                             .contains("cybqa.pesapal.com")
                             .doesNotContain(KEY)
