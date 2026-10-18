@@ -54,6 +54,9 @@ setting failed open: stop the runner and fix the group before any deploy.
 
 ## Operate
 
+- Installed on 2026-10-18 (uid 1002, runner 2.338.0, group id 5). Wall tested from the runner user: the public internet
+  answers; the router (192.168.1.1), the host's sshd and OpenEMS ports, ZeroTier and all IPv6 do not. Rootless Docker
+  26.1.5 pulls images through the wall.
 - A deploy build is cold every time (the hooks wipe all caches) and runs one image at a time. Expect it to be
   slower than the hosted build; record the real duration here after the first runs: _not measured yet_.
 - One job runs at a time. A queued deploy waits for the running one.

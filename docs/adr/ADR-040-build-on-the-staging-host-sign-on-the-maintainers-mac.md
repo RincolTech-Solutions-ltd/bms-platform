@@ -52,7 +52,9 @@ Facts that shaped the answer:
    `bms-platform` only and restricted to the workflow
    `RincolTech-Solutions-ltd/bms-platform/.github/workflows/deploy.yml@refs/heads/main`. No other workflow, no
    other branch, no pull request and no other repository can run a job on a runner of that group. This is the
-   boundary; everything below is defence in depth behind it.
+   boundary; everything below is defence in depth behind it. Tested on 2026-10-18: a throwaway branch whose
+   workflow is `on: push` with `runs-on: [self-hosted, bms-deploy]` stayed queued for two minutes while the
+   runner was online and idle, and the runner's hook log stayed empty.
 2. **A dedicated runner on the Pi.** `bms-deploy-pi`, registered in that group, label `bms-deploy`, run by a
    new user `bmsdeploy` (uid 1002) that is not `ghrunner` and not `nfetestpi1`: no sudo, not in the docker, adm
    or dialout groups, cron denied, its own rootless Docker. Files are in `deploy/runner/`; `provision.sh` installs
@@ -110,7 +112,7 @@ Facts that shaped the answer:
 
 | Attacker or failure | What they can do | Why the outcome is acceptable |
 |---|---|---|
-| A user with write access pushes a branch, tag or pull request whose workflow targets `bms-deploy`, `self-hosted` or the Linux/ARM64 labels | Try to run code on the Pi | The runner group admits only `deploy.yml` on `main`; the job never starts. If the group setting failed open, the root-owned hook fails the job before a step runs. This is tested with a throwaway workflow before the first real deploy. |
+| A user with write access pushes a branch, tag or pull request whose workflow targets `bms-deploy`, `self-hosted` or the Linux/ARM64 labels | Try to run code on the Pi | The runner group admits only `deploy.yml` on `main`; the job never starts (tested, see decision 1). If the group setting failed open, the root-owned hook fails the job before a step runs. |
 | The same user poisons state to taint a later deploy build | Leave something behind | They cannot run there. If they could, the hooks wipe Docker state and caches before and after each job, as a clean-up. |
 | A tag moved in the registry after the build | Point `sha-<short>` at a malicious image | The signer signs the digest from the job log and re-checks the labels; the pointer is created from the verified digests; the host verifies the signature against the digest. A swapped tag has no valid signature. |
 | Another workflow edits the job's annotations or check run | Forge what the signer reads | The signer does not read annotations; it reads the job's log. |
