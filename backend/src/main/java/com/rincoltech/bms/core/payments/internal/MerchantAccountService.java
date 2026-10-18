@@ -63,7 +63,7 @@ class MerchantAccountService {
     private static final Logger log = LoggerFactory.getLogger(MerchantAccountService.class);
 
     /** The permission that changes where a lender's repayments are paid: the tenant admin's alone (migration V57). */
-    static final String MANAGE = "core.payments.account.manage";
+    static final String MANAGE = "core.payment_account.manage";
 
     /** The purpose of the blind index of a consumer key. */
     static final String KEY_INDEX = "payment-account-key";
@@ -153,6 +153,11 @@ class MerchantAccountService {
         this.tx = new TransactionTemplate(transactions);
         this.read = new TransactionTemplate(transactions);
         this.read.setReadOnly(true);
+    }
+
+    /** Forgets when each business last tested (for tests that move the clock back). */
+    void forgetTests() {
+        lastTest.clear();
     }
 
     View view() {

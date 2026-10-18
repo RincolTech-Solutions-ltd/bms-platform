@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.rincoltech.bms.core.identity.DataKeys;
+import com.rincoltech.bms.core.identity.SealedSecrets;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.core.payments.PaymentGateway.Account;
 import com.rincoltech.bms.core.payments.PaymentGateway.Scope;
@@ -68,6 +69,11 @@ class AccountGuardTest {
         }
 
         @Override
+        public String blindIndex(String purpose, String value) {
+            return (purpose + "|" + current + "|" + value).replaceAll("[^a-z0-9]", "0");
+        }
+
+        @Override
         public String keyIdOf(byte[] box) {
             String s = new String(box, StandardCharsets.UTF_8);
             return s.substring(0, s.indexOf('|'));
@@ -98,6 +104,7 @@ class AccountGuardTest {
                 Instant.parse("2026-10-18T10:00:00Z"),
                 keys.seal(key.getBytes(StandardCharsets.UTF_8)),
                 keys.seal(secret.getBytes(StandardCharsets.UTF_8)),
+                keys.blindIndex("payment-account-key", key),
                 key.substring(key.length() - 4),
                 keys.currentKeyId(),
                 status,
@@ -215,7 +222,9 @@ class AccountGuardTest {
         AccountStore.Account before = row(old, "verified", "lender-key-000001", "lender-secret-000001");
         when(store.sealedWithOtherKey("k2")).thenReturn(List.of(before));
         BusinessClock clock = new BusinessClock(Clock.fixed(Instant.parse("2026-10-18T10:00:00Z"), ZoneOffset.UTC));
-        AccountKeyRotation rotation = new AccountKeyRotation(null, mock(TenantJobs.class), store, rotated, clock);
+        SealedSecrets secrets = mock(SealedSecrets.class);
+        AccountKeyRotation rotation =
+                new AccountKeyRotation(null, mock(TenantJobs.class), store, rotated, secrets, clock, transactions());
 
         assertThat(rotation.resealHere("k2")).isEqualTo(1);
 
@@ -227,6 +236,7 @@ class AccountGuardTest {
                         org.mockito.ArgumentMatchers.any(),
                         key.capture(),
                         secret.capture(),
+                        org.mockito.ArgumentMatchers.eq(rotated.blindIndex("payment-account-key", "lender-key-000001")),
                         org.mockito.ArgumentMatchers.eq("k2"));
         assertThat(rotated.keyIdOf(key.getValue())).isEqualTo("k2");
         assertThat(rotated.keyIdOf(secret.getValue())).isEqualTo("k2");
@@ -243,12 +253,15 @@ class AccountGuardTest {
         when(store.sealedWithOtherKey("k2"))
                 .thenReturn(List.of(row(old, "verified", "lender-key-000001", "x-secret-0000001")));
         BusinessClock clock = new BusinessClock(Clock.fixed(Instant.parse("2026-10-18T10:00:00Z"), ZoneOffset.UTC));
-        AccountKeyRotation rotation = new AccountKeyRotation(null, mock(TenantJobs.class), store, rotated, clock);
+        SealedSecrets secrets = mock(SealedSecrets.class);
+        AccountKeyRotation rotation =
+                new AccountKeyRotation(null, mock(TenantJobs.class), store, rotated, secrets, clock, transactions());
         assertThatThrownBy(() -> rotation.resealHere("k2"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageNotContaining("x-secret-0000001");
         org.mockito.Mockito.verify(store, org.mockito.Mockito.never())
                 .reseal(
+                        org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),

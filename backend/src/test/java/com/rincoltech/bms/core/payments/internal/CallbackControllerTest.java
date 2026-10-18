@@ -48,6 +48,8 @@ class CallbackControllerTest {
     {
         org.mockito.Mockito.when(tokens.resolve(PesapalSettingsTest.TOKEN))
                 .thenReturn(java.util.Optional.of(new AccountTokens.Selected(Scope.TENANT, LENDER)));
+        org.mockito.Mockito.when(tokens.resolve(PesapalSettingsTest.PLATFORM_TOKEN))
+                .thenReturn(java.util.Optional.of(new AccountTokens.Selected(Scope.PLATFORM, null)));
     }
 
     static MockHttpServletRequest ipn() {
@@ -74,11 +76,20 @@ class CallbackControllerTest {
         }
         assertThat(notFound).isEqualTo(2);
         assertThat(tooMany).isEqualTo(18);
-        // A real notification from the same address still gets through: it has its own bucket.
-        ResponseEntity<Map<String, Object>> real = controller.ipn(PesapalSettingsTest.TOKEN, ipn());
+        // The platform's own notifications still get through from the same address: its token is checked in memory,
+        // with no lookup, and it has its own bucket. A lender's token from an address that has used up its wrong-token
+        // quota is refused before any database lookup is made (a flood of random tokens is not a flood of lookups).
+        ResponseEntity<Map<String, Object>> real = controller.ipn(PesapalSettingsTest.PLATFORM_TOKEN, ipn());
         assertThat(real.getStatusCode().value()).isEqualTo(200);
         assertThat(real.getBody()).containsEntry("status", 200).containsEntry("orderMerchantReference", REF);
-        verify(service).receive(Scope.TENANT, LENDER, "ipn", "IPNCHANGE", ID, REF);
+        verify(service).receive(Scope.PLATFORM, null, "ipn", "IPNCHANGE", ID, REF);
+        assertThat(controller
+                        .ipn(PesapalSettingsTest.TOKEN, ipn())
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(429);
+        verify(tokens, org.mockito.Mockito.times(2)).resolve(org.mockito.ArgumentMatchers.startsWith("wrong-token"));
+        verify(tokens, never()).resolve(PesapalSettingsTest.TOKEN);
     }
 
     @Test

@@ -833,11 +833,11 @@ class RlsIsolationIT {
         // two
         // boxes are filler bytes of the right length; nothing here is a credential.
         owner.sql("""
-                        INSERT INTO payment_gateway_accounts (id, tenant_id, consumer_key_enc, consumer_secret_enc, key_hint,
-                                                              data_key_id, status, updated_by)
-                        VALUES (?, ?, ?, ?, 'abcd', 'k1', 'saved', ?)
+                        INSERT INTO payment_gateway_accounts (id, tenant_id, consumer_key_enc, consumer_secret_enc,
+                                                              consumer_key_hmac, key_hint, data_key_id, status, updated_by)
+                        VALUES (?, ?, ?, ?, ?, 'abcd', 'k1', 'saved', ?)
                         """)
-                .params(UUID.randomUUID(), t.tenantId(), new byte[40], new byte[40], user)
+                .params(UUID.randomUUID(), t.tenantId(), new byte[40], new byte[40], hex64(t.tenantId()), user)
                 .update();
     }
 
@@ -1307,5 +1307,10 @@ class RlsIsolationIT {
                         .param(a.tenantId())
                         .update())
                 .hasStackTraceContaining("append-only");
+    }
+
+    /** A 64 character lower case hex string that differs per tenant (the unique digest column of a fixture). */
+    private static String hex64(UUID id) {
+        return (id.toString().replace("-", "") + id.toString().replace("-", "")).substring(0, 64);
     }
 }

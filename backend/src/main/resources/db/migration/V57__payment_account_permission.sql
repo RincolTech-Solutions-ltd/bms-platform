@@ -1,7 +1,7 @@
 -- V57: the permission to change a lender's payment account, and the check of the rows already in payment_intents
 -- (extras slice A7, issue #233; ADR-035 amendment of 2026-10-18).
 --
--- 1. `core.payments.account.manage`: save, test and remove the business's own payment provider account. Changing it
+-- 1. `core.payment_account.manage`: save, test and remove the business's own payment provider account. Changing it
 --    redirects where every later repayment is paid, so it is held by the tenant admin only (not by branch managers or
 --    anyone with the general `core.settings.manage`) and every change asks for a second-factor code and tells the other
 --    holders. Two inserts into the catalogue; no table is touched.
@@ -12,10 +12,10 @@
 --    held no real payment when this was written.
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
-    ('core.payments.account.manage', 'core', 'Payments: connect, test and remove the business''s own payment provider account', true);
+    ('core.payment_account.manage', 'core', 'Payments: connect, test and remove the business''s own payment provider account', true);
 
 INSERT INTO role_permissions (role_key, permission_key) VALUES
-    ('tenant_admin', 'core.payments.account.manage')
+    ('tenant_admin', 'core.payment_account.manage')
 ON CONFLICT DO NOTHING;
 
 DO $$

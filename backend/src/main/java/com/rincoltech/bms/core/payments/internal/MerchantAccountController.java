@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  * own payment provider account, the screen "Receive payments". A tenant administrator saves the consumer key and secret
  * (the secret is write-only: no response, log line or audit row ever carries it), tests the connection, and can remove
  * the account. Reading needs {@code core.settings.read} (the key's last four characters only go to a holder of the manage
- * permission); saving, testing and removing need {@code core.payments.account.manage}, the tenant admin's alone, because
+ * permission); saving, testing and removing need {@code core.payment_account.manage}, the tenant admin's alone, because
  * changing it redirects where every later repayment is paid; saving and removing also take a current second-factor (TOTP)
  * code in the body (step-up). Every response is {@code no-store}.
  */
