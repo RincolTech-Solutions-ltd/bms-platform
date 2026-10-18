@@ -2,7 +2,7 @@ package com.rincoltech.bms.core.payments.internal;
 
 import com.rincoltech.bms.core.payments.GatewayException;
 import com.rincoltech.bms.core.payments.PaymentGateway;
-import com.rincoltech.bms.core.payments.PaymentGateway.Scope;
+import com.rincoltech.bms.core.payments.PaymentGateway.Account;
 import com.rincoltech.bms.core.payments.PaymentGateway.StatusResult;
 import com.rincoltech.bms.core.payments.internal.IntentStore.Intent;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -53,7 +53,7 @@ class StatusChecker {
     private static final Set<String> PERIODIC = Set.of("created", "pending", "expired", "paid");
 
     /** What applying an answer decided, to be done after the transaction has committed. */
-    private record Applied(boolean bookNext, String cancelReference, Scope scope, List<String> counts) {
+    private record Applied(boolean bookNext, String cancelReference, Account scope, List<String> counts) {
         static Applied none() {
             return new Applied(false, null, null, List.of());
         }
@@ -129,7 +129,7 @@ class StatusChecker {
             // The payer is no longer offered the order, whether or not the provider can be reached now.
             intent = expire(intent, started);
         }
-        Scope scope = Scope.ofKey(intent.scope());
+        Account scope = Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose());
         StatusResult result;
         try {
             result = gateway.queryStatus(scope, intent.providerReference());
@@ -190,7 +190,9 @@ class StatusChecker {
         });
         if (Boolean.TRUE.equals(cancel)) {
             try {
-                gateway.cancelOrder(Scope.ofKey(intent.scope()), intent.providerReference());
+                gateway.cancelOrder(
+                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose()),
+                        intent.providerReference());
             } catch (GatewayException ignored) {
                 // Best effort, and the provider was just unreachable.
             }
@@ -265,14 +267,19 @@ class StatusChecker {
                 audit.system(i, "failed", "failed", Map.of("reason", "order_mismatch"));
                 store.finishCallbacks(i.id(), started, now, "status_mismatch", json);
                 log.warn("payment intent {} failed: the order is not the one asked for", i.id());
-                return new Applied(false, i.providerReference(), Scope.ofKey(i.scope()), List.of("order_mismatch"));
+                return new Applied(
+                        false,
+                        i.providerReference(),
+                        Account.forIntent(i.scope(), i.tenantId(), i.purpose()),
+                        List.of("order_mismatch"));
             }
             extra.put("order_verified_at", now);
         }
         if (CheckSchedule.isFinal(now, i.createdAt())) {
             closeUnpaid(i, now);
             store.finishCallbacks(i.id(), started, now, "unchanged", json);
-            return new Applied(false, i.providerReference(), Scope.ofKey(i.scope()), List.of());
+            return new Applied(
+                    false, i.providerReference(), Account.forIntent(i.scope(), i.tenantId(), i.purpose()), List.of());
         }
         Map<String, Object> cols = settled(i, now, 0, started);
         cols.putAll(extra);

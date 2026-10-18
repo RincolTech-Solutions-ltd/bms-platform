@@ -9,27 +9,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * printed: {@code toString} names no value.
  *
  * @param provider {@code BMS_PESAPAL_PROVIDER}: {@code pesapal}, {@code fake} (an in-process stand-in, refused in
- *     production) or {@code off}; empty means {@code pesapal} when the tenant pair below is complete, else off
+ *     production) or {@code off}; empty means {@code pesapal} when the callback origin is set or the platform pair is
+ *     complete, else off
  * @param baseUrl {@code BMS_PESAPAL_BASE_URL}: the sandbox or the live API base; outside production only the sandbox
- * @param consumerKey {@code BMS_PESAPAL_CONSUMER_KEY}
- * @param consumerSecret {@code BMS_PESAPAL_CONSUMER_SECRET}
- * @param ipnId {@code BMS_PESAPAL_IPN_ID}: the registration of this credential pair; one IPN id never serves two pairs
- * @param ipnToken {@code BMS_PESAPAL_IPN_TOKEN}: the random path token that selects this pair on the callback host
- * @param tenantId {@code BMS_PESAPAL_TENANT_ID}: the one tenant this merchant account is bound to (ADR-035 decision 11)
  * @param callbackBaseUrl {@code BMS_PESAPAL_CALLBACK_BASE_URL}: the public https origin of the callback host
- * @param platform the platform operator's own pair, for subscription payments (slice #228)
+ * @param platform the platform operator's own pair, for subscription payments (slice #228). A lender's own merchant
+ *     account is not here: it is entered by the lender's administrator, stored encrypted per tenant and never read from
+ *     the environment (ADR-035 amendment of 2026-10-18, issue #233)
  */
 @ConfigurationProperties("bms.pesapal")
-record PesapalProperties(
-        String provider,
-        String baseUrl,
-        String consumerKey,
-        String consumerSecret,
-        String ipnId,
-        String ipnToken,
-        String tenantId,
-        String callbackBaseUrl,
-        Platform platform) {
+record PesapalProperties(String provider, String baseUrl, String callbackBaseUrl, Platform platform) {
 
     PesapalProperties {
         platform = platform == null ? new Platform(null, null, null, null) : platform;

@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.payments.GatewayException;
 import com.rincoltech.bms.core.payments.PaymentCollections;
 import com.rincoltech.bms.core.payments.PaymentGateway;
+import com.rincoltech.bms.core.payments.PaymentGateway.Account;
 import com.rincoltech.bms.core.payments.PaymentGateway.Scope;
 import com.rincoltech.bms.core.payments.PurposeHandler;
 import com.rincoltech.bms.core.payments.PurposeHandler.PurposeRefusal;
@@ -63,6 +64,7 @@ class IntentService implements PaymentCollections {
     private final PaymentGateway gateway;
     private final PesapalSettings pesapal;
     private final PaymentsSettingsService settings;
+    private final MerchantAccountService accounts;
     private final OrderCreator creator;
     private final Idempotency idempotency;
     private final CurrentTenant tenant;
@@ -78,6 +80,7 @@ class IntentService implements PaymentCollections {
             PaymentGateway gateway,
             PesapalSettings pesapal,
             PaymentsSettingsService settings,
+            MerchantAccountService accounts,
             OrderCreator creator,
             Idempotency idempotency,
             CurrentTenant tenant,
@@ -90,6 +93,7 @@ class IntentService implements PaymentCollections {
         this.gateway = gateway;
         this.pesapal = pesapal;
         this.settings = settings;
+        this.accounts = accounts;
         this.creator = creator;
         this.idempotency = idempotency;
         this.tenant = tenant;
@@ -114,11 +118,16 @@ class IntentService implements PaymentCollections {
     private IntentView createLocked(CreateIntent request, String key, Principal principal) {
         CurrentTenant.Profile profile = tenant.profile();
         PaymentsSettingsService.Effective effective = settings.effective();
-        if (!effective.enabled()
-                || effective.dailyCeilingMinor() == null
-                || !gateway.available(Scope.TENANT)
-                || !profile.id().equals(pesapal.boundTenant())) {
+        if (!effective.enabled() || effective.dailyCeilingMinor() == null || !pesapal.tenantAccountsEnabled()) {
             throw ApiException.rule("collections_disabled", "Collecting by mobile money or card is not switched on.");
+        }
+        // The own-account rule (ADR-035 amendment of 2026-10-18): money owed to this business lands only in this
+        // business's own merchant account. With none connected and tested there is nothing to collect into, and the
+        // platform's account is never a substitute.
+        if (!accounts.verified()) {
+            throw ApiException.rule(
+                    "merchant_account_not_verified",
+                    "Connect and test your own payment account (Receive payments) before collecting.");
         }
         return idempotency
                 .once(
@@ -244,7 +253,9 @@ class IntentService implements PaymentCollections {
         }
         if (intent.providerReference() != null) {
             try {
-                gateway.cancelOrder(Scope.ofKey(intent.scope()), intent.providerReference());
+                gateway.cancelOrder(
+                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose()),
+                        intent.providerReference());
             } catch (GatewayException e) {
                 // The provider refuses once the payer has paid or the order was already cancelled: do not guess.
                 throw new ApiException(
