@@ -1,22 +1,28 @@
 package com.rincoltech.bms.core.payments.internal;
 
 import com.rincoltech.bms.core.identity.DataKeys;
+import com.rincoltech.bms.core.identity.SealedSecrets;
 import com.rincoltech.bms.core.jobs.TenantJobs;
 import com.rincoltech.bms.kernel.BusinessClock;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The job {@code core.payments.reseal-accounts} (ADR-008, ADR-035 amendment of 2026-10-18): after the application data
- * key is rotated, every lender's stored credentials sealed with a retired key are opened with it and sealed again with the
- * current key, one tenant and one row at a time, each in that tenant's own transaction. The host keeps the retired key in
- * {@code BMS_DATA_KEY_PREVIOUS} until a run reports nothing left (runbook: docs/runbooks/payments.md). A row that cannot be
- * opened (its key was dropped too early) is logged by type and tenant id only, left as it is, and counted as a failure so
- * the scheduler records and retries it; nothing is ever deleted or guessed. No secret, key or box is read into a log line.
+ * The job {@code core.payments.reseal-accounts} (ADR-008, ADR-035 amendment of 2026-10-18): after the application data key is
+ * rotated, every secret sealed with a retired key is opened with it and sealed again with the current key, one tenant at a
+ * time, each in that tenant's own transaction: the lenders' stored payment credentials (with their blind-index digest, which
+ * depends on the key) and the second-factor seeds of every user, plus the platform operators' seeds. Suspended tenants are
+ * included (they are resumed one day and their secrets must open then). The host keeps the retired key in
+ * {@code BMS_DATA_KEY_PREVIOUS} until a run logs {@code remaining=0} (runbook: docs/runbooks/payments.md). A tenant whose
+ * secret cannot be opened (its key was dropped too early) is logged by id and error type, left as it is, and counted as a
+ * failure so the scheduler records and retries it; nothing is ever deleted or guessed. No secret, key or box is logged.
  */
 @Component
 class AccountKeyRotation {
@@ -27,20 +33,31 @@ class AccountKeyRotation {
     private final TenantJobs tenantJobs;
     private final AccountStore store;
     private final DataKeys keys;
+    private final SealedSecrets secrets;
     private final BusinessClock clock;
+    private final TransactionTemplate tx;
 
-    AccountKeyRotation(JdbcClient jdbc, TenantJobs tenantJobs, AccountStore store, DataKeys keys, BusinessClock clock) {
+    AccountKeyRotation(
+            JdbcClient jdbc,
+            TenantJobs tenantJobs,
+            AccountStore store,
+            DataKeys keys,
+            SealedSecrets secrets,
+            BusinessClock clock,
+            PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.tenantJobs = tenantJobs;
         this.store = store;
         this.keys = keys;
+        this.secrets = secrets;
         this.clock = clock;
+        this.tx = new TransactionTemplate(transactions);
     }
 
-    /** One pass over up to 500 tenants; returns the number of accounts re-sealed. */
+    /** One pass over up to 500 tenants and the platform operators; returns the number of secrets re-sealed. */
     int run() {
         String current = keys.currentKeyId();
-        List<UUID> tenants = jdbc.sql("SELECT app_tenants_with_payment_accounts_to_reseal(?, ?)")
+        List<UUID> tenants = jdbc.sql("SELECT app_tenants_with_sealed_secrets_to_reseal(?, ?)")
                 .params(current, 500)
                 .query(UUID.class)
                 .list();
@@ -48,32 +65,57 @@ class AccountKeyRotation {
         int failures = 0;
         for (UUID tenantId : tenants) {
             try {
-                resealed += tenantJobs.callForTenant(tenantId, () -> resealHere(current));
-            } catch (TenantJobs.InactiveTenantException e) {
-                // A suspended tenant keeps its row as it is; it is re-sealed when it is active again.
+                // Not callForTenant: that refuses a suspended tenant. The id is the platform's own worklist, never a
+                // request's.
+                resealed += tenantJobs.callAs(tenantId, () -> tx.execute(status -> resealHere(current)));
             } catch (RuntimeException e) {
                 failures++;
                 log.error(
-                        "payment account of tenant {} could not be re-sealed: {}",
+                        "sealed secrets of tenant {} could not be re-sealed: {}",
                         tenantId,
                         e.getClass().getSimpleName());
             }
         }
+        try {
+            resealed += tx.execute(status -> secrets.resealPlatformUsers());
+        } catch (RuntimeException e) {
+            failures++;
+            log.error(
+                    "platform operator secrets could not be re-sealed: {}",
+                    e.getClass().getSimpleName());
+        }
+        long remaining = jdbc.sql("SELECT app_count_sealed_secrets_to_reseal(?)")
+                .param(current)
+                .query(Long.class)
+                .single();
+        log.info(
+                "data key re-seal: key={} resealed={} remaining={} tenants={}",
+                current,
+                resealed,
+                remaining,
+                tenants.size());
         if (failures > 0) {
-            throw new IllegalStateException(failures + " payment account(s) could not be re-sealed");
+            throw new IllegalStateException(failures + " tenant(s) or operator secrets could not be re-sealed");
         }
         return resealed;
     }
 
-    /** The bound tenant's rows sealed with another key. */
+    /** The bound tenant's secrets sealed with another key: payment accounts and second-factor seeds. */
     int resealHere(String current) {
         int count = 0;
         for (AccountStore.Account row : store.sealedWithOtherKey(current)) {
-            byte[] key = keys.seal(keys.open(row.consumerKeyBox()));
-            byte[] secret = keys.seal(keys.open(row.consumerSecretBox()));
-            store.reseal(row.id(), clock.now(), key, secret, current);
+            String key = new String(keys.open(row.consumerKeyBox()), StandardCharsets.UTF_8);
+            byte[] keyBox = keys.seal(key.getBytes(StandardCharsets.UTF_8));
+            byte[] secretBox = keys.seal(keys.open(row.consumerSecretBox()));
+            store.reseal(
+                    row.id(),
+                    clock.now(),
+                    keyBox,
+                    secretBox,
+                    keys.blindIndex(MerchantAccountService.KEY_INDEX, key),
+                    current);
             count++;
         }
-        return count;
+        return count + secrets.resealBoundTenant();
     }
 }

@@ -498,7 +498,10 @@ final class PesapalGateway implements PaymentGateway {
 
     /** A digest of the credential values, kept in memory only: a token is valid for the credentials that fetched it. */
     private static String fingerprint(PesapalSettings.Pair pair) {
-        return java.util.HexFormat.of().formatHex(PesapalSettings.sha256(pair.key() + ":" + pair.secret()));
+        // Length-prefixed, so no pair of values can give the same input as another (a credential may contain any
+        // character).
+        return java.util.HexFormat.of()
+                .formatHex(PesapalSettings.sha256(pair.key().length() + ":" + pair.key() + pair.secret()));
     }
 
     /** The provider's {@code expiryDate} (UTC, with {@code Z}), capped; a missing or odd one gives a minute. */

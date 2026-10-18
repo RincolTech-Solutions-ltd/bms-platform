@@ -5,6 +5,8 @@ import com.rincoltech.bms.core.payments.PaymentGateway.Account;
 import com.rincoltech.bms.core.payments.PaymentGateway.Scope;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +41,7 @@ class AccountCredentials implements PesapalGateway.Credentials {
     private final DataKeys keys;
     private final CurrentTenant tenant;
     private final TransactionTemplate read;
+    private final java.util.Map<java.util.UUID, Instant> lastLogged = new java.util.concurrent.ConcurrentHashMap<>();
 
     AccountCredentials(
             PesapalSettings settings,
@@ -66,12 +69,22 @@ class AccountCredentials implements PesapalGateway.Credentials {
                 log.warn("a payment account of another tenant was asked for and refused");
                 return Optional.empty();
             }
-            return read.execute(status -> store.find().flatMap(row -> open(row)));
+            return read.execute(status -> store.find()
+                    // Belt and braces beside row-level security: never hand back a row of another tenant.
+                    .filter(row -> row.tenantId().equals(account.tenantId()))
+                    .flatMap(row -> open(row)));
         } catch (RuntimeException e) {
-            // No tenant bound, or the key cannot open the box: no credentials. Only the type is logged.
-            log.error(
-                    "payment account credentials could not be read: {}",
-                    e.getClass().getSimpleName());
+            // No tenant bound, or the key cannot open the box: no credentials. Only the type is logged, once an hour
+            // for a tenant, because the poller asks on every pass and a dropped key would flood the log.
+            Instant now = Instant.now();
+            Instant last = lastLogged.get(account.tenantId());
+            if (last == null || now.isAfter(last.plus(Duration.ofHours(1)))) {
+                lastLogged.put(account.tenantId(), now);
+                log.error(
+                        "payment account credentials of tenant {} could not be read: {}",
+                        account.tenantId(),
+                        e.getClass().getSimpleName());
+            }
             return Optional.empty();
         }
     }

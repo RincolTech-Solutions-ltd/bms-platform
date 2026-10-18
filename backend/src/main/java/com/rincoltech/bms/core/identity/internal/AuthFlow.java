@@ -212,6 +212,26 @@ class AuthFlow {
         return new Outcome(Step.SIGNED_IN, null, null, null, codes);
     }
 
+    /**
+     * A second-factor re-entry for one sensitive action by a signed-in user (step-up, issue #233): the current TOTP code
+     * of the user's own enrolment, each code usable once. A wrong code counts toward the account's lockout like any other.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
+    void confirmTotp(Accounts accounts, UUID userId, String code) {
+        Instant now = clock.now();
+        Account account = accounts.byIdForUpdate(userId).orElseThrow(AuthFlow::invalidCredentials);
+        if (!account.mfaEnabled() || account.totpSecret() == null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT, "mfa_not_enrolled", "MFA not enrolled", "Enrol a second factor first.");
+        }
+        OptionalLong step =
+                Totp.verify(box.open(account.totpSecret()), code == null ? "" : code, now, account.totpLastStep());
+        if (step.isEmpty() || !accounts.advanceTotpStep(userId, step.getAsLong())) {
+            fail(accounts, account, now, "core.mfa.failed");
+            throw invalidCode(HttpStatus.UNPROCESSABLE_CONTENT);
+        }
+    }
+
     /** New recovery codes replace every old one; needs a current TOTP code (FR-IAM-11). */
     @Transactional(noRollbackFor = ApiException.class)
     List<String> regenerateRecoveryCodes(Accounts accounts, UUID userId, String code) {

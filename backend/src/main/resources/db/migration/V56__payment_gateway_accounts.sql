@@ -13,13 +13,17 @@
 --      status (status words and times only, never a credential), and the existing `app_resolve_payment_intent` with one
 --      more argument (the tenant the token belongs to), so a notification sent to one lender's url can never be matched
 --      to another lender's order.
---   3. A CHECK on `payment_intents`: an intent of the platform scope must carry a platform purpose. Every loan repayment and
---      savings deposit purpose is tenant scope, so none can ever name the platform account, even if a caller asked.
+--   3. A CHECK on `payment_intents`, in both directions: an intent of the platform scope carries a platform purpose and an
+--      intent of the tenant scope does not. Every loan repayment and savings deposit purpose is tenant scope, so none can ever
+--      name the platform account, and no platform subscription can be paid into a lender's account. It is added NOT VALID
+--      here (it binds every new row at once) and validated by V57 in a transaction of its own.
+--   4. The old four-argument `app_resolve_payment_intent` is dropped: it matched an order with no check of whose address the
+--      notification arrived on. Only the five-argument form (with the tenant of the address) remains.
 --
 -- Locks: the table is created empty; CREATE TABLE ... REFERENCES takes SHARE ROW EXCLUSIVE on tenants and users for the
--- few milliseconds the file takes (reads continue). The CHECK is added NOT VALID and validated in the same file: the
--- validation reads payment_intents under SHARE UPDATE EXCLUSIVE (writes continue) and the table holds no platform intents
--- yet. The first statement bounds the wait, as V26, V48, V49 and V54 do.
+-- few milliseconds the file takes (reads continue). ADD CONSTRAINT ... NOT VALID takes ACCESS EXCLUSIVE on payment_intents
+-- for an instant (no row is scanned) and holds it to the commit of this file; that is why the scan is not here but in V57.
+-- DROP FUNCTION takes no table lock. The first statement bounds the wait, as V26, V48, V49 and V54 do.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -31,6 +35,9 @@ CREATE TABLE payment_gateway_accounts (
     provider           text         NOT NULL DEFAULT 'pesapal' CHECK (provider IN ('pesapal')),
     consumer_key_enc   bytea        NOT NULL CHECK (octet_length(consumer_key_enc) BETWEEN 30 AND 1024),
     consumer_secret_enc bytea       NOT NULL CHECK (octet_length(consumer_secret_enc) BETWEEN 30 AND 1024),
+    -- A keyed digest (HMAC under a key derived from the data key) of the consumer key, unique across tenants: two lenders
+    -- can never be connected to one merchant account, whatever either of them types. Recomputed when the row is re-sealed.
+    consumer_key_hmac  char(64)     NOT NULL UNIQUE CHECK (consumer_key_hmac ~ '^[0-9a-f]{64}$'),
     key_hint           varchar(4)   NOT NULL,
     data_key_id        varchar(64)  NOT NULL CHECK (data_key_id <> ''),
     status             text         NOT NULL CHECK (status IN ('saved', 'verified', 'failed')),
@@ -81,18 +88,55 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
      WHERE a.provider = p_provider AND a.ipn_token_hash = p_token_hash AND t.status IN ('active', 'suspended')
 $$;
 
--- The tenants that still hold credentials sealed with a key other than the current one (the rotation job's worklist).
-CREATE FUNCTION app_tenants_with_payment_accounts_to_reseal(p_current_key_id text, p_limit integer) RETURNS SETOF uuid
+-- The rotation job's worklist: every tenant, suspended ones too (a suspended tenant is resumed one day and its secrets must
+-- open then), that still holds a secret sealed with a key other than the current one: a payment account, or a second-factor
+-- seed (the key id is inside each box: byte 2 is its length, then the id).
+CREATE FUNCTION app_tenants_with_sealed_secrets_to_reseal(p_current_key_id text, p_limit integer) RETURNS SETOF uuid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT a.tenant_id
-      FROM payment_gateway_accounts a JOIN tenants t ON t.id = a.tenant_id
-     WHERE a.data_key_id <> p_current_key_id AND t.status = 'active'
-     GROUP BY a.tenant_id
-     ORDER BY a.tenant_id
-     LIMIT p_limit
+    SELECT tenant_id FROM (
+        SELECT a.tenant_id
+          FROM payment_gateway_accounts a
+         WHERE a.data_key_id <> p_current_key_id
+        UNION
+        SELECT u.tenant_id
+          FROM user_credentials u
+         WHERE (u.totp_secret_enc IS NOT NULL
+                AND substring(u.totp_secret_enc FROM 3 FOR get_byte(u.totp_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+            OR (u.totp_pending_secret_enc IS NOT NULL
+                AND substring(u.totp_pending_secret_enc FROM 3 FOR get_byte(u.totp_pending_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+    ) w
+    JOIN tenants t ON t.id = w.tenant_id AND t.status IN ('active', 'suspended')
+    ORDER BY tenant_id
+    LIMIT p_limit
 $$;
 
--- As app_resolve_payment_intent(text, text, text, text), and additionally: when the notification came in on a lender's own
+-- How many sealed secrets (payment accounts, second-factor seeds of every tenant and of the platform operators) are still
+-- sealed with a key other than the current one: the number a data key retirement waits for, logged by every run.
+CREATE FUNCTION app_count_sealed_secrets_to_reseal(p_current_key_id text) RETURNS bigint
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT (SELECT count(*) FROM payment_gateway_accounts WHERE data_key_id <> p_current_key_id)
+         + (SELECT count(*) FROM user_credentials
+             WHERE totp_secret_enc IS NOT NULL
+               AND substring(totp_secret_enc FROM 3 FOR get_byte(totp_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+         + (SELECT count(*) FROM user_credentials
+             WHERE totp_pending_secret_enc IS NOT NULL
+               AND substring(totp_pending_secret_enc FROM 3 FOR get_byte(totp_pending_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+         + (SELECT count(*) FROM platform_users
+             WHERE totp_secret_enc IS NOT NULL
+               AND substring(totp_secret_enc FROM 3 FOR get_byte(totp_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+         + (SELECT count(*) FROM platform_users
+             WHERE totp_pending_secret_enc IS NOT NULL
+               AND substring(totp_pending_secret_enc FROM 3 FOR get_byte(totp_pending_secret_enc, 1)) <> convert_to(p_current_key_id, 'UTF8'))
+$$;
+
+-- Whether a consumer key (by its digest) is already connected, by any tenant other than this one.
+CREATE FUNCTION app_payment_account_key_in_use(p_provider text, p_key_hmac text, p_tenant uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT EXISTS (SELECT 1 FROM payment_gateway_accounts a
+                    WHERE a.provider = p_provider AND a.consumer_key_hmac = p_key_hmac AND a.tenant_id <> p_tenant)
+$$;
+
+-- As the four-argument form of V54 (dropped below), and additionally: when the notification came in on a lender's own
 -- url (p_tenant is that lender), an order that belongs to any other tenant is a scope mismatch, so one lender's url can
 -- never reach another lender's order. p_tenant is null for the platform url and for the payer's return.
 CREATE FUNCTION app_resolve_payment_intent(
@@ -109,27 +153,51 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
      WHERE i.provider = p_provider AND i.merchant_reference = p_reference AND t.status IN ('active', 'suspended')
 $$;
 
--- The platform console shows whether a lender is connected, never how: status words and times only.
+-- The platform console shows whether a lender is connected, never how: status words and times only. It answers only to a
+-- connection with no tenant bound (a platform request); from a tenant's own transaction it returns nothing.
 CREATE FUNCTION app_payment_account_status(p_tenant uuid)
 RETURNS TABLE (status text, ipn_registered_at timestamptz, last_checked_at timestamptz, failure_reason varchar)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT a.status, a.ipn_registered_at, a.last_checked_at, a.failure_reason
       FROM payment_gateway_accounts a
      WHERE a.tenant_id = p_tenant AND a.provider = 'pesapal'
+       AND nullif(current_setting('app.tenant_id', true), '') IS NULL
+$$;
+
+-- The operator's way out when a lender's account must go while a payment still waits on it (a compromised merchant account,
+-- a stuck order): removes the row and returns the status it had, or null when there was none. Answers only to a connection
+-- with no tenant bound (a platform request); the console audits it. In-flight orders of that account are then left waiting
+-- (the poller skips an intent whose account has no credentials and never closes it) until a new account is connected.
+CREATE FUNCTION app_release_payment_account(p_tenant uuid) RETURNS text
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    WITH gone AS (
+        DELETE FROM payment_gateway_accounts a
+         WHERE a.tenant_id = p_tenant AND a.provider = 'pesapal' AND nullif(current_setting('app.tenant_id', true), '') IS NULL
+        RETURNING a.status)
+    SELECT status FROM gone
 $$;
 
 REVOKE ALL ON FUNCTION app_resolve_payment_account(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_release_payment_account(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_release_payment_account(uuid) TO bms_app;
 REVOKE ALL ON FUNCTION app_payment_account_status(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_payment_account_status(uuid) TO bms_app;
-REVOKE ALL ON FUNCTION app_tenants_with_payment_accounts_to_reseal(text, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_tenants_with_sealed_secrets_to_reseal(text, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_count_sealed_secrets_to_reseal(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_payment_account_key_in_use(text, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_resolve_payment_intent(text, text, text, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_resolve_payment_account(text, text) TO bms_app;
-GRANT EXECUTE ON FUNCTION app_tenants_with_payment_accounts_to_reseal(text, integer) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_tenants_with_sealed_secrets_to_reseal(text, integer) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_count_sealed_secrets_to_reseal(text) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_payment_account_key_in_use(text, text, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_resolve_payment_intent(text, text, text, text, uuid) TO bms_app;
 
--- An intent of the platform scope belongs to the platform's own purposes (subscriptions and add-ons, slice #228). Lender
--- money (loan repayments, savings deposits) is never of that scope.
+-- The old four-argument resolver matched an order with no check of whose notification address it arrived on.
+DROP FUNCTION app_resolve_payment_intent(text, text, text, text);
+
+-- The platform's purposes (subscriptions and add-ons, slice #228) belong to the platform scope and only to it; lender money
+-- (loan repayments, savings deposits) is never of that scope, and a platform purpose is never paid into a lender's account.
+-- NOT VALID: binds every new row now; V57 checks the rows already there.
 ALTER TABLE payment_intents
-    ADD CONSTRAINT payment_intents_platform_scope_purpose
-    CHECK (scope = 'tenant' OR purpose LIKE 'platform.%') NOT VALID;
-ALTER TABLE payment_intents VALIDATE CONSTRAINT payment_intents_platform_scope_purpose;
+    ADD CONSTRAINT payment_intents_scope_purpose
+    CHECK ((scope = 'platform') = (purpose LIKE 'platform.%')) NOT VALID;

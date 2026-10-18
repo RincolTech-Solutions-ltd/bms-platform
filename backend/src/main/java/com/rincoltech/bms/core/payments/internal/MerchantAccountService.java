@@ -1,7 +1,9 @@
 package com.rincoltech.bms.core.payments.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.identity.AdminSecurity;
 import com.rincoltech.bms.core.identity.DataKeys;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.payments.GatewayException;
 import com.rincoltech.bms.core.payments.PaymentGateway;
 import com.rincoltech.bms.core.payments.PaymentGateway.Account;
@@ -13,14 +15,21 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -34,24 +43,44 @@ import org.springframework.transaction.support.TransactionTemplate;
  * becomes {@code verified}. Until it is, nothing is collected for the tenant, and the platform's own account is never
  * a substitute ({@link PaymentGateway.Account}).
  *
+ * <p>Changing the account changes where every later repayment is paid, so: only the holders of
+ * {@link #MANAGE} (the tenant admin) may do it; saving and removing ask for a second-factor code (step-up); every
+ * change is audited and tells the other holders by email; the platform's own consumer key is refused, and so is a
+ * consumer key another tenant is already connected with (a keyed digest, unique across tenants).
+ *
  * <p>Saving and testing are separate steps on purpose. Saving makes no outbound call, so it can never fail because the
  * provider is down; testing makes exactly the calls of a real order's first use (token, then registration) and nothing
- * else, outside any transaction (spec principle 4). A refusal of the credentials or of the registration marks the
- * account {@code failed}; a provider that could not be reached marks nothing, because an outage must not switch a
- * lender's collections off. Credentials are not replaced, and the account is not removed, while an intent still needs
- * them, unless the consumer key is unchanged (a new secret for the same account).
+ * else, outside any transaction (spec principle 4), and at most once every half minute for a business. A refusal of the
+ * credentials or of the registration marks the account {@code failed}; a provider that could not be reached, a backoff
+ * after an earlier refusal and a bare 401 mark nothing, because a hiccup must not switch a lender's collections off.
+ * Credentials are not replaced, and the account is not removed, while an intent still needs them (one still scheduled
+ * for a check), unless the consumer key is unchanged (a new secret for the same account); the platform operator can
+ * release an account in that case (audited).
  */
 @Service
 class MerchantAccountService {
 
     private static final Logger log = LoggerFactory.getLogger(MerchantAccountService.class);
 
+    /** The permission that changes where a lender's repayments are paid: the tenant admin's alone (migration V57). */
+    static final String MANAGE = "core.payments.account.manage";
+
+    /** The purpose of the blind index of a consumer key. */
+    static final String KEY_INDEX = "payment-account-key";
+
+    /** One test a half minute for a business: the provider throttles registrations and every test registers an address. */
+    static final Duration TEST_SPACING = Duration.ofSeconds(30);
+
+    static final String TEMPLATE_CHANGED = "payments.account_changed";
+
     /** What a consumer key or secret may look like: printable ASCII without spaces, 8 to 256 characters. */
     private static final Pattern CREDENTIAL = Pattern.compile("^[\\x21-\\x7E]{8,256}$");
 
+    private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("d MMM yyyy HH:mm 'UTC'");
+
     /**
      * What the screen and the operator may read. There is no field for the secret, and none for the key beyond its
-     * last four characters.
+     * last four characters, which only a holder of the manage permission is given.
      */
     @Schema(name = "MerchantAccount")
     record View(
@@ -61,7 +90,9 @@ class MerchantAccountService {
             @Schema(description = "Credentials are saved but not yet tested")
             boolean credentialsSaved,
 
-            @Schema(description = "The last four characters of the consumer key, or null")
+            @Schema(
+                    description =
+                            "The last four characters of the consumer key, or null (given to those who may change the account only)")
             String keyHint,
 
             @Schema(description = "When the last test was made, or null")
@@ -72,11 +103,13 @@ class MerchantAccountService {
                             "A closed word saying why the last test failed: invalid_credentials or registration_refused")
             String failureReason,
 
-            @Schema(description = "The host can make the calls a test needs (a callback address is configured)")
+            @Schema(
+                    description =
+                            "The host can make the calls a test needs (given to those who may change the account only)")
             boolean hostReady) {}
 
     /** The input of a save. {@link #toString} names no value. */
-    record Credentials(String consumerKey, String consumerSecret) {
+    record Credentials(String consumerKey, String consumerSecret, String totpCode) {
 
         @Override
         public String toString() {
@@ -91,8 +124,11 @@ class MerchantAccountService {
     private final AuditLog audit;
     private final CurrentTenant tenant;
     private final BusinessClock clock;
+    private final AdminSecurity security;
+    private final Outbox outbox;
     private final TransactionTemplate tx;
     private final TransactionTemplate read;
+    private final Map<UUID, Instant> lastTest = new ConcurrentHashMap<>();
 
     MerchantAccountService(
             AccountStore store,
@@ -102,6 +138,8 @@ class MerchantAccountService {
             AuditLog audit,
             CurrentTenant tenant,
             BusinessClock clock,
+            AdminSecurity security,
+            Outbox outbox,
             PlatformTransactionManager transactions) {
         this.store = store;
         this.gateway = gateway;
@@ -110,6 +148,8 @@ class MerchantAccountService {
         this.audit = audit;
         this.tenant = tenant;
         this.clock = clock;
+        this.security = security;
+        this.outbox = outbox;
         this.tx = new TransactionTemplate(transactions);
         this.read = new TransactionTemplate(transactions);
         this.read.setReadOnly(true);
@@ -119,15 +159,22 @@ class MerchantAccountService {
         return read.execute(status -> view(store.find().orElse(null)));
     }
 
+    /** Whether the signed-in user may change the account: only they see the key's last four characters and the host's state. */
+    private static boolean manager() {
+        return CurrentPrincipal.require().permissions().contains(MANAGE);
+    }
+
     private View view(AccountStore.Account row) {
-        boolean ready = settings.tenantAccountsEnabled();
+        boolean manager = manager();
+        boolean ready = manager && settings.tenantAccountsEnabled();
         if (row == null) {
             return new View("not_connected", false, null, null, null, ready);
         }
+        String hint = manager ? row.keyHint() : null;
         return switch (row.status()) {
-            case "verified" -> new View("verified", true, row.keyHint(), row.lastCheckedAt(), null, ready);
-            case "failed" -> new View("failed", true, row.keyHint(), row.lastCheckedAt(), row.failureReason(), ready);
-            default -> new View("not_connected", true, row.keyHint(), row.lastCheckedAt(), null, ready);
+            case "verified" -> new View("verified", true, hint, row.lastCheckedAt(), null, ready);
+            case "failed" -> new View("failed", true, hint, row.lastCheckedAt(), row.failureReason(), ready);
+            default -> new View("not_connected", true, hint, row.lastCheckedAt(), null, ready);
         };
     }
 
@@ -141,7 +188,7 @@ class MerchantAccountService {
         String key = input.consumerKey() == null ? "" : input.consumerKey().trim();
         String secret =
                 input.consumerSecret() == null ? "" : input.consumerSecret().trim();
-        List<FieldProblem> problems = new java.util.ArrayList<>();
+        List<FieldProblem> problems = new ArrayList<>();
         if (!CREDENTIAL.matcher(key).matches()) {
             problems.add(new FieldProblem(
                     "consumer_key", "invalid", "Paste the consumer key exactly as Pesapal shows it, with no spaces."));
@@ -155,35 +202,68 @@ class MerchantAccountService {
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
         }
+        if (samePlatformKey(key)) {
+            throw inUse();
+        }
+        // The second factor first, outside the transaction: a wrong code counts toward the lockout and rolls nothing
+        // back.
+        security.requireTotp(input.totpCode());
         UUID user = CurrentPrincipal.require().userId();
-        View saved = tx.execute(status -> {
-            AccountStore.Account before = store.lock().orElse(null);
-            if (before != null && store.hasWorkInFlight() && !sameKey(before, key)) {
-                throw inFlight();
-            }
-            Instant now = clock.now();
-            UUID id = before == null ? UUID.randomUUID() : before.id();
-            String hint = key.substring(key.length() - 4);
-            store.save(
-                    id,
-                    tenant.profile().id(),
-                    now,
-                    keys.seal(key.getBytes(StandardCharsets.UTF_8)),
-                    keys.seal(secret.getBytes(StandardCharsets.UTF_8)),
-                    hint,
-                    keys.currentKeyId(),
-                    user);
-            audit.record(new AuditLog.Entry(
-                    "core.payments.account.saved",
-                    "payment_gateway_account",
-                    id,
-                    null,
-                    state(before == null ? null : before.status(), before == null ? null : before.keyHint()),
-                    state("saved", hint)));
-            return view(store.find().orElseThrow());
-        });
+        String hmac = keys.blindIndex(KEY_INDEX, key);
+        View saved;
+        try {
+            saved = tx.execute(status -> {
+                AccountStore.Account before = store.lock().orElse(null);
+                if (store.keyInUseElsewhere(hmac, tenant.profile().id())) {
+                    throw inUse();
+                }
+                if (before != null && store.hasWorkInFlight() && !sameKey(before, key)) {
+                    throw inFlight();
+                }
+                Instant now = clock.now();
+                UUID id = before == null ? UUID.randomUUID() : before.id();
+                String hint = key.substring(key.length() - 4);
+                store.save(
+                        id,
+                        tenant.profile().id(),
+                        now,
+                        keys.seal(key.getBytes(StandardCharsets.UTF_8)),
+                        keys.seal(secret.getBytes(StandardCharsets.UTF_8)),
+                        hmac,
+                        hint,
+                        keys.currentKeyId(),
+                        user);
+                audit.record(new AuditLog.Entry(
+                        "core.payments.account.saved",
+                        "payment_gateway_account",
+                        id,
+                        null,
+                        state(before == null ? null : before.status(), before == null ? null : before.keyHint()),
+                        state("saved", hint)));
+                notifyHolders(id, "saved", now);
+                return view(store.find().orElseThrow());
+            });
+        } catch (DuplicateKeyException e) {
+            // Two lenders saving the same merchant account at once: the unique digest decides, not our check.
+            throw inUse();
+        }
         log.info("payment account credentials saved");
         return saved;
+    }
+
+    private boolean samePlatformKey(String key) {
+        String platformKey = settings.platformPair().key();
+        return platformKey != null
+                && MessageDigest.isEqual(
+                        platformKey.getBytes(StandardCharsets.UTF_8), key.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static ApiException inUse() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "merchant_account_in_use",
+                "This account cannot be used",
+                "This merchant account is already connected elsewhere. Use your own Pesapal account.");
     }
 
     /**
@@ -206,27 +286,36 @@ class MerchantAccountService {
                     "Not available",
                     "The payment provider is not set up on this host yet. Ask the platform operator.");
         }
+        Instant started = clock.now();
+        UUID tenantId = tenant.profile().id();
+        Instant previous = lastTest.get(tenantId);
+        if (previous != null && started.isBefore(previous.plus(TEST_SPACING))) {
+            throw new ApiException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "test_too_soon",
+                    "Try again shortly",
+                    "A test was made a moment ago. Wait half a minute before testing again.");
+        }
+        lastTest.put(tenantId, started);
         UUID user = CurrentPrincipal.require().userId();
         String token = AccountTokens.newToken();
         String url = settings.callbackBase() + PaymentsConfiguration.IPN_PATH + token;
         String ipnId;
         try {
-            ipnId = gateway.registerIpn(Account.tenant(tenant.profile().id()), url, IpnType.GET)
+            ipnId = gateway.registerIpn(Account.tenant(tenantId), url, IpnType.GET)
                     .ipnId();
         } catch (GatewayException e) {
             switch (e.kind()) {
                 case AUTH -> {
-                    return failed(row.id(), "invalid_credentials", user);
+                    if (credentialsRefused(e)) {
+                        return failed(row, "invalid_credentials", user);
+                    }
+                    throw busy();
                 }
                 case REFUSED -> {
-                    return failed(row.id(), "registration_refused", user);
+                    return failed(row, "registration_refused", user);
                 }
-                case THROTTLED ->
-                    throw new ApiException(
-                            HttpStatus.TOO_MANY_REQUESTS,
-                            "provider_busy",
-                            "Try again shortly",
-                            "The payment provider asked us to wait. Try again in a minute.");
+                case THROTTLED -> throw busy();
                 default ->
                     throw new ApiException(
                             HttpStatus.BAD_GATEWAY,
@@ -241,13 +330,10 @@ class MerchantAccountService {
                     || !current.id().equals(row.id())
                     || !current.updatedAt().equals(row.updatedAt())) {
                 // The credentials were replaced or removed while the test ran: this result belongs to the old ones.
-                throw new ApiException(
-                        HttpStatus.CONFLICT,
-                        "account_changed",
-                        "The account changed",
-                        "The credentials were changed while the test ran. Test again.");
+                throw changed();
             }
-            store.markVerified(row.id(), clock.now(), ipnId, AccountTokens.digest(token), user);
+            Instant now = clock.now();
+            store.markVerified(row.id(), now, ipnId, AccountTokens.digest(token), user);
             audit.record(new AuditLog.Entry(
                     "core.payments.account.verified",
                     "payment_gateway_account",
@@ -255,30 +341,58 @@ class MerchantAccountService {
                     null,
                     state(row.status(), row.keyHint()),
                     state("verified", row.keyHint())));
+            notifyHolders(row.id(), "tested and working", now);
             return view(store.find().orElseThrow());
         });
     }
 
-    private View failed(UUID id, String reason, UUID user) {
+    /** The provider said the key and secret are wrong, as against a backoff or a bare 401 that says nothing about them. */
+    private static boolean credentialsRefused(GatewayException e) {
+        return e.code() != null && !e.code().equals("auth_backoff");
+    }
+
+    private static ApiException busy() {
+        return new ApiException(
+                HttpStatus.TOO_MANY_REQUESTS,
+                "provider_busy",
+                "Try again shortly",
+                "The payment provider asked us to wait. Try again in a minute.");
+    }
+
+    private static ApiException changed() {
+        return new ApiException(
+                HttpStatus.CONFLICT,
+                "account_changed",
+                "The account changed",
+                "The credentials were changed while the test ran. Test again.");
+    }
+
+    private View failed(AccountStore.Account tested, String reason, UUID user) {
         return tx.execute(status -> {
             AccountStore.Account current = store.lock().orElse(null);
-            if (current == null || !current.id().equals(id)) {
-                throw ApiException.notFound();
+            // A refusal of the credentials that were tested says nothing about credentials saved since.
+            if (current == null
+                    || !current.id().equals(tested.id())
+                    || !current.updatedAt().equals(tested.updatedAt())) {
+                throw changed();
             }
-            store.markFailed(id, clock.now(), reason, user);
+            Instant now = clock.now();
+            store.markFailed(tested.id(), now, reason, user);
             audit.record(new AuditLog.Entry(
                     "core.payments.account.failed",
                     "payment_gateway_account",
-                    id,
+                    tested.id(),
                     null,
                     state(current.status(), current.keyHint()),
                     state("failed", current.keyHint(), reason)));
+            notifyHolders(tested.id(), "tested and refused by the provider", now);
             return view(store.find().orElseThrow());
         });
     }
 
-    /** Removes the credentials. Refused while an order or a booking still needs them. */
-    View disconnect() {
+    /** Removes the credentials. Needs the second factor. Refused while an order or a review still needs them. */
+    View disconnect(String totpCode) {
+        security.requireTotp(totpCode);
         return tx.execute(status -> {
             AccountStore.Account before = store.lock().orElse(null);
             if (before == null) {
@@ -288,6 +402,7 @@ class MerchantAccountService {
                 throw inFlight();
             }
             store.delete(before.id());
+            Instant now = clock.now();
             audit.record(new AuditLog.Entry(
                     "core.payments.account.removed",
                     "payment_gateway_account",
@@ -295,8 +410,28 @@ class MerchantAccountService {
                     null,
                     state(before.status(), before.keyHint()),
                     state("not_connected", null)));
+            notifyHolders(before.id(), "removed", now);
             return view(null);
         });
+    }
+
+    /** Tells the other holders of the permission, by email through the outbox, what changed and when; never a value. */
+    private void notifyHolders(UUID accountId, String change, Instant now) {
+        for (AdminSecurity.Holder holder : security.otherHolders(MANAGE)) {
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("business_name", tenant.profile().name());
+            params.put("change", change);
+            params.put("when", WHEN.format(now.atZone(ZoneOffset.UTC)));
+            outbox.enqueue(new Outbox.Message(
+                    Outbox.EMAIL,
+                    holder.email(),
+                    TEMPLATE_CHANGED,
+                    params,
+                    TEMPLATE_CHANGED + ":" + accountId + ":" + change.hashCode() + ":" + now.toEpochMilli() + ":"
+                            + holder.userId(),
+                    null,
+                    null));
+        }
     }
 
     private boolean sameKey(AccountStore.Account before, String key) {

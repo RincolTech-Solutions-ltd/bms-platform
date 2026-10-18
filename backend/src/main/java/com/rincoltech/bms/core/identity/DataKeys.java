@@ -22,6 +22,13 @@ public interface DataKeys {
     /** The id of the key a box was sealed with. */
     String keyIdOf(byte[] box);
 
+    /**
+     * A keyed, one-way digest of a value (HMAC-SHA256 under a key derived from the current data key for this purpose, hex),
+     * for finding or de-duplicating a secret without storing it: equal inputs give equal digests while the current key
+     * stays the same, so whoever stores one must recompute it when re-sealing after a rotation.
+     */
+    String blindIndex(String purpose, String value);
+
     /** True when the box was sealed with a key other than the current one, so a rotation job should re-seal it. */
     default boolean needsRewrap(byte[] box) {
         return !currentKeyId().equals(keyIdOf(box));

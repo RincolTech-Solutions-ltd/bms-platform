@@ -66,8 +66,12 @@ class KeyMaterial {
                 throw new IllegalStateException("BMS_DATA_KEY_PREVIOUS must be id:base64 pairs separated by commas");
             }
             try {
+                String id = entry.substring(0, colon).trim();
+                if (keys.containsKey(id)) {
+                    throw new IllegalStateException("BMS_DATA_KEY_PREVIOUS names the same key id twice");
+                }
                 keys.put(
-                        entry.substring(0, colon).trim(),
+                        id,
                         Base64.getDecoder().decode(entry.substring(colon + 1).trim()));
             } catch (IllegalArgumentException e) {
                 throw new IllegalStateException("BMS_DATA_KEY_PREVIOUS holds a key that is not base64");

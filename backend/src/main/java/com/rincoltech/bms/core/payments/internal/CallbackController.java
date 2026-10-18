@@ -85,6 +85,12 @@ class CallbackController {
     ResponseEntity<Map<String, Object>> ipn(@PathVariable("token") String token, HttpServletRequest request) {
         // The token is resolved first (the platform's in memory, a lender's by one indexed lookup of its digest), so a
         // request with a wrong one can never take a slot of the provider's bucket.
+        // An address that has already sent its quota of wrong tokens this minute is not looked up at all, so a flood of
+        // random tokens cannot become a flood of database lookups.
+        if (!settings.isPlatformToken(token)
+                && limiter.exhausted(CallbackLimiter.Bucket.BAD_TOKEN, RequestContext.clientIp())) {
+            return tooMany();
+        }
         java.util.Optional<AccountTokens.Selected> selected = tokens.resolve(token);
         if (selected.isEmpty()) {
             if (!limiter.tryAcquire(CallbackLimiter.Bucket.BAD_TOKEN, RequestContext.clientIp())) {

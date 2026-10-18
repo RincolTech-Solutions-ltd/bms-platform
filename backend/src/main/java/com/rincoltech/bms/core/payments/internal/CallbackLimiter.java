@@ -40,6 +40,17 @@ class CallbackLimiter {
         this.overall = properties.callbackGlobalPerMinute();
     }
 
+    /** True when the address has used up its bucket this minute (a read only: nothing is counted). */
+    synchronized boolean exhausted(Bucket bucket, String address) {
+        long minute = clock.now().getEpochSecond() / 60;
+        if (minute != window) {
+            return false;
+        }
+        Map<String, Integer> perIp = counts.get(bucket);
+        String key = address == null ? "unknown" : address;
+        return totals.getOrDefault(bucket, 0) >= overall || (perIp != null && perIp.getOrDefault(key, 0) >= perAddress);
+    }
+
     /** True when the request may go on. */
     synchronized boolean tryAcquire(Bucket bucket, String address) {
         long minute = clock.now().getEpochSecond() / 60;

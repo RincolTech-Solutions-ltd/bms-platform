@@ -46,11 +46,27 @@ final class SecretBox implements DataKeys {
             if (k.length != 32 || id.isEmpty() || id.getBytes(StandardCharsets.UTF_8).length > 64) {
                 throw new IllegalArgumentException("a retired data key must be 32 bytes with an id of 1 to 64 bytes");
             }
-            if (!id.equals(keyId)) {
-                copy.put(id, k.clone());
+            if (id.equals(keyId)) {
+                // Rotating the key without changing its id would make every old box undecryptable, silently.
+                throw new IllegalArgumentException(
+                        "a retired data key must not have the id of the current one (change BMS_DATA_KEY_ID when rotating)");
             }
+            copy.put(id, k.clone());
         });
         this.retired = Map.copyOf(copy);
+    }
+
+    @Override
+    public String blindIndex(String purpose, String value) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            byte[] derived = mac.doFinal(("blind-index:" + purpose).getBytes(StandardCharsets.UTF_8));
+            mac.init(new SecretKeySpec(derived, "HmacSHA256"));
+            return java.util.HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("digest failed", e);
+        }
     }
 
     @Override
@@ -68,7 +84,7 @@ final class SecretBox implements DataKeys {
             byte[] id = new byte[in.get()];
             in.get(id);
             return new String(id, StandardCharsets.UTF_8);
-        } catch (java.nio.BufferUnderflowException e) {
+        } catch (RuntimeException e) {
             throw new IllegalStateException("unreadable ciphertext");
         }
     }
@@ -118,6 +134,8 @@ final class SecretBox implements DataKeys {
             return cipher.doFinal(sealed);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("decryption failed", e);
+        } catch (java.nio.BufferUnderflowException | NegativeArraySizeException e) {
+            throw new IllegalStateException("unreadable ciphertext");
         }
     }
 }

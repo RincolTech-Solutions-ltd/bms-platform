@@ -27,6 +27,7 @@ class AccountStore {
             Instant updatedAt,
             byte[] consumerKeyBox,
             byte[] consumerSecretBox,
+            String keyHmac,
             String keyHint,
             String dataKeyId,
             String status,
@@ -41,8 +42,9 @@ class AccountStore {
         }
     }
 
-    private static final String COLUMNS = "id, tenant_id, updated_at, consumer_key_enc, consumer_secret_enc, key_hint,"
-            + " data_key_id, status, ipn_id, ipn_registered_at, last_checked_at, failure_reason";
+    private static final String COLUMNS =
+            "id, tenant_id, updated_at, consumer_key_enc, consumer_secret_enc, consumer_key_hmac, key_hint,"
+                    + " data_key_id, status, ipn_id, ipn_registered_at, last_checked_at, failure_reason";
 
     private final JdbcClient jdbc;
 
@@ -76,16 +78,18 @@ class AccountStore {
             Instant now,
             byte[] keyBox,
             byte[] secretBox,
+            String keyHmac,
             String keyHint,
             String dataKeyId,
             UUID updatedBy) {
         jdbc.sql("""
                         INSERT INTO payment_gateway_accounts (id, tenant_id, created_at, updated_at, provider, consumer_key_enc,
-                                                              consumer_secret_enc, key_hint, data_key_id, status, updated_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)
+                                                              consumer_secret_enc, consumer_key_hmac, key_hint, data_key_id, status, updated_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)
                         ON CONFLICT (tenant_id, provider) DO UPDATE
                            SET updated_at = EXCLUDED.updated_at, consumer_key_enc = EXCLUDED.consumer_key_enc,
-                               consumer_secret_enc = EXCLUDED.consumer_secret_enc, key_hint = EXCLUDED.key_hint,
+                               consumer_secret_enc = EXCLUDED.consumer_secret_enc, consumer_key_hmac = EXCLUDED.consumer_key_hmac,
+                               key_hint = EXCLUDED.key_hint,
                                data_key_id = EXCLUDED.data_key_id, status = 'saved', ipn_id = NULL, ipn_token_hash = NULL,
                                ipn_registered_at = NULL, last_checked_at = NULL, failure_reason = NULL,
                                updated_by = EXCLUDED.updated_by
@@ -98,6 +102,7 @@ class AccountStore {
                         PROVIDER,
                         keyBox,
                         secretBox,
+                        keyHmac,
                         keyHint,
                         dataKeyId,
                         updatedBy)
@@ -133,10 +138,11 @@ class AccountStore {
 
     /** True when an intent still needs the credentials: an order to check, a payment to book or a review to make. */
     boolean hasWorkInFlight() {
-        return jdbc.sql("""
-                        SELECT EXISTS (SELECT 1 FROM payment_intents
-                                        WHERE next_check_at IS NOT NULL OR status IN ('paid', 'needs_attention'))
-                        """).query(Boolean.class).single();
+        // Only an intent still scheduled for a check needs the provider credentials: a paid one is booked from what was
+        // stored, and one that needs a person (needs_attention) is never re-checked, so neither blocks a change.
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM payment_intents WHERE next_check_at IS NOT NULL)")
+                .query(Boolean.class)
+                .single();
     }
 
     /** Rows sealed with a key other than the current one (the bound tenant's). */
@@ -147,14 +153,23 @@ class AccountStore {
                 .list();
     }
 
-    void reseal(UUID id, Instant now, byte[] keyBox, byte[] secretBox, String dataKeyId) {
+    void reseal(UUID id, Instant now, byte[] keyBox, byte[] secretBox, String keyHmac, String dataKeyId) {
         jdbc.sql("""
                         UPDATE payment_gateway_accounts
-                           SET consumer_key_enc = ?, consumer_secret_enc = ?, data_key_id = ?, updated_at = ?
+                           SET consumer_key_enc = ?, consumer_secret_enc = ?, consumer_key_hmac = ?, data_key_id = ?,
+                               updated_at = ?
                          WHERE id = ?
                         """)
-                .params(keyBox, secretBox, dataKeyId, IntentStore.ts(now), id)
+                .params(keyBox, secretBox, keyHmac, dataKeyId, IntentStore.ts(now), id)
                 .update();
+    }
+
+    /** True when another tenant is already connected to the merchant account with this consumer key (by its digest). */
+    boolean keyInUseElsewhere(String keyHmac, UUID tenantId) {
+        return jdbc.sql("SELECT app_payment_account_key_in_use(?, ?, ?)")
+                .params(PROVIDER, keyHmac, tenantId)
+                .query(Boolean.class)
+                .single();
     }
 
     private static Account map(ResultSet rs, int n) throws SQLException {
@@ -164,6 +179,7 @@ class AccountStore {
                 instant(rs, "updated_at"),
                 rs.getBytes("consumer_key_enc"),
                 rs.getBytes("consumer_secret_enc"),
+                rs.getString("consumer_key_hmac"),
                 rs.getString("key_hint"),
                 rs.getString("data_key_id"),
                 rs.getString("status"),

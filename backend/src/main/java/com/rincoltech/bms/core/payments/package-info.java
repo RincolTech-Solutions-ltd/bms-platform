@@ -22,7 +22,8 @@
             "core.jobs",
             "core.ledger",
             "core.operations",
-            "core.identity"
+            "core.identity",
+            "core.notifications"
         })
 package com.rincoltech.bms.core.payments;
 
