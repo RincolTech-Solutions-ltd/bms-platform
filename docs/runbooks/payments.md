@@ -95,9 +95,10 @@ The lenders' stored credentials are sealed with `BMS_DATA_KEY`; each box carries
 3. The job `core.payments.reseal-accounts` runs nightly at 03:50 Africa/Kampala and re-seals every row sealed with a retired key. To
    see what is left: `SELECT data_key_id, count(*) FROM payment_gateway_accounts GROUP BY 1` as the owner role. A run that cannot open a
    row (a key dropped too early) fails and is logged by tenant id and error type, and the row is left untouched.
-4. Only when no row carries `k1` any more (and no TOTP secret does, which the sign-in re-seals as users sign in or an operator resets), remove
-   `BMS_DATA_KEY_PREVIOUS` and restart. Never drop the old key before then: a sealed credential cannot be recovered without it, and the
-   lender would have to enter the key and secret again.
+4. Only when no row of `payment_gateway_accounts` carries `k1` any more, consider removing `BMS_DATA_KEY_PREVIOUS`. **Not yet safe:** enrolled TOTP
+   secrets are sealed with the same key and no job re-seals them (they stay readable through `BMS_DATA_KEY_PREVIOUS`); until a follow-up
+   re-seals them, keep the retired key configured, or every enrolled user must enrol again. Never drop the old key early: a sealed credential cannot
+   be recovered without it, and the lender would have to enter the key and secret again.
 
 ## 5. How a payment moves, for the person on call
 
