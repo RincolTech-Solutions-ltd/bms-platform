@@ -108,6 +108,38 @@ class MerchantAccountStepUpIT extends IntegrationTest {
         assertThat(adminView.get("key_hint").asString()).isEqualTo("0001");
     }
 
+    @Test
+    void anAccountLockedByWrongCodesCannotStepUpAndItsSessionsEnd() {
+        TestDatabase.Fixture t = TestDatabase.tenant("pay-locked", true);
+        String email = "admin-lock-" + UUID.randomUUID() + "@example.test";
+        UUID admin = Api.staff(t, email, new Role("tenant_admin", null));
+        Api api = Api.tenant(http, t.slug());
+        Session s = api.signIn(admin, email, Api.PASSWORD, null);
+        String path = "/api/v1/payments/merchant-account";
+        // A stolen session guesses codes: five wrong ones lock the account.
+        for (int i = 0; i < 5; i++) {
+            ResponseEntity<JsonNode> r = api.call(HttpMethod.PUT, path, body(KEY, "00000" + i), s.accessToken());
+            assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isIn(422, 401, 423);
+        }
+        // The right code now is refused too, and nothing is saved.
+        Api.allowTotpReuse(admin);
+        String code = Api.totp(s.totpSecret(), Instant.now());
+        ResponseEntity<JsonNode> locked = api.call(HttpMethod.PUT, path, body(KEY, code), s.accessToken());
+        assertThat(locked.getStatusCode().value()).isIn(423, 401);
+        assertThat(count(t)).isZero();
+        // The lock ended the user's sessions: the stolen token no longer works for anything.
+        assertThat(api.call(HttpMethod.GET, path, null, s.accessToken())
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(401);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT locked_until IS NOT NULL FROM users WHERE id = ?")
+                        .param(admin)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+    }
+
     long count(TestDatabase.Fixture t) {
         return TestDatabase.owner()
                 .sql("SELECT count(*) FROM payment_gateway_accounts WHERE tenant_id = ?")

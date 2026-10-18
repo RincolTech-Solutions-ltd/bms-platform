@@ -2213,4 +2213,45 @@ class PaymentGatewayIT extends IntegrationTest {
                 .query(Long.class)
                 .single();
     }
+
+    @Test
+    void aProviderRefusalOfTheLendersCredentialsNeverClosesOrCancelsAnIntentTheBorrowerMayHavePaid() {
+        JsonNode intent = create(1500);
+        String id = intent.get("id").asString();
+        TestDatabase.owner()
+                .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
+                .params(
+                        java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT.minusSeconds(5)),
+                        UUID.fromString(id))
+                .update();
+        // The lender rotated its secret at Pesapal: every status query is refused as an authentication error.
+        fake.failQuery(
+                new GatewayException(GatewayException.Kind.AUTH, 200, "invalid_consumer_key_or_secret_provided"));
+        // Past the 48 hours after which an unreachable provider would end the intent unpaid and cancel the order.
+        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)));
+        tick();
+        assertThat(statusOf(id)).isIn("pending", "expired");
+        assertThat(row(id).get("next_check_at")).isNotNull();
+        assertThat(fake.calls()).noneMatch(c -> c.startsWith("cancel:"));
+        // The same after the backoff the adapter reports on the next pass.
+        fake.failQuery(new GatewayException(GatewayException.Kind.AUTH, 0, "auth_backoff"));
+        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(5)).plus(Duration.ofHours(2)));
+        TestDatabase.owner()
+                .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
+                .params(java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT), UUID.fromString(id))
+                .update();
+        tick();
+        assertThat(statusOf(id)).isIn("pending", "expired");
+        assertThat(fake.calls()).noneMatch(c -> c.startsWith("cancel:"));
+        // The credentials work again: the payment the borrower made is found and booked.
+        fake.failQuery(null);
+        pay(intent, 1500, "UGX", "CONF-AUTH-1");
+        clock.set(MovableClockConfig.BEFORE_MIDNIGHT.plus(Duration.ofDays(6)));
+        TestDatabase.owner()
+                .sql("UPDATE payment_intents SET next_check_at = ? WHERE id = ?")
+                .params(java.sql.Timestamp.from(MovableClockConfig.BEFORE_MIDNIGHT), UUID.fromString(id))
+                .update();
+        tick();
+        assertThat(statusOf(id)).isIn("paid", "booked");
+    }
 }

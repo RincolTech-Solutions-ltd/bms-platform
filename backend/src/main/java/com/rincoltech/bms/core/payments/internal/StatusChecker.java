@@ -137,10 +137,17 @@ class StatusChecker {
         try {
             result = gateway.queryStatus(scope, intent.providerReference());
         } catch (GatewayException e) {
+            if (e.kind() == GatewayException.Kind.AUTH && "tenant".equals(intent.scope())) {
+                // The provider refused a lender's own credentials (rotated or revoked at Pesapal, or a backoff after
+                // that). That is the lender's to fix, never evidence the borrower did not pay: the intent is neither
+                // closed nor cancelled at the provider, and is asked again until the credentials work.
+                noCredentials(intent, started, "provider_auth");
+                return;
+            }
             if (e.kind() == GatewayException.Kind.UNAVAILABLE && "not_configured".equals(e.code())) {
                 // Nothing was asked: the account has no credentials we can read (not connected yet, removed, or its key
                 // was dropped). That is not the provider being down and never closes an intent that may have been paid.
-                noCredentials(intent, started);
+                noCredentials(intent, started, "no_credentials");
                 return;
             }
             unreachable(intent, e, started);
@@ -177,16 +184,16 @@ class StatusChecker {
      * exactly as it is and looked at again in an hour: it is neither closed nor counted as a failure (a payment the payer
      * made is still waiting to be found), and the counter {@code no_credentials} rises so someone connects the account.
      */
-    private void noCredentials(Intent intent, Instant started) {
+    private void noCredentials(Intent intent, Instant started, String counter) {
         tx.executeWithoutResult(status -> {
             Instant now = clock.now();
             Intent i = store.lock(intent.id()).orElse(intent);
             Map<String, Object> cols = new HashMap<>();
             cols.put("next_check_at", now.plus(NO_CREDENTIALS_RETRY));
             store.update(i.id(), i.status(), null, now, cols);
-            store.finishCallbacks(i.id(), started, now, "rejected", "{\"status\":\"no_credentials\"}");
+            store.finishCallbacks(i.id(), started, now, "rejected", "{\"status\":\"" + counter + "\"}");
         });
-        counters.count("no_credentials");
+        counters.count(counter);
         log.warn("payment status check skipped, the account has no readable credentials: intent={}", intent.id());
     }
 

@@ -220,6 +220,11 @@ class AuthFlow {
     void confirmTotp(Accounts accounts, UUID userId, String code) {
         Instant now = clock.now();
         Account account = accounts.byIdForUpdate(userId).orElseThrow(AuthFlow::invalidCredentials);
+        if (account.lockedAt(now)) {
+            // Too many wrong codes: a stolen session cannot go on guessing a code for a sensitive action.
+            accounts.audit("core.auth.step_up_refused_locked", account.id(), Map.of());
+            throw locked();
+        }
         if (!account.mfaEnabled() || account.totpSecret() == null) {
             throw new ApiException(
                     HttpStatus.CONFLICT, "mfa_not_enrolled", "MFA not enrolled", "Enrol a second factor first.");
@@ -237,6 +242,11 @@ class AuthFlow {
     List<String> regenerateRecoveryCodes(Accounts accounts, UUID userId, String code) {
         Instant now = clock.now();
         Account account = accounts.byIdForUpdate(userId).orElseThrow(AuthFlow::invalidCredentials);
+        if (account.lockedAt(now)) {
+            // Too many wrong codes: a stolen session cannot go on guessing a code for a sensitive action.
+            accounts.audit("core.auth.step_up_refused_locked", account.id(), Map.of());
+            throw locked();
+        }
         if (!account.mfaEnabled() || account.totpSecret() == null) {
             throw new ApiException(
                     HttpStatus.CONFLICT, "mfa_not_enrolled", "MFA not enrolled", "Enrol a second factor first.");
@@ -384,6 +394,9 @@ class AuthFlow {
         // Only the failure that reached the threshold set the lock; later ones keep it.
         if (failures.consecutive() == MAX_FAILURES) {
             accounts.audit("core.auth.account_locked", account.id(), Map.of("locked_minutes", LOCK.toMinutes()));
+            // A lock ends every session of the user: whoever holds one (a stolen session guessing codes) signs in
+            // again.
+            accounts.sessions().revokeAllOf(account.id(), "admin", now);
         }
     }
 
