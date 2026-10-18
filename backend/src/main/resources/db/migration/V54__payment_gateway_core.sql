@@ -1,4 +1,4 @@
--- V55: payment gateway core (extras slice A2, issue #213; ADR-035 and its 2026-10-14 and 2026-10-15 amendments,
+-- V54: payment gateway core (extras slice A2, issue #213; ADR-035 and its 2026-10-14 and 2026-10-15 amendments,
 -- docs/specs/client-extras.md section 3, chapter 6 `payment_intents` and `payment_callbacks`, chapter 12 section 12.4).
 --
 -- Expand only, safe on a populated database. It adds: two tenant tables (`payment_intents`, `payment_callbacks`, each with

@@ -14,7 +14,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * Every SQL statement on {@code payment_intents} and {@code payment_callbacks} (migration V55), so the transitions are in
+ * Every SQL statement on {@code payment_intents} and {@code payment_callbacks} (migration V54), so the transitions are in
  * one place. Every method runs in the caller's transaction with the tenant bound, and every write that changes a status
  * is conditional on the status the caller read ({@code WHERE status = :from}): of two writers racing for one
  * transition exactly one updates a row and the other gets zero, and the database's own guard trigger refuses any

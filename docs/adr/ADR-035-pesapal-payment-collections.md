@@ -264,7 +264,7 @@ Additive; the decisions above stand. Where the build made a choice the text left
    `cancelled`, `expired`, `reversed_pending_review` and `reversed`. `paid` is new: the checker stores the verified
    answer (amount, currency, confirmation code, time) in one transaction and the booker books it in the next, so a worker
    that dies between them leaves a row the poller finishes. The allowed transitions are enforced by a trigger on
-   `payment_intents` (migration V55), which also forbids changing what was asked (amount, currency, subject, reference,
+   `payment_intents` (migration V54), which also forbids changing what was asked (amount, currency, subject, reference,
    expiry) and anything the provider reported once it is written. Intents are never deleted.
 2. **Status mapping (decision 5) stands as amended.** The adapter decides on the numeric code. Anything it cannot map (an unknown
    order, a credential error, a status code outside 0 to 3, a fraction of a shilling, a tracking id that is not the one
