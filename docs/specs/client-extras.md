@@ -1091,7 +1091,7 @@ Where the build differs from, or sharpens, the text above:
 
 ### 5.14 As built in slice #226 (the daily brief, the stored brief, the card and the settings)
 
-Migration `V56` (the number is taken above main and every open pull request and renumbered by the coordinator at merge): the table
+Migration `V55` (the number is taken above main and every open pull request and renumbered by the coordinator at merge): the table
 `lending_ai_briefs` and the permissions `lending.advisor.use` (tenant admin, branch manager, accountant, auditor) and
 `lending.advisor.configure` (tenant admin). Where the build differs from, or sharpens, the text above:
 

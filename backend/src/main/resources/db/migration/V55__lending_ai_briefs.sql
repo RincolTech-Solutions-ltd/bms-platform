@@ -1,4 +1,4 @@
--- V56: the stored daily AI brief and the two advisor permissions (extras slice C3, issue #226, ADR-037;
+-- V55: the stored daily AI brief and the two advisor permissions (extras slice C3, issue #226, ADR-037;
 -- docs/specs/client-extras.md sections 5.2, 5.7 and 5.13).
 --
 -- Expand only, safe on a populated database: one new empty tenant table with the standard row-level security

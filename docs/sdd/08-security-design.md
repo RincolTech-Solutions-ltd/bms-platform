@@ -246,7 +246,7 @@ Notes:
   table as CSV, audited as `lending.insights.exported`; a member name in an export is reduced to
   initials unless the user holds `lending.members.read`, and no insights table carries a phone or
   an ID number. The daily digest settings need `core.settings.manage`.
-- Client extras (issue #210): the permissions `lending.advisor.use` and `lending.advisor.configure` are in the matrix above (migration `V56`, issue #226); `core.payments.manage` is not yet (its migration adds the row, with #224). The grants: `core.payments.manage`
+- Client extras (issue #210): the permissions `lending.advisor.use` and `lending.advisor.configure` are in the matrix above (migration `V55`, issue #226); `core.payments.manage` is not yet (its migration adds the row, with #224). The grants: `core.payments.manage`
   to the tenant admin and accountant, `lending.advisor.use` to the tenant admin, branch manager, accountant and auditor,
   `lending.advisor.configure` to the tenant admin. `core.payments.collect` starts a gateway collection and `core.payments.manage` uploads the
   merchant statement and reads the reconciliation (ADR-035); switching collections on needs `core.settings.manage`. The

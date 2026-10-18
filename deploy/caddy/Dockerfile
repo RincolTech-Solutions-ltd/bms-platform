@@ -24,12 +24,15 @@ ARG TARGETARCH
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH xcaddy build --output /out/caddy \
         --with github.com/caddy-dns/cloudflare@v0.2.4
 
-FROM caddy:2.11.4-builder-alpine AS empty
+# Pinned to the build platform like the stage above: its RUN must never execute under emulation (ADR-040: the
+# deploy runner's rootless Docker has no binfmt, so a non-native RUN would fail the linux/amd64 build).
+FROM --platform=$BUILDPLATFORM caddy:2.11.4-builder-alpine AS empty
 RUN mkdir -p /empty
 
 FROM caddy:2.11.4-alpine
 COPY --from=build /out/caddy /usr/bin/caddy
-COPY caddy/Caddyfile caddy/Caddyfile.tunnel /etc/caddy/
+# --chmod: the image must not depend on the umask of the host that built it (the non-root Caddy has to read these).
+COPY --chmod=644 caddy/Caddyfile caddy/Caddyfile.tunnel /etc/caddy/
 COPY compose.pi-staging.yml deploy.sh backup.sh restore-drill.sh pull-staging.sh /usr/share/bms-deploy/
 COPY postgres /usr/share/bms-deploy/postgres
 COPY sql /usr/share/bms-deploy/sql

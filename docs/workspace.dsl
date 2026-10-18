@@ -220,7 +220,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         bms.api.advisor -> bms.api.ai "Sends prompts of aliases and aggregates; receives the structured answer, which is validated and rendered by our code (never stored as the model wrote it); reads and writes the assistant settings (switch, acknowledgement, caps)"
         bms.api.advisor -> bms.api.jobs "Runs the daily brief job every 15 minutes from 06:00 Kampala time, once per tenant and business date, for tenants with the assistant on (built, issue #226)"
         bms.api.advisor -> bms.api.audit "Audits switching on and the acknowledgement"
-        bms.api.advisor -> bms.db "Inserts and reads the stored all-branches brief, one row per tenant and day, append-only (lending_ai_briefs, V56)"
+        bms.api.advisor -> bms.db "Inserts and reads the stored all-branches brief, one row per tenant and day, append-only (lending_ai_briefs, V55)"
         bms.api.ai -> llmProvider "Chat completions with a 30 second budget and a circuit breaker" "HTTPS"
         bms.api.ai -> bms.db "Call log (counts, a request hash, a closed reason; no prompt, no response, no provider error text) and the daily cap sums"
         bms.api.ai -> bms.api.tenancy "Keeps the tenant's switch, caps and acknowledgement as the settings group ai; refuses the switch for a tenant outside BMS_AI_ENABLED_TENANTS"
@@ -335,6 +335,12 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             github = deploymentNode "GitHub" "Build once per commit on main for amd64 and arm64; moves the staging pointer (ADR-006, ADR-018)" "GitHub Actions" {
                 registry = infrastructureNode "Container registry" "Private bms-platform-api, -web and -proxy images tagged sha-<short>, and the staging pointer tag; each signed by digest with cosign" "GHCR"
             }
+            maintainerMac = deploymentNode "Maintainer's Mac" "Always on; holds the cosign private key in its Keychain and nothing else of the pipeline (ADR-040)" "macOS, launchd" {
+                signer = infrastructureNode "Image signer" "bms_signer.py every 30 seconds: signs image@digest for a push-to-main deploy run that built on bms-deploy-laptop, checking the commit and its merged pull request, the build job's log line and the image labels" "Python, cosign, crane"
+            }
+            laptop = deploymentNode "Jerome's laptop" "Windows 11 with WSL2 Ubuntu; shared with the AGA and other CI runner users; Kyma-owned (ADR-040 amendment)" "HP EliteBook, x86-64" {
+                deployRunner = infrastructureNode "Deploy runner" "bms-deploy-laptop: user bmsdeploy (uid 1006), rootless Docker wiped before and after every job, nftables wall, 5 GB cap, no signing key or deploy secret; builds and pushes the images and waits for their signatures before moving the staging pointer (ADR-040)" "GitHub Actions runner, deploy/runner/provision-laptop.sh"
+            }
             host = deploymentNode "Staging host" "Shared ARM64 host at a Rincol home site; no inbound port; BMS capped at 900 MB by bms.slice" "Raspberry Pi 4, Debian 13, linux/arm64" {
                 puller = infrastructureNode "Puller" "bms-pull.timer every two minutes: resolves the staging pointer to its sha tag and runs deploy.sh (ADR-018)" "systemd timer, pull-staging.sh"
                 compose = deploymentNode "Docker Compose" "compose.pi-staging.yml: pinned multi-arch images, no published ports, per-container memory limits; migrate runs before the switch" "Docker" {
@@ -349,6 +355,8 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             staging.cloudflare.edge -> staging.host.compose.cloudflared "Visitor requests, over the tunnel the host opened" "HTTPS, Cloudflare Tunnel"
             staging.host.compose.cloudflared -> staging.host.compose.proxy "Forwards with the original Host header" "HTTP"
             staging.host.puller -> staging.github.registry "Reads the staging pointer; pulls sha-<short> images anonymously" "HTTPS"
+            staging.laptop.deployRunner -> staging.github.registry "Pushes sha-<short> images with the job token; waits for the cosign signatures, then moves the staging pointer" "HTTPS"
+            staging.maintainerMac.signer -> staging.github.registry "Signs image@digest with the Keychain key; reads the deploy run's job logs through the GitHub API" "HTTPS"
         }
 
         production = deploymentEnvironment "Production" {
