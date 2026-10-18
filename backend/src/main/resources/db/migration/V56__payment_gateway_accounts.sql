@@ -37,6 +37,9 @@ CREATE TABLE payment_gateway_accounts (
     consumer_secret_enc bytea       NOT NULL CHECK (octet_length(consumer_secret_enc) BETWEEN 30 AND 1024),
     -- A keyed digest (HMAC under a key derived from the data key) of the consumer key, unique across tenants: two lenders
     -- can never be connected to one merchant account, whatever either of them types. Recomputed when the row is re-sealed.
+    -- Which merchant account this is: new when the consumer key changes (not when only the secret does). Intents record it, so an order
+    -- made under one merchant account is never checked with the credentials of another.
+    merchant_id        uuid         NOT NULL DEFAULT gen_random_uuid(),
     consumer_key_hmac  char(64)     NOT NULL UNIQUE CHECK (consumer_key_hmac ~ '^[0-9a-f]{64}$'),
     key_hint           varchar(4)   NOT NULL,
     data_key_id        varchar(64)  NOT NULL CHECK (data_key_id <> ''),
@@ -195,6 +198,10 @@ GRANT EXECUTE ON FUNCTION app_resolve_payment_intent(text, text, text, text, uui
 
 -- The old four-argument resolver matched an order with no check of whose notification address it arrived on.
 DROP FUNCTION app_resolve_payment_intent(text, text, text, text);
+
+-- The merchant account an intent was created under (null for intents made before this migration: they are checked with whatever
+-- account the tenant has, as before).
+ALTER TABLE payment_intents ADD COLUMN merchant_id uuid;
 
 -- The platform's purposes (subscriptions and add-ons, slice #228) belong to the platform scope and only to it; lender money
 -- (loan repayments, savings deposits) is never of that scope, and a platform purpose is never paid into a lender's account.

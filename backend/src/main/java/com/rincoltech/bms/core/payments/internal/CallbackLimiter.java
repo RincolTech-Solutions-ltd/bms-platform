@@ -48,7 +48,9 @@ class CallbackLimiter {
         }
         Map<String, Integer> perIp = counts.get(bucket);
         String key = address == null ? "unknown" : address;
-        return totals.getOrDefault(bucket, 0) >= overall || (perIp != null && perIp.getOrDefault(key, 0) >= perAddress);
+        // This address's own count only: a flood from many addresses must not shut the door on every lender's genuine
+        // notification (the bucket's overall total applies to counted requests, not to this pre-check).
+        return perIp != null && perIp.getOrDefault(key, 0) >= perAddress;
     }
 
     /** True when the request may go on. */

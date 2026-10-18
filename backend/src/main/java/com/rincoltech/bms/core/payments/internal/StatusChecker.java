@@ -132,7 +132,7 @@ class StatusChecker {
             // The payer is no longer offered the order, whether or not the provider can be reached now.
             intent = expire(intent, started);
         }
-        Account scope = Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose());
+        Account scope = Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose(), intent.merchantId());
         StatusResult result;
         try {
             result = gateway.queryStatus(scope, intent.providerReference());
@@ -225,7 +225,7 @@ class StatusChecker {
         if (Boolean.TRUE.equals(cancel)) {
             try {
                 gateway.cancelOrder(
-                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose()),
+                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose(), intent.merchantId()),
                         intent.providerReference());
             } catch (GatewayException ignored) {
                 // Best effort, and the provider was just unreachable.
@@ -304,7 +304,7 @@ class StatusChecker {
                 return new Applied(
                         false,
                         i.providerReference(),
-                        Account.forIntent(i.scope(), i.tenantId(), i.purpose()),
+                        Account.forIntent(i.scope(), i.tenantId(), i.purpose(), i.merchantId()),
                         List.of("order_mismatch"));
             }
             extra.put("order_verified_at", now);
@@ -313,7 +313,10 @@ class StatusChecker {
             closeUnpaid(i, now);
             store.finishCallbacks(i.id(), started, now, "unchanged", json);
             return new Applied(
-                    false, i.providerReference(), Account.forIntent(i.scope(), i.tenantId(), i.purpose()), List.of());
+                    false,
+                    i.providerReference(),
+                    Account.forIntent(i.scope(), i.tenantId(), i.purpose(), i.merchantId()),
+                    List.of());
         }
         Map<String, Object> cols = settled(i, now, 0, started);
         cols.putAll(extra);

@@ -31,19 +31,28 @@ class AdminSecurityService implements AdminSecurity, SealedSecrets {
     }
 
     @Override
-    public List<Holder> otherHolders(String permission) {
-        UUID self = CurrentPrincipal.require().userId();
+    public List<Holder> holders(String permission) {
         return jdbc.sql("""
                         SELECT DISTINCT u.id, u.email
                           FROM users u
                           JOIN user_role_assignments a ON a.user_id = u.id AND a.tenant_id = u.tenant_id AND a.revoked_at IS NULL
                           JOIN role_permissions rp ON rp.role_key = a.role_key
                          WHERE rp.permission_key = ? AND u.kind = 'staff' AND u.status = 'active'
-                           AND u.email IS NOT NULL AND u.id <> ?
+                           AND u.email IS NOT NULL
                         """)
-                .params(permission, self)
+                .param(permission)
                 .query((rs, n) -> new Holder(rs.getObject("id", UUID.class), rs.getString("email")))
                 .list();
+    }
+
+    @Override
+    public String actorName() {
+        UUID self = CurrentPrincipal.require().userId();
+        return jdbc.sql("SELECT full_name FROM users WHERE id = ?")
+                .param(self)
+                .query(String.class)
+                .optional()
+                .orElse("");
     }
 
     // ---- re-sealing --------------------------------------------------------------------------------------------

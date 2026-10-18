@@ -150,8 +150,13 @@ class PaymentGatewayIT extends IntegrationTest {
         }
 
         @Override
-        public List<Holder> otherHolders(String permission) {
+        public List<Holder> holders(String permission) {
             return holders;
+        }
+
+        @Override
+        public String actorName() {
+            return "Test Administrator";
         }
     }
 
@@ -1519,10 +1524,12 @@ class PaymentGatewayIT extends IntegrationTest {
         assertThat(theirs.getStatusCode().value()).as("%s", theirs.getBody()).isEqualTo(201);
 
         // Each order was made for its own tenant's account, and no call ever named the platform's.
+        assertThat(fake.accountsUsed().stream()
+                        .map(PaymentGateway.Account::tenantId)
+                        .toList())
+                .containsExactly(BOUND.tenantId(), second.tenantId());
         assertThat(fake.accountsUsed())
-                .containsExactly(
-                        PaymentGateway.Account.tenant(BOUND.tenantId()),
-                        PaymentGateway.Account.tenant(second.tenantId()));
+                .allMatch(a -> a.scope() == PaymentGateway.Scope.TENANT && a.merchantId() != null);
         assertThat(row(mine.get("id").asString()).get("scope")).isEqualTo("tenant");
         assertThat(row(theirs.getBody().get("id").asString()).get("scope")).isEqualTo("tenant");
 
@@ -1718,7 +1725,6 @@ class PaymentGatewayIT extends IntegrationTest {
         ResponseEntity<JsonNode> ok =
                 call(HttpMethod.POST, "/api/v1/payments/merchant-account/test", BOUND, staff, null, null);
         assertThat(ok.getBody().get("status").asString()).isEqualTo("verified");
-        TOKENS.put(BOUND.tenantId(), tokenFromFake(BOUND));
         assertThat(operatorStatus(BOUND).status()).isEqualTo("verified");
         assertThat(create(1500).get("status").asString()).isEqualTo("pending");
     }
@@ -2325,5 +2331,101 @@ class PaymentGatewayIT extends IntegrationTest {
                         .query(Boolean.class)
                         .single())
                 .isFalse();
+    }
+
+    @Test
+    void testingAnAccountThatIsAlreadyRegisteredKeepsItsNotificationAddressAndMakesNoNewRegistration() {
+        String hashBefore = TestDatabase.owner()
+                .sql("SELECT ipn_token_hash FROM payment_gateway_accounts WHERE tenant_id = ?")
+                .param(BOUND.tenantId())
+                .query(String.class)
+                .single();
+        String ipnBefore = TestDatabase.owner()
+                .sql("SELECT ipn_id FROM payment_gateway_accounts WHERE tenant_id = ?")
+                .param(BOUND.tenantId())
+                .query(String.class)
+                .single();
+        fake.reset();
+        merchantAccounts.forgetTests();
+        ResponseEntity<JsonNode> again =
+                call(HttpMethod.POST, "/api/v1/payments/merchant-account/test", BOUND, staff, null, null);
+        assertThat(again.getStatusCode().value()).isEqualTo(200);
+        assertThat(again.getBody().get("status").asString()).isEqualTo("verified");
+        // Only the credentials were checked: no new address was registered, and the one orders were made with still
+        // stands.
+        assertThat(fake.calls()).contains("check").noneMatch(c -> c.startsWith("register:"));
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT ipn_token_hash FROM payment_gateway_accounts WHERE tenant_id = ?")
+                        .param(BOUND.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo(hashBefore);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT ipn_id FROM payment_gateway_accounts WHERE tenant_id = ?")
+                        .param(BOUND.tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo(ipnBefore);
+        // The address still reaches its order.
+        JsonNode intent = create(1500);
+        ipn(token(), tracking(intent), intent.get("merchant_reference").asString());
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM payment_callbacks WHERE intent_id = ?")
+                        .param(UUID.fromString(intent.get("id").asString()))
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void anIntentIsBoundToTheMerchantAccountItWasMadeUnderAndIsNeverCheckedWithAnothersCredentials() {
+        JsonNode intent = create(1500);
+        UUID merchant = TestDatabase.owner()
+                .sql("SELECT merchant_id FROM payment_gateway_accounts WHERE tenant_id = ?")
+                .param(BOUND.tenantId())
+                .query(UUID.class)
+                .single();
+        assertThat(row(intent.get("id").asString()).get("merchant_id")).isEqualTo(merchant);
+        // While the account is still that merchant account the credentials resolve for the intent's account...
+        PaymentGateway.Account forIntent =
+                PaymentGateway.Account.forIntent("tenant", BOUND.tenantId(), PURPOSE, merchant);
+        assertThat(tenantJobs.callAs(BOUND.tenantId(), () -> credentials.find(forIntent)))
+                .isPresent();
+        // ...and once the stored account is another merchant account (a different consumer key, or after a release and
+        // a
+        // new connection) they do not: "no credentials", so the intent is skipped, never checked with the new
+        // merchant's.
+        UUID before = merchant;
+        TestDatabase.owner()
+                .sql("UPDATE payment_gateway_accounts SET merchant_id = gen_random_uuid() WHERE tenant_id = ?")
+                .param(BOUND.tenantId())
+                .update();
+        try {
+            assertThat(tenantJobs.callAs(BOUND.tenantId(), () -> credentials.find(forIntent)))
+                    .isEmpty();
+            // A current order (no merchant given) resolves the tenant's present account as before.
+            assertThat(tenantJobs.callAs(
+                            BOUND.tenantId(), () -> credentials.find(PaymentGateway.Account.tenant(BOUND.tenantId()))))
+                    .isPresent();
+        } finally {
+            TestDatabase.owner()
+                    .sql("UPDATE payment_gateway_accounts SET merchant_id = ? WHERE tenant_id = ?")
+                    .params(before, BOUND.tenantId())
+                    .update();
+        }
+    }
+
+    @Test
+    void aReleaseNeedsAReasonOfRealLength() {
+        jakarta.validation.Validator v =
+                jakarta.validation.Validation.buildDefaultValidatorFactory().getValidator();
+        assertThat(v.validate(new MerchantAccountOperatorController.ReleaseRequest("short")))
+                .isNotEmpty();
+        assertThat(v.validate(new MerchantAccountOperatorController.ReleaseRequest(" ")))
+                .isNotEmpty();
+        assertThat(v.validate(new MerchantAccountOperatorController.ReleaseRequest(null)))
+                .isNotEmpty();
+        assertThat(v.validate(new MerchantAccountOperatorController.ReleaseRequest("The merchant key was exposed.")))
+                .isEmpty();
     }
 }

@@ -680,6 +680,7 @@ collected only into this account, never into the platform's.
 | (std) | | `UNIQUE (tenant_id, provider)` |
 | `provider` | `text NOT NULL` | `pesapal` |
 | `consumer_key_enc`, `consumer_secret_enc` | `bytea NOT NULL` | AES-256-GCM boxes sealed with the application data key (`BMS_DATA_KEY`, chapter 8 section 8.7); never selected by any API, never logged, never in an audit row |
+| `merchant_id` | `uuid NOT NULL DEFAULT gen_random_uuid()` | Which merchant account this is: new when the consumer key changes (not when only the secret does); recorded on each intent (`payment_intents.merchant_id`, nullable, null for intents before V56) so an order is never checked with another merchant's credentials |
 | `consumer_key_hmac` | `char(64) NOT NULL UNIQUE` | HMAC-SHA256 (hex) of the consumer key under a key derived from the data key: no two tenants can be connected to one merchant account; recomputed on re-seal |
 | `key_hint` | `varchar(4) NOT NULL` | The last four characters of the consumer key, for display |
 | `data_key_id` | `varchar(64) NOT NULL` | Which data key sealed the boxes; the rotation job (`core.payments.reseal-accounts`) re-seals rows whose id is not the current one |
@@ -694,7 +695,7 @@ Checks: `verified` needs the registration and the check time, `failed` needs a r
 trigger forbids changing the id, tenant, creation time or provider. `bms_app` holds SELECT, INSERT, UPDATE and DELETE (the row is removed
 when a lender disconnects, only while no payment needs it). Definer functions (ADR-016): `app_resolve_payment_account(provider, token_hash)`
 returns the tenant and account of a notification address; `app_tenants_with_sealed_secrets_to_reseal(current_key_id, limit)` is the
-rotation job's worklist (payment accounts and second-factor seeds, active and suspended tenants) and `app_count_sealed_secrets_to_reseal(current_key_id)` the number still to re-seal; `app_payment_account_key_in_use(provider, key_hmac, tenant_id)` says whether another tenant holds the key; `app_release_payment_account(tenant_id)` is the operator's override (answers only to a connection with no tenant bound, like `app_payment_account_status`); `app_payment_account_status(tenant_id)` returns status words and times for the platform console and no credential
+rotation job's worklist (payment accounts and second-factor seeds, active and suspended tenants) and `app_count_sealed_secrets_to_reseal(current_key_id)` the number still to re-seal; `app_payment_account_key_in_use(provider, key_hmacs text[], tenant_id)` says whether another tenant holds the key under any of the digests (current and retired keys); `app_release_payment_account(tenant_id)` is the operator's override (answers only to a connection with no tenant bound, like `app_payment_account_status`); `app_payment_account_status(tenant_id)` returns status words and times for the platform console and no credential
 column; `app_resolve_payment_intent(provider, scope, tracking_id, reference, tenant_id)` adds the tenant of the notification address, so one
 lender's address can never match another lender's order (the four-argument form of V54 is dropped). `payment_intents` gained the CHECK `payment_intents_scope_purpose`
 (added NOT VALID in `V56`, validated by `V57`): a platform-scope intent carries a purpose starting `platform.` and a tenant-scope intent does not. `V57` also seeds the permission

@@ -103,7 +103,7 @@ class OrderCreator {
         if (intent == null) {
             return Outcome.NOT_CLAIMED;
         }
-        Account scope = Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose());
+        Account scope = Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose(), intent.merchantId());
         if (intent.creationAttempts() >= MAX_ROUNDS) {
             return fail(intent, "creation_unknown");
         }

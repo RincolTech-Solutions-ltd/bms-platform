@@ -87,10 +87,13 @@ class MerchantAccountStepUpIT extends IntegrationTest {
                 .param(t.tenantId())
                 .query(String.class)
                 .list();
-        assertThat(notices).hasSize(1);
-        assertThat(notices.get(0))
-                .contains(emailB)
-                .doesNotContain(emailA)
+        // Every holder is told, the one who made the change too (a business with one administrator must hear of a
+        // hijack),
+        // and the notice names who.
+        assertThat(notices).hasSize(2);
+        assertThat(notices).anyMatch(n -> n.contains(emailB)).anyMatch(n -> n.contains(emailA));
+        assertThat(String.join(" ", notices))
+                .contains("Test Staff admin-a-")
                 .doesNotContain(KEY)
                 .doesNotContain(SECRET);
 

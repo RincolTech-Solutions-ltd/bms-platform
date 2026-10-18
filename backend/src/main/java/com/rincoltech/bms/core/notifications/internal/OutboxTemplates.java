@@ -94,7 +94,7 @@ class OutboxTemplates {
             new Template("The payment account of {business_name} was changed", """
                     Hello,
 
-                    The payment account that receives your members' payments for {business_name} was changed: {change}, on {when}.
+                    The payment account that receives your members' payments for {business_name} was changed by {who}: {change}, on {when}.
 
                     If you or another administrator did this, nothing more is needed. If you do not know about it, open
                     Receive payments in BMS now, check the account, and change your password.

@@ -859,6 +859,39 @@ class PesapalGatewayContractTest {
         assertThat(requests).isEmpty();
     }
 
+    @Test
+    void checkingCredentialsAsksForAFreshTokenWithTheAccountsOwnKeyAndRegistersNothing() throws Exception {
+        accounts.put(
+                SECOND, new PesapalSettings.Pair("second-lender-key-0001", "second-lender-secret-0001", IPN_ID, null));
+        gateway.checkCredentials(SECOND);
+        assertThat(requests).hasSize(1);
+        assertThat(requests.getFirst().route()).isEqualTo("POST /pesapalv3/api/Auth/RequestToken");
+        assertThat(mapper.readTree(requests.getFirst().body())
+                        .get("consumer_key")
+                        .asString())
+                .isEqualTo("second-lender-key-0001");
+        // Each check is a fresh token, never the cached one.
+        gateway.checkCredentials(SECOND);
+        assertThat(authCalls).hasValue(2);
+        assertThat(hits("POST /pesapalv3/api/URLSetup/RegisterIPN")).isZero();
+    }
+
+    @Test
+    void checkingRefusedCredentialsIsAnAuthFailureAndAnAccountWithNoneMakesNoCall() {
+        accounts.put(SECOND, new PesapalSettings.Pair("wrong-key-000000001", "wrong-secret-000000001", IPN_ID, null));
+        route("POST /pesapalv3/api/Auth/RequestToken", "auth-invalid-credentials");
+        assertThatThrownBy(() -> gateway.checkCredentials(SECOND)).isInstanceOfSatisfying(GatewayException.class, e -> {
+            assertThat(e.kind()).isEqualTo(Kind.AUTH);
+            assertThat(e.code()).isEqualTo("invalid_consumer_key_or_secret_provided");
+        });
+        requests.clear();
+        Account none = Account.tenant(UUID.fromString("00000000-0000-4000-8000-0000000000a3"));
+        assertThatThrownBy(() -> gateway.checkCredentials(none))
+                .isInstanceOfSatisfying(
+                        GatewayException.class, e -> assertThat(e.kind()).isEqualTo(Kind.UNAVAILABLE));
+        assertThat(requests).isEmpty();
+    }
+
     // ---- the breaker --------------------------------------------------------------------------------------------
 
     @Test

@@ -105,6 +105,11 @@ class PaymentsConfiguration {
         }
 
         @Override
+        public void checkCredentials(Account account) throws GatewayException {
+            throw unavailable();
+        }
+
+        @Override
         public IpnRegistration registerIpn(Account account, String url, IpnType type) throws GatewayException {
             throw unavailable();
         }

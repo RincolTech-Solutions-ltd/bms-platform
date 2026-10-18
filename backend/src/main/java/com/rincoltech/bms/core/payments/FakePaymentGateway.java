@@ -138,6 +138,15 @@ public final class FakePaymentGateway implements PaymentGateway {
     }
 
     @Override
+    public synchronized void checkCredentials(Account account) throws GatewayException {
+        calls.add("check");
+        accountsUsed.add(account);
+        if (registerFailure != null) {
+            throw registerFailure;
+        }
+    }
+
+    @Override
     public synchronized IpnRegistration registerIpn(Account account, String url, IpnType type) throws GatewayException {
         calls.add("register:" + type);
         accountsUsed.add(account);

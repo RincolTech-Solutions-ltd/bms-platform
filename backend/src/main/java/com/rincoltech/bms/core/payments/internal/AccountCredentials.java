@@ -75,6 +75,9 @@ class AccountCredentials implements PesapalGateway.Credentials {
             return read.execute(status -> store.find()
                     // Belt and braces beside row-level security: never hand back a row of another tenant.
                     .filter(row -> row.tenantId().equals(account.tenantId()))
+                    // An order made under one merchant account is never checked with another's credentials.
+                    .filter(row ->
+                            account.merchantId() == null || account.merchantId().equals(row.merchantId()))
                     .flatMap(row -> open(row)));
         } catch (RuntimeException e) {
             // No tenant bound, or the key cannot open the box: no credentials. Only the type is logged, once an hour

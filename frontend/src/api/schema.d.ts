@@ -7474,6 +7474,10 @@ export interface components {
             member_no?: string;
             relationship?: string;
         };
+        ReleasePaymentAccountRequest: {
+            /** @description Why the account is released (10 to 300 characters); written to the platform audit log */
+            reason: string;
+        };
         RemoveMerchantAccountRequest: {
             /** @description A current code of the signed-in administrator's own authenticator (step-up), used once */
             totp_code?: string;
@@ -17470,7 +17474,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleasePaymentAccountRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

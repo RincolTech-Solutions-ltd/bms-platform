@@ -125,6 +125,7 @@ class MerchantAccountService {
     private final BusinessClock clock;
     private final AdminSecurity security;
     private final Outbox outbox;
+    private final com.rincoltech.bms.core.jobs.TenantJobs tenantJobs;
     private final TransactionTemplate tx;
     private final TransactionTemplate read;
     private final Map<UUID, Instant> lastTest = new ConcurrentHashMap<>();
@@ -139,6 +140,7 @@ class MerchantAccountService {
             BusinessClock clock,
             AdminSecurity security,
             Outbox outbox,
+            com.rincoltech.bms.core.jobs.TenantJobs tenantJobs,
             PlatformTransactionManager transactions) {
         this.store = store;
         this.gateway = gateway;
@@ -149,6 +151,7 @@ class MerchantAccountService {
         this.clock = clock;
         this.security = security;
         this.outbox = outbox;
+        this.tenantJobs = tenantJobs;
         this.tx = new TransactionTemplate(transactions);
         this.read = new TransactionTemplate(transactions);
         this.read.setReadOnly(true);
@@ -184,7 +187,12 @@ class MerchantAccountService {
 
     /** True when the bound tenant has a connected and tested account of its own (read in the caller's transaction). */
     boolean verified() {
-        return store.find().filter(a -> "verified".equals(a.status())).isPresent();
+        return verifiedMerchant().isPresent();
+    }
+
+    /** The merchant account of the bound tenant when it is connected and tested, for an intent to record. */
+    java.util.Optional<UUID> verifiedMerchant() {
+        return store.find().filter(a -> "verified".equals(a.status())).map(AccountStore.Account::merchantId);
     }
 
     /** Saves the credentials sealed with the data key. Makes no call to the provider. */
@@ -227,10 +235,13 @@ class MerchantAccountService {
                 }
                 Instant now = clock.now();
                 UUID id = before == null ? UUID.randomUUID() : before.id();
+                // The same consumer key (a new secret for the account) is the same merchant; another key is a new one.
+                UUID merchantId = before != null && sameKey(before, key) ? before.merchantId() : UUID.randomUUID();
                 String hint = key.substring(key.length() - 4);
                 store.save(
                         id,
                         tenant.profile().id(),
+                        merchantId,
                         now,
                         keys.seal(key.getBytes(StandardCharsets.UTF_8)),
                         keys.seal(secret.getBytes(StandardCharsets.UTF_8)),
@@ -245,7 +256,7 @@ class MerchantAccountService {
                         null,
                         state(before == null ? null : before.status(), before == null ? null : before.keyHint()),
                         state("saved", hint)));
-                notifyHolders(id, "saved", now);
+                notifyHolders(id, "saved", null, now);
                 return view(store.find().orElseThrow());
             });
         } catch (DuplicateKeyException e) {
@@ -296,12 +307,22 @@ class MerchantAccountService {
         }
         lastTest.put(tenantId, started);
         UUID user = CurrentPrincipal.require().userId();
-        String token = AccountTokens.newToken();
-        String url = settings.callbackBase() + PaymentsConfiguration.IPN_PATH + token;
-        String ipnId;
+        // An account whose notification address is already registered keeps it (orders made before notify that address,
+        // and a
+        // new random token would kill it): the test only asks whether the credentials work. A new registration is made
+        // only
+        // when there is none.
+        boolean registered = row.ipnId() != null;
+        String token = registered ? null : AccountTokens.newToken();
+        String url = registered ? null : settings.callbackBase() + PaymentsConfiguration.IPN_PATH + token;
+        String ipnId = null;
         try {
-            ipnId = gateway.registerIpn(Account.tenant(tenantId), url, IpnType.GET)
-                    .ipnId();
+            if (registered) {
+                gateway.checkCredentials(Account.tenant(tenantId));
+            } else {
+                ipnId = gateway.registerIpn(Account.tenant(tenantId), url, IpnType.GET)
+                        .ipnId();
+            }
         } catch (GatewayException e) {
             switch (e.kind()) {
                 case AUTH -> {
@@ -322,6 +343,7 @@ class MerchantAccountService {
                             "The payment provider could not be reached. Nothing was changed; try again shortly.");
             }
         }
+        String registeredId = ipnId;
         return tx.execute(status -> {
             AccountStore.Account current = store.lock().orElse(null);
             if (current == null
@@ -331,7 +353,11 @@ class MerchantAccountService {
                 throw changed();
             }
             Instant now = clock.now();
-            store.markVerified(row.id(), now, ipnId, AccountTokens.digest(token), user);
+            if (registered) {
+                store.markChecked(row.id(), now, user);
+            } else {
+                store.markVerified(row.id(), now, registeredId, AccountTokens.digest(token), user);
+            }
             audit.record(new AuditLog.Entry(
                     "core.payments.account.verified",
                     "payment_gateway_account",
@@ -339,7 +365,7 @@ class MerchantAccountService {
                     null,
                     state(row.status(), row.keyHint()),
                     state("verified", row.keyHint())));
-            notifyHolders(row.id(), "tested and working", now);
+            notifyHolders(row.id(), "tested and working", null, now);
             return view(store.find().orElseThrow());
         });
     }
@@ -383,7 +409,7 @@ class MerchantAccountService {
                     null,
                     state(current.status(), current.keyHint()),
                     state("failed", current.keyHint(), reason)));
-            notifyHolders(tested.id(), "tested and refused by the provider", now);
+            notifyHolders(tested.id(), "tested and refused by the provider", null, now);
             return view(store.find().orElseThrow());
         });
     }
@@ -408,17 +434,22 @@ class MerchantAccountService {
                     null,
                     state(before.status(), before.keyHint()),
                     state("not_connected", null)));
-            notifyHolders(before.id(), "removed", now);
+            notifyHolders(before.id(), "removed", null, now);
             return view(null);
         });
     }
 
-    /** Tells the other holders of the permission, by email through the outbox, what changed and when; never a value. */
-    private void notifyHolders(UUID accountId, String change, Instant now) {
-        for (AdminSecurity.Holder holder : security.otherHolders(MANAGE)) {
+    /**
+     * Tells every holder of the permission, the one who made the change included (a business with one administrator must hear
+     * of a hijacked session's change), by email through the outbox: what changed, who, and when; never a value.
+     */
+    private void notifyHolders(UUID accountId, String change, String who, Instant now) {
+        String name = who != null ? who : security.actorName();
+        for (AdminSecurity.Holder holder : security.holders(MANAGE)) {
             Map<String, String> params = new LinkedHashMap<>();
             params.put("business_name", tenant.profile().name());
             params.put("change", change);
+            params.put("who", name == null || name.isBlank() ? "an administrator" : name);
             params.put("when", WHEN.format(now.atZone(ZoneOffset.UTC)));
             outbox.enqueue(new Outbox.Message(
                     Outbox.EMAIL,
@@ -430,6 +461,14 @@ class MerchantAccountService {
                     null,
                     null));
         }
+    }
+
+    /** The platform operator released the tenant's account: its administrators are told, in their own tenant's transaction. */
+    void notifyReleased(UUID tenantId, UUID accountId) {
+        tenantJobs.callForTenant(tenantId, () -> {
+            notifyHolders(accountId, "removed by the platform operator", "the platform operator", clock.now());
+            return null;
+        });
     }
 
     private boolean sameKey(AccountStore.Account before, String key) {

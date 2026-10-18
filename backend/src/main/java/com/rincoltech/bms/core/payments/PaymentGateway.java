@@ -47,7 +47,12 @@ public interface PaymentGateway {
      * tenant scope must carry one (ADR-035 amendment of 2026-10-18, issue #233). An adapter resolves the credentials from
      * the account alone and never falls back from one scope to the other.
      */
-    record Account(Scope scope, UUID tenantId) {
+    record Account(Scope scope, UUID tenantId, UUID merchantId) {
+
+        /** Any merchant account of the tenant (a connection test, a new order): the tenant's current one. */
+        public Account(Scope scope, UUID tenantId) {
+            this(scope, tenantId, null);
+        }
 
         public Account {
             if (scope == null) {
@@ -56,13 +61,21 @@ public interface PaymentGateway {
             if (scope == Scope.TENANT && tenantId == null) {
                 throw new IllegalArgumentException("a tenant account belongs to a tenant");
             }
-            if (scope == Scope.PLATFORM && tenantId != null) {
+            if (scope == Scope.PLATFORM && (tenantId != null || merchantId != null)) {
                 throw new IllegalArgumentException("the platform account belongs to no tenant");
             }
         }
 
         public static Account tenant(UUID tenantId) {
             return new Account(Scope.TENANT, tenantId);
+        }
+
+        /**
+         * The tenant's account as it was when an order was made: credentials resolve only while the stored account is
+         * still that same merchant account (same consumer key); a different one is "no credentials", never a guess.
+         */
+        public static Account tenant(UUID tenantId, UUID merchantId) {
+            return new Account(Scope.TENANT, tenantId, merchantId);
         }
 
         public static Account platform() {
@@ -75,6 +88,11 @@ public interface PaymentGateway {
          * Anything else is refused here, in code, whatever the row says.
          */
         public static Account forIntent(String scopeKey, UUID tenantId, String purpose) {
+            return forIntent(scopeKey, tenantId, purpose, null);
+        }
+
+        /** As above, bound to the merchant account the intent was created under (null for an intent made before that was recorded). */
+        public static Account forIntent(String scopeKey, UUID tenantId, String purpose, UUID merchantId) {
             Scope scope = Scope.ofKey(scopeKey);
             if (scope == Scope.PLATFORM) {
                 if (purpose == null || !purpose.startsWith("platform.")) {
@@ -82,7 +100,7 @@ public interface PaymentGateway {
                 }
                 return platform();
             }
-            return tenant(tenantId);
+            return tenant(tenantId, merchantId);
         }
 
         @Override
@@ -109,6 +127,12 @@ public interface PaymentGateway {
 
     /** Best effort; the provider allows it for a pending or failed order, once. */
     void cancelOrder(Account account, String providerReference) throws GatewayException;
+
+    /**
+     * Asks the provider for a fresh token with the account's own credentials and does nothing else: do they work? Used to test an
+     * account whose notification address is already registered, so the address orders were made with stays valid.
+     */
+    void checkCredentials(Account account) throws GatewayException;
 
     /** Registers the notification url for the account's pair (an operator command). Idempotent at the provider. */
     IpnRegistration registerIpn(Account account, String url, IpnType type) throws GatewayException;

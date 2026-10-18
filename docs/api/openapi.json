@@ -5560,6 +5560,17 @@
           }
         }
       },
+      "ReleasePaymentAccountRequest" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why the account is released (10 to 300 characters); written to the platform audit log",
+            "maxLength" : 300,
+            "minLength" : 10,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
       "RemoveMerchantAccountRequest" : {
         "properties" : {
           "totp_code" : {
@@ -23285,6 +23296,16 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReleasePaymentAccountRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {

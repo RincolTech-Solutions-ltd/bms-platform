@@ -17,8 +17,14 @@ public interface AdminSecurity {
      */
     void requireTotp(String code);
 
-    /** Active staff users who hold the permission through a current role, other than the signed-in user, with their email. */
-    List<Holder> otherHolders(String permission);
+    /**
+     * Active staff users who hold the permission through a current role, with their email, **the signed-in user included**: a
+     * business with one administrator must still be told when its account was changed by a hijacked session.
+     */
+    List<Holder> holders(String permission);
+
+    /** The full name of the signed-in user, for a notice that names who made a change; empty when there is none. */
+    String actorName();
 
     record Holder(UUID userId, String email) {}
 }

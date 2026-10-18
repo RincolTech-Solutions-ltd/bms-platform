@@ -24,6 +24,7 @@ class AccountStore {
     record Account(
             UUID id,
             UUID tenantId,
+            UUID merchantId,
             Instant updatedAt,
             byte[] consumerKeyBox,
             byte[] consumerSecretBox,
@@ -43,7 +44,7 @@ class AccountStore {
     }
 
     private static final String COLUMNS =
-            "id, tenant_id, updated_at, consumer_key_enc, consumer_secret_enc, consumer_key_hmac, key_hint,"
+            "id, tenant_id, merchant_id, updated_at, consumer_key_enc, consumer_secret_enc, consumer_key_hmac, key_hint,"
                     + " data_key_id, status, ipn_id, ipn_registered_at, last_checked_at, failure_reason";
 
     private final JdbcClient jdbc;
@@ -75,6 +76,7 @@ class AccountStore {
     void save(
             UUID id,
             UUID tenantId,
+            UUID merchantId,
             Instant now,
             byte[] keyBox,
             byte[] secretBox,
@@ -84,15 +86,15 @@ class AccountStore {
             UUID updatedBy) {
         jdbc.sql("""
                         INSERT INTO payment_gateway_accounts (id, tenant_id, created_at, updated_at, provider, consumer_key_enc,
-                                                              consumer_secret_enc, consumer_key_hmac, key_hint, data_key_id, status, updated_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)
+                                                              consumer_secret_enc, consumer_key_hmac, key_hint, data_key_id, status, updated_by, merchant_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?, ?)
                         ON CONFLICT (tenant_id, provider) DO UPDATE
                            SET updated_at = EXCLUDED.updated_at, consumer_key_enc = EXCLUDED.consumer_key_enc,
                                consumer_secret_enc = EXCLUDED.consumer_secret_enc, consumer_key_hmac = EXCLUDED.consumer_key_hmac,
                                key_hint = EXCLUDED.key_hint,
                                data_key_id = EXCLUDED.data_key_id, status = 'saved', ipn_id = NULL, ipn_token_hash = NULL,
                                ipn_registered_at = NULL, last_checked_at = NULL, failure_reason = NULL,
-                               updated_by = EXCLUDED.updated_by
+                               updated_by = EXCLUDED.updated_by, merchant_id = EXCLUDED.merchant_id
                         """)
                 .params(
                         id,
@@ -105,7 +107,8 @@ class AccountStore {
                         keyHmac,
                         keyHint,
                         dataKeyId,
-                        updatedBy)
+                        updatedBy,
+                        merchantId)
                 .update();
     }
 
@@ -118,6 +121,20 @@ class AccountStore {
                          WHERE id = ?
                         """)
                 .params(ipnId, tokenHash, IntentStore.ts(now), IntentStore.ts(now), IntentStore.ts(now), updatedBy, id)
+                .update();
+    }
+
+    /**
+     * The credentials work again and the registration made earlier still stands: the account is verified with the same
+     * notification address, so orders made before keep notifying a live one.
+     */
+    void markChecked(UUID id, Instant now, UUID updatedBy) {
+        jdbc.sql("""
+                        UPDATE payment_gateway_accounts
+                           SET status = 'verified', last_checked_at = ?, failure_reason = NULL, updated_at = ?, updated_by = ?
+                         WHERE id = ? AND ipn_id IS NOT NULL AND ipn_token_hash IS NOT NULL
+                        """)
+                .params(IntentStore.ts(now), IntentStore.ts(now), updatedBy, id)
                 .update();
     }
 
@@ -176,6 +193,7 @@ class AccountStore {
         return new Account(
                 rs.getObject("id", UUID.class),
                 rs.getObject("tenant_id", UUID.class),
+                rs.getObject("merchant_id", UUID.class),
                 instant(rs, "updated_at"),
                 rs.getBytes("consumer_key_enc"),
                 rs.getBytes("consumer_secret_enc"),

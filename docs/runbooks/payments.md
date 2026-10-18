@@ -15,6 +15,7 @@ secret or token is ever written in the repository, a chat or an issue.
 | `BMS_PESAPAL_BASE_URL` | Empty or the provider's API base. Outside production only the sandbox is accepted |
 | `BMS_PESAPAL_CALLBACK_BASE_URL` | The public https origin of the callback host, no path. **Needed before any lender can test its account**: the notification address is built from it |
 | `BMS_PESAPAL_PLATFORM_*` | The operator's own pair for subscription payments (slice #228); leave empty until then. Never used for a lender's money |
+| `BMS_PESAPAL_REFUSED_KEY_DIGESTS` | **Required in production whenever the gateway is on** (startup refuses otherwise): comma separated SHA-256 digests (lower case hex) of **every** consumer key the platform operator owns, current and retired, so no lender can enter one as its own account, whether or not `BMS_PESAPAL_PLATFORM_*` is in use. Compute one with `printf %s "$CONSUMER_KEY" \| shasum -a 256`. Add a key's digest before it is ever used anywhere, and keep the digests of retired keys. Development and tests may leave it empty |
 | `BMS_DATA_KEY`, `BMS_DATA_KEY_ID` | The application data key (32 bytes, base64) that seals the lenders' stored credentials (and TOTP secrets), and its id |
 | `BMS_DATA_KEY_PREVIOUS` | Only during a data key rotation: the retired keys as `id:base64` pairs, comma separated (section 4a) |
 
@@ -118,7 +119,10 @@ with credentials:
 4. If the lender connects a **different** merchant account, its old orders cannot be checked there (the provider answers that it knows no such order): they
    are counted as anomalies, never booked and never closed; reconcile them by hand against the old account's statement before releasing anything.
 5. If an account must be removed while orders wait (a compromised merchant account), the operator releases it
-   (`POST /api/v1/platform/tenants/{id}/payment-account/release`, audited) and the lender connects the new one.
+   (`POST /api/v1/platform/tenants/{id}/payment-account/release` with a `reason` of 10 to 300 characters; audited in the platform audit log in one transaction with the removal, and the
+   tenant's administrators are emailed) and the lender connects the new one. Orders are bound to the merchant account they were made under (`payment_intents.merchant_id`): a new
+   connection with a **different consumer key** is a different merchant, and the old orders are skipped, not checked with it (they wait, never closed, until reconciled by hand
+   against the old account's statement). Reconnecting the **same consumer key** after a release is a new merchant id too: reconcile the same way.
 
 ## 5. How a payment moves, for the person on call
 
@@ -154,6 +158,7 @@ as late; an expired order stays payable on purpose), `needs_attention`, `reverse
 | `reversed_pending_review` | The provider reports a reversal after booking (found by the daily re-ask or by a notification). Nothing is reversed automatically and the ledger is untouched; the checker request is slice #224. Reverse through the loan or savings reversal by hand after the accountant agrees |
 | Flood on the callback path | Answered 429 by the application (separate buckets for the provider's notifications and the payer return page); unknown references make no outbound call. The edge rule is required before activation, see section 3 |
 | Stop everything at once | Set `BMS_PESAPAL_PROVIDER=off` (the gateway is off for every tenant and the platform, intents stay or fail, nothing is sent), restart the API. Collections can also be switched off per business, and a lender's account can be removed by its administrator when nothing is in flight |
+| Counter `provider_auth` rises | Pesapal refused a lender's credentials while checking an order (the lender rotated or revoked the secret). The intent is not closed or cancelled and is asked again hourly. The lender pastes the new secret (same consumer key: allowed) and tests |
 | Counter `no_credentials` rises | An intent's account has no readable credentials (not connected, released, or its data key was dropped). Nothing is lost: the intent is checked again hourly and never closed. Connect the account, or restore the retired key in `BMS_DATA_KEY_PREVIOUS` (section 4a) |
 | A lender's account shows `failed` | Pesapal refused its consumer key and secret, or the notification address (`failure_reason`: `invalid_credentials` or `registration_refused`). Collecting for that lender stops (422 `merchant_account_not_verified`); other lenders are unaffected. Ask the lender to check the key and secret in its own Pesapal account and test again; never ask for the secret |
 | `provider_auth` on a lender's intents | The lender rotated or revoked its secret at Pesapal. Orders already made keep failing their checks until the lender pastes the new secret (same consumer key: allowed with payments in flight) and tests again |

@@ -385,3 +385,25 @@ environment, bound to a named tenant"; the rest of the ADR stands.
 17. **Migrations.** `V56` creates the table, the functions and adds the CHECK `NOT VALID` (an instant ACCESS EXCLUSIVE, no scan) and drops the old
     four-argument resolver; `V57` seeds the permission and validates the CHECK in a transaction of its own (SHARE UPDATE EXCLUSIVE, writes continue);
     if an old row breaks it the constraint stays NOT VALID, still binding new rows, with a warning.
+
+### Review round 2 (PR #308), decisions added
+
+18. **The operator's own keys, independent of the platform pair.** `BMS_PESAPAL_REFUSED_KEY_DIGESTS` lists the SHA-256 of every consumer key the platform
+    operator owns, current and retired; none can be entered by a lender, whether or not the platform pair is in use on the host (`BMS_PESAPAL_PLATFORM_*` is empty
+    until subscriptions exist). Production refuses to start with the gateway on and the list empty; development and tests allow it. The second-factor code is
+    checked first, so nobody learns whether a key is refused without passing it.
+19. **Duplicate detection across key rotations.** A lookup passes the blind index under the current key and under every retired key (`DataKeys.blindIndexes`),
+    because a row sealed before a rotation keeps its old digest until re-sealed. The re-seal runs a tenant's payment accounts and its second-factor seeds in
+    separate transactions, so a problem with one can never block the other (or the `remaining` count from reaching 0).
+20. **Step-up cannot be brute-forced.** A locked account (five wrong codes, 15 minutes) refuses step-up and recovery-code regeneration, and the lock ends all of the
+    user's sessions (`revoked_reason = admin`), audited as `core.auth.account_locked`.
+21. **A provider refusal of a lender's credentials never ends an intent.** `AUTH` on a tenant account (a rotated secret, a backoff) takes the same path as "no
+    credentials": the intent is neither closed nor cancelled at the provider, counter `provider_auth`, asked again in an hour.
+22. **Intents are bound to the merchant account they were made under.** `payment_gateway_accounts.merchant_id` is new when the consumer key changes (not when only the
+    secret does); `payment_intents.merchant_id` records it. Credentials resolve for an intent only while the stored account is that merchant account; another one is
+    "no credentials" (skipped, never checked with another merchant's credentials). Intents made before V56 (null) resolve to the tenant's present account as before.
+23. **Testing keeps the registration.** Test connection on an account whose notification address is registered only checks the credentials with a fresh token
+    (`PaymentGateway.checkCredentials`); the address and IPN id stay, so earlier orders keep notifying a live address. A new registration is made only when there is none.
+24. **Notices go to every holder of the permission, the actor included, and name who** (a business with one administrator hears of a hijacked session's change). The
+    operator's release needs a reason (10 to 300 characters), removes the account and writes its platform audit row in one transaction, and emails the tenant's administrators.
+    The wrong-token pre-check looks at the address's own count only, so a flood from elsewhere cannot shut out a lender's genuine notification.

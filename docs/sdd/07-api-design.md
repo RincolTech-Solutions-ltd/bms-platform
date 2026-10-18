@@ -380,7 +380,7 @@ The refresh token never appears in a response body: it is the `__Host-bms_rt` co
 | GET | `/platform/tenants` | `platform.tenants.read` | |
 | POST | `/platform/tenants` | `platform.tenants.manage` | Create per FR-TEN-01: tenant, subscription (`trial`), settings, head office, modules with their chart of accounts, first tenant admin; returns the admin's one-time link once |
 | GET | `/platform/tenants/{tenant_id}` | `platform.tenants.read` | |
-| POST | `/platform/tenants/{tenant_id}/payment-account/release` | `platform.tenants.manage` | Built in #233. Operator override: removes the tenant's saved payment account although payments are in flight (a compromised merchant account), audited in the platform audit log; waiting orders are skipped, never closed |
+| POST | `/platform/tenants/{tenant_id}/payment-account/release` | `platform.tenants.manage` | Built in #233. `{reason}` (10 to 300 characters, required). Operator override, one transaction with its platform audit row, emails the tenant's administrators: removes the tenant's saved payment account although payments are in flight (a compromised merchant account), audited in the platform audit log; waiting orders are skipped, never closed |
 | GET | `/platform/tenants/{tenant_id}/payment-account` | `platform.tenants.read` | Built in #233. Whether the tenant has connected its own payment account: `status` (`not_connected`, `verified`, `failed`), `last_checked_at`, `failure_reason`. Status only: the operator can neither read nor enter a credential. ADR-035 amendment of 2026-10-18 |
 | PATCH | `/platform/tenants/{tenant_id}` | `platform.tenants.manage` | Not built yet |
 | PUT | `/platform/tenants/{tenant_id}/modules` | `platform.tenants.manage` | `{modules: ["lending"]}`. FR-TEN-03 |

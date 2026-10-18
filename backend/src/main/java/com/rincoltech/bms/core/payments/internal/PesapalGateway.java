@@ -231,6 +231,15 @@ final class PesapalGateway implements PaymentGateway {
     }
 
     @Override
+    public void checkCredentials(Account account) throws GatewayException {
+        PesapalSettings.Pair pair = requirePair(account);
+        // A fresh token, never the cached one: this answers "do the credentials work now?", and the cache must not.
+        tokens.remove(account);
+        authBackoff.remove(account);
+        token(account, pair);
+    }
+
+    @Override
     public synchronized IpnRegistration registerIpn(Account account, String url, IpnType type) throws GatewayException {
         PesapalSettings.Pair pair = requirePair(account);
         URI target;

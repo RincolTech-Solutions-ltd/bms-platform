@@ -124,11 +124,10 @@ class IntentService implements PaymentCollections {
         // The own-account rule (ADR-035 amendment of 2026-10-18): money owed to this business lands only in this
         // business's own merchant account. With none connected and tested there is nothing to collect into, and the
         // platform's account is never a substitute.
-        if (!accounts.verified()) {
-            throw ApiException.rule(
-                    "merchant_account_not_verified",
-                    "Connect and test your own payment account (Receive payments) before collecting.");
-        }
+        UUID merchantId = accounts.verifiedMerchant()
+                .orElseThrow(() -> ApiException.rule(
+                        "merchant_account_not_verified",
+                        "Connect and test your own payment account (Receive payments) before collecting."));
         return idempotency
                 .once(
                         key,
@@ -136,7 +135,7 @@ class IntentService implements PaymentCollections {
                         "/api/v1/payments/intents",
                         request,
                         IntentView.class,
-                        () -> insert(request, key, principal, profile, effective))
+                        () -> insert(request, key, principal, profile, effective, merchantId))
                 .body();
     }
 
@@ -145,7 +144,8 @@ class IntentService implements PaymentCollections {
             String key,
             Principal principal,
             CurrentTenant.Profile profile,
-            PaymentsSettingsService.Effective effective) {
+            PaymentsSettingsService.Effective effective,
+            UUID merchantId) {
         List<FieldProblem> problems = new ArrayList<>();
         PurposeHandler handler = request.purpose() == null
                 ? null
@@ -215,7 +215,8 @@ class IntentService implements PaymentCollections {
                 Scope.TENANT.key(),
                 MerchantReference.of(id, pesapal.environment()),
                 principal.userId(),
-                now.plus(CheckSchedule.OFFER));
+                now.plus(CheckSchedule.OFFER),
+                merchantId);
         store.insert(intent, key);
         audit.created(intent, request.subjectId());
         log.info("payment intent {} created", id);
@@ -254,7 +255,7 @@ class IntentService implements PaymentCollections {
         if (intent.providerReference() != null) {
             try {
                 gateway.cancelOrder(
-                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose()),
+                        Account.forIntent(intent.scope(), intent.tenantId(), intent.purpose(), intent.merchantId()),
                         intent.providerReference());
             } catch (GatewayException e) {
                 // The provider refuses once the payer has paid or the order was already cancelled: do not guess.

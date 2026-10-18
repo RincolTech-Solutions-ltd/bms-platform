@@ -9,13 +9,19 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -40,40 +46,70 @@ class MerchantAccountOperatorController {
             @Schema(description = "A closed word: invalid_credentials or registration_refused")
             String failureReason) {}
 
+    /** Why the operator releases the account: required, and kept in the platform audit log. */
+    @Schema(name = "ReleasePaymentAccountRequest")
+    record ReleaseRequest(
+            @Schema(
+                    description =
+                            "Why the account is released (10 to 300 characters); written to the platform audit log")
+            @NotBlank
+            @Size(min = 10, max = 300)
+            String reason) {}
+
     private final JdbcClient jdbc;
     private final PlatformAuditLog audit;
+    private final MerchantAccountService accounts;
+    private final TransactionTemplate tx;
 
-    MerchantAccountOperatorController(JdbcClient jdbc, PlatformAuditLog audit) {
+    MerchantAccountOperatorController(
+            JdbcClient jdbc,
+            PlatformAuditLog audit,
+            MerchantAccountService accounts,
+            PlatformTransactionManager transactions) {
         this.jdbc = jdbc;
         this.audit = audit;
+        this.accounts = accounts;
+        this.tx = new TransactionTemplate(transactions);
     }
 
     /**
      * The operator's way out when a lender's account must go while a payment still waits on it (a compromised merchant
-     * account, a stuck order): removes the saved account whatever is in flight and audits it. Orders still waiting are left
-     * as they are (the poller skips an intent whose account has no credentials and never closes it) until a new account is
-     * connected. The operator never sees or enters a credential.
+     * account, a stuck order): removes the saved account whatever is in flight, with a reason, in one transaction with its audit
+     * row (the removal and the audit are both done or neither), and tells the tenant's administrators by email. Orders still
+     * waiting are left as they are (they were made under that merchant account and are never checked with another's
+     * credentials; the poller skips them and never closes them). The operator never sees or enters a credential.
      */
     @PostMapping("/tenants/{tenant_id}/payment-account/release")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary = "Remove a tenant's saved payment account although payments are in flight (audited override)",
             operationId = "platformReleaseTenantPaymentAccount")
-    Status release(@PathVariable("tenant_id") UUID tenantId, HttpServletResponse response) {
+    Status release(
+            @PathVariable("tenant_id") UUID tenantId,
+            @Valid @RequestBody ReleaseRequest request,
+            HttpServletResponse response) {
         NoStore.apply(response);
-        String was = jdbc.sql("SELECT app_release_payment_account(?)")
-                .param(tenantId)
-                .query(String.class)
-                .optional()
-                .orElse(null);
-        if (was == null) {
-            throw ApiException.notFound();
+        UUID operator = CurrentPrincipal.require().userId();
+        tx.executeWithoutResult(status -> {
+            String was = jdbc.sql("SELECT app_release_payment_account(?)")
+                    .param(tenantId)
+                    .query(String.class)
+                    .optional()
+                    .orElse(null);
+            if (was == null) {
+                throw ApiException.notFound();
+            }
+            audit.record(
+                    "platform.payment_account.released",
+                    operator,
+                    tenantId,
+                    java.util.Map.of("previous_status", was, "reason", request.reason()));
+        });
+        try {
+            accounts.notifyReleased(tenantId, UUID.randomUUID());
+        } catch (RuntimeException e) {
+            // The release stands; a notice that could not be queued is not a reason to undo it.
         }
-        audit.record(
-                "platform.payment_account.released",
-                CurrentPrincipal.require().userId(),
-                tenantId,
-                java.util.Map.of("previous_status", was));
         return new Status("not_connected", null, null);
     }
 

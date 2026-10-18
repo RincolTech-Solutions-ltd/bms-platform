@@ -11,6 +11,8 @@
 --    every new row, and a warning names the count; the migration never fails a deploy over the history of a table that
 --    held no real payment when this was written.
 
+SET LOCAL lock_timeout = '5s';
+
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
     ('core.payment_account.manage', 'core', 'Payments: connect, test and remove the business''s own payment provider account', true);
 

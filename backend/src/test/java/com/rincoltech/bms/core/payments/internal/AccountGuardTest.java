@@ -110,6 +110,7 @@ class AccountGuardTest {
         return new AccountStore.Account(
                 UUID.randomUUID(),
                 LENDER,
+                UUID.randomUUID(),
                 Instant.parse("2026-10-18T10:00:00Z"),
                 keys.seal(key.getBytes(StandardCharsets.UTF_8)),
                 keys.seal(secret.getBytes(StandardCharsets.UTF_8)),
