@@ -176,6 +176,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   user in; the PWA walks a new user through password, an optional second factor and recovery codes;
   role aware spotlight tours (`frontend/src/tour/`) start once and replay from Help, with per-user
   progress in `users.preferences` (`V31`). A new screen adds `data-tour` anchors and its steps.
+- **Built (lending staff screens 1 and 2, issue #280):** PWA only, no migration: Members (list with live search, add, change, the member's page with the check of the details, next of kin, ID photos, relationships, loans) and the collateral register (register, change, valuations, custody changes, photos, the release request), phone-first, with a tour each (`docs/specs/lending-ui-notes.md`, section "Members and collateral"). Loan application, appraisal and decision are slices 3 and 4.
 - **Built (increment 9, savings, issue #151, ADR-032):** migration `V30` (savings products,
   accounts, transactions, end-of-day balances, interest postings; the outbox accepts `sms`);
   products with interest rules, minimum and opening balances, withdrawal fee and limits, dormancy;
@@ -564,6 +565,11 @@ Accepted (this list is the ADR index):
 - ADR-039 One search convention: a shared kernel matcher (folded text, AND of terms, phone digits, ranked, rank in the
   cursor), `bms_fold` and `bms_digits` in V40 and no search index (none is usable under row-level security), one
   live search hook in the PWA (proposed, #241; spec `docs/specs/search.md`)
+- ADR-040 Build on a dedicated runner on the staging host, sign on the maintainer's Mac: the deploy jobs run on
+  `bms-deploy-laptop` (Jerome's laptop) in an org runner group that admits only `deploy.yml` on main (own user, wall, caps, wiped state,
+  no secret), the cosign key lives only in the Keychain and a launchd signer (cosign v2.4.1) signs the digests a
+  main run logged; the staging pointer waits for the signatures (hosted minutes are not used and the budget is
+  not raised; proposed, #296; `deploy/runner/`, `deploy/signer/`)
 
 Pending (cite only as "pending ADR-NNN"):
 

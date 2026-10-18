@@ -95,6 +95,8 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Alert | `.alert` with `-danger`, `-warning`, `-success`, `-info` | Left rule and tint; the words carry the meaning |
 | Badge | `.badge` with `-success`, `-warning`, `-danger`, `-info` | |
 | Search box | `useLiveSearch` and `<SearchBox id label search fetching count more>` (`app/ui/`) with `<SearchResults fetching>`, `<NoResults term onClear noun>` and `<Highlight text term>` | Every search on every screen: the label, the input with a Clear button, and a polite status line ("Searching", "12 results", `No results for "x"`). The text is live, the term follows after 250 ms, Escape clears, the old list stays dimmed until the new answer arrives. Pass `placeholderData: keepPreviousData` and the query function's `signal`. Rules: `docs/specs/search.md` section 2 |
+| Form fields | `TextField`, `SelectField`, `Group`, `SaveBar`, `useFormErrors` (`areas/staff/lending/form-fields.tsx`; `.mf`, `.mf-field`, `.mf-group`, `.mf-savebar`) | A label above each input, hint and error tied with `aria-describedby`, `aria-invalid`, focus to the first refused input, groups as fieldset and legend, and a save bar stuck to the bottom of a phone with what blocks it in words |
+| Photo control | `PhotoQueueControl`, `usePhotoQueue` (`areas/staff/lending/photo-queue.tsx`, `image-prep.ts`; `.ph-*`) | Take a photo (camera) or Choose a file, checked and shrunk in the browser, progress, Send again that does not shrink twice |
 | Empty state | `<EmptyState art="noSales" title="...">help</EmptyState>`; bare `.empty-state` for a line of text | The illustration, a title and a line of help in a dashed box; `art` is one of `noSales`, `noProducts`, `noApplications`, `nothingWaiting` |
 | Success, error | `<StatusPanel tone="success" title="...">` | `role="status"` or `"alert"`; the title in the status colour |
 | Loading | `<BrandLoader />` for a page, `<SkeletonList />` for a list, `.loading` for a line of text, `.spinner`, `.skeleton` | Every loader names what loads in words; motion stops with `prefers-reduced-motion` |
@@ -107,6 +109,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Recovery codes | `RecoveryCodes`, `.codes-grid`, `.button-pair` | Two columns, Copy all, Download as text, a required tick |
 | Guided tour | `tour/` (`.tour-card`, `.tour-hole`, `.tour-backdrop`, `.tour-dots`) | A card docked top or bottom, away from the lit target; the hole is placed with CSS custom properties, never a style attribute (ADR-025) |
 | Tour anchor | `data-tour="<id>"` on the element a tour step lights up | Stable ids, never a CSS class; `tour/tours.test.tsx` fails when one disappears |
+| Tour rules (issue #292) | `tour/model.ts` `autoTourFor`, `host.tsx` | At most one tour starts by itself per page load; the rest wait for the next visit. A user with no tour history gets only the first-run (Welcome) tour, and every "New:" tour is marked seen for them at that moment, since they have nothing to compare against. One "Do not show tours again" checkbox (progress key `tours-off`) stops every automatic tour, "New:" ones included; Help still replays any tour |
 | Help | `HelpMenu` in the staff bar | A `dialog.sheet` with Take the tour and Show me this page |
 
 ## Rules for a new screen
