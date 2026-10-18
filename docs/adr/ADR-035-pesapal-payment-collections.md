@@ -194,7 +194,7 @@ API; whose credentials are used; what is out of scope.
 - The payer leaves the app for a hosted page; there is no push prompt, so the experience is a link or
   a QR code, and a cashier-initiated payment needs the payer to open it (by SMS, ADR-036).
 - Provider fees are known only after the statement is uploaded, so charges lag by a statement cycle.
-- One merchant per environment, bound to a named tenant, until per-tenant credentials exist limits the
+- (Superseded by the amendment of 2026-10-18: one merchant per tenant, its own.) One merchant per environment, bound to a named tenant, until per-tenant credentials exist limits the
   product to one lender per environment for collections.
 - Polling and nightly re-checks cost provider calls; the throttle and the 48 hour window bound them.
 
@@ -308,3 +308,54 @@ Additive; the decisions above stand. Where the build made a choice the text left
    `reversal` counter. **The ledger is never touched by this slice**: the receipt stays in the books until a person reverses it by hand (the loan or
    savings reversal), and the checker request raised by a system user is slice #224. The nightly `core.payments.reconcile` job, the statement upload and the
    reconciliation report are not built in #213 either (#224); the built job is `core.payments.poll`, every 10 seconds.
+
+## Amendment (2026-10-18, issue #233): money owed to a tenant lands only in that tenant's own merchant account
+
+Hillary's decision of 18 October 2026, built in slice A7 (issue #233). It supersedes decision 10 where it says credentials live in the
+server environment for a lender, decision 11 (the merchant bound to one named tenant) and the consequence "one merchant per
+environment, bound to a named tenant"; the rest of the ADR stands.
+
+1. **The rule.** Money owed to a tenant (loan repayments, savings deposits, investment funding: slices A3, A4 and later) is paid into
+   **that tenant's own Pesapal merchant account** and never into the platform's. The platform's own account receives only money owed to
+   the platform (subscriptions and add-ons, slice A6). A tenant that has no connected, tested account of its own cannot start a payment
+   (422 `merchant_account_not_verified`); there is no fallback to the platform account, by design and by test.
+2. **Why (licensing).** Holding and passing on a third party's money looks like a payment service under the National Payment Systems
+   Act 2020, which needs a licence from the Bank of Uganda. A lender collecting its own money through Pesapal is an ordinary merchant,
+   the same model Nearly Free Energy uses for its own customers. **Legal confirmation (KTA) is still to be asked, and it is a gate on the
+   first live repayment, not on this build.** Nothing here collects real money by default: the slice is off until a tenant connects an
+   account and switches collections on, and production needs the live callback host.
+3. **Build order.** A7 now comes before A3 and A4; it no longer depends on A3. A3 and A4 refuse to start a payment for a tenant with no
+   verified account of its own (`merchant_account_not_verified`) and never fall back.
+4. **Self-service connect.** A tenant administrator opens "Receive payments", enters the consumer key and secret of the lender's own
+   Pesapal account, and presses Test connection, which asks the provider for a token and registers this account's notification address
+   (a new random path token per test; only its SHA-256 is stored). The status is not connected, verified or failed, with the time of the
+   last test. Saving makes no call; a refused key or registration marks the account failed; an unreachable provider changes nothing.
+   The secret is write-only: sealed on arrival, never returned by any endpoint, never logged, never in an audit row. The platform
+   operator sees the status and the time only (`GET /api/v1/platform/tenants/{id}/payment-account`); it cannot read or enter a credential.
+5. **Where the credentials live.** Table `payment_gateway_accounts` (migration `V56`): one row per tenant and provider, forced row-level
+   security, the consumer key and secret as AES-256-GCM boxes sealed with the **application data key** (`BMS_DATA_KEY`, the one that seals
+   TOTP secrets; the box names the key that sealed it), the key's last four characters for display, the IPN id, and the digest of the
+   path token. The environment keeps only what is not a lender's: the provider mode, the base URL, the callback origin and the platform
+   pair (`BMS_PESAPAL_PLATFORM_*`). `BMS_PESAPAL_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_IPN_ID`, `_IPN_TOKEN` and `_TENANT_ID` are gone.
+6. **Key rotation.** After the data key is rotated the host keeps the retired key in `BMS_DATA_KEY_PREVIOUS` (`id:base64` pairs); the
+   job `core.payments.reseal-accounts` (nightly, and run by hand) opens every row sealed with a retired key and seals it with the
+   current one, one tenant and one row at a time; the retired key is removed only once a run finds nothing left. A row whose key was
+   dropped too early is left as it is and the run fails loudly.
+7. **The guard in code.** A payment gateway call names an `Account`: a tenant account carries its tenant and the platform account
+   carries none, so "the platform's account on behalf of a tenant" cannot be expressed. The credentials of an account come from that
+   account alone (`AccountCredentials`): the platform's from the environment, a tenant's from its own decrypted row and only for the
+   tenant bound to the thread. `Account.forIntent` gives a stored intent the tenant's own account, and refuses the platform account
+   for any purpose that is not a platform purpose. The database adds a CHECK: an intent of the platform scope must carry a purpose
+   starting `platform.`. Tests: `AccountGuardTest`, `PaymentGatewayIT`.
+8. **Notifications.** The path token selects an account: the platform's by constant-time comparison with the environment, a lender's by
+   the digest lookup `app_resolve_payment_account`. A notification that arrives on one lender's address can only match that lender's own
+   orders (`app_resolve_payment_intent` gained the tenant of the token; any other tenant is a scope mismatch, counted and kept).
+9. **One lender's problem is not everyone's.** A lender's refused credentials do not count against the shared circuit breaker, and the
+   token cache is per account and per credential value, so a replaced secret is used at once and one lender's token is never used for
+   another.
+10. **Replacing credentials.** While an order, a booking or a review of a booked payment still needs the credentials, they cannot be
+    replaced by another merchant account or removed (409 `payments_in_flight`); a new secret for the same consumer key is allowed and
+    needs a new test.
+11. **What is not built here.** The purpose handlers and screens that start a payment (A3, A4, A6), and a screen for the platform
+    operator in the console (the status is on the API for it). Switching collections on is now refused with 409
+    `merchant_account_not_verified` (it was `merchant_not_bound_to_tenant`) until the tenant's account is verified.

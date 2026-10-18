@@ -206,15 +206,10 @@ bms:
   # Payment collections through Pesapal (ADR-035, spec 3.11). Nothing here collects by default: with no credentials the
   # gateway is off, and startup refuses any base URL that could reach the live provider from outside production (only the
   # sandbox is allowed there, in every mode) and the fake provider in production. Keys, secrets and path tokens come from
-  # the host environment only and are never logged. BMS_PESAPAL_TENANT_ID binds the merchant account to one tenant.
+  # the host environment only and are never logged. A lender's own account is entered by the lender and stored encrypted (issue #233), so there is no per-lender value here.
   pesapal:
     provider: ${BMS_PESAPAL_PROVIDER:}
     base-url: ${BMS_PESAPAL_BASE_URL:}
-    consumer-key: ${BMS_PESAPAL_CONSUMER_KEY:}
-    consumer-secret: ${BMS_PESAPAL_CONSUMER_SECRET:}
-    ipn-id: ${BMS_PESAPAL_IPN_ID:}
-    ipn-token: ${BMS_PESAPAL_IPN_TOKEN:}
-    tenant-id: ${BMS_PESAPAL_TENANT_ID:}
     callback-base-url: ${BMS_PESAPAL_CALLBACK_BASE_URL:}
     platform:
       consumer-key: ${BMS_PESAPAL_PLATFORM_CONSUMER_KEY:}
