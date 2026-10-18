@@ -312,7 +312,9 @@ merchant account.** A lender's credentials are not in the environment any more. 
 there is no environment-level merchant to bind and none for any tenant admin to receive by switching on first.
 
 **Each lender connects its own account** (screen "Receive payments", `/api/v1/payments/merchant-account`; runbook
-`docs/runbooks/connect-lender-pesapal-account.md`). The tenant administrator enters the consumer key and secret; the secret is write-only.
+`docs/runbooks/connect-lender-pesapal-account.md`). Only the tenant administrator (permission `core.payment_account.manage`, not the general settings
+permission) may change it, saving and removing ask for a code from the administrator's authenticator, and the other administrators are emailed; the
+platform's own consumer key and a key another tenant already uses are refused (409 `merchant_account_in_use`). The tenant administrator enters the consumer key and secret; the secret is write-only.
 Test connection asks the provider for a token and registers this account's notification address, with a new random path token whose only
 stored form is its SHA-256, and the account becomes verified. The status is `not_connected`, `verified` or `failed`, with the time of the last
 test; the platform operator sees the status and the time only. `payments.collections_enabled` (`core.settings.manage`, default off) can be
@@ -327,7 +329,7 @@ the first live repayment.
 
 **The guard.** The gateway port names an account (`Account`): a tenant account carries its tenant, the platform account carries none, and the
 credentials come from the account alone. A stored intent is given its own tenant's account; the platform account is refused for any purpose that
-is not a platform purpose, in code (`Account.forIntent`) and in the database (`payment_intents_platform_scope_purpose`, migration V56).
+is not a platform purpose (and a platform purpose is never paid into a lender's account), in code (`Account.forIntent`) and in the database (`payment_intents_scope_purpose`, V56 and V57).
 Credentials are sealed with the application data key; the data key can be rotated and the job `core.payments.reseal-accounts` re-seals rows
 (ADR-035 amendment, items 5 and 6). Credentials are issued by Pesapal to the lender's own account holder, who enters them; the dev lead
 never handles a lender's secret, and none is in a chat, an issue or the repository.

@@ -87,18 +87,38 @@ remove or replace its account (other than a new secret for the same consumer key
 
 ## 4a. Rotating the data key
 
-The lenders' stored credentials are sealed with `BMS_DATA_KEY`; each box carries the id of its key. To rotate:
+The lenders' stored credentials and every user's second-factor seed (and the platform operators') are sealed with `BMS_DATA_KEY`; each box carries
+the id of its key. To rotate:
 
 1. Generate a new key (`java -jar bms-api.jar keys` prints a fresh data key line; take only `BMS_DATA_KEY`).
-2. In `/opt/bms/.env` set `BMS_DATA_KEY` to the new key and `BMS_DATA_KEY_ID` to a new id (for example `k2`), and put the **old** key in
-   `BMS_DATA_KEY_PREVIOUS=k1:<old base64>`. Restart the API. New boxes use `k2`; old ones still open.
-3. The job `core.payments.reseal-accounts` runs nightly at 03:50 Africa/Kampala and re-seals every row sealed with a retired key. To
-   see what is left: `SELECT data_key_id, count(*) FROM payment_gateway_accounts GROUP BY 1` as the owner role. A run that cannot open a
-   row (a key dropped too early) fails and is logged by tenant id and error type, and the row is left untouched.
-4. Only when no row of `payment_gateway_accounts` carries `k1` any more, consider removing `BMS_DATA_KEY_PREVIOUS`. **Not yet safe:** enrolled TOTP
-   secrets are sealed with the same key and no job re-seals them (they stay readable through `BMS_DATA_KEY_PREVIOUS`); until a follow-up
-   re-seals them, keep the retired key configured, or every enrolled user must enrol again. Never drop the old key early: a sealed credential cannot
-   be recovered without it, and the lender would have to enter the key and secret again.
+2. In `/opt/bms/.env` set `BMS_DATA_KEY` to the new key and `BMS_DATA_KEY_ID` to a **new** id (for example `k2`; the same id as the old key is refused at
+   start, because it would make every old box unreadable), and put the **old** key in `BMS_DATA_KEY_PREVIOUS=k1:<old base64>` (two entries with one id are
+   refused too). The compose files pass `BMS_DATA_KEY_PREVIOUS` through. Restart the API. New boxes use `k2`; old ones still open.
+3. The job `core.payments.reseal-accounts` runs nightly at 03:50 Africa/Kampala and re-seals, tenant by tenant (suspended tenants too), every payment account
+   and every second-factor seed sealed with a retired key, and the platform operators' seeds. Every run logs one line `data key re-seal: key=k2
+   resealed=<n> remaining=<n> tenants=<n>`. A tenant whose secret cannot be opened (a key dropped too early) is logged by id and error type, left
+   untouched, and the run fails so the scheduler retries.
+4. Remove `BMS_DATA_KEY_PREVIOUS` (and restart) **only after a run logs `remaining=0`**. Never drop the old key earlier: a sealed credential or a seed cannot be
+   recovered without it (the lender would have to enter the key and secret again, and every user would have to enrol the authenticator again).
+   To see the count by hand: `SELECT app_count_sealed_secrets_to_reseal('k2')` as the application role.
+
+## 4b. Deploy gate: moving from environment credentials (V54 era) to a lender's own account
+
+Before V56 a lender's merchant account was `BMS_PESAPAL_CONSUMER_KEY` and `_SECRET` in the host environment, bound to one tenant. Those variables are gone
+and nothing moves their values into the table (the lender enters its own key and secret). So, before deploying this change to a host that ever ran V54
+with credentials:
+
+1. Check what is in flight: `SELECT status, count(*) FROM payment_intents WHERE next_check_at IS NOT NULL GROUP BY 1` as the owner role. **Today no live
+   tenant uses environment credentials and Pesapal is sandbox only**; staging may hold V54 test intents, which are harmless.
+2. If any intent could be a real payment: switch collections off for that tenant (new intents stop, old ones are still checked), wait until the query above
+   shows nothing (an order is final after 48 hours), then deploy. Or deploy and have the lender connect **the same Pesapal account** (same consumer key) at once.
+3. What happens if neither is done: the poller finds no readable credentials, **skips the intent and looks again in an hour** (counter `no_credentials`,
+   never closed, never counted as the provider being down), so a payment made meanwhile is found once the account is connected. The old notification address (the
+   old `BMS_PESAPAL_IPN_TOKEN`) answers 404 from now on: a lost notification costs a delay, not a payment, because the poller asks anyway.
+4. If the lender connects a **different** merchant account, its old orders cannot be checked there (the provider answers that it knows no such order): they
+   are counted as anomalies, never booked and never closed; reconcile them by hand against the old account's statement before releasing anything.
+5. If an account must be removed while orders wait (a compromised merchant account), the operator releases it
+   (`POST /api/v1/platform/tenants/{id}/payment-account/release`, audited) and the lender connects the new one.
 
 ## 5. How a payment moves, for the person on call
 
@@ -134,6 +154,7 @@ as late; an expired order stays payable on purpose), `needs_attention`, `reverse
 | `reversed_pending_review` | The provider reports a reversal after booking (found by the daily re-ask or by a notification). Nothing is reversed automatically and the ledger is untouched; the checker request is slice #224. Reverse through the loan or savings reversal by hand after the accountant agrees |
 | Flood on the callback path | Answered 429 by the application (separate buckets for the provider's notifications and the payer return page); unknown references make no outbound call. The edge rule is required before activation, see section 3 |
 | Stop everything at once | Set `BMS_PESAPAL_PROVIDER=off` (the gateway is off for every tenant and the platform, intents stay or fail, nothing is sent), restart the API. Collections can also be switched off per business, and a lender's account can be removed by its administrator when nothing is in flight |
+| Counter `no_credentials` rises | An intent's account has no readable credentials (not connected, released, or its data key was dropped). Nothing is lost: the intent is checked again hourly and never closed. Connect the account, or restore the retired key in `BMS_DATA_KEY_PREVIOUS` (section 4a) |
 | A lender's account shows `failed` | Pesapal refused its consumer key and secret, or the notification address (`failure_reason`: `invalid_credentials` or `registration_refused`). Collecting for that lender stops (422 `merchant_account_not_verified`); other lenders are unaffected. Ask the lender to check the key and secret in its own Pesapal account and test again; never ask for the secret |
 | `provider_auth` on a lender's intents | The lender rotated or revoked its secret at Pesapal. Orders already made keep failing their checks until the lender pastes the new secret (same consumer key: allowed with payments in flight) and tests again |
 

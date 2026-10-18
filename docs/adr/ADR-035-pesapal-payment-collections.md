@@ -337,16 +337,19 @@ environment, bound to a named tenant"; the rest of the ADR stands.
    TOTP secrets; the box names the key that sealed it), the key's last four characters for display, the IPN id, and the digest of the
    path token. The environment keeps only what is not a lender's: the provider mode, the base URL, the callback origin and the platform
    pair (`BMS_PESAPAL_PLATFORM_*`). `BMS_PESAPAL_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_IPN_ID`, `_IPN_TOKEN` and `_TENANT_ID` are gone.
-6. **Key rotation.** After the data key is rotated the host keeps the retired key in `BMS_DATA_KEY_PREVIOUS` (`id:base64` pairs); the
-   job `core.payments.reseal-accounts` (nightly, and run by hand) opens every row sealed with a retired key and seals it with the
-   current one, one tenant and one row at a time; the retired key is removed only once a run finds nothing left. A row whose key was
-   dropped too early is left as it is and the run fails loudly.
+6. **Key rotation.** After the data key is rotated the host keeps the retired key in `BMS_DATA_KEY_PREVIOUS` (`id:base64` pairs) and gives the
+   new key a **new** `BMS_DATA_KEY_ID`; the application refuses to start when a retired key has the id of the current one or two retired keys
+   share an id. The job `core.payments.reseal-accounts` (nightly, and run by hand) opens every secret sealed with a retired key and seals it with
+   the current one, one tenant at a time in that tenant's own transaction, **suspended tenants included**: the lenders' payment credentials (with
+   their blind-index digest) **and the second-factor (TOTP) seeds of every user and of the platform operators**, since they use the same key. Every
+   run logs `remaining=<n>`; the retired key is removed only once a run reports 0. A secret whose key was dropped too early is left as it is and the run fails loudly.
 7. **The guard in code.** A payment gateway call names an `Account`: a tenant account carries its tenant and the platform account
    carries none, so "the platform's account on behalf of a tenant" cannot be expressed. The credentials of an account come from that
-   account alone (`AccountCredentials`): the platform's from the environment, a tenant's from its own decrypted row and only for the
-   tenant bound to the thread. `Account.forIntent` gives a stored intent the tenant's own account, and refuses the platform account
-   for any purpose that is not a platform purpose. The database adds a CHECK: an intent of the platform scope must carry a purpose
-   starting `platform.`. Tests: `AccountGuardTest`, `PaymentGatewayIT`.
+   account alone (`AccountCredentials`): the platform's from the environment, a tenant's from its own decrypted row, only for the
+   tenant bound to the thread, and only if the row's tenant is that tenant. `Account.forIntent` gives a stored intent the tenant's own
+   account, and refuses the platform account for any purpose that is not a platform purpose. The database adds a CHECK in both directions
+   (`payment_intents_scope_purpose`, V56, validated by V57): an intent of the platform scope carries a purpose starting `platform.` and an intent of the
+   tenant scope does not. Tests: `AccountGuardTest`, `PaymentGatewayIT`.
 8. **Notifications.** The path token selects an account: the platform's by constant-time comparison with the environment, a lender's by
    the digest lookup `app_resolve_payment_account`. A notification that arrives on one lender's address can only match that lender's own
    orders (`app_resolve_payment_intent` gained the tenant of the token; any other tenant is a scope mismatch, counted and kept).
@@ -359,3 +362,26 @@ environment, bound to a named tenant"; the rest of the ADR stands.
 11. **What is not built here.** The purpose handlers and screens that start a payment (A3, A4, A6), and a screen for the platform
     operator in the console (the status is on the API for it). Switching collections on is now refused with 409
     `merchant_account_not_verified` (it was `merchant_not_bound_to_tenant`) until the tenant's account is verified.
+
+### Review of 2026-10-18 (independent review of PR #308), decisions added to the amendment
+
+12. **No shared merchant, enforced.** A consumer key equal to the platform's is refused, and so is one another tenant is already connected with: the
+    column `consumer_key_hmac` holds a keyed digest (HMAC-SHA256 under a key derived from the data key; recomputed when a row is re-sealed), unique across
+    tenants and checked through a definer function. The answer is 409 `merchant_account_in_use`, "already connected elsewhere".
+13. **Who may redirect the money.** New permission `core.payment_account.manage` (migration V57), held by the **tenant admin only**: save, test and
+    remove need it, not the general `core.settings.manage`. Saving and removing ask for a current TOTP code of the signed-in administrator's own
+    authenticator (the existing second factor; each code once; wrong codes count toward the lockout; 422 `invalid_code`, 409 `mfa_not_enrolled`). Every
+    save, verify, failure and removal is audited and **emailed to the other holders** of the permission (template `payments.account_changed`; no key,
+    secret or account detail). The key's last four characters and the host's state are shown only to holders of the permission.
+14. **A missing account never loses a payment.** An intent whose account has no readable credentials (not connected yet, removed, the key dropped) is
+    skipped by the poller and looked at again in an hour: never closed, never counted as the provider being down (counter `no_credentials`). The check
+    window only closes an intent when the provider could actually be asked and was unreachable. Deploy gate in `docs/runbooks/payments.md` section 4b.
+15. **Changing an account while payments wait.** "In flight" means an intent still scheduled for a check (not `paid`, not `needs_attention`, which need no
+    credentials). The platform operator can release a tenant's account regardless (`POST /api/v1/platform/tenants/{id}/payment-account/release`,
+    `platform.tenants.manage`, audited in the platform audit log); orders left waiting are skipped, not closed, until a new account is connected.
+16. **Test connection** is allowed once every 30 seconds for a business (429 `test_too_soon`); a refusal that is not about the credentials (a backoff after an
+    earlier refusal, a bare 401) changes nothing; a stale result for credentials saved since is dropped (409 `account_changed`). A notification address with
+    an exhausted wrong-token quota is not looked up in the database.
+17. **Migrations.** `V56` creates the table, the functions and adds the CHECK `NOT VALID` (an instant ACCESS EXCLUSIVE, no scan) and drops the old
+    four-argument resolver; `V57` seeds the permission and validates the CHECK in a transaction of its own (SHARE UPDATE EXCLUSIVE, writes continue);
+    if an old row breaks it the constraint stays NOT VALID, still binding new rows, with a warning.
