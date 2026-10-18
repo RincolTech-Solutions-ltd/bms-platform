@@ -3,7 +3,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { type MerchantAccount, payments } from '../../../api/payments';
 import { useStaff } from '../context';
-import { STATUS_WORDS, canChangePaymentAccount, credentialProblem, failureWords, nextStep, showReceivePayments } from './state';
+import { STATUS_WORDS, canChangePaymentAccount, codeProblem, credentialProblem, failureWords, nextStep, showReceivePayments } from './state';
 
 // "Receive payments" (extras slice A7, issue #233; ADR-035 amendment of 2026-10-18): money owed to the business lands only in
 // the business's own Pesapal account. A business administrator enters the consumer key and secret (the secret is write-only: it
@@ -39,22 +39,45 @@ export function AccountStatus({ account }: { account: MerchantAccount }) {
   );
 }
 
+/** A box for the six digits of the authenticator app: never remembered by the browser, cleared after each use. */
+export function CodeField({ id, value, onChange, problem }: { id: string; value: string; onChange: (v: string) => void; problem: string | null }) {
+  return (
+    <>
+      <label htmlFor={id}>Code from your authenticator app</label>
+      <input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        spellCheck={false}
+        aria-invalid={problem !== null}
+      />
+      {problem && <p role="alert" className="field-error">{problem}</p>}
+    </>
+  );
+}
+
 export function CredentialsForm({ account, busy, error, onSave }: {
   account: MerchantAccount;
   busy: boolean;
   error: string | null;
-  onSave: (key: string, secret: string) => void;
+  onSave: (key: string, secret: string, code: string) => void;
 }) {
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
+  const [code, setCode] = useState('');
   const keyProblem = key === '' ? null : credentialProblem(key);
   const secretProblem = secret === '' ? null : credentialProblem(secret);
-  const ready = key !== '' && secret !== '' && !credentialProblem(key) && !credentialProblem(secret);
+  const codeBad = code === '' ? null : codeProblem(code);
+  const ready = key !== '' && secret !== '' && !credentialProblem(key) && !credentialProblem(secret) && !codeProblem(code);
   return (
     <section className="rt-card stack" aria-labelledby="receive-form">
       <h2 id="receive-form">{account.credentials_saved ? 'Change the key and secret' : 'Enter the key and secret'}</h2>
       <p className="hint">
         You find both in your own Pesapal account, under the API keys of your business. The secret cannot be shown again after you save it.
+        Because this changes where your members' payments go, you are asked for a code from your authenticator app.
       </p>
       <form
         className="stack"
@@ -63,8 +86,10 @@ export function CredentialsForm({ account, busy, error, onSave }: {
         onSubmit={(e) => {
           e.preventDefault();
           if (ready && !busy) {
-            onSave(key.trim(), secret.trim());
+            onSave(key.trim(), secret.trim(), code.trim());
+            // Nothing typed is kept on the page once it has been sent.
             setSecret('');
+            setCode('');
           }
         }}
       >
@@ -82,6 +107,7 @@ export function CredentialsForm({ account, busy, error, onSave }: {
           aria-invalid={secretProblem !== null}
         />
         {secretProblem && <p role="alert" className="field-error">{secretProblem}</p>}
+        <CodeField id="receive-code" value={code} onChange={setCode} problem={codeBad} />
         {error && <p role="alert" className="alert alert-danger">{error}</p>}
         <p>
           <button type="submit" className="rt-primary" disabled={!ready || busy}>{busy ? 'Saving' : 'Save the key and secret'}</button>
@@ -91,26 +117,82 @@ export function CredentialsForm({ account, busy, error, onSave }: {
   );
 }
 
+export function RemoveAccount({ busy, error, onRemove }: { busy: boolean; error: string | null; onRemove: (code: string) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [code, setCode] = useState('');
+  return (
+    <section className="rt-card stack" aria-labelledby="receive-remove">
+      <h2 id="receive-remove">Remove the account</h2>
+      {error && <p role="alert" className="alert alert-danger">{error}</p>}
+      {!confirming ? (
+        <p>
+          <button type="button" className="btn-ghost" disabled={busy} onClick={() => setConfirming(true)}>Remove the saved key and secret</button>
+        </p>
+      ) : (
+        <form
+          className="stack"
+          aria-label="Confirm removing the account"
+          autoComplete="off"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!codeProblem(code) && !busy) {
+              onRemove(code.trim());
+              setCode('');
+              setConfirming(false);
+            }
+          }}
+        >
+          <p className="alert alert-warning">Collecting stops until you connect an account again. Payments already made are not affected.</p>
+          <CodeField id="remove-code" value={code} onChange={setCode} problem={code === '' ? null : codeProblem(code)} />
+          <p className="cluster">
+            <button type="submit" className="rt-primary" disabled={busy || codeProblem(code) !== null}>Yes, remove it</button>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => { setConfirming(false); setCode(''); }}>Keep it</button>
+          </p>
+        </form>
+      )}
+    </section>
+  );
+}
+
 export function ReceivePaymentsPage() {
   const { me } = useStaff();
   const queryClient = useQueryClient();
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  // The key, the secret and the code go through local handlers and are never given to a mutation or a query: the query
+  // client keeps the variables of a mutation in its cache, and a secret must not sit there. Only the answer (which
+  // carries no secret) is kept.
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const query = useQuery({ queryKey: ['payments', 'account'], queryFn: payments.account, enabled: showReceivePayments(me) });
   const keep = (saved: MerchantAccount) => queryClient.setQueryData(['payments', 'account'], saved);
-  const save = useMutation({ mutationFn: (v: { key: string; secret: string }) => payments.save(v.key, v.secret), onSuccess: keep });
   const test = useMutation({
     mutationFn: payments.test,
     onSuccess: keep,
     onError: () => void queryClient.invalidateQueries({ queryKey: ['payments', 'account'] }),
   });
-  const remove = useMutation({
-    mutationFn: payments.remove,
-    onSuccess: (saved) => {
-      keep(saved);
-      setConfirmRemove(false);
-    },
-    onError: () => setConfirmRemove(false),
-  });
+  async function save(key: string, secret: string, code: string) {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      keep(await payments.save(key, secret, code));
+    } catch (e) {
+      setSaveError(messageOf(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove(code: string) {
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      keep(await payments.remove(code));
+    } catch (e) {
+      setRemoveError(messageOf(e));
+    } finally {
+      setRemoving(false);
+    }
+  }
   if (!showReceivePayments(me)) {
     return (
       <main className="rt ln">
@@ -121,7 +203,7 @@ export function ReceivePaymentsPage() {
   }
   const account = query.data;
   const canChange = canChangePaymentAccount(me);
-  const busy = save.isPending || test.isPending || remove.isPending;
+  const busy = saving || test.isPending || removing;
   return (
     <main className="rt ln stack">
       <h1>Receive payments</h1>
@@ -154,28 +236,10 @@ export function ReceivePaymentsPage() {
         </div>
       )}
       {account && canChange && (
-        <CredentialsForm key={account.key_hint ?? 'new'} account={account} busy={save.isPending} error={save.error ? messageOf(save.error) : null} onSave={(key, secret) => save.mutate({ key, secret })} />
+        <CredentialsForm key={account.key_hint ?? 'new'} account={account} busy={saving} error={saveError} onSave={(key, secret, code) => void save(key, secret, code)} />
       )}
-      {account && canChange && account.credentials_saved && (
-        <section className="rt-card stack" aria-labelledby="receive-remove">
-          <h2 id="receive-remove">Remove the account</h2>
-          {remove.error && <p role="alert" className="alert alert-danger">{messageOf(remove.error)}</p>}
-          {!confirmRemove ? (
-            <p>
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setConfirmRemove(true)}>Remove the saved key and secret</button>
-            </p>
-          ) : (
-            <div className="stack" role="group" aria-label="Confirm removing the account">
-              <p className="alert alert-warning">Collecting stops until you connect an account again. Payments already made are not affected.</p>
-              <p className="cluster">
-                <button type="button" className="rt-primary" disabled={busy} onClick={() => remove.mutate()}>Yes, remove it</button>
-                <button type="button" className="btn-ghost" disabled={busy} onClick={() => setConfirmRemove(false)}>Keep it</button>
-              </p>
-            </div>
-          )}
-        </section>
-      )}
-      {account && !canChange && <p className="hint">Only a business administrator can change the key and secret.</p>}
+      {account && canChange && account.credentials_saved && <RemoveAccount busy={busy} error={removeError} onRemove={(code) => void remove(code)} />}
+      {account && !canChange && <p className="hint">Only the business administrator can change the key and secret.</p>}
     </main>
   );
 }

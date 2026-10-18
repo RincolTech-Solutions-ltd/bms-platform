@@ -5,17 +5,18 @@ import type { MerchantAccount } from '../../../api/payments';
 // only decides what the menu and the page offer, from the /me permissions.
 
 export const SETTINGS_READ = 'core.settings.read';
-export const SETTINGS_MANAGE = 'core.settings.manage';
+/** Changing where repayments are paid: the business administrator's alone (the API checks it, and asks for a code). */
+export const ACCOUNT_MANAGE = 'core.payment_account.manage';
 
 const held = (me: Pick<Me, 'permissions'>): string[] => me.permissions ?? [];
 
 /** The page and its menu entry: a business administrator reads and changes it; a settings reader sees the status only. */
 export function showReceivePayments(me: Pick<Me, 'permissions'>): boolean {
-  return held(me).includes(SETTINGS_MANAGE) || held(me).includes(SETTINGS_READ);
+  return held(me).includes(ACCOUNT_MANAGE) || held(me).includes(SETTINGS_READ);
 }
 
 export function canChangePaymentAccount(me: Pick<Me, 'permissions'>): boolean {
-  return held(me).includes(SETTINGS_MANAGE);
+  return held(me).includes(ACCOUNT_MANAGE);
 }
 
 export const STATUS_WORDS: Record<MerchantAccount['status'], string> = {
@@ -41,6 +42,11 @@ export function nextStep(account: MerchantAccount): string {
   if (account.credentials_saved) return 'Saved. Now test the connection to turn collecting on.';
   return 'Enter the consumer key and secret from your own Pesapal account.';
 }
+
+/** The six digits of the authenticator app. */
+export const CODE = /^\d{6}$/;
+
+export const codeProblem = (value: string): string | null => (CODE.test(value.trim()) ? null : 'Type the 6 digits from your authenticator app.');
 
 /** A consumer key or secret as Pesapal shows it: no spaces, 8 to 256 characters. */
 export const CREDENTIAL = /^[\x21-\x7E]{8,256}$/;

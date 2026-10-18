@@ -2533,6 +2533,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/payment-account/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a tenant's saved payment account although payments are in flight (audited override) */
+        post: operations["platformReleaseTenantPaymentAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/resume": {
         parameters: {
             query?: never;
@@ -7186,9 +7203,9 @@ export interface components {
             credentials_saved?: boolean;
             /** @description A closed word saying why the last test failed: invalid_credentials or registration_refused */
             failure_reason?: string;
-            /** @description The host can make the calls a test needs (a callback address is configured) */
+            /** @description The host can make the calls a test needs (given to those who may change the account only) */
             host_ready?: boolean;
-            /** @description The last four characters of the consumer key, or null */
+            /** @description The last four characters of the consumer key, or null (given to those who may change the account only) */
             key_hint?: string;
             /**
              * Format: date-time
@@ -7456,6 +7473,10 @@ export interface components {
             in_scope?: boolean;
             member_no?: string;
             relationship?: string;
+        };
+        RemoveMerchantAccountRequest: {
+            /** @description A current code of the signed-in administrator's own authenticator (step-up), used once */
+            totp_code?: string;
         };
         RepaymentRequest: {
             /** Format: int64 */
@@ -12080,6 +12101,8 @@ export interface components {
              * @description The consumer secret. Write-only: it is sealed on arrival and never returned
              */
             consumer_secret?: string;
+            /** @description A current code of the signed-in administrator's own authenticator (step-up), used once */
+            totp_code?: string;
         };
         SaveSmsTemplateRequest: {
             /** @description The wording with {placeholders} from the event's list; 422 with the code of the first problem */
@@ -16763,7 +16786,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveMerchantAccountRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -17413,6 +17440,28 @@ export interface operations {
         };
     };
     platformGetTenantPaymentAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPaymentAccountStatus"];
+                };
+            };
+        };
+    };
+    platformReleaseTenantPaymentAccount: {
         parameters: {
             query?: never;
             header?: never;

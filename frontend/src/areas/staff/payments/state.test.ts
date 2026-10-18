@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { MerchantAccount } from '../../../api/payments';
-import { canChangePaymentAccount, credentialProblem, failureWords, nextStep, showReceivePayments } from './state';
+import { canChangePaymentAccount, codeProblem, credentialProblem, failureWords, nextStep, showReceivePayments } from './state';
 
 const none: MerchantAccount = { status: 'not_connected', credentials_saved: false, key_hint: null, last_checked_at: null, failure_reason: null, host_ready: true };
 
 describe('Receive payments state', () => {
   it('opens for a settings reader and changes only for a settings manager', () => {
     expect(showReceivePayments({ permissions: ['core.settings.read'] })).toBe(true);
-    expect(showReceivePayments({ permissions: ['core.settings.manage'] })).toBe(true);
+    expect(showReceivePayments({ permissions: ['core.payment_account.manage'] })).toBe(true);
     expect(showReceivePayments({ permissions: ['core.approvals.read'] })).toBe(false);
     expect(showReceivePayments({})).toBe(false);
     expect(canChangePaymentAccount({ permissions: ['core.settings.read'] })).toBe(false);
-    expect(canChangePaymentAccount({ permissions: ['core.settings.manage'] })).toBe(true);
+    // The general settings permission does not change the payment account.
+    expect(canChangePaymentAccount({ permissions: ['core.settings.manage'] })).toBe(false);
+    expect(codeProblem('123456')).toBeNull();
+    expect(codeProblem('12345')).not.toBeNull();
+    expect(codeProblem('12345a')).not.toBeNull();
+    expect(canChangePaymentAccount({ permissions: ['core.payment_account.manage'] })).toBe(true);
   });
 
   it('names the next step in one sentence for each state', () => {

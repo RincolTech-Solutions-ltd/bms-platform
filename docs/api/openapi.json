@@ -4926,11 +4926,11 @@
             "type" : "string"
           },
           "host_ready" : {
-            "description" : "The host can make the calls a test needs (a callback address is configured)",
+            "description" : "The host can make the calls a test needs (given to those who may change the account only)",
             "type" : "boolean"
           },
           "key_hint" : {
-            "description" : "The last four characters of the consumer key, or null",
+            "description" : "The last four characters of the consumer key, or null (given to those who may change the account only)",
             "type" : "string"
           },
           "last_checked_at" : {
@@ -5556,6 +5556,16 @@
             "type" : "string"
           },
           "relationship" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RemoveMerchantAccountRequest" : {
+        "properties" : {
+          "totp_code" : {
+            "description" : "A current code of the signed-in administrator's own authenticator (step-up), used once",
+            "maxLength" : 20,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -14596,6 +14606,12 @@
             "maxLength" : 300,
             "minLength" : 0,
             "type" : "string"
+          },
+          "totp_code" : {
+            "description" : "A current code of the signed-in administrator's own authenticator (step-up), used once",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
           }
         }
       },
@@ -22402,6 +22418,16 @@
     "/api/v1/payments/merchant-account" : {
       "delete" : {
         "operationId" : "removeMerchantAccount",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RemoveMerchantAccountRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -23244,6 +23270,34 @@
           }
         },
         "summary" : "Whether a tenant has connected its own payment account (status only)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/tenants/{tenant_id}/payment-account/release" : {
+      "post" : {
+        "operationId" : "platformReleaseTenantPaymentAccount",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantPaymentAccountStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Remove a tenant's saved payment account although payments are in flight (audited override)",
         "tags" : [ "platform" ]
       }
     },

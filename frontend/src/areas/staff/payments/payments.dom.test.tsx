@@ -30,7 +30,7 @@ const saved: MerchantAccount = { ...none, credentials_saved: true, key_hint: '00
 const verified: MerchantAccount = { ...saved, status: 'verified', last_checked_at: '2026-10-18T10:00:00Z' };
 const failed: MerchantAccount = { ...saved, status: 'failed', last_checked_at: '2026-10-18T10:00:00Z', failure_reason: 'invalid_credentials' };
 
-const ADMIN = ['core.settings.read', 'core.settings.manage'];
+const ADMIN = ['core.settings.read', 'core.settings.manage', 'core.payment_account.manage'];
 
 function shell(node: ReactElement, permissions: string[] = ADMIN) {
   const me = { ...mockMe('admin'), permissions };
@@ -73,12 +73,19 @@ describe('connecting the account', () => {
     expect(screen.getAllByText(/with no spaces/).length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: 'Save the key and secret' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('Consumer secret'), { target: { value: 'invented-secret-0001' } });
+    expect((screen.getByRole('button', { name: 'Save the key and secret' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change((document.getElementById('receive-code') as HTMLInputElement), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save the key and secret' }));
-    await waitFor(() => expect(api.save).toHaveBeenCalledWith('invented-key-0001', 'invented-secret-0001'));
+    await waitFor(() => expect(api.save).toHaveBeenCalledWith('invented-key-0001', 'invented-secret-0001', '123456'));
     // Saved: the key's last four show, the secret never does, and the test is now offered.
     expect(await screen.findByText(/Consumer key ending 0001/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Test connection' })).toBeTruthy();
     expect(document.body.innerHTML).not.toContain('invented-secret-0001');
+    // Nothing typed stays in the boxes once sent.
+    expect((screen.getByLabelText('Consumer secret') as HTMLInputElement).value).toBe('');
+    expect(((document.getElementById('receive-code') as HTMLInputElement) as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Consumer secret') as HTMLInputElement).autocomplete).toBe('new-password');
+    expect(((document.getElementById('receive-code') as HTMLInputElement) as HTMLInputElement).autocomplete).toBe('one-time-code');
   });
 
   it('shows a refusal from the server in words and keeps what was typed out of the page', async () => {
@@ -87,6 +94,7 @@ describe('connecting the account', () => {
     await screen.findByText('Not connected');
     fireEvent.change(screen.getByLabelText('Consumer key'), { target: { value: 'invented-key-0001' } });
     fireEvent.change(screen.getByLabelText('Consumer secret'), { target: { value: 'invented-secret-0001' } });
+    fireEvent.change((document.getElementById('receive-code') as HTMLInputElement), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save the key and secret' }));
     expect(await screen.findByText(/Paste the consumer key exactly/)).toBeTruthy();
   });
@@ -141,8 +149,9 @@ describe('removing the account', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the saved key and secret' }));
     expect(api.remove).not.toHaveBeenCalled();
     expect(screen.getByText(/Collecting stops until you connect an account again/)).toBeTruthy();
+    fireEvent.change(document.getElementById('remove-code') as HTMLInputElement, { target: { value: '654321' } });
     fireEvent.click(screen.getByRole('button', { name: 'Yes, remove it' }));
-    await waitFor(() => expect(api.remove).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.remove).toHaveBeenCalledWith('654321'));
     expect(await screen.findByText('Not connected')).toBeTruthy();
   });
 
@@ -151,19 +160,20 @@ describe('removing the account', () => {
     api.remove.mockRejectedValue(new PaymentsError('Some payments are still being confirmed with this account.', 409, 'payments_in_flight'));
     shell(<ReceivePaymentsPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove the saved key and secret' }));
+    fireEvent.change(document.getElementById('remove-code') as HTMLInputElement, { target: { value: '654321' } });
     fireEvent.click(screen.getByRole('button', { name: 'Yes, remove it' }));
     expect(await screen.findByText(/still being confirmed/)).toBeTruthy();
   });
 });
 
 describe('who sees what', () => {
-  it('shows the status and no form or button to someone who may only read settings', async () => {
-    api.account.mockResolvedValue(verified);
+  it('shows the status and no form or button to someone who may only read settings, and no key hint', async () => {
+    api.account.mockResolvedValue({ ...verified, key_hint: null, host_ready: false });
     shell(<ReceivePaymentsPage />, ['core.settings.read']);
     expect(await screen.findByText('Connected and working')).toBeTruthy();
     expect(screen.queryByLabelText('Consumer secret')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Test again' })).toBeNull();
-    expect(screen.getByText(/Only a business administrator can change the key and secret/)).toBeTruthy();
+    expect(screen.getByText(/Only the business administrator can change the key and secret/)).toBeTruthy();
   });
 
   it('opens nothing for someone without settings access', () => {

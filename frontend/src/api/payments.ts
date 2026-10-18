@@ -12,7 +12,7 @@ export interface MerchantAccount {
   status: MerchantStatus;
   /** Credentials are saved, but not yet tested */
   credentials_saved: boolean;
-  /** The last four characters of the consumer key, or null */
+  /** The last four characters of the consumer key, or null (given to those who may change the account only) */
   key_hint: string | null;
   last_checked_at: string | null;
   /** invalid_credentials or registration_refused, when the last test failed */
@@ -42,7 +42,11 @@ const MESSAGES: Record<string, string | undefined> = {
   provider_busy: 'Pesapal asked us to wait. Try again in a minute.',
   payments_in_flight:
     'Some payments are still being confirmed with this account. Wait until they finish, or keep the same consumer key and change only the secret.',
-  permission_denied: 'You do not have permission to do this.',
+  permission_denied: 'Only the business administrator can change this.',
+  invalid_code: 'That code did not work. Open your authenticator app and type the current code.',
+  mfa_not_enrolled: 'Turn on two-step sign-in first: this change asks for a code from your authenticator app.',
+  merchant_account_in_use: 'This merchant account is already connected elsewhere. Use your own Pesapal account.',
+  test_too_soon: 'A test was made a moment ago. Wait half a minute before testing again.',
 };
 
 function fail(error: unknown, status: number, fallback: string): never {
@@ -65,9 +69,11 @@ export const payments = {
   },
 
   /** Saves the key and secret. No call is made to Pesapal; test the connection next. */
-  async save(consumerKey: string, consumerSecret: string): Promise<MerchantAccount> {
+  async save(consumerKey: string, consumerSecret: string, totpCode: string): Promise<MerchantAccount> {
     return unwrap(
-      await api.PUT('/api/v1/payments/merchant-account', { body: { consumer_key: consumerKey, consumer_secret: consumerSecret } }),
+      await api.PUT('/api/v1/payments/merchant-account', {
+        body: { consumer_key: consumerKey, consumer_secret: consumerSecret, totp_code: totpCode },
+      }),
       'Could not save the key and secret.',
     ) as MerchantAccount;
   },
@@ -76,7 +82,10 @@ export const payments = {
     return unwrap(await api.POST('/api/v1/payments/merchant-account/test'), 'Could not test the connection.') as MerchantAccount;
   },
 
-  async remove(): Promise<MerchantAccount> {
-    return unwrap(await api.DELETE('/api/v1/payments/merchant-account'), 'Could not remove the account.') as MerchantAccount;
+  async remove(totpCode: string): Promise<MerchantAccount> {
+    return unwrap(
+      await api.DELETE('/api/v1/payments/merchant-account', { body: { totp_code: totpCode } }),
+      'Could not remove the account.',
+    ) as MerchantAccount;
   },
 };
