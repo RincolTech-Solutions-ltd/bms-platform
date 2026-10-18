@@ -15,6 +15,7 @@ run only when ALL of these hold:
     annotations are not used because a check run can be updated through the API;
   * the image behind that digest carries the label `org.opencontainers.image.revision` equal to the commit,
     on both the arm64 and the amd64 manifest;
+  * the commit came through a merged pull request (GitHub cannot forbid a direct push to main on the free plan);
   * the public half of the Keychain key equals `deploy/cosign.pub` on main (a wrong key would make the
     staging host mark every release failed for good).
 
@@ -58,6 +59,7 @@ COSIGN = os.environ.get("BMS_COSIGN", str(STATE_DIR / "bin" / "cosign"))
 COSIGN_VERSION = "v2.4.1"
 KEY_ITEM = "bms-cosign-key"
 PASSWORD_ITEM = "bms-cosign-password"
+ALLOW_DIRECT = os.environ.get("BMS_SIGNER_ALLOW_DIRECT") == "1"   # sign a commit that did not come through a merged PR
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 LOG_LINE_RE = re.compile(r"bms-image-digest image=(\S+) digest=(sha256:[0-9a-f]{64}) revision=([0-9a-f]{40})")
@@ -127,6 +129,13 @@ def main_sha() -> str | None:
 def is_on_main(sha: str, head: str) -> bool:
     data = gh_api(f"repos/{REPO}/compare/{sha}...{head}")
     return isinstance(data, dict) and data.get("status") in ("ahead", "identical")
+
+
+def from_merged_pr(sha: str) -> bool:
+    """The commit reached main through a merged pull request, not a direct push (the repository is on the free
+    plan, so GitHub cannot forbid a direct push to main; the signer refuses to sign one)."""
+    data = gh_api(f"repos/{REPO}/commits/{sha}/pulls")
+    return isinstance(data, list) and any(p.get("merged_at") and (p.get("base") or {}).get("ref") == "main" for p in data)
 
 
 def main_public_key(head: str) -> str | None:
@@ -218,6 +227,9 @@ def process(run_info: dict, key: tuple[str, str], state: dict, dry: bool, head: 
         return
     if not is_on_main(sha, head):
         refuse(f"commit {sha[:7]} is not on main")
+        return
+    if not ALLOW_DIRECT and not from_merged_pr(sha):
+        refuse(f"commit {sha[:7]} did not come through a merged pull request (BMS_SIGNER_ALLOW_DIRECT=1 overrides)")
         return
     pem, password = key
     user_code, user_out, _ = run(["gh", "api", "user", "--jq", ".login"])

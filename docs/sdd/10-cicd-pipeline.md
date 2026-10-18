@@ -22,7 +22,7 @@ branch --PR--> ci.yml (self-hosted hillary-pi): backend mvn verify | frontend co
  main --> deploy.yml (meta, build, staging-pointer, promote on the deploy runner bms-deploy-pi, ADR-040)
             meta:     sha-<7>
             build:    api, web, proxy images, built once for linux/amd64 and linux/arm64,
-                      pushed to GHCR as sha-<7>; each pushed digest is recorded in a job annotation
+                      pushed to GHCR as sha-<7>; each pushed digest is written to the build job's log
             signer:   (the maintainer's Mac, not a runner) signs image@digest with the Keychain key (ADR-040)
             staging-pointer: waits until cosign verifies the three signatures, then retags sha-<7> as `staging`
                                   :
@@ -33,7 +33,8 @@ branch --PR--> ci.yml (self-hosted hillary-pi): backend mvn verify | frontend co
    |
    | git tag vX.Y.Z (a commit on main, already on staging)
    v
- tag  --> deploy.yml (promote on bms-deploy-pi; deploy-production on ubuntu-latest, ADR-040)
+ tag  --> deploy.yml (NOT YET: the runner group admits only refs/heads/main, so a release tag leaves `meta` queued
+            until a group entry for the tag exists, deferred with the production VM, ADR-040)
             meta:     checks vX.Y.Z format and that the commit is on main
             promote:  retag sha-<7> as vX.Y.Z for all three images (no rebuild; already signed)
             production: environment `production` (dev lead approves) -> ssh -> deploy.sh vX.Y.Z
@@ -236,8 +237,10 @@ allows 30 seconds; measured locally at under 10).
   credential between deploys; the staging host holds a `read:packages`-only token, provisioned once
   by hand, and its host files still come inside the release image, never fetched from GitHub
   directly.
-- The production environment requires the dev lead's approval; branch protection on `main`
-  requires review and green checks (`PROCESS.md` section 9).
+- The production environment requires the dev lead's approval. Review of `main` is team discipline plus the
+  merge helper's checks: GitHub branch protection and rulesets are not available for this private repository on
+  the organisation's free plan (a 403 "Upgrade to GitHub Pro"), and every collaborator is an administrator. The
+  signer therefore also requires that a commit came through a merged pull request (ADR-040).
 
 ## 10.9 GitHub configuration
 

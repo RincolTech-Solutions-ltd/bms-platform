@@ -26,7 +26,7 @@ name: Deploy
 #     Actions budget is exhausted and will not be raised, so nothing here may depend on hosted minutes.
 #   * Nothing on that runner can sign. The cosign private key lives only in the maintainer's Keychain; a
 #     launchd job on the maintainer's Mac (deploy/signer/bms_signer.py) signs the three image digests that
-#     the build jobs record in a `bms-image-digest` annotation, and only for a run on main. The pointer
+#     the build jobs write in a `bms-image-digest` log line, and only for a run on main. The pointer
 #     job moves `staging` only after cosign verifies those signatures with deploy/cosign.pub, because the
 #     staging host's puller marks a release failed for good when a signature does not verify.
 #   * deploy-production keeps `ubuntu-latest`: it holds the production SSH key, which never goes on a
@@ -169,17 +169,18 @@ jobs:
           SHA_TAG: ${{ needs.meta.outputs.sha_tag }}
         run: |
           : > verified-digests.txt
+          deadline=$((SECONDS + 1500))   # one shared 25 minute budget for all three images
           for image in api web proxy; do
             ref="${IMAGE_PREFIX}-${image}:${SHA_TAG}"
             digest="$(docker buildx imagetools inspect "$ref" --format '{{ .Manifest.Digest }}')"
             printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "::error::no digest for $ref"; exit 1; }
             ok=""
-            for _ in $(seq 1 60); do
-              if cosign verify --key deploy/cosign.pub --insecure-ignore-tlog=true "${IMAGE_PREFIX}-${image}@${digest}" > /dev/null 2>&1; then ok=yes; break; fi
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if err="$(cosign verify --key deploy/cosign.pub --insecure-ignore-tlog=true "${IMAGE_PREFIX}-${image}@${digest}" 2>&1 > /dev/null)"; then ok=yes; break; fi
               sleep 20
             done
             if [ -z "$ok" ]; then
-              echo "::error::${image}@${digest} was not signed in time: is the signer on the maintainer's Mac running? (docs/runbooks/deploy-signer.md)"
+              echo "::error::${image}@${digest} was not signed in time (last cosign message: $(printf '%s' "$err" | tail -1 | cut -c1-160)): is the signer on the maintainer's Mac running? (docs/runbooks/deploy-signer.md)"
               exit 1
             fi
             echo "${image} ${digest}" >> verified-digests.txt
@@ -214,7 +215,7 @@ jobs:
           # Created from the DIGESTS verified above, never from the mutable sha tag: a tag swapped after the
           # verification cannot reach the pointer (ADR-040).
           while read -r image digest; do
-            docker buildx imagetools create --tag "${IMAGE_PREFIX}-${image}:staging" "${IMAGE_PREFIX}-${image}@${digest}"
+            docker buildx imagetools create --tag "${IMAGE_PREFIX}-${image}:staging" "${IMAGE_PREFIX}-${image}@${digest}" < /dev/null
           done < verified-digests.txt
           echo "::notice title=Staging pointer::staging now names ${SHA_TAG}; the staging host deploys it within a few minutes (docs/runbooks/deploy.md)."
 

@@ -53,6 +53,7 @@ put() {  # put <mode> <source> <destination>: install, and remember that somethi
 nft -c -f "${HERE}/bmsdeploy-wall.nft"
 put 644 "${HERE}/bmsdeploy-wall.nft" /etc/nftables.d/bmsdeploy-wall.nft
 put 644 "${HERE}/bmsdeploy-netwall.service" /etc/systemd/system/bmsdeploy-netwall.service
+WALLS_BEFORE="$(cat /etc/systemd/system/user@${USER_UID}.service.d/50-ci-walls.conf 2>/dev/null || true)"
 put 644 "${HERE}/50-ci-walls.conf" /etc/systemd/system/user@${USER_UID}.service.d/50-ci-walls.conf
 put 644 "${HERE}/50-ci-caps.conf" /etc/systemd/system/user-${USER_UID}.slice.d/50-ci-caps.conf
 put 644 "${HERE}/50-user-slice-cap.conf" /etc/systemd/system/user.slice.d/50-user-slice-cap.conf
@@ -65,6 +66,7 @@ systemctl enable bmsdeploy-netwall.service
 # enable --now does nothing for a unit that is already active, so a changed wall or cap is applied explicitly.
 systemctl restart bmsdeploy-netwall.service
 systemctl start "user@${USER_UID}.service"
+if [ "${WALLS_BEFORE}" != "$(cat /etc/systemd/system/user@${USER_UID}.service.d/50-ci-walls.conf)" ]; then systemctl restart "user@${USER_UID}.service"; fi
 systemctl set-property --runtime user.slice MemoryMax=5500M MemorySwapMax=0 2>/dev/null || true
 echo "== loopback listeners the wall does not name (add any host service here to bmsdeploy-wall.nft):"
 known=" $(grep -o 'elements = { [0-9, ]*' "${HERE}/bmsdeploy-wall.nft" | tail -3 | tr -d 'elements={,' | tr -s ' ' ' ') "

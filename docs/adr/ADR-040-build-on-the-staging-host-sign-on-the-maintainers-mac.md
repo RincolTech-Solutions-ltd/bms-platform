@@ -73,7 +73,7 @@ Facts that shaped the answer:
      `user.slice`.
    - State: root-owned hooks remove all rootless Docker state (containers, images, volumes, build cache),
      credential and tool-cache files, temporary files of the user and the job work area before and after every
-     job. This is a clean-up, not an isolation boundary.
+     job. This is a clean-up, not an isolation boundary; it does not kill leftover processes.
    - No secrets: the runner holds no signing key and no deploy secret. The only credential a job has is its own
      `GITHUB_TOKEN`, which GitHub invalidates when the job ends, plus the runner's own registration
      credentials.
@@ -98,8 +98,7 @@ Facts that shaped the answer:
    pinned hash and asserted at every pass. The key reaches cosign through the environment and a private
    temporary Docker config only; nothing secret is logged.
 6. **The pointer waits for the signature and points at digests.** `staging-pointer` verifies all three digests
-   with `cosign verify --key deploy/cosign.pub` (up to 20 minutes per image, bounded by the job's 30 minute
-   timeout) and then creates the `staging` tags from those verified digests, not from the mutable `sha-<short>`
+   with `cosign verify --key deploy/cosign.pub` (one shared 25 minute budget, inside the job's 30 minute timeout) and then creates the `staging` tags from those verified digests, not from the mutable `sha-<short>`
    tag. If the signer is off the job times out and the pointer stays where it was. Nothing unsigned is ever
    pointed at.
 7. **The key is rotated and the repository secrets are deleted.** Because `COSIGN_PRIVATE_KEY` and
@@ -110,23 +109,28 @@ Facts that shaped the answer:
 
 ## Threat model
 
-| Attacker or failure | What they can do | Why the outcome is acceptable |
+The signature is only as trustworthy as what can reach the signer's inputs: the build runs on the Pi, the Pi also
+runs pull request code, and the repository has no branch protection. Said plainly, the design makes a pull
+request unable to get an image signed; it does not make the Pi, a repository administrator or a push to `main`
+untrusted.
+
+| Attacker or failure | What they can do | Outcome and why |
 |---|---|---|
-| A user with write access pushes a branch, tag or pull request whose workflow targets `bms-deploy`, `self-hosted` or the Linux/ARM64 labels | Try to run code on the Pi | The runner group admits only `deploy.yml` on `main`; the job never starts (tested, see decision 1). If the group setting failed open, the root-owned hook fails the job before a step runs. |
-| The same user poisons state to taint a later deploy build | Leave something behind | They cannot run there. If they could, the hooks wipe Docker state and caches before and after each job, as a clean-up. |
+| A user with write access pushes a branch, tag or pull request whose workflow targets `bms-deploy` | Try to run code as `bmsdeploy` | The runner group admits only `deploy.yml` on `main`; the job never starts (probe tested, decision 1). If the setting failed open, the root-owned hook fails the job before a step runs (tested: an admitted probe was refused with the exact workflow reference). |
+| The same user targets the other runner on the same Pi (`hillary-pi-aga-heavy`, labels `self-hosted,Linux,ARM64`; its group `hillary-pi` includes this repository) | Run pull request code on the Pi as `ghrunner` | This still happens today (ADR-018, CI overflow). It cannot reach `bmsdeploy`: a different uid, home, Docker daemon and wall. It shares the kernel, the disk and the 5.5 GB user cap with the deploy runner. A kernel or container escape on the Pi would defeat the isolation, and the signature then proves little. Accepted; narrowing the `hillary-pi` group is the lever if that is not acceptable. |
 | A tag moved in the registry after the build | Point `sha-<short>` at a malicious image | The signer signs the digest from the job log and re-checks the labels; the pointer is created from the verified digests; the host verifies the signature against the digest. A swapped tag has no valid signature. |
 | Another workflow edits the job's annotations or check run | Forge what the signer reads | The signer does not read annotations; it reads the job's log. |
-| Theft of the runner's own credentials from the Pi | Impersonate `bms-deploy-pi` from elsewhere | The group still admits only `deploy.yml` on `main`, so the impostor can only take a legitimate deploy job; it would need to hold a job token and push an image and a log line the signer accepts, so the same review gate on `main` applies. Accepted. |
-| A push to `main` of a malicious `deploy.yml` or Dockerfile | Anything | Out of scope: code on `main` already ships. Review and branch protection are the control, as before. |
+| Theft of the runner's own credentials from the Pi (or an impostor runner) | Take a legitimate deploy job, build anything and write the log line | The signer signs it: the signature trust equals the runner's trust. The impostor still needs a `deploy.yml` job on `main` to be queued, which needs a commit that passed the signer's merged-pull-request check, but the image content is theirs. Accepted: protect the Pi. |
+| A repository administrator pushes straight to `main` with an edited `deploy.yml` or Dockerfile | Anything that ships | GitHub branch protection and rulesets are not available for this private repository on the free plan, and all collaborators are administrators, so nothing technical prevents the push. The signer refuses a commit that did not come through a merged pull request (override `BMS_SIGNER_ALLOW_DIRECT=1`), which turns a silent direct push into a visible refusal. Review is otherwise team discipline. |
 | Theft of the key from the Mac | Sign anything | The same exposure a workstation key always had; it is no longer also in GitHub. Rotation is in the runbook. |
-| The Mac is off or the signer is stopped | Deploys wait | Fail closed: the pointer job times out, staging stays on the last signed release, re-run the job when the signer is back. |
+| The Mac is off or the signer is stopped | Deploys wait | Fail closed: the pointer job times out after 25 minutes, staging stays on the last signed release, re-run the job when the signer is back. |
 
 Residual risks, accepted: the group restriction is a GitHub setting, so it must be re-checked after any change
 to the group; the Pi is shared with the NFE edge and the AGA runner, and the wall, the caps and the total
 `user.slice` cap protect the edge but a full disk or a kernel bug in rootless containers remains a shared-host
-risk; the runner's own credentials can be read by the runner's user, as they must be; anonymous Docker Hub
-pulls are limited (about 100 an hour per source address) and one deploy makes about 30, from an address shared
-with other hosts.
+risk; the runner's own credentials can be read by the runner's user, as they must be; anonymous Docker Hub pulls
+are limited (about 100 an hour per source address) and one deploy makes about 16 to 30, from an address shared
+with other hosts; a release tag cannot use the runner until a group entry exists for it.
 
 ## Consequences
 

@@ -10,7 +10,8 @@ Every 30 seconds `deploy/signer/bms_signer.py` lists the latest `deploy.yml` run
 `bms-deploy-pi`, it reads each job's own log for the one `bms-image-digest image=... digest=... revision=...`
 line and signs `image@digest` with the Keychain key (`cosign sign --tlog-upload=false`). Before signing it
 checks that the commit is on `main`, the revision is the run's commit, the image labels name that commit on
-both platforms, and the public half of the Keychain key equals `deploy/cosign.pub` on main. Anything else is
+both platforms, and the public half of the Keychain key equals `deploy/cosign.pub` on main. The commit must also have come through a merged pull request (a direct push to `main` is refused; set
+`BMS_SIGNER_ALLOW_DIRECT=1` in the agent's environment only on purpose). Anything else is
 refused and logged once. A signed run attempt is remembered in `~/bms-ops/signer/state.json` (a re-run is a
 new attempt and is signed again). The `staging-pointer`
 job then sees the signatures (it verifies with `deploy/cosign.pub`) and moves `staging`.
@@ -37,7 +38,7 @@ runs the copy, not the repository).
 
 ## When the pointer job times out
 
-The pointer job waits 20 minutes for the signatures and then fails, leaving `staging` where it was. Causes,
+The pointer job waits 25 minutes for the signatures and then fails, leaving `staging` where it was. Causes,
 in order: the Mac is off or asleep, the agent is not loaded, the Keychain is locked, `gh` is logged out, or
 the signer refused the run (the log says why, for example "build ran on ... refused"). Fix the cause, then
 re-run the failed `staging-pointer` job (or the whole run) from the Actions page; nothing needs rebuilding.

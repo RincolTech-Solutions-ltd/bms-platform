@@ -32,7 +32,7 @@ rm -rf /tmp/bms-deploy-runner
 ```
 
 `provision.sh` is idempotent. It creates the user (uid 1002, no sudo, no docker group), the nftables wall
-and the 4 GB memory cap, rootless Docker, the root-owned job hooks and the locked runner install. It never
+and the 3.5 GB memory cap (and a 5.5 GB cap over all user slices), rootless Docker, the root-owned job hooks and the locked runner install. It never
 touches `ghrunner` (the AGA runner), the bms staging stack or the OpenEMS edge. The runner shows as
 `bms-deploy-pi`, label `bms-deploy`, in the runner group `bms-deploy` of the organisation.
 
@@ -66,6 +66,11 @@ setting failed open: stop the runner and fix the group before any deploy.
   `deprovision.sh` (the registration is kept only if you do not remove it).
 - If the wall blocks a registry or mirror a build needs, add it to the allowed side by editing
   `bmsdeploy-wall.nft` in this repository, not on the host, and re-run `provision.sh`.
+
+## Do not re-run provision.sh during a deploy
+
+Re-running it restarts the wall (`Requires=` also restarts the user manager and the runner) when a file changed. Check
+`gh api orgs/RincolTech-Solutions-ltd/actions/runners --jq '.runners[]|select(.name=="bms-deploy-pi").busy'` is false first.
 
 ## Remove
 

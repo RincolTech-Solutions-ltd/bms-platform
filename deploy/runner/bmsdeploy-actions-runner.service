@@ -6,7 +6,7 @@
 #   - user bmsdeploy: no sudo, not in docker/dialout, cron denied, its own uid 1002
 #   - Docker is bmsdeploy's ROOTLESS daemon (user@1002.service, walled by its own drop-in), and the job
 #     hooks wipe ALL of its state (containers, images, volumes, build cache) before and after every job
-#   - Slice=user-1002.slice: one combined cap with that daemon (MemoryMax=4G, CPUQuota=300%)
+#   - Slice=user-1002.slice: one combined cap with that daemon (MemoryMax=3500M, CPUQuota=300%)
 #   - network: bmsdeploy-netwall.service (nftables owner match on uid 1002): public internet only
 #   - the sandbox below
 [Unit]
