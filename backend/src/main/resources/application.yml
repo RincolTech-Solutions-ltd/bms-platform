@@ -130,6 +130,8 @@ bms:
     # Application data key (32 bytes, base64) and its id; encrypts TOTP secrets (chapter 8 section 8.7).
     data-key: ${BMS_DATA_KEY:}
     data-key-id: ${BMS_DATA_KEY_ID:k1}
+    # Retired data keys (id:base64, comma separated), kept only until every row sealed with them is re-sealed (docs/runbooks/payments.md).
+    previous-data-keys: ${BMS_DATA_KEY_PREVIOUS:}
   database:
     role-guard: true
   # Documents (chapter 12 section 12.5). r2 on servers; fake (in memory, self-signed URLs) only in

@@ -1,10 +1,12 @@
 package com.rincoltech.bms.core.identity.internal;
 
+import com.rincoltech.bms.core.identity.DataKeys;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
-import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -14,26 +16,65 @@ import javax.crypto.spec.SecretKeySpec;
  * random 96 bit nonce. The ciphertext carries the key id, so a rotation can re-encrypt row by row:
  * {@code [1: format 1][1: key id length][key id][12: nonce][ciphertext and 16 byte tag]}.
  */
-final class SecretBox {
+final class SecretBox implements DataKeys {
 
     private static final byte FORMAT = 1;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final byte[] key;
     private final byte[] keyId;
+    private final String keyIdText;
+    /** Retired keys, by id: they open old boxes during a rotation and never seal. */
+    private final Map<String, byte[]> retired;
 
     SecretBox(byte[] key, String keyId) {
+        this(key, keyId, Map.of());
+    }
+
+    SecretBox(byte[] key, String keyId, Map<String, byte[]> retired) {
         if (key.length != 32) {
             throw new IllegalArgumentException("the data key must be 32 bytes");
         }
         this.key = key.clone();
+        this.keyIdText = keyId;
         this.keyId = keyId.getBytes(StandardCharsets.UTF_8);
         if (this.keyId.length == 0 || this.keyId.length > 64) {
             throw new IllegalArgumentException("the data key id must be 1 to 64 bytes");
         }
+        Map<String, byte[]> copy = new LinkedHashMap<>();
+        retired.forEach((id, k) -> {
+            if (k.length != 32 || id.isEmpty() || id.getBytes(StandardCharsets.UTF_8).length > 64) {
+                throw new IllegalArgumentException("a retired data key must be 32 bytes with an id of 1 to 64 bytes");
+            }
+            if (!id.equals(keyId)) {
+                copy.put(id, k.clone());
+            }
+        });
+        this.retired = Map.copyOf(copy);
     }
 
-    byte[] seal(byte[] plaintext) {
+    @Override
+    public String currentKeyId() {
+        return keyIdText;
+    }
+
+    @Override
+    public String keyIdOf(byte[] box) {
+        try {
+            ByteBuffer in = ByteBuffer.wrap(box);
+            if (in.get() != FORMAT) {
+                throw new IllegalStateException("unknown ciphertext format");
+            }
+            byte[] id = new byte[in.get()];
+            in.get(id);
+            return new String(id, StandardCharsets.UTF_8);
+        } catch (java.nio.BufferUnderflowException e) {
+            throw new IllegalStateException("unreadable ciphertext");
+        }
+    }
+
+    @Override
+    public byte[] seal(byte[] plaintext) {
         try {
             byte[] nonce = new byte[12];
             RANDOM.nextBytes(nonce);
@@ -53,7 +94,8 @@ final class SecretBox {
         }
     }
 
-    byte[] open(byte[] box) {
+    @Override
+    public byte[] open(byte[] box) {
         try {
             ByteBuffer in = ByteBuffer.wrap(box);
             if (in.get() != FORMAT) {
@@ -61,7 +103,9 @@ final class SecretBox {
             }
             byte[] id = new byte[in.get()];
             in.get(id);
-            if (!Arrays.equals(id, keyId)) {
+            String sealedWith = new String(id, StandardCharsets.UTF_8);
+            byte[] opening = sealedWith.equals(keyIdText) ? key : retired.get(sealedWith);
+            if (opening == null) {
                 throw new IllegalStateException("ciphertext was sealed with another data key");
             }
             byte[] nonce = new byte[12];
@@ -69,8 +113,8 @@ final class SecretBox {
             byte[] sealed = new byte[in.remaining()];
             in.get(sealed);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, nonce));
-            cipher.updateAAD(keyId);
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(opening, "AES"), new GCMParameterSpec(128, nonce));
+            cipher.updateAAD(id);
             return cipher.doFinal(sealed);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("decryption failed", e);
