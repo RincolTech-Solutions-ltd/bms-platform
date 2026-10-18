@@ -41,6 +41,7 @@ class AccountCredentials implements PesapalGateway.Credentials {
     private final DataKeys keys;
     private final CurrentTenant tenant;
     private final TransactionTemplate read;
+    private final com.rincoltech.bms.kernel.BusinessClock clock;
     private final java.util.Map<java.util.UUID, Instant> lastLogged = new java.util.concurrent.ConcurrentHashMap<>();
 
     AccountCredentials(
@@ -48,11 +49,13 @@ class AccountCredentials implements PesapalGateway.Credentials {
             AccountStore store,
             DataKeys keys,
             CurrentTenant tenant,
+            com.rincoltech.bms.kernel.BusinessClock clock,
             PlatformTransactionManager transactions) {
         this.settings = settings;
         this.store = store;
         this.keys = keys;
         this.tenant = tenant;
+        this.clock = clock;
         // A transaction of its own, so a caller that happens to hold one is never affected and the secret is read once.
         this.read = new TransactionTemplate(transactions);
         this.read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -76,7 +79,7 @@ class AccountCredentials implements PesapalGateway.Credentials {
         } catch (RuntimeException e) {
             // No tenant bound, or the key cannot open the box: no credentials. Only the type is logged, once an hour
             // for a tenant, because the poller asks on every pass and a dropped key would flood the log.
-            Instant now = Instant.now();
+            Instant now = clock.now();
             Instant last = lastLogged.get(account.tenantId());
             if (last == null || now.isAfter(last.plus(Duration.ofHours(1)))) {
                 lastLogged.put(account.tenantId(), now);

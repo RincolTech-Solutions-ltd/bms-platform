@@ -36,6 +36,8 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 class AccountGuardTest {
 
     static final UUID LENDER = UUID.fromString("00000000-0000-4000-8000-0000000000b1");
+    static final BusinessClock CLOCK =
+            new BusinessClock(Clock.fixed(Instant.parse("2026-10-18T10:00:00Z"), ZoneOffset.UTC));
     static final UUID OTHER = UUID.fromString("00000000-0000-4000-8000-0000000000b2");
 
     /** A reversible stand-in for the data key: it prefixes the key id, which is all the rotation logic looks at. */
@@ -151,7 +153,7 @@ class AccountGuardTest {
         AccountStore store = mock(AccountStore.class);
         when(store.find()).thenReturn(Optional.of(row(keys, "verified", "lender-key-000001", "lender-secret-000001")));
         AccountCredentials credentials =
-                new AccountCredentials(settingsWithPlatformPair(), store, keys, boundTo(LENDER), transactions());
+                new AccountCredentials(settingsWithPlatformPair(), store, keys, boundTo(LENDER), CLOCK, transactions());
 
         PesapalSettings.Pair pair = credentials.find(Account.tenant(LENDER)).orElseThrow();
         assertThat(pair.key()).isEqualTo("lender-key-000001");
@@ -169,7 +171,7 @@ class AccountGuardTest {
         AccountStore store = mock(AccountStore.class);
         when(store.find()).thenReturn(Optional.of(row(keys, "verified", "lender-key-000001", "lender-secret-000001")));
         AccountCredentials credentials =
-                new AccountCredentials(settingsWithPlatformPair(), store, keys, boundTo(OTHER), transactions());
+                new AccountCredentials(settingsWithPlatformPair(), store, keys, boundTo(OTHER), CLOCK, transactions());
         assertThat(credentials.find(Account.tenant(LENDER))).isEmpty();
         verifyNoInteractions(store);
     }
@@ -181,7 +183,8 @@ class AccountGuardTest {
         when(store.find()).thenReturn(Optional.empty());
         PesapalSettings settings = settingsWithPlatformPair();
         assertThat(settings.platformPair().usable()).isTrue();
-        AccountCredentials credentials = new AccountCredentials(settings, store, keys, boundTo(LENDER), transactions());
+        AccountCredentials credentials =
+                new AccountCredentials(settings, store, keys, boundTo(LENDER), CLOCK, transactions());
         assertThat(credentials.find(Account.tenant(LENDER))).isEmpty();
         // The platform account is the platform pair, for the platform account only.
         assertThat(credentials.find(Account.platform())).contains(settings.platformPair());
@@ -193,8 +196,8 @@ class AccountGuardTest {
         AccountStore store = mock(AccountStore.class);
         for (String status : List.of("saved", "failed")) {
             when(store.find()).thenReturn(Optional.of(row(keys, status, "lender-key-000001", "lender-secret-000001")));
-            AccountCredentials credentials =
-                    new AccountCredentials(settingsWithPlatformPair(), store, keys, boundTo(LENDER), transactions());
+            AccountCredentials credentials = new AccountCredentials(
+                    settingsWithPlatformPair(), store, keys, boundTo(LENDER), CLOCK, transactions());
             PesapalSettings.Pair pair = credentials.find(Account.tenant(LENDER)).orElseThrow();
             assertThat(pair.usable()).as(status).isTrue();
             assertThat(pair.ipnId()).as(status).isNull();
@@ -208,7 +211,7 @@ class AccountGuardTest {
         when(store.find())
                 .thenReturn(Optional.of(row(sealedWith, "verified", "lender-key-000001", "lender-secret-000001")));
         AccountCredentials credentials = new AccountCredentials(
-                settingsWithPlatformPair(), store, new FakeKeys("k2"), boundTo(LENDER), transactions());
+                settingsWithPlatformPair(), store, new FakeKeys("k2"), boundTo(LENDER), CLOCK, transactions());
         assertThat(credentials.find(Account.tenant(LENDER))).isEmpty();
     }
 
