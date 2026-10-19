@@ -566,6 +566,12 @@ the lending module is switched on (runbook `docs/runbooks/`, onboarding a tenant
 | Language model provider key (`BMS_AI_API_KEY`, with `BMS_AI_BASE_URL`, `BMS_AI_MODEL`) | Host env file (ADR-037) | Yearly, on staff change |
 | Backup encryption key | Host env file and an offline copy held by the dev lead | On staff change |
 
+A lender's Pesapal consumer key (issue #309): the refused-key check and the cross-tenant uniqueness digest compare the key
+lower cased (nothing recorded says whether Pesapal treats letter case as significant, so the two checks assume it may not; the
+key sent to Pesapal and the sealed copy are exactly as pasted); an account whose key box cannot be opened counts as refused
+(fails closed, never open); and intent creation reads the account row `FOR SHARE` so it cannot race a key change, which holds
+the row `FOR UPDATE` (`docs/runbooks/payments.md` section 4c).
+
 No secret is ever committed. `.env.example` lists every variable with a placeholder.
 `java -jar bms-api.jar keys` prints a new signing key and data key for a host env file; outside
 the dev and test profiles the API refuses to start without them (ADR-014).
