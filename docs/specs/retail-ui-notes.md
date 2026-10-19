@@ -668,8 +668,8 @@ pages in the browser.
 - **Plain words for the odd cases.** While a level loads it says Loading; a failed level shows the message and Try again; a
   level with nothing says "No sales found." (or "No credit sales found."), "No sales in this month." or "No sales on this day.";
   a search with no match keeps the screen's no-results box with its Clear button.
-- **Mobile first.** Headers stack on 360px (period and total on one line, the figures under it), nothing needs a sideways
-  scroll, and the styles are the `rt-group` classes in `retail.css` on the shared tokens.
+- **Mobile first.** Headers are laid out for a 360px phone (period and total on one line, the figures under it) and need no sideways
+  scroll; not yet checked on a device or in a browser, and the styles are the `rt-group` classes in `retail.css` on the shared tokens.
 - **Files.** `sales-grouped-state.ts` (pure rules: what is open, titles, the days a group asks for, the methods of a group),
   `sales-grouped.tsx` (the groups; the day's sales are supplied by `sales.tsx` as `renderDay`), the mock in
   `api/retail-summary-mock.ts`, and tests `sales-grouped-state.test.ts`, `sales-grouped.dom.test.tsx` and

@@ -255,5 +255,151 @@ class RetailSalesSummaryIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(summary(api, "", ADMIN, "*").getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        for (String bad : List.of("owing=sometimes", "payment_method=cheque")) {
+            ResponseEntity<JsonNode> r = summary(api, "group_by=year&" + bad, ADMIN, "*");
+            assertThat(r.getStatusCode()).as(bad).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(api.get("/sales?" + bad, ADMIN).getStatusCode())
+                    .as("the list refuses it the same way")
+                    .isEqualTo(r.getStatusCode());
+        }
+    }
+
+    // JUSTIFICATION-A3: the review asked for tests of the profit scope, the shared filters and the bounds; each is one
+    // test method.
+    /** The profit of a sum is shown only when it is readable in every branch the sum covers (ADR-017). */
+    @Test
+    void profitNeedsProfitReadInEveryBranchTheFiguresCover() {
+        arrange();
+        Map<String, String> scoped = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
+        java.util.function.Function<String, JsonNode> year = query -> {
+            ResponseEntity<JsonNode> r =
+                    api.call(HttpMethod.GET, "/sales/summary?group_by=year" + query, null, ADMIN, "*", scoped);
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+            return r.getBody().get("items").get(0);
+        };
+        JsonNode everywhere = year.apply("");
+        assertThat(everywhere.get("total_minor").asLong()).isEqualTo(12_000);
+        assertThat(everywhere.has("profit_minor"))
+                .as("profit is readable at one branch only, the figures cover all")
+                .isFalse();
+        assertThat(year.apply("&branch_id=" + t.headOffice() + "&branch_id=" + t.secondBranch())
+                        .has("profit_minor"))
+                .isFalse();
+        assertThat(year.apply("&branch_id=" + t.secondBranch()).has("profit_minor"))
+                .isFalse();
+        JsonNode headOffice = year.apply("&branch_id=" + t.headOffice());
+        assertThat(headOffice.get("profit_minor").asLong()).isEqualTo(2_500);
+        assertThat(headOffice.get("total_minor").asLong()).isEqualTo(10_000);
+    }
+
+    /** The summary and the list share their filters: for each one, the sums equal the completed rows of the list. */
+    @Test
+    void everyFilterGivesTheSameSalesAsTheListDoes() {
+        arrange();
+        UUID other = api.product("SUM-3", 1_500, 2_000);
+        api.stockUp(t.headOffice(), other, "50");
+        sale(api, t.headOffice(), "cash", "2026-10-17", "2", other);
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Credit Buyer 03"), ADMIN));
+        creditSale("2026-10-16", null, buyer, "2020-01-01");
+        UUID paid = RetailTestSupport.id(creditSale("2026-10-15", "Test Debtor Zed", null, null));
+        ResponseEntity<JsonNode> payment = api.postKeyed(
+                "/sales/" + paid + "/payments",
+                Map.of("amount_minor", 2_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(payment.getStatusCode()).as("%s", payment.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        agree("", 9);
+        agree("buyer=Zed", 1);
+        agree("product_id=" + other, 1);
+        agree("customer_id=" + buyer, 1);
+        agree("owing=owing", 2);
+        agree("owing=overdue", 1);
+        agree("owing=paid", 1);
+        agree("payment_method=credit", 3);
+        agree("payment_method=cash&branch_id=" + t.secondBranch(), 1);
+        agree("buyer=Test+Buyer&owing=owing&payment_method=credit&from=2026-10-17&to=2026-10-31", 1);
+    }
+
+    ResponseEntity<JsonNode> creditSale(String date, String buyerName, UUID customerId, String due) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("payment_method", "credit");
+        body.put("sale_date", date);
+        if (buyerName != null) {
+            body.put("buyer_name", buyerName);
+        }
+        if (customerId != null) {
+            body.put("customer_id", customerId);
+        }
+        if (due != null) {
+            body.put("due_date", due);
+        }
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r;
+    }
+
+    /** Compares the year groups with the completed rows of the list under one query, and with the count expected. */
+    void agree(String query, long expected) {
+        String more = query.isEmpty() ? "" : "&" + query;
+        long groupCount = 0;
+        long groupTotal = 0;
+        for (JsonNode g : items("group_by=year" + more, ADMIN)) {
+            groupCount += g.get("sales_count").asLong();
+            groupTotal += g.get("total_minor").asLong();
+        }
+        ResponseEntity<JsonNode> list = api.get("/sales?status=completed&limit=200" + more, ADMIN);
+        assertThat(list.getStatusCode()).as("%s", list.getBody()).isEqualTo(HttpStatus.OK);
+        long rows = 0;
+        long total = 0;
+        for (JsonNode s : list.getBody().get("items")) {
+            rows++;
+            total += s.get("total_minor").asLong();
+        }
+        assertThat(rows).as("rows of the list under '%s'", query).isEqualTo(expected);
+        assertThat(groupCount).as("count under '%s'", query).isEqualTo(rows);
+        assertThat(groupTotal).as("total under '%s'", query).isEqualTo(total);
+    }
+
+    /** Years 20, months 12 (above), days 31: the newest come first and the rest is reached by next_to. */
+    @Test
+    void daysAndYearsAreBoundedToo() {
+        UUID cheap = api.product("SUM-4", 100, 200);
+        api.stockUp(t.headOffice(), cheap, "100");
+        for (int i = 0; i < 32; i++) {
+            sale(
+                    api,
+                    t.headOffice(),
+                    "cash",
+                    java.time.LocalDate.parse("2026-09-01").plusDays(i).toString(),
+                    "1",
+                    cheap);
+        }
+        for (int y = 2006; y <= 2026; y++) {
+            sale(api, t.headOffice(), "cash", y + "-06-15", "1", cheap);
+        }
+        JsonNode days = summary(api, "group_by=day&from=2026-09-01", ADMIN, "*").getBody();
+        assertThat(days.get("items")).hasSize(31);
+        assertThat(days.get("items").get(0).get("period").asString()).isEqualTo("2026-10-02");
+        assertThat(days.get("has_more").asBoolean()).isTrue();
+        assertThat(days.get("next_to").asString()).isEqualTo("2026-09-01");
+        JsonNode rest = summary(api, "group_by=day&from=2026-09-01&to=2026-09-01", ADMIN, "*")
+                .getBody();
+        assertThat(rest.get("items")).hasSize(1);
+        assertThat(rest.get("has_more").asBoolean()).isFalse();
+
+        JsonNode years = summary(api, "group_by=year", ADMIN, "*").getBody();
+        assertThat(years.get("items")).hasSize(20);
+        assertThat(years.get("items").get(0).get("period").asString()).isEqualTo("2026");
+        assertThat(years.get("has_more").asBoolean()).isTrue();
+        assertThat(years.get("next_to").asString()).isEqualTo("2006-12-31");
+        JsonNode oldest =
+                summary(api, "group_by=year&to=2006-12-31", ADMIN, "*").getBody();
+        assertThat(oldest.get("items")).hasSize(1);
+        assertThat(oldest.get("items").get(0).get("period").asString()).isEqualTo("2006");
     }
 }

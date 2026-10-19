@@ -51,7 +51,9 @@ class SalesSummaryRepository {
             LocalDate today,
             int limit) {
         // The unit is one of UNITS (checked by the service), never caller text.
-        StringBuilder sql = new StringBuilder("SELECT date_trunc('" + unit + "', sale_date)::date AS period_start,");
+        // sale_date is a date: truncate a timestamp (a date would go through timestamptz and the session zone).
+        String start = unit.equals("day") ? "sale_date" : "date_trunc('" + unit + "', sale_date::timestamp)::date";
+        StringBuilder sql = new StringBuilder("SELECT " + start + " AS period_start,");
         sql.append(" count(*) FILTER (WHERE status = 'completed') AS sales_count,");
         sql.append(" coalesce(sum(total_minor) FILTER (WHERE status = 'completed'), 0) AS total_minor,");
         sql.append(" count(*) FILTER (WHERE status = 'voided') AS voided_count,");

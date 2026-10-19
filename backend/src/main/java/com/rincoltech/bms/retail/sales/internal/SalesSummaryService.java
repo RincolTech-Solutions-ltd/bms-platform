@@ -19,7 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class SalesSummaryService {
 
-    /** Periods per request by level: years 20, months 12, days 31 (an unbounded range never costs more). */
+    /**
+     * Periods per request by level: years 20, months 12, days 31. This bounds the response, not the work: the LIMIT
+     * applies after the grouping, so a query with no {@code from} reads every sale in its filter (a covering index on
+     * the date, branch, status and amounts would make that an index-only scan; no migration is made for it here).
+     */
     static final int YEARS = 20;
 
     static final int MONTHS = 12;

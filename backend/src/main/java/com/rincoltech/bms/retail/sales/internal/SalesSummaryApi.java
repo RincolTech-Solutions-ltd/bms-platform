@@ -27,8 +27,11 @@ final class SalesSummaryApi {
             @Schema(description = "2026, 2026-10 or 2026-10-19, by group_by")
             String period,
 
-            @Schema(description = "First day of the period") LocalDate from,
-            @Schema(description = "Last day of the period") LocalDate to,
+            @Schema(description = "First calendar day of the period; not narrowed by the from filter of the request")
+            LocalDate from,
+
+            @Schema(description = "Last calendar day of the period; not narrowed by the to filter of the request")
+            LocalDate to,
 
             @Schema(description = "Completed sales; voided sales are not counted")
             long salesCount,
@@ -47,10 +50,13 @@ final class SalesSummaryApi {
     @Schema(name = "RetailSalesSummary")
     record Summary(
             String groupBy,
+
+            @Schema(description = "The tenant's currency; a retail tenant keeps its books in one currency")
             String currency,
+
             List<Group> items,
 
-            @Schema(description = "True when older periods remain: ask again with to = nextTo")
+            @Schema(description = "True when older periods remain: ask again with to = next_to")
             boolean hasMore,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "The day before the oldest period shown")
