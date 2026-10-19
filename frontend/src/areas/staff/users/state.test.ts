@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planLimitWords } from '../../../api/users';
 import {
-  assignmentFor, canManageUsers, emptyInvite, hasProblems, inviteBody, inviteProblems, roleChoice, roleChoices, roleLines, showUsers, whatsappLink,
+  assignmentFor, branchUnavailable, canManageUsers, contactLine, emptyInvite, hasProblems, inviteBody, inviteProblems, matchesSearch, roleChoice, roleChoices, roleLines, showUsers, whatsappLink,
 } from './state';
 
 // The rules of the Users screen (issue #319), with fabricated people and numbers only.
@@ -61,16 +61,17 @@ describe('the invite form', () => {
 });
 
 describe('roles in plain words', () => {
-  it('names a role as "Sales person (retail_sales)" with what it is for', () => {
+  it('names a role as "Sales person", without its key, with what it is for', () => {
     const c = roleChoice({ key: 'retail_sales', name: 'Sales' });
-    expect(c.label).toBe('Sales person (retail_sales)');
+    expect(c.label).toBe('Sales person');
+    expect(c.label).not.toMatch(/retail_sales/);
     expect(c.about).toMatch(/Sells in the shop/);
   });
 
   it('keeps a role it has no words for, under the name the server gives it, administrator first', () => {
     const list = roleChoices([{ key: 'cashier', name: 'Cashier' }, { key: 'new_role', name: 'Stock clerk' }, { key: 'tenant_admin', name: 'Tenant admin' }]);
     expect(list.map((c) => c.key)).toEqual(['tenant_admin', 'cashier', 'new_role']);
-    expect(list[2]?.label).toBe('Stock clerk (new_role)');
+    expect(list[2]?.label).toBe('Stock clerk');
   });
 
   it('writes a user\'s roles with their branch', () => {
@@ -101,5 +102,35 @@ describe('the WhatsApp message', () => {
 
   it('lets WhatsApp ask who to send to when there is no phone', () => {
     expect(whatsappLink({ phone: null, name: 'Test', business: 'B', url: 'https://x.example/l' }).startsWith('https://wa.me/?text=')).toBe(true);
+  });
+});
+
+describe('finding a person', () => {
+  const user = { full_name: 'Test Seller 02', email: 'seller02@example.com', phone_e164: '+256700000002' };
+
+  it('matches a name, an email, and a phone however it is typed', () => {
+    for (const term of ['seller', 'SELLER02@', 'Test Seller 02', '0700000002', '0700 000 002', '+256 700 000 002', '256700000002', '700000002', '000 002']) {
+      expect(matchesSearch(user, term), term).toBe(true);
+    }
+  });
+
+  it('does not match another number, or a couple of digits', () => {
+    for (const term of ['0700000003', '+256700000003', '07', '12', 'nobody']) expect(matchesSearch(user, term), term).toBe(false);
+    expect(matchesSearch({ full_name: 'Test Owner 01' }, '000 002')).toBe(false);
+  });
+
+  it('shows a phone written to read', () => {
+    expect(contactLine(user)).toBe('+256 700 000 002 \u00b7 seller02@example.com');
+  });
+});
+
+describe('a branch that has closed', () => {
+  const branches = [{ id: 'a', status: 'active' }, { id: 'c', status: 'inactive' }];
+  it('is unavailable; every branch, an open branch, and an unloaded list are not', () => {
+    expect(branchUnavailable('c', branches)).toBe(true);
+    expect(branchUnavailable('gone', branches)).toBe(true);
+    expect(branchUnavailable('a', branches)).toBe(false);
+    expect(branchUnavailable('', branches)).toBe(false);
+    expect(branchUnavailable('c', [])).toBe(false);
   });
 });

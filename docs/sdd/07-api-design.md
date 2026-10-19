@@ -451,7 +451,8 @@ person's name, phone then email, every role with its branch ("every branch" when
 the status `invited`, `active` or `deactivated`, and searches in the browser as you type. The invite form
 (`/staff/users/new`) is phone first (a Uganda mobile number, checked the way the member forms check it),
 the email is optional, and one of the two is required; the role pick-list is the staff roles of
-`GET /roles`, each with a plain sentence and its key ("Sales person (retail_sales)"); a branch pick-list
+`GET /roles`, each shown by a plain name ("Sales person") with one sentence on what it may do (the key, for example
+`retail_sales`, stays in the docs and the tours, not on a small phone screen); a branch pick-list
 follows for every role except `tenant_admin`, which covers every branch and is sent without a
 `branch_id`. After `POST /users` (and after `POST /users/{user_id}/invitation`) the one-time
 `invitation.url` is shown once in a box with the expiry, a Copy button and a Send on WhatsApp button (a
@@ -461,7 +462,16 @@ gone when the box is closed; to get another, an administrator uses Send a new li
 old one. Double taps send one request. Refusals are shown in plain words: `plan_limit_reached` (the plan
 caps staff users; people still invited count), `last_tenant_admin`, `cannot_deactivate_self` (the screen
 offers no Deactivate on one's own card), `duplicate_email`, `duplicate_phone`, `invalid_phone`.
-Deactivating asks first and ends every session of the person (FR-IAM-08).
+Deactivating asks first and ends every session of the person (FR-IAM-08), and closes a link box that was
+made for that person. A call that gets no answer (a dropped connection, a lost response) is worded as
+"the answer did not reach your phone, open the staff list: if the person is there, tap Send a new link", and
+a repeated phone or email on the invite screen points at the same list, because the first call may have
+succeeded. The server's field problems (`unknown_branch`, `unknown_role`, `invalid`, `required`) are
+shown in plain words, not as the server's sentence. A role on a branch that has since closed is listed as
+"(closed)" in Change roles and cannot be saved until another branch is chosen. Taking the administrator role
+off one's own card asks for a second tap with a warning, and the screen reads `/me` again after saving one's
+own roles so the buttons it offers follow the new permissions. The search finds a name, an email, or a phone
+typed in any usual way (`0700 000 002`, `+256700000002`, the last digits).
 
 ### 7.11.5 Approvals
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StaffUser } from '../../../api/users';
@@ -35,21 +35,26 @@ const ROLES = [
 const BRANCHES = [
   { id: 'b-head', code: 'HQ', name: 'Head office', status: 'active' },
   { id: 'b-two', code: 'KLA', name: 'Test Branch Two', status: 'active' },
+  { id: 'b-old', code: 'OLD', name: 'Test Old Branch', status: 'inactive' },
 ];
 const LINK = 'https://test.example/accept-invitation#token=invented-token-0001';
 
 const SELF: StaffUser = { id: 'u-self', full_name: 'Test Owner 01', email: 'owner01@example.com', status: 'active', roles: [{ role_key: 'tenant_admin' }] };
 const WAITING: StaffUser = { id: 'u-wait', full_name: 'Test Seller 02', phone_e164: '+256700000002', status: 'invited', roles: [{ role_key: 'retail_sales', branch_id: 'b-two' }] };
 const SECOND_ADMIN: StaffUser = { id: 'u-admin2', full_name: 'Test Admin 03', email: 'admin03@example.com', status: 'active', roles: [{ role_key: 'tenant_admin' }] };
+const ON_CLOSED: StaffUser = { id: 'u-closed', full_name: 'Test Cashier 06', email: 'cashier06@example.com', status: 'active', roles: [{ role_key: 'cashier', branch_id: 'b-old' }] };
 const LEFT: StaffUser = { id: 'u-left', full_name: 'Test Leaver 04', phone_e164: '+256700000004', status: 'deactivated', roles: [{ role_key: 'cashier' }] };
 
 const ADMIN = ['core.users.read', 'core.users.manage', 'core.branches.read'];
 const READER = ['core.users.read'];
 
+let lastClient: QueryClient;
+
 function shell(node: ReactElement, permissions: string[] = ADMIN) {
   const me = { ...mockMe('admin'), permissions, user_id: 'u-self' };
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/users'] }) });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  lastClient = client;
   return render(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={client}>
@@ -78,8 +83,23 @@ afterEach(() => {
   writeText.mockReset();
 });
 
+const TOKEN = 'invented-token-0001';
+
+/** The link left nowhere: not in the text, any input, any address on the page, or the query and mutation caches. */
+function expectNoToken() {
+  expect(document.body.textContent).not.toContain(TOKEN);
+  document.querySelectorAll('input, textarea').forEach((el) => expect((el as HTMLInputElement).value).not.toContain(TOKEN));
+  document.querySelectorAll('a[href]').forEach((el) => expect(decodeURIComponent(el.getAttribute('href') ?? '')).not.toContain(TOKEN));
+  expectNoTokenInCaches();
+}
+
+function expectNoTokenInCaches() {
+  expect(JSON.stringify(lastClient.getQueryCache().getAll().map((q) => [q.queryKey, q.state.data]))).not.toContain(TOKEN);
+  expect(JSON.stringify(lastClient.getMutationCache().getAll().map((m) => [m.state.data, m.state.variables]))).not.toContain(TOKEN);
+}
+
 async function fillInvite(overrides: { name?: string; phone?: string; role?: string } = {}) {
-  await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
+  await screen.findByRole('option', { name: 'Cashier' }, { timeout: 5000 });
   fireEvent.change(screen.getByLabelText('Full name'), { target: { value: overrides.name ?? 'Test Cashier 05' } });
   fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: overrides.phone ?? '0700 000 005' } });
   fireEvent.change(screen.getByLabelText('What will this person do?'), { target: { value: overrides.role ?? 'cashier' } });
@@ -88,7 +108,7 @@ async function fillInvite(overrides: { name?: string; phone?: string; role?: str
 describe('the invite form', () => {
   it('refuses an empty form and a bad phone before anything is sent', async () => {
     shell(<InviteScreen />);
-    await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
+    await screen.findByRole('option', { name: 'Cashier' }, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
     expect(await screen.findByText('Type the person\'s full name.')).toBeTruthy();
     expect(screen.getByText(/Give a phone number or an email address/)).toBeTruthy();
@@ -191,6 +211,8 @@ describe('the one-time link', () => {
 
     await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
     expect((screen.getByLabelText('Invitation link') as HTMLInputElement).value).toBe(LINK);
+    // While the box is open the link is in the box and nowhere else: not in the query cache, not in a mutation.
+    expectNoTokenInCaches();
     expect(screen.getByText(/shown only now/)).toBeTruthy();
     expect(screen.getByText(/works once and stops/)).toBeTruthy();
     const whatsapp = screen.getByRole('link', { name: 'Send on WhatsApp' }) as HTMLAnchorElement;
@@ -204,15 +226,9 @@ describe('the one-time link', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /I have sent it/ }));
     expect(screen.queryByLabelText('Invitation link')).toBeNull();
-    expect(document.body.textContent).not.toContain('invented-token-0001');
+    expectNoToken();
     // The form is empty again for the next person.
     expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('');
-  });
-
-  it('is not there when the screen is opened again', async () => {
-    shell(<InviteScreen />);
-    await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
-    expect(screen.queryByLabelText('Invitation link')).toBeNull();
   });
 
   it('is made again for a person still invited, shown once, and the old one is not kept', async () => {
@@ -223,8 +239,86 @@ describe('the one-time link', () => {
     await screen.findByRole('heading', { name: 'New link for Test Seller 02' });
     expect(api.reissue).toHaveBeenCalledWith('u-wait');
     expect((screen.getByLabelText('Invitation link') as HTMLInputElement).value).toBe(LINK);
+    expectNoTokenInCaches();
     fireEvent.click(screen.getByRole('button', { name: 'I have sent it' }));
     expect(screen.queryByLabelText('Invitation link')).toBeNull();
+    expectNoToken();
+  });
+
+  it('is closed with the person when they are deactivated, so a dead link is not left on the page', async () => {
+    api.reissue.mockResolvedValue({ url: LINK, expires_at: '2026-10-22T10:00:00Z' });
+    api.deactivate.mockResolvedValue({ ...WAITING, status: 'deactivated' });
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Seller 02')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Send a new link' }));
+    await screen.findByLabelText('Invitation link');
+    fireEvent.click(within(card).getByRole('button', { name: 'Deactivate' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Yes, deactivate' }));
+    await waitFor(() => expect(api.deactivate).toHaveBeenCalledWith('u-wait'));
+    await waitFor(() => expect(screen.queryByLabelText('Invitation link')).toBeNull());
+    expectNoToken();
+  });
+
+  it('stays open when somebody else is deactivated', async () => {
+    api.reissue.mockResolvedValue({ url: LINK, expires_at: '2026-10-22T10:00:00Z' });
+    api.deactivate.mockResolvedValue({ ...SECOND_ADMIN, status: 'deactivated' });
+    shell(<UsersScreen />);
+    fireEvent.click(within((await screen.findByText('Test Seller 02')).closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' }));
+    await screen.findByLabelText('Invitation link');
+    const other = screen.getByText('Test Admin 03').closest('li') as HTMLElement;
+    fireEvent.click(within(other).getByRole('button', { name: 'Deactivate' }));
+    fireEvent.click(within(other).getByRole('button', { name: 'Yes, deactivate' }));
+    await waitFor(() => expect(api.deactivate).toHaveBeenCalledWith('u-admin2'));
+    expect(screen.getByLabelText('Invitation link')).toBeTruthy();
+  });
+
+  it('is not made twice by two taps that land before the page has redrawn', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    api.reissue.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    shell(<UsersScreen />);
+    const button = within((await screen.findByText('Test Seller 02')).closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' });
+    act(() => {
+      button.click();
+      button.click();
+    });
+    expect(api.reissue).toHaveBeenCalledTimes(1);
+    finish({ url: LINK, expires_at: '2026-10-22T10:00:00Z' });
+    await screen.findByLabelText('Invitation link');
+  });
+
+  it('can be copied by hand when the clipboard is refused: selected, and said only when it is', async () => {
+    api.reissue.mockResolvedValue({ url: LINK, expires_at: '2026-10-22T10:00:00Z' });
+    writeText.mockRejectedValue(new Error('denied'));
+    const exec = vi.fn().mockReturnValue(false);
+    Object.defineProperty(document, 'execCommand', { value: exec, configurable: true });
+    shell(<UsersScreen />);
+    fireEvent.click(within((await screen.findByText('Test Seller 02')).closest('li') as HTMLElement).getByRole('button', { name: 'Send a new link' }));
+    await screen.findByLabelText('Invitation link');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the link' }));
+    expect(await screen.findByText(/The link is selected/)).toBeTruthy();
+    expect(exec).toHaveBeenCalledWith('copy');
+    const input = screen.getByLabelText('Invitation link') as HTMLInputElement;
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, LINK.length]);
+    exec.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the link' }));
+    expect(await screen.findByText(/Copied/)).toBeTruthy();
+    expect(screen.queryByText(/The link is selected/)).toBeNull();
+    Reflect.deleteProperty(document, 'execCommand');
+  });
+});
+
+describe('closing the box and coming back', () => {
+  it('leaves no link on the next visit to the invite screen', async () => {
+    api.invite.mockResolvedValue({ user: { id: 'u-new', full_name: 'Test Cashier 05' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
+    shell(<InviteScreen />);
+    await fillInvite();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+    await screen.findByLabelText('Invitation link');
+    cleanup();
+    shell(<InviteScreen />);
+    await screen.findByLabelText('Full name');
+    expect(screen.queryByLabelText('Invitation link')).toBeNull();
+    expectNoToken();
   });
 });
 
@@ -234,7 +328,7 @@ describe('the staff list', () => {
     const waiting = (await screen.findByText('Test Seller 02')).closest('li') as HTMLElement;
     expect(within(waiting).getByText('Invited, not joined yet')).toBeTruthy();
     expect(within(waiting).getByText('Sales person, Test Branch Two')).toBeTruthy();
-    expect(within(waiting).getByText('+256700000002')).toBeTruthy();
+    expect(within(waiting).getByText('+256 700 000 002')).toBeTruthy();
     const owner = screen.getByText('Test Owner 01').closest('li') as HTMLElement;
     expect(within(owner).getByText('Administrator, every branch')).toBeTruthy();
     expect(within(owner).getByText('Active')).toBeTruthy();
@@ -329,5 +423,85 @@ describe('who sees what', () => {
     expect(screen.getByText(/Only an administrator can invite staff/)).toBeTruthy();
     expect(api.list).not.toHaveBeenCalled();
     expect(api.roles).not.toHaveBeenCalled();
+  });
+});
+
+describe('a role on a branch that has closed', () => {
+  it('lists the closed branch as closed, asks for another, and will not save until one is chosen', async () => {
+    api.list.mockResolvedValue([SELF, ON_CLOSED]);
+    api.setRoles.mockResolvedValue(ON_CLOSED);
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Cashier 06')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Change roles' }));
+    const where = within(card).getByLabelText('Where?') as HTMLSelectElement;
+    // The select shows the branch the person really has, not "Every branch".
+    expect(where.value).toBe('b-old');
+    expect(within(card).getByRole('option', { name: 'Test Old Branch (closed)' })).toBeTruthy();
+    expect(within(card).getByText(/This branch is closed. Pick another branch/)).toBeTruthy();
+    expect((within(card).getByRole('button', { name: 'Save the roles' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(where, { target: { value: 'b-two' } });
+    expect(within(card).queryByText(/This branch is closed/)).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
+    await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-closed', [{ role_key: 'cashier', branch_id: 'b-two' }]));
+  });
+
+  it('is never offered for a new person', async () => {
+    shell(<InviteScreen />);
+    await fillInvite();
+    expect(screen.getByRole('option', { name: 'Test Branch Two (KLA)' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Test Old Branch/ })).toBeNull();
+  });
+});
+
+describe('taking the administrator role off yourself', () => {
+  it('warns first, changes nothing until confirmed, then reads who you are again', async () => {
+    api.setRoles.mockResolvedValue({ ...SELF, roles: [{ role_key: 'cashier' }] });
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Owner 01')).closest('li') as HTMLElement;
+    const invalidate = vi.spyOn(lastClient, 'invalidateQueries');
+    fireEvent.click(within(card).getByRole('button', { name: 'Change roles' }));
+    fireEvent.change(within(card).getByLabelText('Role'), { target: { value: 'cashier' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
+    expect(within(card).getByText(/taking the administrator role off/)).toBeTruthy();
+    expect(api.setRoles).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole('button', { name: 'Yes, remove my administrator role' }));
+    await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-self', [{ role_key: 'cashier' }]));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] }));
+  });
+
+  it('lets the warning be backed out of by changing the choice', async () => {
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Owner 01')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Change roles' }));
+    fireEvent.change(within(card).getByLabelText('Role'), { target: { value: 'cashier' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
+    fireEvent.change(within(card).getByLabelText('Role'), { target: { value: 'tenant_admin' } });
+    expect(within(card).queryByText(/taking the administrator role off/)).toBeNull();
+    expect(api.setRoles).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when the roles are somebody else\'s', async () => {
+    api.setRoles.mockResolvedValue(SECOND_ADMIN);
+    shell(<UsersScreen />);
+    const card = (await screen.findByText('Test Admin 03')).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Change roles' }));
+    fireEvent.change(within(card).getByLabelText('Role'), { target: { value: 'cashier' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
+    await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-admin2', [{ role_key: 'cashier' }]));
+    expect(screen.queryByText(/taking the administrator role off/)).toBeNull();
+  });
+});
+
+describe('finding a person by phone', () => {
+  it('finds a number however it is typed, and shows phones written to read', async () => {
+    shell(<UsersScreen />);
+    await screen.findByText('Test Seller 02');
+    for (const typed of ['0700 000 002', '+256700000002', '700000002', '000 002']) {
+      fireEvent.change(screen.getByLabelText('Find a person'), { target: { value: typed } });
+      await waitFor(() => expect(screen.queryByText('Test Owner 01')).toBeNull(), { timeout: 3000 });
+      expect(screen.getByText('Test Seller 02')).toBeTruthy();
+    }
+    // The digits that matched are marked, which splits the text; the whole line still reads as the phone.
+    expect((screen.getByText('Test Seller 02').closest('li') as HTMLElement).textContent).toContain('+256 700 000 002');
   });
 });

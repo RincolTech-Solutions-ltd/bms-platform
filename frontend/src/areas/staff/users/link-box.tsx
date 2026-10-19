@@ -6,6 +6,8 @@ import { expiryWords, whatsappLink } from './state';
 // and a WhatsApp button carry it to the person, and it is gone for good when the box is closed.
 
 export interface ShownLink {
+  /** The person the link is for, when they are on the list: deactivating them closes the box. */
+  userId?: string;
   name: string;
   phone: string | null;
   url: string;
@@ -15,18 +17,33 @@ export interface ShownLink {
 }
 
 export function LinkBox({ link, business, onDone, doneLabel = 'I have sent it' }: { link: ShownLink; business: string; onDone: () => void; doneLabel?: string }) {
-  const [copied, setCopied] = useState<'yes' | 'no' | null>(null);
+  const [copied, setCopied] = useState<'yes' | 'selected' | 'failed' | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(link.url);
       setCopied('yes');
+      return;
     } catch {
-      // No clipboard permission (an older phone browser): select the link so it can be copied by hand.
-      field.current?.select();
-      setCopied('no');
+      // No clipboard permission (an older phone browser, or iOS in some views): select the link and try the older copy command.
     }
+    const input = field.current;
+    if (!input) return setCopied('failed');
+    try {
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, link.url.length);
+    } catch {
+      return setCopied('failed');
+    }
+    let done = false;
+    try {
+      done = typeof document.execCommand === 'function' && document.execCommand('copy');
+    } catch {
+      done = false;
+    }
+    setCopied(done ? 'yes' : 'selected');
   }
 
   return (
@@ -45,7 +62,8 @@ export function LinkBox({ link, business, onDone, doneLabel = 'I have sent it' }
         </a>
       </p>
       {copied === 'yes' && <p role="status" className="alert alert-success">Copied. Paste it into a message.</p>}
-      {copied === 'no' && <p role="status" className="alert alert-info">Your phone would not copy it. The link is selected: press and hold, then choose Copy.</p>}
+      {copied === 'selected' && <p role="status" className="alert alert-info">Your phone would not copy it. The link is selected: press and hold, then choose Copy.</p>}
+      {copied === 'failed' && <p role="status" className="alert alert-info">Your phone would not copy it. Press and hold the link above, then choose Copy.</p>}
       <p>
         <button type="button" className="btn-ghost" onClick={onDone}>{doneLabel}</button>
       </p>

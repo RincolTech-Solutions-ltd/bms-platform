@@ -4,12 +4,11 @@ import { useRef, useState } from 'react';
 import { type RoleAssignmentRequest, type StaffUser, users } from '../../../api/users';
 import { useShellBrand } from '../../../app/branding';
 import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
-import { foldText } from '../../../app/ui/fold';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useStaff } from '../context';
 import { LinkBox, type ShownLink } from './link-box';
 import { RoleEditor } from './role-editor';
-import { canManageUsers, contactLine, roleChoices, roleLines, showUsers, statusWords } from './state';
+import { canManageUsers, contactLine, matchesSearch, roleChoices, roleLines, showUsers, statusWords } from './state';
 
 // Staff users (issue #319; FR-IAM-01, FR-IAM-02, FR-IAM-08): who works in the business, what each person may do, and who has not
 // joined yet. Anyone who may read the list sees it; an administrator also invites, sends a new link, changes roles and deactivates.
@@ -69,7 +68,7 @@ export function UsersScreen() {
   const resend = (user: StaffUser) =>
     act(user, async () => {
       const made = await users.reissue(user.id ?? '');
-      setLink({ name: user.full_name ?? 'this person', phone: user.phone_e164 ?? null, url: made.url ?? '', expiresAt: made.expires_at, kind: 'again' });
+      setLink({ userId: user.id, name: user.full_name ?? 'this person', phone: user.phone_e164 ?? null, url: made.url ?? '', expiresAt: made.expires_at, kind: 'again' });
       return null;
     });
 
@@ -77,6 +76,8 @@ export function UsersScreen() {
     act(user, async () => {
       await users.deactivate(user.id ?? '');
       setMode(null);
+      // A link made for this person is of no use now.
+      setLink((shownLink) => (shownLink?.userId === user.id ? null : shownLink));
       return `${user.full_name} is deactivated and signed out.`;
     });
 
@@ -85,6 +86,8 @@ export function UsersScreen() {
       await users.setRoles(user.id ?? '', next);
       setMode(null);
       setNotice(`The roles of ${user.full_name} are saved.`);
+      // One's own roles decide what this page offers, and they come from /me: read them again.
+      if (user.id === me.user_id) await queryClient.invalidateQueries({ queryKey: ['me'] });
       await queryClient.invalidateQueries({ queryKey: ['staff-users'] });
       return null;
     } catch (e) {
@@ -93,8 +96,7 @@ export function UsersScreen() {
   }
 
   const all = list.data ?? [];
-  const term = foldText(search.term);
-  const shown = term === '' ? all : all.filter((u) => foldText(`${u.full_name ?? ''} ${u.email ?? ''} ${u.phone_e164 ?? ''}`).includes(term));
+  const shown = search.term === '' ? all : all.filter((u) => matchesSearch(u, search.term));
   const roleList = roles.data ?? [];
   const branchList = branches.data ?? [];
   const choices = roleChoices(roleList);
@@ -160,7 +162,7 @@ export function UsersScreen() {
                       </p>
                     )}
                     {mode?.id === u.id && mode?.kind === 'roles' && (
-                      <RoleEditor user={u} roles={choices} branches={branchList} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
+                      <RoleEditor user={u} self={u.id === me.user_id} roles={choices} branches={branchList} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
                     )}
                     {mode?.id === u.id && mode?.kind === 'deactivate' && (
                       <div className="alert alert-warning stack" role="group" aria-label={`Deactivate ${u.full_name}`}>

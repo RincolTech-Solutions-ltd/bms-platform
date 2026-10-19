@@ -1,6 +1,7 @@
 import type { Me } from '../../../api/client';
 import type { InviteUserBody, RoleAssignmentRequest, StaffBranch, StaffRole, StaffUser } from '../../../api/users';
-import { normaliseUganda, phoneProblem } from '../lending/member-state';
+import { foldText } from '../../../app/ui/fold';
+import { normaliseUganda, phoneProblem, showPhone } from '../lending/member-state';
 
 // Who sees the Users screen, and the rules and words it uses (issue #319; FR-IAM-01, FR-IAM-02, FR-IAM-08). The API is the
 // authority (it checks the permission, the branch scope, the plan and the last administrator); this decides what the menu and
@@ -32,7 +33,7 @@ const ROLE_WORDS: Record<string, { title: string; about: string }> = {
 
 export interface RoleChoice {
   key: string;
-  /** "Sales person (retail_sales)" */
+  /** "Sales person": the role's name in plain words. The key stays in the docs and the tours, not on a small phone screen. */
   label: string;
   /** One plain sentence on what the role may do. */
   about: string;
@@ -44,7 +45,7 @@ export function roleChoice(role: Pick<StaffRole, 'key' | 'name'>): RoleChoice {
   const words = ROLE_WORDS[key];
   return {
     key,
-    label: `${words?.title ?? role.name ?? key} (${key})`,
+    label: words?.title ?? role.name ?? key,
     about: words?.about ?? 'Ask the platform operator what this role may do.',
   };
 }
@@ -126,9 +127,32 @@ export function roleLines(user: StaffUser, branches: StaffBranch[], roles: Staff
   });
 }
 
-/** The contact line of a user: the phone first (phone first is how most staff are reached), then the email. */
+/** The contact line of a user: the phone first (phone first is how most staff are reached), written to read, then the email. */
 export function contactLine(user: StaffUser): string {
-  return [user.phone_e164, user.email].filter(Boolean).join(' · ');
+  return [user.phone_e164 ? showPhone(user.phone_e164) : null, user.email].filter(Boolean).join(' · ');
+}
+
+/**
+ * Whether a typed search finds a person: their name or email, or their phone however it is typed (0700 000 002, +256700000002,
+ * 700000002 or just the last digits). The browser filters the list, since a business has a handful of staff.
+ */
+export function matchesSearch(user: StaffUser, rawTerm: string): boolean {
+  const term = foldText(rawTerm);
+  if (term === '') return true;
+  if (foldText(`${user.full_name ?? ''} ${user.email ?? ''}`).includes(term)) return true;
+  const stored = user.phone_e164 ?? '';
+  if (stored === '') return false;
+  if (normaliseUganda(rawTerm) === stored) return true;
+  const typed = rawTerm.replace(/\D/g, '');
+  if (typed.length < 3) return false;
+  const international = stored.replace(/\D/g, '');
+  return international.includes(typed) || `0${international.slice(3)}`.includes(typed);
+}
+
+/** A role's branch that is closed, or no longer on the list of branches: it cannot be kept when the roles are saved. */
+export function branchUnavailable(branchId: string, branches: StaffBranch[]): boolean {
+  if (branchId === '' || branches.length === 0) return false;
+  return !branches.some((b) => b.id === branchId && (b.status ?? 'active') === 'active');
 }
 
 // --- The one-time link -----------------------------------------------------------------------------
