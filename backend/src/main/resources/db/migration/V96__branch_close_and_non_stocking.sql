@@ -1,0 +1,20 @@
+-- V96 (PLACEHOLDER NUMBER: the real number is chosen when the pull request merges; Flyway runs with outOfOrder off, so it
+-- must be above the highest one on main): closing a branch and marking a branch as not stocking (issue #329).
+--
+-- Expand only, safe on a populated database. Three nullable-or-defaulted columns on `branches` and nothing else:
+--
+--   stocks_goods  boolean, default true. A branch that does not stock goods (a head office that only keeps accounts) is not
+--                 offered for sales, restocks, transfers or stock adjustments; the retail module refuses them with 422
+--                 `branch_not_stocking`. Every existing branch keeps the default, so nothing changes until an
+--                 administrator switches it.
+--   closed_at     when the branch was closed, for the Branches screen. The status stays `inactive`: closing a branch is the
+--                 deactivation FR-BR-01 already defines, and its history, stock and sales are never touched (ADR-041).
+--   closed_reason why it was closed, kept only when the administrator had to confirm over stock or transfers in flight.
+--                 The audit row carries the same words.
+--
+-- No existing row is rewritten, no check is replaced, no index is added: the table holds a handful of rows per tenant.
+
+ALTER TABLE branches
+    ADD COLUMN stocks_goods boolean     NOT NULL DEFAULT true,
+    ADD COLUMN closed_at    timestamptz,
+    ADD COLUMN closed_reason text;

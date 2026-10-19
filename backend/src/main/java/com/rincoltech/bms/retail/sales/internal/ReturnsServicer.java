@@ -185,6 +185,13 @@ class ReturnsServicer {
                             field + ".restock_branch_id", "unknown_branch", "No such active branch in your scope."));
                     continue;
                 }
+                if (!branches.findActive(restock).orElseThrow().stocksGoods()) {
+                    problems.add(new FieldProblem(
+                            field + ".restock_branch_id",
+                            "branch_not_stocking",
+                            "That branch does not stock goods. Choose a shop or a store, or write the goods off."));
+                    continue;
+                }
             } else if (l.restockBranchId() != null) {
                 problems.add(new FieldProblem(
                         field + ".restock_branch_id",

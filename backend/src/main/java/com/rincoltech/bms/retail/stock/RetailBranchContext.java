@@ -9,6 +9,7 @@ import com.rincoltech.bms.kernel.Principal.BranchScope;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
@@ -53,6 +54,37 @@ public class RetailBranchContext {
 
     public UUID resolve(String permission, UUID requested) {
         return resolve(permission, requested, "branch_id");
+    }
+
+    /**
+     * As {@link #resolve(String, UUID)} for an event that moves or counts goods (a restock, a transfer, an adjustment): the
+     * branch must also keep goods. A branch marked as not stocking, such as a head office that only keeps accounts, is refused
+     * with 422 {@code branch_not_stocking} (issue #329, ADR-041).
+     */
+    public UUID resolveStocking(String permission, UUID requested) {
+        return resolveStocking(permission, requested, "branch_id");
+    }
+
+    /** As {@link #resolveStocking(String, UUID)}, naming the request field the branch came from. */
+    public UUID resolveStocking(String permission, UUID requested, String field) {
+        UUID branch = resolve(permission, requested, field);
+        requireStocks(branch, field);
+        return branch;
+    }
+
+    /** Refuses a branch that keeps no goods; the branch is already known to be active and in scope. */
+    public void requireStocks(UUID branch, String field) {
+        Branches.Branch found = branches.findActive(branch).orElse(null);
+        if (found != null && !found.stocksGoods()) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "branch_not_stocking",
+                    "This branch does not stock goods",
+                    found.name()
+                            + " is marked as not stocking goods, so nothing can be sold, restocked, moved or counted"
+                            + " there. Choose a shop or a store.",
+                    List.of(new FieldProblem(field, "branch_not_stocking", "This branch does not stock goods.")));
+        }
     }
 
     /** As {@link #resolve(String, UUID)}, naming the request field the branch came from. */

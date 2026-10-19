@@ -81,7 +81,7 @@ class UsageService {
     }
 
     private UsageReport record(UsageRequest r) {
-        UUID branch = branches.resolve("retail.usage.report", r.branchId());
+        UUID branch = branches.resolveStocking("retail.usage.report", r.branchId());
         LocalDate today = clock.today(tenant.profile().timezone());
         LocalDate on = r.occurredOn() == null ? today : r.occurredOn();
         List<FieldProblem> problems = new ArrayList<>();

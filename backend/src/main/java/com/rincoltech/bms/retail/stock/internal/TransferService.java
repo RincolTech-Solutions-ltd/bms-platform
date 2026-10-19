@@ -128,7 +128,7 @@ class TransferService {
 
     private Transfer record(TransferRequest r) {
         boolean dispatchOnly = capabilities.enabled(RetailCapabilities.TRANSFER_RECEIPT);
-        UUID from = branchContext.resolve(PERMISSION, r.fromBranchId(), "from_branch_id");
+        UUID from = branchContext.resolveStocking(PERMISSION, r.fromBranchId(), "from_branch_id");
         LocalDate today = clock.today(tenant.profile().timezone());
         LocalDate on = r.transferDate() == null ? today : r.transferDate();
         List<FieldProblem> problems = new ArrayList<>();
@@ -140,6 +140,8 @@ class TransferService {
             to = branches.findActive(r.toBranchId()).orElse(null);
             if (to == null) {
                 problems.add(new FieldProblem("to_branch_id", "unknown_branch", "No such active branch."));
+            } else {
+                branchContext.requireStocks(to.id(), "to_branch_id");
             }
         }
         if (on.isAfter(today)) {
