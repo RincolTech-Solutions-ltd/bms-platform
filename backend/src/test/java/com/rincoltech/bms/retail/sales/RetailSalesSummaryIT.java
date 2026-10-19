@@ -52,7 +52,8 @@ class RetailSalesSummaryIT extends IntegrationTest {
             body.put("buyer_name", "Test Buyer 01");
         }
         body.put("lines", List.of(Map.of("product_id", p, "qty", qty)));
-        ResponseEntity<JsonNode> r = as.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> r =
+                as.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         return r;
     }
@@ -125,14 +126,16 @@ class RetailSalesSummaryIT extends IntegrationTest {
         assertThat(months.get(0).get("total_minor").asLong()).isEqualTo(10_000);
         assertThat(months.get(1).get("period").asString()).isEqualTo("2026-09");
         assertThat(months.get(1).get("to").asString()).isEqualTo("2026-09-30");
-        assertThat(months.get(0).get("total_minor").asLong() + months.get(1).get("total_minor").asLong())
+        assertThat(months.get(0).get("total_minor").asLong()
+                        + months.get(1).get("total_minor").asLong())
                 .isEqualTo(12_000);
 
         JsonNode days = items("group_by=day&from=2026-10-01&to=2026-10-31", ADMIN);
         assertThat(days).hasSize(2);
         JsonNode nineteenth = days.get(0);
         assertThat(nineteenth.get("period").asString()).isEqualTo("2026-10-19");
-        assertThat(nineteenth.get("from").asString()).isEqualTo(nineteenth.get("to").asString());
+        assertThat(nineteenth.get("from").asString())
+                .isEqualTo(nineteenth.get("to").asString());
         assertThat(nineteenth.get("sales_count").asLong()).isEqualTo(3);
         assertThat(nineteenth.get("total_minor").asLong()).isEqualTo(8_000);
         assertThat(nineteenth.get("profit_minor").asLong()).isEqualTo(2_000);
@@ -143,11 +146,14 @@ class RetailSalesSummaryIT extends IntegrationTest {
     @Test
     void aVoidedSaleIsCountedApartAndLeavesEveryOtherFigureAlone() {
         arrange();
-        JsonNode day = items("group_by=day&from=2026-10-19&to=2026-10-19", ADMIN).get(0);
+        JsonNode day =
+                items("group_by=day&from=2026-10-19&to=2026-10-19", ADMIN).get(0);
         assertThat(day.get("voided_count").asLong()).isEqualTo(1);
         assertThat(day.get("sales_count").asLong()).isEqualTo(3);
         assertThat(day.get("total_minor").asLong()).isEqualTo(8_000);
-        assertThat(total(day, "cash")).as("the voided five units are not in cash").isEqualTo(4_000);
+        assertThat(total(day, "cash"))
+                .as("the voided five units are not in cash")
+                .isEqualTo(4_000);
     }
 
     @Test
@@ -168,7 +174,8 @@ class RetailSalesSummaryIT extends IntegrationTest {
     @Test
     void theBranchScopeAndTheBranchFilterNarrowTheFigures() {
         arrange();
-        ResponseEntity<JsonNode> second = summary(api, "group_by=year", ADMIN, t.secondBranch().toString());
+        ResponseEntity<JsonNode> second =
+                summary(api, "group_by=year", ADMIN, t.secondBranch().toString());
         JsonNode only = second.getBody().get("items");
         assertThat(only).hasSize(1);
         assertThat(only.get(0).get("sales_count").asLong()).isEqualTo(1);
@@ -176,7 +183,10 @@ class RetailSalesSummaryIT extends IntegrationTest {
         assertThat(only.get(0).get("profit_minor").asLong()).isEqualTo(500);
 
         ResponseEntity<JsonNode> outside = summary(
-                api, "group_by=year&branch_id=" + t.headOffice(), ADMIN, t.secondBranch().toString());
+                api,
+                "group_by=year&branch_id=" + t.headOffice(),
+                ADMIN,
+                t.secondBranch().toString());
         assertThat(outside.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(outside.getBody().get("items")).isEmpty();
 
@@ -230,7 +240,8 @@ class RetailSalesSummaryIT extends IntegrationTest {
 
         JsonNode mine = items("group_by=year", ADMIN);
         assertThat(mine.get(0).get("total_minor").asLong()).isEqualTo(12_000);
-        JsonNode theirsOnly = summary(otherApi, "group_by=year", ADMIN, "*").getBody().get("items");
+        JsonNode theirsOnly =
+                summary(otherApi, "group_by=year", ADMIN, "*").getBody().get("items");
         assertThat(theirsOnly).hasSize(1);
         assertThat(theirsOnly.get(0).get("total_minor").asLong()).isEqualTo(18_000);
         assertThat(theirsOnly.get(0).get("sales_count").asLong()).isEqualTo(1);
@@ -238,7 +249,8 @@ class RetailSalesSummaryIT extends IntegrationTest {
 
     @Test
     void anUnknownLevelAndAnUpsideDownRangeAreRefused() {
-        assertThat(summary(api, "group_by=week", ADMIN, "*").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(summary(api, "group_by=week", ADMIN, "*").getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(summary(api, "group_by=day&from=2026-10-19&to=2026-10-01", ADMIN, "*")
                         .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
