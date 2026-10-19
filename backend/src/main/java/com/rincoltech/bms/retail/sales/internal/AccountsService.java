@@ -675,6 +675,14 @@ class AccountsService {
                         "Sale " + a.saleNo() + " no longer holds this payment, so it cannot be reversed.");
             }
         }
+        // A sale whose unpaid part was written off holds that write-off in its paid amount; taking a payment back would
+        // make the cleared debt owing again (ADR-043).
+        if (!repo.writtenOffAmong(parts.stream().map(AllocationRow::saleId).toList())
+                .isEmpty()) {
+            throw ApiException.rule(
+                    "payment_not_reversible",
+                    "A sale this payment paid has had its unpaid part written off, so the payment cannot be reversed.");
+        }
         // Money refunded on a return of these sales was paid out of what this receipt brought in; giving the full
         // amount
         // back to the sale would leave the buyer owing money that was refunded. Void the return first (issue #201).

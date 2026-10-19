@@ -11,6 +11,7 @@ import com.rincoltech.bms.retail.sales.internal.SalesApi.Sale;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOff;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsRepository.Row;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsRepository.Standing;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
 import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
@@ -104,13 +105,29 @@ class WriteOffsServicer {
             throw ApiException.rule("nothing_owing", "This sale has nothing left to pay.");
         }
         String recognition = capabilities.creditRecognition();
-        long loss = recognition.equals(RetailCapabilities.ON_PAYMENT)
-                ? BigDecimal.valueOf(s.costTotalMinor())
-                        .multiply(BigDecimal.valueOf(unpaid))
-                        .divide(BigDecimal.valueOf(s.totalMinor()), 0, RoundingMode.HALF_UP)
-                        .longValueExact()
-                : unpaid;
+        long loss = recognition.equals(RetailCapabilities.ON_PAYMENT) ? unrecognisedCost(s) : unpaid;
         return new Plan(s, unpaid, loss, recognition);
+    }
+
+    /**
+     * The cost of the goods that no payment has carried into the profit yet: what the sale still holds after its returns, less the
+     * share the money kept has recognised. It is exactly {@code CreditRecognition.state} of the reports (the cost share is
+     * {@code revenue x remaining cost / net}, rounded half up once), so the cost the reports recognised plus this loss is the
+     * sale's cost to the unit, with or without returns. With no return it is the unpaid share of the cost of goods.
+     */
+    private long unrecognisedCost(Sale s) {
+        Standing h = repo.standing(s.id());
+        long net = Math.subtractExact(s.totalMinor(), h.returned());
+        long remainingCost = Math.max(0, Math.subtractExact(s.costTotalMinor(), h.returnedCost()));
+        long kept = Math.subtractExact(h.paid(), h.refunded());
+        long revenue = Math.max(0, Math.min(net, kept));
+        long recognised = net <= 0 || revenue == 0
+                ? 0
+                : BigDecimal.valueOf(revenue)
+                        .multiply(BigDecimal.valueOf(remainingCost))
+                        .divide(BigDecimal.valueOf(net), 0, RoundingMode.HALF_UP)
+                        .longValueExact();
+        return Math.max(0, remainingCost - recognised);
     }
 
     /** Posts the entry, records the write-off and clears the debt on the sale. */

@@ -60,13 +60,12 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         }
         List<FieldProblem> problems = new ArrayList<>();
         proposed.forEach((key, value) -> {
-            if (!key.equals(PROFILE) && !key.equals(CREDIT_RECOGNITION) && !CAPABILITIES.contains(key)) {
+            if (key.equals(CREDIT_RECOGNITION)) {
+                if (!(value instanceof String c && CREDIT_RECOGNITIONS.contains(c))) {
+                    problems.add(new FieldProblem(CREDIT_RECOGNITION, "invalid", "Use on_sale or on_payment."));
+                }
+            } else if (!key.equals(PROFILE) && !CAPABILITIES.contains(key)) {
                 problems.add(new FieldProblem(key, "unknown", "Not a retail capability."));
-            } else if (key.equals(CREDIT_RECOGNITION)
-                    && !(value instanceof String c && CREDIT_RECOGNITIONS.contains(c))) {
-                problems.add(new FieldProblem(CREDIT_RECOGNITION, "invalid", "Use on_sale or on_payment."));
-            } else if (key.equals(CREDIT_RECOGNITION)) {
-                // valid: applied below
             } else if (key.equals(PROFILE) && !(value instanceof String p && isProfile(p))) {
                 problems.add(new FieldProblem(PROFILE, "invalid", "Use shop or trade."));
             } else if (!key.equals(PROFILE) && !(value instanceof Boolean)) {

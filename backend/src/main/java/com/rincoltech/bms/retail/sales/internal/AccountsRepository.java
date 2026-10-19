@@ -162,6 +162,14 @@ class AccountsRepository {
                 .list();
     }
 
+    /** The sales among these whose unpaid part was written off (ADR-043): a payment that paid one cannot be reversed. */
+    List<UUID> writtenOffAmong(List<UUID> ids) {
+        return jdbc.sql("SELECT sale_id FROM retail_sale_writeoffs WHERE sale_id IN (:ids)")
+                .param("ids", ids)
+                .query(UUID.class)
+                .list();
+    }
+
     /** Whether a sale is an imported (historical) one: the manual allocation refuses those too. */
     List<UUID> historicalAmong(List<UUID> ids) {
         return jdbc.sql("SELECT id FROM retail_sales WHERE id IN (:ids) AND historical")

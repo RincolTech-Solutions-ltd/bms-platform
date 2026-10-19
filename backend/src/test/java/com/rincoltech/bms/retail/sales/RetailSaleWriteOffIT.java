@@ -230,6 +230,65 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                 .isEmpty();
     }
 
+    /** A return of {@code qty} pieces credited to the buyer's balance; the credit note's id. */
+    UUID returnToAccount(UUID sale, String qty) {
+        UUID line = UUID.fromString(sale(sale).get("lines").get(0).get("id").asString());
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("sale_line_id", line);
+        l.put("qty", qty);
+        l.put("reason", "defective");
+        l.put("disposition", "restock");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("lines", List.of(l));
+        body.put("refund_method", "account");
+        body.put("money_method", "cash");
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/returns",
+                body,
+                MANAGER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return UUID.fromString(r.getBody().get("sale_return").get("id").asString());
+    }
+
+    @Test
+    void afterAReturnTheLossIsTheCostThatIsLeftLessWhatThePaymentsCarriedIn() {
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        UUID s = creditSale(3, 3);
+        pay(s, 500, 2);
+        returnToAccount(s, "1");
+        // Left: 2 pieces worth 2,000 at a cost of 1,200. The 500 received carried in 500 x 1,200 / 2,000 = 300 of that
+        // cost.
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("unpaid_minor").asLong()).isEqualTo(1_500);
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(900);
+        Map<String, long[]> posted = posted(UUID.fromString(w.get("id").asString()));
+        assertThat(posted.get("bad_debt_loss")[0]).isEqualTo(900);
+        assertThat(posted.get("sales_revenue")[0]).isEqualTo(600);
+        assertThat(posted.get("trade_debtors")[1]).isEqualTo(1_500);
+        assertThat(ledgerImbalance()).isZero();
+        assertThat(profit().get("profit_minor").asLong())
+                .as("500 received less the 1,200 cost of the 2 pieces that stayed sold")
+                .isEqualTo(-700);
+    }
+
+    @Test
+    void aReturnOfAWrittenOffSaleCannotBeVoidedBack() {
+        UUID s = creditSale(3, 2);
+        UUID credit = returnToAccount(s, "1");
+        writeOffOk(s);
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/returns/" + credit + "/void",
+                Map.of("reason", "Customer changed their mind"),
+                MANAGER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("sale_written_off");
+        assertThat(sale(s).get("balance_minor").asLong()).isZero();
+    }
+
     // ---- on_sale: the whole unpaid amount ---------------------------------------------------------
 
     @Test

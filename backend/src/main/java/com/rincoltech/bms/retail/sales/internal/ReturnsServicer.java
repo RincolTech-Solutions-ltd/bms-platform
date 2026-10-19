@@ -594,7 +594,16 @@ class ReturnsServicer {
         Row seen = repo.find(returnId, false)
                 .filter(x -> principal.may(PERMISSION, x.branchId()))
                 .orElseThrow(ApiException::notFound);
-        sales.find(seen.saleId(), true).orElseThrow(ApiException::notFound);
+        Sale lockedSale = sales.find(seen.saleId(), true)
+                .orElseThrow(ApiException::notFound)
+                .sale();
+        if (lockedSale.writeOff() != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "sale_written_off",
+                    "Sale written off",
+                    "The unpaid part of this sale was written off, so its returns cannot be voided.");
+        }
         Row r = repo.find(returnId, true).orElseThrow(ApiException::notFound);
         if (r.status().equals("voided")) {
             throw new ApiException(

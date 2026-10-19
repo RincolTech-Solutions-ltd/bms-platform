@@ -46,17 +46,18 @@ class CreditRecognitionRepository {
                             SELECT p.sale_id, p.paid_on AS d, p.amount_minor AS pay, CAST(0 AS bigint) AS rv,
                                    CAST(0 AS bigint) AS rc, CAST(0 AS bigint) AS rf
                               FROM retail_sale_payments p
+                             WHERE p.paid_on <= :to
                             UNION ALL
                             SELECT al.sale_id, ap.reversed_on, -al.amount_minor, CAST(0 AS bigint), CAST(0 AS bigint),
                                    CAST(0 AS bigint)
                               FROM retail_account_payments ap
                               JOIN retail_account_payment_allocations al
                                 ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id
-                             WHERE ap.status = 'reversed'
+                             WHERE ap.status = 'reversed' AND ap.reversed_on <= :to
                             UNION ALL
                             SELECT r.sale_id, r.returned_on, CAST(0 AS bigint), r.total_minor, r.cost_minor, r.refund_minor
                               FROM retail_sale_returns r
-                             WHERE r.status = 'completed'
+                             WHERE r.status = 'completed' AND r.returned_on <= :to
                         ), active AS (
                             SELECT DISTINCT sale_id FROM e WHERE d BETWEEN :from AND :to
                         )

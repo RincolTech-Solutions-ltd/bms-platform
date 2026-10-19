@@ -86,8 +86,8 @@ class DashboardService {
             }
         }
         // ADR-043: with credit sales counted when the buyer pays, profit comes from the money received (sales paid at
-        // the
-        // sale, and each payment on a credit sale with its share of the profit); Sold stays what was sold.
+        // the sale,
+        // and each payment on a credit sale with its share of the profit); Sold stays what was sold.
         boolean onPay = capabilities.recognisesOnPayment();
         Map<UUID, Map<LocalDate, long[]>> recBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> recDay = new LinkedHashMap<>();
@@ -157,7 +157,8 @@ class DashboardService {
 
         // A shop row for every branch with sales in the window or with stock, in scope.
         List<UUID> branches = new ArrayList<>(byBranch.keySet());
-        positions.keySet().stream().filter(b -> !byBranch.containsKey(b)).forEach(branches::add);
+        recBranch.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
+        positions.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         branches.sort(null);
         List<Shop> shops = new ArrayList<>();
         for (UUID b : branches) {

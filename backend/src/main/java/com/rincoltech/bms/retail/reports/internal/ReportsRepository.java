@@ -114,8 +114,11 @@ class ReportsRepository {
         String deferredSale = received ? " AND (s.payment_method <> 'credit' OR s.historical)" : "";
         String deferredReturn = received
                 ? "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
-                        + " AND rs.payment_method = 'credit' AND NOT rs.historical) "
-                : "false ";
+                        + " AND rs.payment_method = 'credit' AND NOT rs.historical)"
+                : "false";
+        // Spelled outside the text blocks below, which strip the space at the end of a line.
+        String returnSales = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.total_minor END,";
+        String returnCost = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.cost_minor END,";
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("from", Date.valueOf(from));
         params.put("to", Date.valueOf(to));
@@ -147,16 +150,13 @@ class ReportsRepository {
                              WHERE occurred_on BETWEEN :from AND :to""" + usageFilter + """
 
                             UNION ALL
-                            SELECT r.branch_id, r.returned_on,
-                                   CASE WHEN """ + deferredReturn + """
- THEN 0 ELSE -r.total_minor END,
-                                   CASE WHEN """
-                        + deferredReturn + """
- THEN 0 ELSE -r.cost_minor END,
+                            SELECT r.branch_id, r.returned_on,""" + returnSales + returnCost + """
+
                                    coalesce((SELECT sum(l.line_cost_minor) FROM retail_sale_return_lines l
                                               WHERE l.return_id = r.id AND l.disposition = 'write_off'), 0)
                               FROM retail_sale_returns r
-                             WHERE r.status = 'completed' AND r.returned_on BETWEEN :from AND :to""" + returnsFilter + """
+                             WHERE r.status = 'completed' AND r.returned_on BETWEEN :from AND :to"""
+                        + returnsFilter + """
 
                             UNION ALL
                             SELECT l.branch_id, d.cost_date, 0, l.to_cogs_minor, 0

@@ -59,6 +59,37 @@ class WriteOffsRepository {
                 .update();
     }
 
+    /** What a sale holds now, for the share of its cost that was never recognised: all in minor units. */
+    record Standing(long paid, long returned, long returnedCost, long refunded) {}
+
+    /**
+     * Payments received less payments reversed, and the returns that stand (value, cost and money given back), as
+     * {@code CreditRecognition} in the reports reads them.
+     */
+    Standing standing(UUID saleId) {
+        return jdbc.sql("""
+                        SELECT
+                          (SELECT coalesce(sum(p.amount_minor), 0) FROM retail_sale_payments p WHERE p.sale_id = :sale)
+                          - (SELECT coalesce(sum(al.amount_minor), 0)
+                               FROM retail_account_payment_allocations al
+                               JOIN retail_account_payments ap ON ap.id = al.receipt_id
+                              WHERE al.sale_id = :sale AND ap.status = 'reversed') AS paid,
+                          (SELECT coalesce(sum(r.total_minor), 0) FROM retail_sale_returns r
+                            WHERE r.sale_id = :sale AND r.status = 'completed') AS returned,
+                          (SELECT coalesce(sum(r.cost_minor), 0) FROM retail_sale_returns r
+                            WHERE r.sale_id = :sale AND r.status = 'completed') AS returned_cost,
+                          (SELECT coalesce(sum(r.refund_minor), 0) FROM retail_sale_returns r
+                            WHERE r.sale_id = :sale AND r.status = 'completed') AS refunded
+                        """)
+                .param("sale", saleId)
+                .query((rs, n) -> new Standing(
+                        rs.getLong("paid"),
+                        rs.getLong("returned"),
+                        rs.getLong("returned_cost"),
+                        rs.getLong("refunded")))
+                .single();
+    }
+
     Optional<Row> forSale(UUID saleId) {
         return jdbc.sql("""
                         SELECT w.id, w.sale_id, s.sale_no, w.branch_id, w.written_off_on, w.currency, w.unpaid_minor,

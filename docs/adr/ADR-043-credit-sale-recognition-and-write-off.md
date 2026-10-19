@@ -55,8 +55,9 @@ balance today and every closed period.
 
 5. **Where the figures apply under `on_payment`.** The daily profit report (`sales_minor` becomes Received, `sold_minor` and the
    position `on_credit_minor` come beside it), the retail home cards (Sales today is Sold, Cash and mobile money is Received, On
-   credit is the position, Profit today is the profit of the money received) and the daily savings suggestion, which reads the
-   same `ProfitFigures` as the report so that they can never disagree: **50 percent of the received profit per shop per day**
+   credit is the position, Profit today is the gross profit of the money received) and the daily savings suggestion. The report and the
+   savings suggestion read the same `ProfitFigures` so that they can never disagree, and the cards use the same `CreditRecognition`
+   arithmetic (they show gross profit, with no usage, stock-take difference or debt written off, as they always did): **50 percent of the received profit per shop per day**
    (the tenant rate of ADR-022 is unchanged). Usage, damage, landed cost and the stock-take difference are unchanged.
    `/retail/sales/summary` and the grouped sales lists are not changed here (issue #341 owns that endpoint); the sales analysis,
    margins and evaluation reports keep counting what was sold, as product analytics.
@@ -83,8 +84,9 @@ balance today and every closed period.
 10. **Write-off (a loss for a buyer who never pays).** A holder of `retail.credit.manage` can write off the unpaid part of a live
     credit sale, with a reason. It never deletes: the sale stays, reads "Written off", and leaves the owing and overdue lists and
     On credit. It is audited and recorded in the append-only `retail_sale_writeoffs` (one per sale, never reversed in this
-    release). The journal entry clears the buyer's trade debtors for the unpaid amount `U`. Under `on_payment` the loss is the unpaid
-    share of the cost of goods, `L = round_half_up(cost x U / total)`, because the profit of the unpaid part was never counted: the entry
+    release). The journal entry clears the buyer's trade debtors for the unpaid amount `U`. Under `on_payment` the loss is the cost of the goods that no payment has carried into the profit yet (with no
+    return, the unpaid share of the cost of goods, `cost x U / total`; with returns, what the sale still holds after them less the
+    share the money kept has recognised, so the cost recognised plus `L` is the sale's cost to the unit), because the profit of the unpaid part was never counted: the entry
     debits the new chart account 5140 `bad_debt_loss` for `L`, debits sales revenue for the rest `U - L` (the profit never counted;
     a credit when the sale was sold below cost) and credits trade debtors for `U`. Under `on_sale` the sale's profit was counted when
     it was made, so the loss is the whole `U` and revenue is not touched. The loss is a figure of the daily profit report on the
@@ -99,7 +101,7 @@ balance today and every closed period.
 - The monthly profit is no longer overstated by credit sales that are never paid.
 - Nothing changes for any tenant that does not choose `on_payment`: the default, the queries, the responses (apart from new
   optional fields) and the golden tests are those of today.
-- One place (`ProfitFigures`) decides the basis for the report, the cards and the savings.
+- One place (`ProfitFigures`) decides the basis for the report and the savings, and the cards use the same recognition arithmetic.
 
 **Worse:**
 - Two bases exist at once (sales analysis, margins and evaluation still count what was sold), so a number in one report need not
@@ -109,6 +111,12 @@ balance today and every closed period.
 - The ledger still shows the profit of a credit sale at the sale (revenue and cost of goods sold), so the profit and loss account
   and the report differ in time until the buyer pays or the debt is written off; the difference is exactly On credit at margin.
 - A write-off lowers the savings suggestion of its day.
+- Switching the setting after a write-off restates the profit by the new rule, but the loss stays as it was stored: a write-off made under
+  `on_payment` and then viewed under `on_sale` leaves the unpaid profit counted at the sale with only the cost share lost.
+- A voided credit sale (possible only with no payment standing) drops out of every day, including days of payments that were later
+  reversed; the days net to zero but a past figure is restated.
+- A sale whose unpaid part was written off takes no payment, no void, no return, and its payments and returns cannot be reversed or voided.
+  A document issued from it (an invoice) still reads its paid amount, which includes the write-off; the document wording is a follow-up.
 
 **Watch for:**
 - Switching the setting back and forth: the reports restate the past by the new rule (nothing stored changes), but saved savings
