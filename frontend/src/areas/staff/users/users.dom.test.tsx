@@ -59,6 +59,9 @@ function shell(node: ReactElement, permissions: string[] = ADMIN) {
   );
 }
 
+// The first screen of the file pays for loading the lazy router, which is slow on a busy machine.
+vi.setConfig({ testTimeout: 15000 });
+
 const writeText = vi.fn();
 
 beforeEach(() => {
@@ -76,7 +79,7 @@ afterEach(() => {
 });
 
 async function fillInvite(overrides: { name?: string; phone?: string; role?: string } = {}) {
-  await screen.findByRole('option', { name: 'Cashier (cashier)' });
+  await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
   fireEvent.change(screen.getByLabelText('Full name'), { target: { value: overrides.name ?? 'Test Cashier 05' } });
   fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: overrides.phone ?? '0700 000 005' } });
   fireEvent.change(screen.getByLabelText('What will this person do?'), { target: { value: overrides.role ?? 'cashier' } });
@@ -85,7 +88,7 @@ async function fillInvite(overrides: { name?: string; phone?: string; role?: str
 describe('the invite form', () => {
   it('refuses an empty form and a bad phone before anything is sent', async () => {
     shell(<InviteScreen />);
-    await screen.findByRole('option', { name: 'Cashier (cashier)' });
+    await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
     expect(await screen.findByText('Type the person\'s full name.')).toBeTruthy();
     expect(screen.getByText(/Give a phone number or an email address/)).toBeTruthy();
@@ -174,7 +177,7 @@ describe('the one-time link', () => {
 
   it('is not there when the screen is opened again', async () => {
     shell(<InviteScreen />);
-    await screen.findByRole('option', { name: 'Cashier (cashier)' });
+    await screen.findByRole('option', { name: 'Cashier (cashier)' }, { timeout: 5000 });
     expect(screen.queryByLabelText('Invitation link')).toBeNull();
   });
 

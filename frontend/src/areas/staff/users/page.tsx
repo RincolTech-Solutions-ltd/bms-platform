@@ -112,7 +112,7 @@ export function UsersScreen() {
       )}
       {link && <LinkBox link={link} business={brand.name} onDone={() => setLink(null)} doneLabel="I have sent it" />}
       {notice && <p role="status" className="alert alert-success">{notice}</p>}
-      {error && <p role="alert" className="alert alert-danger">{error}</p>}
+      {error && mode?.kind !== 'deactivate' && <p role="alert" className="alert alert-danger">{error}</p>}
       {list.isPending && <p className="loading">Loading your staff</p>}
       {list.isError && <p role="alert" className="alert alert-danger">{messageOf(list.error)}</p>}
       {roles.isError && <p role="alert" className="alert alert-warning">The role names could not be loaded, so roles are shown by their key.</p>}
@@ -164,6 +164,7 @@ export function UsersScreen() {
                     )}
                     {mode?.id === u.id && mode?.kind === 'deactivate' && (
                       <div className="alert alert-warning stack" role="group" aria-label={`Deactivate ${u.full_name}`}>
+                        {error && <p role="alert" className="alert alert-danger">{error}</p>}
                         <p>Deactivate <strong>{u.full_name}</strong>? They are signed out at once and cannot sign in again. Everything they recorded stays on the books.</p>
                         <p className="cluster">
                           <button type="button" className="btn-danger" disabled={busyId !== null} onClick={() => void deactivate(u)}>
