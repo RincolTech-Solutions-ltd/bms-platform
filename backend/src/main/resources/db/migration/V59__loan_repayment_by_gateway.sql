@@ -8,8 +8,9 @@
 --      module booked, mapped to a ledger account by the tenant, FR-GL-08). The old check is replaced by a superset, so
 --      every existing row satisfies it. It is added NOT VALID and validated in the same transaction: that gains no lock
 --      relief (Flyway holds the ACCESS EXCLUSIVE lock to the commit) and is kept only so the validation is explicit.
---   2. A unique index over (tenant, payment method, external reference) for the method `gateway`, so a confirmation code
---      books one repayment however many times it is presented (spec 3.4.1). It is partial: no existing row has the
+--   2. A unique index over (tenant, payment method, external reference) for the method `gateway`, so an order tracking id
+--      (the provider's reference, unique per payment; the short confirmation code is not) books one repayment however
+--      many times it is presented (spec 3.4.1). It is partial: no existing row has the
 --      method `gateway` (the check above refused it until now), so building it scans the table once and finds nothing to
 --      collide with. A reversal row copies the method but never the reference, and the index names the two types that
 --      carry one.

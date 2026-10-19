@@ -130,16 +130,17 @@ class LoanServicer implements LoanServicing {
         }
         Loan loan = loans.lock(loanId).orElseThrow(ApiException::notFound);
         if (GATEWAY.equals(paymentMethodKey) && externalReference != null) {
-            // The loan row is locked, so two callers with one confirmation code meet here one after the other.
+            // The loan row is locked, so two callers with one payment reference meet here one after the other.
             Optional<Txn> first = repo.gatewayRepayment(externalReference);
             if (first.isPresent()) {
                 Txn t = first.get();
                 if (t.loanId().equals(loanId) && t.amountMinor() == amountMinor) {
                     return t.id();
                 }
-                // The same code for another loan or amount is not a replay: never hand back someone else's repayment.
+                // The same reference for another loan or amount is not a replay: never hand back someone else's
+                // repayment.
                 throw ApiException.rule(
-                        "duplicate_reference", "That confirmation code already booked a different payment.");
+                        "duplicate_reference", "That payment reference already booked a different payment.");
             }
         }
         checkRepayable(loan, valueDate, paymentMethodKey);

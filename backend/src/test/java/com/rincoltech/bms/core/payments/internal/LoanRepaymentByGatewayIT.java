@@ -796,4 +796,46 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                 JsonNode.class);
         assertThat(r.getStatusCode().value()).isEqualTo(403);
     }
+
+    @Test
+    void aPaymentWhoseDayFellInAClosedPeriodIsBookedDatedTodayEndToEnd() {
+        String loan = activeLoan();
+        clock.set(Instant.parse("2026-10-31T06:00:00Z"));
+        JsonNode intent = intentFor(loan, 520_000);
+        pay(intent, 520_000, "CONF-216-PC");
+        // The first booking fails technically (so the payment is confirmed on 31 October and waits), then the October
+        // period closes.
+        TestDatabase.owner()
+                .sql(
+                        "CREATE OR REPLACE FUNCTION it216_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'it216 technical failure'; END $$")
+                .update();
+        TestDatabase.owner()
+                .sql(
+                        "CREATE TRIGGER it216_fail BEFORE INSERT ON lending_loan_transactions FOR EACH ROW EXECUTE FUNCTION it216_fail()")
+                .update();
+        try {
+            tick(Duration.ofMinutes(3));
+        } finally {
+            TestDatabase.owner()
+                    .sql("DROP TRIGGER IF EXISTS it216_fail ON lending_loan_transactions")
+                    .update();
+        }
+        assertThat(row(intent).get("status")).isEqualTo("paid");
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE gl_periods SET status = 'closed', closed_at = now() WHERE tenant_id = ? AND year = 2026 AND month = 10")
+                .param(t.tenantId())
+                .update();
+        clock.set(Instant.parse("2026-11-01T06:00:00Z"));
+        poller.tick();
+        assertThat(row(intent).get("status")).isEqualTo("booked");
+        assertThat(repayments(loan).getFirst().get("value_date").toString()).isEqualTo("2026-11-01");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT data->'after'->>'note' FROM audit_log WHERE entity_id = ? AND action = 'core.payments.intent.booked'")
+                        .param(UUID.fromString(intent.get("id").asString()))
+                        .query(String.class)
+                        .single())
+                .isEqualTo("dated_today");
+    }
 }

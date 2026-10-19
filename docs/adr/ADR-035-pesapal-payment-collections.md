@@ -81,8 +81,8 @@ API; whose credentials are used; what is out of scope.
    `lending.savings_deposit`, the subscription confirmation for `platform.subscription_payment`. The
    payment method is `gateway` (account `gateway_clearing`). Idempotency is enforced twice: by the
    intent (`UNIQUE (provider, provider_reference)`, the stored `booked_subject_txn_id`, the row lock)
-   and by the servicing port, which records the provider's confirmation code as the transaction's
-   external reference under a unique index, so a second record for the same reference is a no-op that
+   and by the servicing port, which records the provider's reference as the transaction's
+   external reference under a unique index (as built in #216 this is the order tracking id, not the confirmation code; see the amendment of 2026-10-19), so a second record for the same reference, loan and amount is a no-op that
    returns the first transaction. The two existing ports take no key or reference today and are
    extended in the build slices (decision 15).
 

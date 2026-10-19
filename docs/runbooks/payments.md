@@ -99,8 +99,8 @@ confirms it with an authenticated status query, and the booker records it as a r
 2. **Where the money is.** Each repayment settles into the lender's Pesapal merchant account, not ours. The `gateway_clearing` balance is what Pesapal owes the
    business until the lender records the bank credit (chapter 12 section 12.4.2). The intent's `merchant_id` (and the audit row `core.payments.intent.booked`)
    say which merchant account took the money.
-3. **A completed payment the loan could not take.** A closed loan, a date the books cannot take or an unmapped method does not leave the money unbooked: the intent ends
-   `booked_unallocated`, the amount is posted debit `gateway_clearing` credit `unallocated_receipts` and a row is written to `unallocated_receipts` with the refusal code.
+3. **A completed payment the loan could not take.** A closed loan, a date the books cannot take or an unmapped method does not leave the money unbooked: it is posted out of the account `gateway` is mapped to at the branch into `unallocated_receipts`, and the intent ends
+   `booked_unallocated` and a row is written to `unallocated_receipts` with the refusal code.
    The counter `booking_refused` (spec 9.2) is the alert. Receipts debit the account the `gateway` method is mapped to at the branch, the account a repayment would have debited (`gateway_clearing` only when the method is unmapped or switched off). To list what is waiting (owner role, never the application role):
    `SELECT created_at, tenant_id, amount_minor, refusal_code, confirmation_code, intent_id FROM unallocated_receipts WHERE status = 'open' ORDER BY created_at;`.
    Allocating or refunding a receipt is the cashier's job through the allocation screen of a later slice (FR-PAY-04). **Until that ships, staff must not clear

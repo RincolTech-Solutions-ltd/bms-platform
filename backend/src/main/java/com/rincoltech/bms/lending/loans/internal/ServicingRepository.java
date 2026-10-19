@@ -197,7 +197,7 @@ class ServicingRepository {
                         """).paramSource(t).update();
     }
 
-    /** The repayment a gateway confirmation code already booked, if any (spec 3.4.1: idempotent at the port). */
+    /** The repayment a gateway payment reference (order tracking id) already booked, if any (spec 3.4.1: idempotent at the port). */
     Optional<Txn> gatewayRepayment(String externalReference) {
         return jdbc.sql("""
                         SELECT * FROM lending_loan_transactions

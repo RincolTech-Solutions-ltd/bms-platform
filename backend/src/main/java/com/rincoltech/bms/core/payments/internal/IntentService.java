@@ -229,6 +229,14 @@ class IntentService implements PaymentCollections {
     }
 
     @Override
+    public java.util.Optional<String> confirmationCodeOf(UUID bookedTransactionId) {
+        return jdbc.sql("SELECT confirmation_code FROM payment_intents WHERE booked_subject_txn_id = ?")
+                .param(bookedTransactionId)
+                .query(String.class)
+                .optional();
+    }
+
+    @Override
     public IntentView get(UUID intentId) {
         Principal principal = CurrentPrincipal.require();
         return read.execute(status -> {
@@ -322,6 +330,7 @@ class IntentService implements PaymentCollections {
                 flags,
                 i.failureReason(),
                 i.refusalCode(),
-                i.bookedTxnId());
+                i.bookedTxnId(),
+                i.confirmationCode());
     }
 }

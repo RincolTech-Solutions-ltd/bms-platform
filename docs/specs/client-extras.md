@@ -134,7 +134,7 @@ are registered by the owning module (chapter 5 section 5.4.3).
 
 **Booking**, in one transaction: lock the intent row; if `booked_subject_txn_id` is set, stop (duplicate);
 check status `completed`, equal merchant reference and currency; call the handler inside a **savepoint**
-with method `gateway`, the confirmation code as external reference (3.4.1) and an audit entry naming the
+with method `gateway`, the order tracking id as external reference (3.4.1; the confirmation code is kept in the intent audit) and an audit entry naming the
 order tracking id; store the booked transaction id, the paid amount, the confirmation code and the
 reported payment method on the intent. `UNIQUE (provider, provider_reference)` backs it at the database.
 The audit actor is the intent's initiator.

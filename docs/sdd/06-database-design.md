@@ -727,7 +727,7 @@ and a foreign key to `payment_intents`), `purpose`, `subject_type`, `subject_id`
 `booked_unallocated`). The payer's phone is not copied (it stays on the intent). The columns of allocation (`allocated_subject_*`, `allocated_by`, `allocated_at`,
 `allocation_journal_entry_id`) arrive with the slice that allocates a receipt (FR-PAY-04). The same migration lets `lending_loan_transactions.payment_method_key` take `gateway`
 (the check is replaced by a superset, added `NOT VALID` and validated) and adds the partial unique index `lending_loan_transactions_gateway_reference` over
-(`tenant_id`, `payment_method_key`, `external_reference`) where the method is `gateway`, the reference is not null and the type is `repayment` or `recovery`, so one confirmation code books
+(`tenant_id`, `payment_method_key`, `external_reference`) where the method is `gateway`, the reference is not null and the type is `repayment` or `recovery`, so one order tracking id books
 one repayment (spec 3.4.1).
 
 ### Import tables (RLS)

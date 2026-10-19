@@ -163,6 +163,9 @@ export function CollectStatus({ loan, initial, onNew }: { loan: Loan; initial: P
           </button>
         </div>
       )}
+      {intent.confirmation_code && (
+        <p className="ln-muted">Payment code <strong>{intent.confirmation_code}</strong></p>
+      )}
       {booked && (
         <p>
           {receipt?.receipt_no ? (

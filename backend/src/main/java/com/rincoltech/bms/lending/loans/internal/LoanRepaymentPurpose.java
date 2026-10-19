@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * tenant's currency, no more than the payoff quote of today, spec 3.7) and which branch the money belongs to;
  * {@link #book} is {@link LoanServicing#recordRepayment} with the method {@code gateway}, so a paid mobile money order
  * is allocated, numbered, receipted and posted exactly like a cashier's repayment, and the same call a second time with
- * the same confirmation code returns the first transaction.
+ * the same order tracking id (Booking#providerReference) returns the first transaction.
  *
  * <p>A business refusal of the servicing code (a closed loan, a value date before the loan's last repayment, a method
  * with no account) is handed to the payments module as a {@link PurposeRefusal}, which never strands the money: it
