@@ -444,20 +444,20 @@ Additive; nothing above is rewritten.
     attributable to the merchant account that received the money. The describe step refuses a loan that is not active, a currency other
     than the loan's (`subject_not_payable`) and an amount above today's payoff quote (`exceeds_payoff`).
 30. **Booking is the cash repayment.** The handler calls the `LoanServicing.recordRepayment` overload (ADR-026 amendment of the same date)
-    with the method `gateway`, the confirmation code as the external reference (the order tracking id if none) and origin `gateway`.
+    with the method `gateway`, the **order tracking id** as the external reference (unique per intent; the confirmation code is kept in the intent's audit row) and origin `gateway`.
     Allocation order, receipt number, journal and audit are those of a cashier's repayment; the receipt text is queued in the same
     transaction. Partial and larger payments follow spec 3.7: what was paid is booked, and the excess on a settled loan is the loan's
     credit balance (R-ALLOC step 4).
 31. **Refusals never strand money, as built.** The booker retries `before_last_repayment` once dated today. Any other business refusal
     (a closed or written-off loan, `value_date_in_future`, `payment_method_unmapped`, `duplicate_reference`, a loan currency other than the payment's) rolls the handler's
-    savepoint back, then in the same transaction posts the confirmed amount debit `gateway_clearing` (by system key, so an unmapped
+    savepoint back, then in the same transaction posts the confirmed amount debit the account the `gateway` method is mapped to at the branch (`gateway_clearing` by system key only when it is unmapped, so an unmapped
     method cannot block it) credit `unallocated_receipts`, inserts the `unallocated_receipts` row (migration V59), stores the refusal code
     and ends the intent `booked_unallocated`, audited with the receipt id and the merchant. It is dated the payment's day, or today when
-    that period is closed; the debit is the account the `gateway` method is mapped to at the branch, `gateway_clearing` only when it is unmapped. A `period_closed` refusal is retried once dated today, like
-    `before_last_repayment`. Idempotency is by loan and amount: the same confirmation code for another loan or amount is `duplicate_reference`, never a replay. Staff cannot reverse a gateway
+    that period is closed; the debit is the account the `gateway` method is mapped to at the branch, `gateway_clearing` only when it is unmapped (a lookup that cannot refuse, so it never marks the booking rollback-only). A `period_closed` refusal is retried once dated today, like
+    `before_last_repayment`. Idempotency is by loan and amount: the same reference for another loan or amount is `duplicate_reference`, never a replay. Staff cannot reverse a gateway
     repayment (`gateway_reversal_pending`) until #224. The branch permission is checked before the handler describes the loan. A failure of that posting is a technical failure (retried, five in a row end `needs_attention`), never a
     lost payment. Allocating or refunding a receipt (FR-PAY-04) is a later slice; the table is append-only until then.
-32. **Duplicates.** One booking per intent (row lock and status check, as before) and one repayment per confirmation code (the port's
+32. **Duplicates.** One booking per intent (row lock and status check, as before) and one repayment per order tracking id (the port's
     idempotency and the unique index), so a replayed notification, a poll that finds the same completed order and a retry after a lost
     answer end in one repayment. A payment that completes after the link expired books normally and is flagged `late`.
 33. **Not built here.** The per-tenant non-login system user is created by the slice that first needs it, the reversal request of a

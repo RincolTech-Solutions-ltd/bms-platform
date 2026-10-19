@@ -101,15 +101,15 @@ confirms it with an authenticated status query, and the booker records it as a r
    say which merchant account took the money.
 3. **A completed payment the loan could not take.** A closed loan, a date the books cannot take or an unmapped method does not leave the money unbooked: the intent ends
    `booked_unallocated`, the amount is posted debit `gateway_clearing` credit `unallocated_receipts` and a row is written to `unallocated_receipts` with the refusal code.
-   The counter `booking_refused` (spec 9.2) is the alert. Receipts debit the account the `gateway` method is mapped to at the branch (`gateway_clearing` only when it is unmapped). To list what is waiting (owner role, never the application role):
+   The counter `booking_refused` (spec 9.2) is the alert. Receipts debit the account the `gateway` method is mapped to at the branch, the account a repayment would have debited (`gateway_clearing` only when the method is unmapped or switched off). To list what is waiting (owner role, never the application role):
    `SELECT created_at, tenant_id, amount_minor, refusal_code, confirmation_code, intent_id FROM unallocated_receipts WHERE status = 'open' ORDER BY created_at;`.
    Allocating or refunding a receipt is the cashier's job through the allocation screen of a later slice (FR-PAY-04). **Until that ships, staff must not clear
    an open receipt by a manual journal**: the row would stay `open` and be allocated a second time when FR-PAY-04 arrives. Leave it open; the operator tells the lender
    and the receipt waits. The money is safe in the lender's own Pesapal account and in the liability `unallocated_receipts`.
-4. **Five technical failures in a row** (the database, not a refusal) end the intent `needs_attention` (`refusal_code technical_failures`) with an alert; the money is
+4. **Five technical failures in a row** (the database, or a configuration error such as `account_not_postable`, a ledger `currency_mismatch` or a missing chart account) end the intent `needs_attention` (`refusal_code technical_failures`) with an alert; the money is
    safe at the provider and in the intent's stored paid amount. Look at the log lines `payment intent ... booking failed technically`, fix the cause and ask the
    developer to re-queue; nothing is retried for ever.
-5. **A repeated confirmation code** for the same loan and amount returns the first repayment (a replay ends in one); the same code for another loan or amount is
+5. **A repeated order** (the port is keyed on the order tracking id, never on the provider's short confirmation code, which two genuine payments can share) for the same loan and amount returns the first repayment; the same order for another loan or amount is
    refused `duplicate_reference` and the second payment is held as an unallocated receipt. A written-off loan takes no gateway payment (held the same way), and staff cannot
    reverse a gateway repayment (`gateway_reversal_pending`) until #224. If a cashier also entered
    the same mobile money receipt by hand it is a second repayment: the reconciliation report flags it (slice #224).

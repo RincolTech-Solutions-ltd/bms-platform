@@ -150,7 +150,7 @@ import). It now also serves the payments module booking a verified gateway payme
   journal and audit), so a repayment paid on a phone is indistinguishable in the books from one a cashier typed, apart from the
   account the money came in on (the mapping of the `gateway` method, normally `gateway_clearing`) and the transaction's `source`
   (`gateway`).
-- Idempotent for the method `gateway`: a second call with the same `externalReference` (the provider's confirmation code) returns
+- Idempotent for the method `gateway`: a second call with the same `externalReference` (the provider's order tracking id, unique per payment; a short confirmation code is not) for the same loan and amount returns
   the first transaction and writes nothing, under the loan row lock; a unique partial index over (tenant, method, reference) for
   repayments and recoveries backs it (migration V59). A reversal copies the method but never the reference.
 - `origin` becomes the transaction's `source` (`gateway`, `system`, `import`, `portal`). `queueReceiptNotice` queues the repayment

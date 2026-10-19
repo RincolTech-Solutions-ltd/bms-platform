@@ -175,7 +175,7 @@ SavingsServicing.deposit(accountId, amountMinor, valueDate, paymentMethodKey, re
                          externalReference, origin, queueReceiptNotice) -> txnId
 ```
 
-- `externalReference` is the provider's confirmation code (the order tracking id if none is given),
+- `externalReference` is the provider's reference for the payment: the order tracking id (unique per intent; slice #216 found a short confirmation code is not unique), with the confirmation code kept in the intent's audit row,
   stored in the transaction's existing external reference column. A unique index over (tenant,
   payment method, external reference) for method `gateway` makes a second call with the same reference a
   no-op that returns the first transaction, so idempotency holds at the port as well as on the intent.
@@ -460,12 +460,14 @@ recordings. Mobile money cannot be tested without an answer to question 9.
   row of the booking names it with the order tracking id.
 - **Describe.** The loan must exist in the caller's visibility, be `active` and in the tenant's currency (else `subject_not_payable`), and the amount is at most today's payoff
   quote (else `exceeds_payoff`); a written-off loan takes no gateway recovery.
-- **Booking** is `LoanServicing.recordRepayment(loanId, amount, valueDate, "gateway", recordedBy, confirmationCode, "gateway", true)` (3.4.1), recorded by the intent's initiator,
-  source `gateway`, idempotent on the confirmation code (the order tracking id when there is none): the same allocation, receipt number and journal as a cash repayment, the
-  receipt text queued in the same transaction for a tenant with SMS events on. The repayment's own audit row carries `origin` and `external_reference`; the order tracking id is on the
-  intent's audit row of the same transaction, which also names the booked transaction (the port takes no order id).
+- **Booking** is `LoanServicing.recordRepayment(loanId, amount, valueDate, "gateway", recordedBy, orderTrackingId, "gateway", true)` (3.4.1), recorded by the intent's initiator,
+  source `gateway`, with the **order tracking id** as the external reference, because it is unique per intent while a provider's short confirmation code is not (two genuine
+  payments can carry one, and booking must not swallow the second). Idempotent on that reference for the same loan and amount; the same reference for another loan or amount is
+  `duplicate_reference` (held as an unallocated receipt); `payment_intents (tenant_id, booked_subject_txn_id)` is unique where set (V59). The same allocation, receipt number and journal as a cash repayment, the
+  receipt text queued in the same transaction for a tenant with SMS events on. The repayment's own audit row carries `origin` and `external_reference` (the order tracking id); the provider's confirmation code is on the
+  intent's audit row of the same transaction (`confirmation_code`, with the merchant id and the booked transaction) and on the unallocated receipt.
 - **Handler refusals** end as the table of 3.4 says, now built: `before_last_repayment` retried once dated today (`booked`, note "dated today"); any other business refusal posts the
-  amount debit `gateway_clearing` credit `unallocated_receipts`, inserts the `unallocated_receipts` row, ends the intent `booked_unallocated` and counts `booking_refused`. The
+  amount debit the account the `gateway` method is mapped to at the branch (`gateway_clearing` when unmapped) credit `unallocated_receipts`, inserts the `unallocated_receipts` row, ends the intent `booked_unallocated` and counts `booking_refused`. The
   allocation screen and the refund are later slices; the table is append-only until then (migration V59).
 - **Not built here.** The non-login system user (spec 3.4, decision 16) is created by the slice that first acts as it, the reversal approval request (#224). A payment in another
   currency than the intent's still ends `needs_attention` (the status checker never hands it to booking).

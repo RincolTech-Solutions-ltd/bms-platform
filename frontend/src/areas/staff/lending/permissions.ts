@@ -58,8 +58,10 @@ export function actionsFor(me: Pick<Me, 'permissions'>, status: string | undefin
 export function canReverse(
   me: Pick<Me, 'permissions'>,
   loanStatus: string | undefined,
-  txn: { txn_type?: string; reversed_by_txn_id?: string },
+  txn: { txn_type?: string; reversed_by_txn_id?: string; payment_method_key?: string },
 ): boolean {
+  // A payment collected by mobile money is reviewed with the payment provider, not reversed by staff (issue #216, #224).
+  if (txn.payment_method_key === 'gateway') return false;
   if (!mayDo(me, 'reverse') || txn.reversed_by_txn_id) return false;
   if (txn.txn_type === 'recovery') return true;
   return txn.txn_type === 'repayment' && ['active', 'closed'].includes(loanStatus ?? '');
