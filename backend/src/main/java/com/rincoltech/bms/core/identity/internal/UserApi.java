@@ -58,6 +58,13 @@ final class UserApi {
     @Schema(name = "InvitationLink")
     record InvitationLink(String url, Instant expiresAt) {}
 
+    /**
+     * The one-time link a tenant admin hands to a user who forgot the password (FR-IAM-15): shown once, valid for one hour, and
+     * never sent by email on this path.
+     */
+    @Schema(name = "SignInResetLink")
+    record SignInResetLink(String url, Instant expiresAt) {}
+
     @Schema(name = "InvitedUser")
     record InvitedUserResponse(UserResponse user, InvitationLink invitation) {}
 

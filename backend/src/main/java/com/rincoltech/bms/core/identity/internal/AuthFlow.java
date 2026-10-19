@@ -45,7 +45,9 @@ class AuthFlow {
     enum Step {
         SIGNED_IN,
         MFA_REQUIRED,
-        MFA_ENROLMENT_REQUIRED
+        MFA_ENROLMENT_REQUIRED,
+        /** The password was reset but no session is issued: the user signs in with the new password. */
+        SIGN_IN_REQUIRED
     }
 
     /** What a step returns: tokens when signed in, an MFA token between the two factors. */
@@ -120,6 +122,34 @@ class AuthFlow {
                     tokens.mfa(account.id(), accounts.tenantId(), accounts.kind(), issuer, now));
         }
         return signIn(accounts, account.id(), now, issuer, userAgent, List.of(), "invitation");
+    }
+
+    /**
+     * The sign-in right after a password reset (FR-IAM-15, ADR-042): the link and the new password have just proved who the
+     * user is, as for {@link #afterInvitation}, and a second factor is still asked for exactly as {@link #login} would. A reset
+     * does not clear the failed-attempt lock (it would let a mailbox thief keep guessing the code between resets), so a
+     * locked account is told to sign in later and gets no session.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
+    Outcome afterReset(Accounts accounts, UUID userId, String issuer, String userAgent) {
+        Instant now = clock.now();
+        Account account = accounts.byIdForUpdate(userId).orElseThrow(AuthFlow::invalidCredentials);
+        if (!account.active()) {
+            throw invalidCredentials();
+        }
+        if (account.lockedAt(now)) {
+            return new Outcome(Step.SIGN_IN_REQUIRED, null, null, null, List.of());
+        }
+        if (account.mfaEnabled()) {
+            return Outcome.mfa(
+                    Step.MFA_REQUIRED, tokens.mfa(account.id(), accounts.tenantId(), accounts.kind(), issuer, now));
+        }
+        if (accounts.mfaRequired(account.id())) {
+            return Outcome.mfa(
+                    Step.MFA_ENROLMENT_REQUIRED,
+                    tokens.mfa(account.id(), accounts.tenantId(), accounts.kind(), issuer, now));
+        }
+        return signIn(accounts, account.id(), now, issuer, userAgent, List.of(), "password_reset");
     }
 
     /** The second factor: a TOTP code or one unused recovery code (FR-IAM-06, FR-IAM-11). */

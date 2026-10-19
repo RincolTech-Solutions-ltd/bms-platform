@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.identity.internal.UserApi.InvitationLink;
 import com.rincoltech.bms.core.identity.internal.UserApi.InviteUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.InvitedUserResponse;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleAssignmentRequest;
+import com.rincoltech.bms.core.identity.internal.UserApi.SignInResetLink;
 import com.rincoltech.bms.core.identity.internal.UserApi.UpdateUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserPage;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserResponse;
@@ -37,9 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
 class UserController {
 
     private final UserService service;
+    private final PasswordResets resets;
 
-    UserController(UserService service) {
+    UserController(UserService service, PasswordResets resets) {
         this.service = service;
+        this.resets = resets;
     }
 
     @GetMapping
@@ -114,5 +117,15 @@ class UserController {
     @Operation(summary = "Reset another user's lost second factor (FR-IAM-12)", operationId = "resetUserMfa")
     UserResponse resetMfa(@PathVariable("user_id") UUID userId) {
         return service.resetMfa(userId);
+    }
+
+    @PostMapping("/{user_id}/reset-sign-in")
+    @RequiresPermission("core.users.manage")
+    @Operation(
+            summary =
+                    "Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15)",
+            operationId = "resetUserSignIn")
+    SignInResetLink resetSignIn(@PathVariable("user_id") UUID userId) {
+        return resets.issueForAdmin(userId);
     }
 }
