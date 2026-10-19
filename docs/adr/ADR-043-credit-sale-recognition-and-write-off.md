@@ -89,7 +89,8 @@ balance today and every closed period.
     share the money kept has recognised, so the cost recognised plus `L` is the sale's cost to the unit), because the profit of the unpaid part was never counted: the entry
     debits the new chart account 5140 `bad_debt_loss` for `L`, debits sales revenue for the rest `U - L` (the profit never counted;
     a credit when the sale was sold below cost) and credits trade debtors for `U`. Under `on_sale` the sale's profit was counted when
-    it was made, so the loss is the whole `U` and revenue is not touched. The loss is a figure of the daily profit report on the
+    it was made, so the loss is the whole `U` and revenue is not touched. Both figures are stored, and the daily profit report shows the one
+    that the tenant's setting of the day it is read calls for. The loss is a figure of the daily profit report on the
     write-off date (`bad_debt_minor`, inside `profit_minor`) and so lowers that day's savings suggestion. Above the tenant's approval
     threshold for the action `retail_sale_write_off` the write-off is a maker-checker action (ADR-015); with no threshold set it
     needs no second person, like every other optional threshold of ADR-033. An imported sale cannot be written off.
@@ -111,8 +112,9 @@ balance today and every closed period.
 - The ledger still shows the profit of a credit sale at the sale (revenue and cost of goods sold), so the profit and loss account
   and the report differ in time until the buyer pays or the debt is written off; the difference is exactly On credit at margin.
 - A write-off lowers the savings suggestion of its day.
-- Switching the setting after a write-off restates the profit by the new rule, but the loss stays as it was stored: a write-off made under
-  `on_payment` and then viewed under `on_sale` leaves the unpaid profit counted at the sale with only the cost share lost.
+- Switching the setting after a write-off is safe for the reports: the write-off stores both figures (the unpaid amount and the cost never
+  carried into the profit) and the report picks the one that the setting of the day it is read calls for. The entry the write-off booked in
+  the ledger is not rewritten, so the split between bad debt loss and sales revenue stays as it was on the day.
 - A voided credit sale (possible only with no payment standing) drops out of every day, including days of payments that were later
   reversed; the days net to zero but a past figure is restated.
 - A sale whose unpaid part was written off takes no payment, no void, no return, and its payments and returns cannot be reversed or voided.

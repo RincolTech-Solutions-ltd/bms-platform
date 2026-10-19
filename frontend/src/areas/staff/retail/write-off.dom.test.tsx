@@ -82,7 +82,7 @@ describe('the form', () => {
     writeOffSale.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     screenOf(admin, <WriteOffSaleAction sale={owing} />);
     fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
-    expect(screen.getByTestId('write-off-warning').textContent).toMatch(/UGX 10,000 will be treated as lost.*stays on record.*Written off.*cannot be undone/);
+    expect(screen.getByTestId('write-off-warning').textContent).toMatch(/UGX 10,000 owed will be cleared as a bad debt.*stays on record.*Written off.*cannot be undone/);
     const go = () => screen.getByRole('button', { name: /^(Write off|Writing off)$/ }) as HTMLButtonElement;
     expect(go().disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(/Why will this buyer not pay/), { target: { value: 'abcd' } });
@@ -97,7 +97,7 @@ describe('the form', () => {
     expect(writeOffSale.mock.calls[0]?.[1]).toBe('Buyer left town');
     expect(typeof writeOffSale.mock.calls[0]?.[2]).toBe('string');
     finish({ executed: true, write_off: { unpaid_minor: 10000 } });
-    expect((await screen.findByText(/Written off UGX 10,000 as a loss/)).textContent).toBeTruthy();
+    expect((await screen.findByText(/Cleared UGX 10,000 owed as a bad debt/)).textContent).toBeTruthy();
   });
 
   it('says when the write-off waits for a second administrator', async () => {

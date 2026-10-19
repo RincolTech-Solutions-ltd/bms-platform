@@ -28,6 +28,7 @@ class WriteOffsRepository {
             String currency,
             long unpaidMinor,
             long lossMinor,
+            long costShareMinor,
             String recognition,
             String reason,
             UUID journalEntryId,
@@ -39,8 +40,9 @@ class WriteOffsRepository {
     void insert(Row w) {
         jdbc.sql("""
                         INSERT INTO retail_sale_writeoffs (id, tenant_id, sale_id, branch_id, written_off_on, currency,
-                            unpaid_minor, loss_minor, recognition, reason, journal_entry_id, approval_id, approved_by, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            unpaid_minor, loss_minor, cost_share_minor, recognition, reason, journal_entry_id, approval_id,
+                            approved_by, created_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
                 .params(
                         w.id(),
@@ -50,6 +52,7 @@ class WriteOffsRepository {
                         w.currency(),
                         w.unpaidMinor(),
                         w.lossMinor(),
+                        w.costShareMinor(),
                         w.recognition(),
                         w.reason(),
                         w.journalEntryId(),
@@ -93,7 +96,7 @@ class WriteOffsRepository {
     Optional<Row> forSale(UUID saleId) {
         return jdbc.sql("""
                         SELECT w.id, w.sale_id, s.sale_no, w.branch_id, w.written_off_on, w.currency, w.unpaid_minor,
-                               w.loss_minor, w.recognition, w.reason, w.journal_entry_id, w.approval_id, w.approved_by,
+                               w.loss_minor, w.cost_share_minor, w.recognition, w.reason, w.journal_entry_id, w.approval_id, w.approved_by,
                                w.created_by, w.created_at
                           FROM retail_sale_writeoffs w JOIN retail_sales s ON s.id = w.sale_id
                          WHERE w.sale_id = ?
@@ -108,6 +111,7 @@ class WriteOffsRepository {
                         rs.getString("currency"),
                         rs.getLong("unpaid_minor"),
                         rs.getLong("loss_minor"),
+                        rs.getLong("cost_share_minor"),
                         rs.getString("recognition"),
                         rs.getString("reason"),
                         rs.getObject("journal_entry_id", UUID.class),

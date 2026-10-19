@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * The one place that decides how credit sales count in the profit figures (ADR-043), so the daily profit report, the
- * dashboard and the cash book's daily savings can never disagree. With the tenant setting {@code on_sale} (the
+ * cash book's daily savings can never disagree (the dashboard cards use the same recognition arithmetic and show gross profit). With the tenant setting {@code on_sale} (the
  * default) the figures are exactly what {@link ReportsRepository#daily} has always returned. With {@code on_payment}
  * they are the money received: sales paid at the sale in full on the sale date, and each payment on a credit sale on the
  * day it was received with its share of the sale's profit ({@link CreditRecognition}).
@@ -44,7 +44,7 @@ class ProfitFigures {
     }
 
     private List<DayFigures> withBadDebt(List<DayFigures> base, List<UUID> branchIds, LocalDate from, LocalDate to) {
-        List<DayFigures> losses = credit.badDebt(branchIds, from, to);
+        List<DayFigures> losses = credit.badDebt(branchIds, from, to, onPayment());
         if (losses.isEmpty()) {
             return base;
         }

@@ -112,12 +112,12 @@ export const writeOffReasonOf = (text: string): string | null => reasonOf(text);
 
 /** What the person is told before they confirm: the amount, that it is a loss, that nothing is deleted and that it cannot be undone. */
 export const writeOffWarning = (owed: number): string =>
-  `${formatMinor(owed, RETAIL_CURRENCY)} will be treated as lost. The sale stays on record and reads Written off, the buyer no longer owes it, and it leaves the owing and overdue lists. This cannot be undone.`;
+  `${formatMinor(owed, RETAIL_CURRENCY)} owed will be cleared as a bad debt. The sale stays on record and reads Written off, the buyer no longer owes it, and it leaves the owing and overdue lists. The loss shows in Daily profit on today's date. This cannot be undone.`;
 
 /** A sentence for the result of a write-off: done, or waiting for a second administrator. */
 export const writeOffWords = (outcome: Pick<WriteOffOutcome, 'executed' | 'write_off'>): string =>
   outcome.executed === true
-    ? `Written off ${formatMinor(outcome.write_off?.unpaid_minor ?? 0, RETAIL_CURRENCY)} as a loss. The sale stays on record.`
+    ? `Cleared ${formatMinor(outcome.write_off?.unpaid_minor ?? 0, RETAIL_CURRENCY)} owed as a bad debt. The sale stays on record.`
     : 'Sent to a second administrator to approve. Nothing changes until they do.';
 
 /** Refusals that mean the sale moved on since the screen read it. */

@@ -91,7 +91,7 @@ class CreditRecognitionRepository {
      * report figures with only the bad debt set. A written-off sale stays out of On credit because its paid amount holds the
      * debt that was cleared.
      */
-    List<ReportsRepository.DayFigures> badDebt(List<UUID> branchIds, LocalDate from, LocalDate to) {
+    List<ReportsRepository.DayFigures> badDebt(List<UUID> branchIds, LocalDate from, LocalDate to, boolean onPayment) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -103,7 +103,11 @@ class CreditRecognitionRepository {
             params.put("branchIds", branchIds);
             branch = " AND w.branch_id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT w.branch_id, w.written_off_on AS day, sum(w.loss_minor) AS loss"
+        // The loss follows the setting of the day the report is read: the cost never carried into the profit with
+        // on_payment, the
+        // whole unpaid amount with on_sale, so switching the setting after a write-off never leaves the wrong figure.
+        String loss = onPayment ? "w.cost_share_minor" : "w.unpaid_minor";
+        return jdbc.sql("SELECT w.branch_id, w.written_off_on AS day, sum(" + loss + ") AS loss"
                         + "  FROM retail_sale_writeoffs w"
                         + " WHERE w.written_off_on BETWEEN :from AND :to" + branch
                         + " GROUP BY w.branch_id, w.written_off_on")

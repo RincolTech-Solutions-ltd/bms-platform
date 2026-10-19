@@ -224,6 +224,8 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     void theSaleLeavesTheOwingAndOverdueLists() {
         UUID s = creditSale(2, 3);
         assertThat(api.get("/sales?owing=owing", ADMIN).getBody().get("items")).hasSize(1);
+        assertThat(api.get("/sales?owing=overdue", ADMIN).getBody().get("items"))
+                .isEmpty();
         writeOffOk(s);
         assertThat(api.get("/sales?owing=owing", ADMIN).getBody().get("items")).isEmpty();
         assertThat(api.get("/sales?owing=overdue", ADMIN).getBody().get("items"))
@@ -308,6 +310,25 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         assertThat(report.get("profit_minor").asLong())
                 .as("1,200 counted at the sale less the 2,000 lost")
                 .isEqualTo(-800);
+    }
+
+    @Test
+    void theReportFollowsTheSettingOfTheDayItIsReadNotOfTheDayOfTheWriteOff() {
+        UUID s = creditSale(3, 3);
+        pay(s, 1_000, 2);
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("loss_minor").asLong()).as("booked under on_sale").isEqualTo(2_000);
+        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(2_000);
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        JsonNode report = profit();
+        assertThat(report.get("bad_debt_minor").asLong())
+                .as("the cost never carried into the profit")
+                .isEqualTo(1_200);
+        assertThat(report.get("profit_minor").asLong())
+                .as("1,000 received less the 1,800 cost")
+                .isEqualTo(-800);
+        setting(Map.of("credit_sale_recognition", "on_sale"));
+        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(2_000);
     }
 
     // ---- rules and permissions ----------------------------------------------------------------------

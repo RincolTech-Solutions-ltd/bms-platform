@@ -79,9 +79,12 @@ SELECT bms_seed_retail_chart(tenant_id) FROM tenant_modules WHERE module_key = '
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_sale_writeoffs: one write-off per credit sale. unpaid_minor is what the buyer still owed, the amount the entry clears
--- from trade debtors. loss_minor is the loss the profit report shows on written_off_on: under credit_sale_recognition
--- on_payment the unpaid share of the cost of goods (the profit of the unpaid part was never counted), under on_sale the whole
--- unpaid amount (the sale and its profit were counted when it was made); recognition records which, at the time. The entry
+-- from trade debtors. cost_share_minor is the cost of the goods that no payment had carried into the profit (the unpaid share of
+-- the cost of goods, after returns): the loss the profit report shows on written_off_on under credit_sale_recognition on_payment,
+-- since the profit of the unpaid part was never counted. Under on_sale the report shows the whole unpaid_minor (the sale and its
+-- profit were counted when it was made), so the report follows the tenant's setting of the day it is read and a later switch of the
+-- setting can never leave the wrong figure. loss_minor is the loss the entry booked, under the setting of the day of the write-off,
+-- and recognition records which; the books are not rewritten by a switch. The entry
 -- debits bad debt loss for loss_minor, debits sales revenue for the rest (credits it when the sale was sold below cost) and
 -- credits trade debtors for unpaid_minor with the sale as subledger. approval_id and approved_by are set when a second
 -- administrator approved it (maker-checker above the tenant's threshold for retail_sale_write_off).
@@ -97,6 +100,7 @@ CREATE TABLE retail_sale_writeoffs (
     currency         char(3)      NOT NULL REFERENCES currencies (code),
     unpaid_minor     bigint       NOT NULL CHECK (unpaid_minor > 0 AND unpaid_minor <= 10000000000000),
     loss_minor       bigint       NOT NULL CHECK (loss_minor >= 0 AND loss_minor <= 10000000000000),
+    cost_share_minor bigint       NOT NULL CHECK (cost_share_minor >= 0 AND cost_share_minor <= 10000000000000),
     recognition      text         NOT NULL CHECK (recognition IN ('on_sale', 'on_payment')),
     reason           varchar(300) NOT NULL CHECK (btrim(reason) <> ''),
     journal_entry_id uuid         NOT NULL,

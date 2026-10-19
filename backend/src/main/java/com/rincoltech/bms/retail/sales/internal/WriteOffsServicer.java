@@ -71,7 +71,7 @@ class WriteOffsServicer {
     }
 
     /** What a write-off would do to a sale as it is now. */
-    record Plan(Sale sale, long unpaidMinor, long lossMinor, String recognition) {}
+    record Plan(Sale sale, long unpaidMinor, long lossMinor, long costShareMinor, String recognition) {}
 
     Plan plan(UUID saleId) {
         Principal principal = CurrentPrincipal.require();
@@ -105,8 +105,9 @@ class WriteOffsServicer {
             throw ApiException.rule("nothing_owing", "This sale has nothing left to pay.");
         }
         String recognition = capabilities.creditRecognition();
-        long loss = recognition.equals(RetailCapabilities.ON_PAYMENT) ? unrecognisedCost(s) : unpaid;
-        return new Plan(s, unpaid, loss, recognition);
+        long costShare = unrecognisedCost(s);
+        long loss = recognition.equals(RetailCapabilities.ON_PAYMENT) ? costShare : unpaid;
+        return new Plan(s, unpaid, loss, costShare, recognition);
     }
 
     /**
@@ -164,6 +165,7 @@ class WriteOffsServicer {
                 s.currency(),
                 unpaid,
                 loss,
+                plan.costShareMinor(),
                 plan.recognition(),
                 reason.trim(),
                 entry.entryId(),
