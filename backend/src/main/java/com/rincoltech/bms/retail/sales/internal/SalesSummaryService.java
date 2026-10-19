@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,7 +70,23 @@ class SalesSummaryService {
 
     @Transactional(readOnly = true)
     Summary summary(Query q) {
+        Principal principal = CurrentPrincipal.require();
+        // A ranking of colleagues is management information: the salesperson level needs profit read somewhere in
+        // scope.
+        boolean sellers = principal.scopeOf("retail.profit.read").isPresent();
+        List<String> available = sellers
+                ? SalesSummaryRepository.LEVELS
+                : SalesSummaryRepository.LEVELS.stream()
+                        .filter(l -> !l.equals("seller"))
+                        .toList();
         List<String> chain = chain(q.groupBy());
+        if (!sellers && (chain.contains("seller") || q.sellerId() != null)) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "The salesperson level is for people who may read profit.");
+        }
         String level = q.level() == null ? chain.getFirst() : q.level();
         if (!chain.contains(level)) {
             throw ApiException.validation(List.of(new FieldProblem("level", "invalid", "level is one of group_by.")));
@@ -88,14 +105,12 @@ class SalesSummaryService {
         if (q.offset() != null && q.offset() < 0) {
             throw ApiException.validation(List.of(new FieldProblem("offset", "invalid", "offset is zero or more.")));
         }
-        Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter("retail.sale.read", q.branchIds());
         String currency = tenant.profile().currency();
         int at = chain.indexOf(level);
         String next = at + 1 < chain.size() ? chain.get(at + 1) : null;
         if (filter != null && filter.isEmpty()) {
-            return new Summary(
-                    level, chain, next, SalesSummaryRepository.LEVELS, currency, List.of(), false, null, null);
+            return new Summary(level, chain, next, available, currency, List.of(), false, null, null);
         }
         boolean time = SalesSummaryRepository.TIME_LEVELS.contains(level);
         int size = switch (level) {
@@ -129,8 +144,7 @@ class SalesSummaryService {
         List<Group> items = more ? rows.subList(0, size) : rows;
         LocalDate nextTo = more && time ? items.getLast().from().minusDays(1) : null;
         Integer nextOffset = more && !time ? offset + size : null;
-        return new Summary(
-                level, chain, next, SalesSummaryRepository.LEVELS, currency, items, more, nextTo, nextOffset);
+        return new Summary(level, chain, next, available, currency, items, more, nextTo, nextOffset);
     }
 
     /** The chain of {@code group_by}: known levels only, each once, in the order given. */

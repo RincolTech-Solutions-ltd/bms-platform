@@ -10809,7 +10809,7 @@ export interface components {
             sales_minor?: number;
         };
         RetailSalesSummary: {
-            /** @description Every level group_by accepts */
+            /** @description Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope */
             available_levels?: string[];
             /** @description The tenant's currency; a retail tenant keeps its books in one currency */
             currency?: string;

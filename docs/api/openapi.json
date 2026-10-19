@@ -12050,9 +12050,9 @@
       "RetailSalesSummary" : {
         "properties" : {
           "available_levels" : {
-            "description" : "Every level group_by accepts",
+            "description" : "Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope",
             "items" : {
-              "description" : "Every level group_by accepts",
+              "description" : "Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope",
               "type" : "string"
             },
             "type" : "array"

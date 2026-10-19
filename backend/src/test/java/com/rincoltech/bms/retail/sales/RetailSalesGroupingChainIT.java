@@ -303,14 +303,42 @@ class RetailSalesGroupingChainIT extends IntegrationTest {
 
     @Test
     void noLevelCarriesProfitWithoutProfitRead() {
-        for (String lvl : List.of("branch", "year", "month", "seller", "day", "category", "item")) {
-            JsonNode groups = level(lvl, "", SALES).get("items");
+        // The salesperson level is not offered to this caller at all (see the next test).
+        for (String lvl : List.of("branch", "year", "month", "day", "category", "item")) {
+            ResponseEntity<JsonNode> r =
+                    call(one, "group_by=branch,year,month,day,category,item&level=" + lvl, SALES, Map.of());
+            assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+            JsonNode groups = r.getBody().get("items");
             assertThat(groups).as(lvl).isNotEmpty();
             for (JsonNode g : groups) {
                 assertThat(g.has("profit_minor")).as("%s %s", lvl, g).isFalse();
                 assertThat(g.get("total_minor").asLong()).isPositive();
             }
         }
+    }
+
+    /** A cashier must not see a ranking of colleagues: the salesperson level needs retail.profit.read somewhere in scope. */
+    @Test
+    void theSalespersonLevelNeedsProfitReadSomewhereInScope() {
+        ResponseEntity<JsonNode> plain = call(one, "group_by=branch,day", SALES, Map.of());
+        assertThat(plain.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(plain.getBody().get("available_levels").toString()).doesNotContain("seller");
+        assertThat(call(one, "group_by=seller", SALES, Map.of()).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(one, "group_by=branch,seller&level=branch", SALES, Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(one, "group_by=day&seller_id=" + one.userId(), SALES, Map.of())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        ResponseEntity<JsonNode> manager = call(one, "group_by=seller", ADMIN, Map.of());
+        assertThat(manager.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(manager.getBody().get("available_levels").toString()).contains("seller");
+
+        Map<String, String> oneBranch = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.secondBranch());
+        assertThat(call(one, "group_by=seller", ADMIN, oneBranch).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     @Test
@@ -433,6 +461,80 @@ class RetailSalesGroupingChainIT extends IntegrationTest {
             assertThat(last.get("items")).as(lvl).hasSize(1);
             assertThat(last.get("has_more").asBoolean()).isFalse();
         }
+    }
+
+    /** The product filter of the top of the page keeps that product's lines under a category or an item. */
+    @Test
+    void aProductFilterKeepsOnlyThatProductsLinesOverLines() {
+        JsonNode categories = call(one, "group_by=category,item&level=category&product_id=" + a, ADMIN, Map.of())
+                .getBody();
+        assertThat(categories.get("items")).hasSize(1);
+        assertThat(only(categories, categoryA.toString()).get("total_minor").asLong())
+                .isEqualTo(8_000);
+        JsonNode items =
+                call(one, "group_by=item&product_id=" + b, ADMIN, Map.of()).getBody();
+        assertThat(items.get("items")).hasSize(1);
+        assertThat(items.get("items").get(0).get("key").asString()).isEqualTo(b.toString());
+        assertThat(items.get("items").get(0).get("total_minor").asLong()).isEqualTo(1_200);
+        assertThat(call(one, "group_by=item&category_id=" + categoryB + "&product_id=" + a, ADMIN, Map.of())
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
+        assertThat(call(one, "group_by=day&item_id=" + a + "&product_id=" + b, ADMIN, Map.of())
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
+        // Over whole sales a product filter still means the sales that hold the product, whole.
+        JsonNode days =
+                call(one, "group_by=day&product_id=" + b, ADMIN, Map.of()).getBody();
+        assertThat(only(days, "2026-10-19").get("total_minor").asLong()).isEqualTo(4_300);
+    }
+
+    @Test
+    void theOwingFilterAndACategoryAgree() {
+        JsonNode owing =
+                call(one, "group_by=category&owing=owing", ADMIN, Map.of()).getBody();
+        assertThat(owing.get("items")).hasSize(1);
+        assertThat(only(owing, categoryA.toString()).get("total_minor").asLong())
+                .isEqualTo(2_000);
+        assertThat(call(one, "group_by=category&owing=paid", ADMIN, Map.of())
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
+        JsonNode items = call(
+                        one,
+                        "group_by=item&category_id=" + categoryA + "&owing=owing&payment_method=credit",
+                        ADMIN,
+                        Map.of())
+                .getBody();
+        assertThat(items.get("items")).hasSize(1);
+        assertThat(items.get("items").get(0).get("quantity").asString()).isEqualTo("1");
+    }
+
+    /** More than 100 shops: the first 100 come at once and the rest by the offset. */
+    @Test
+    void theShopLevelIsBoundedAt100() {
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO branches (id, tenant_id, code, name) SELECT gen_random_uuid(), ?, 'S' || g, 'Test Shop ' || g"
+                                + " FROM generate_series(1, 101) g")
+                .param(t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, currency,"
+                        + " total_minor, cost_total_minor, paid_minor, status, created_by)"
+                        + " SELECT gen_random_uuid(), ?, b.id, 'TS' || lpad(row_number() OVER ()::text, 6, '0'),"
+                        + " DATE '2022-01-01', 'cash', 'UGX', 100, 50, 100, 'completed', ?"
+                        + " FROM branches b WHERE b.tenant_id = ? AND b.code LIKE 'S%'")
+                .params(t.tenantId(), one.userId(), t.tenantId())
+                .update();
+        JsonNode first = level("branch", "");
+        assertThat(first.get("items")).hasSize(100);
+        assertThat(first.get("has_more").asBoolean()).isTrue();
+        assertThat(first.get("next_offset").asInt()).isEqualTo(100);
+        JsonNode rest = level("branch", "offset=100");
+        assertThat(rest.get("items")).hasSize(3);
+        assertThat(rest.get("has_more").asBoolean()).isFalse();
     }
 
     @Test

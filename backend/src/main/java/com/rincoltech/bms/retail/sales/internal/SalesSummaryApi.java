@@ -81,7 +81,9 @@ final class SalesSummaryApi {
             @Schema(description = "The level under this one in the chain; absent at the end of the chain")
             String nextLevel,
 
-            @Schema(description = "Every level group_by accepts")
+            @Schema(
+                    description =
+                            "Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope")
             List<String> availableLevels,
 
             @Schema(description = "The tenant's currency; a retail tenant keeps its books in one currency")

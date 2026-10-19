@@ -93,7 +93,11 @@ class SalesSummaryRepository {
             sql.append(" " + sales + " FILTER (WHERE " + mine + ") AS " + method + "_count,");
             sql.append(" coalesce(sum(" + total + ") FILTER (WHERE " + mine + "), 0) AS " + method + "_total,");
         }
-        sql.append(" coalesce(sum(" + profit + ") FILTER (WHERE " + done + "), 0) AS profit_minor,");
+        // Profit is computed only for a caller who may see it (the #332 way), not summed and then dropped.
+        sql.append(
+                spec.withProfit()
+                        ? " coalesce(sum(" + profit + ") FILTER (WHERE " + done + "), 0) AS profit_minor,"
+                        : " 0 AS profit_minor,");
         sql.append(
                 level.equals("item")
                         ? " coalesce(sum(sl.qty) FILTER (WHERE " + done + "), 0) AS quantity"
@@ -116,13 +120,18 @@ class SalesSummaryRepository {
                 spec.to(),
                 spec.customerId(),
                 spec.paymentMethod(),
-                spec.productId(),
+                // Over lines a product filter keeps that product's lines, not every line of the sales that hold it.
+                lines ? null : spec.productId(),
                 spec.buyer(),
                 null,
                 spec.owing(),
                 spec.today(),
                 spec.sellerId(),
                 null);
+        if (lines && spec.productId() != null) {
+            sql.append(" AND sl.product_id = :productId");
+            params.put("productId", spec.productId());
+        }
         if (spec.categoryId() != null) {
             sql.append(" AND pr.category_id = :categoryId");
             params.put("categoryId", spec.categoryId());
