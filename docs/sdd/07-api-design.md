@@ -308,6 +308,9 @@ replaces this before a second API instance is added):
 | Sign-up: new applications per client address, an IPv6 client by its /64 (ADR-024) | 5 per hour (429) |
 | Sign-up: link reads (verify, status, reply) per client address | 30 per 10 minutes (429) |
 | Sign-up: confirmation emails per mailbox (database) | 3 per 24 hours (202, nothing sent) |
+| Forgot password: requests per client address, an IPv6 client by its /64 (FR-IAM-15) | 20 per hour (429) |
+| Forgot password: using a link per client address | 30 per 10 minutes (429) |
+| Forgot password: links for one account (database) | 3 per hour (202, nothing sent) |
 | Sign-up: new applications, all clients (database, `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR`) | 30 per hour by default (202, nothing created; audit row and one Telegram alert per hour) |
 | Sign-up: confirmation emails, all clients (database, `BMS_SIGNUP_MAX_VERIFICATION_EMAILS_PER_HOUR`) | 60 per hour by default (as above) |
 
@@ -354,8 +357,8 @@ port (8081), which is never published outside the container network.
 | POST | `/auth/staff/mfa/confirm` | public (mfa_token), or signed in | `{mfa_token?, code}` activates TOTP and returns ten recovery codes once; with the MFA token it also signs in. FR-IAM-11 |
 | POST | `/auth/staff/mfa/recovery-codes` | authenticated staff | `{code}` (a current TOTP code) replaces every recovery code; returns the new ones once. FR-IAM-11 |
 | POST | `/auth/staff/invitations/accept` | public (token) | `{token, password}`; sets the password and signs in: the same body as `/auth/staff/login` (`signed_in` with tokens, or `mfa_enrolment_required` with an MFA token when the role requires a second factor). FR-IAM-01, FR-IAM-13, ADR-025 |
-| POST | `/auth/staff/password/forgot` | public | Always 202. Not built yet |
-| POST | `/auth/staff/password/reset` | public (token) | Not built yet |
+| POST | `/auth/staff/password/forgot` | public | **Built (#320).** `{login}` (email or phone). Always 202 `{message}` with the same words and after at least the same time (a 400 ms floor) for a known account, an unknown one, a deactivated one, a user still invited and a user with no email; a link goes to the email on file only for an active user, through the outbox (`identity.password_reset`). 429 `rate_limited` per client address; further links for one account in an hour are answered and ignored. FR-IAM-15, ADR-042 |
+| POST | `/auth/staff/password/reset` | public (token) | **Built (#320).** `{token, password}`; the token is the fragment of the emailed or admin-issued link. Sets the password under the invitation's rules, ends every session of the user and answers like `/auth/staff/login`: `signed_in` with tokens, `mfa_required` or `mfa_enrolment_required` with an MFA token (a reset never skips the second factor), or `sign_in_required` with no token while the failed-attempt lock holds. 422 `reset_link_invalid` (used, replaced, unknown, other tenant, user not active), 422 `reset_link_expired`, 422 `weak_password` (the link still works), 429 `rate_limited`. FR-IAM-15, ADR-042 |
 | POST | `/auth/member/otp/request` | public | `{phone, purpose}`; always 202. FR-IAM-09 (P2) |
 | POST | `/auth/member/otp/verify` | public | `{phone, code}` returns a short-lived `pin_setup_token` (P2) |
 | POST | `/auth/member/pin` | public (pin_setup_token) | Sets PIN, returns tokens (P2) |
@@ -438,6 +441,7 @@ re-encoded image of that tenant, and the keys of its enabled modules (no counts,
 | POST | `/users/{user_id}/deactivate` | `core.users.manage` | Revokes every session. FR-IAM-08 |
 | POST | `/users/{user_id}/invitation` | `core.users.manage` | New one-time link for a user still invited; the previous link stops working. FR-IAM-01 |
 | POST | `/users/{user_id}/mfa/reset` | `core.users.manage` | Another user only. FR-IAM-12 |
+| POST | `/users/{user_id}/reset-sign-in` | `core.users.manage` | **Built (#320).** No body. Issues a one-time link to choose a new password for an **active** user and returns `{url, expires_at}` once (one hour; the same shape as the invitation link; never emailed on this path; audited as `core.password_reset.requested` and `core.password_reset.link_revealed`, without the token). An earlier open link of the user is revoked. 409 `invalid_status_transition` for a user still invited (use `/invitation`) or deactivated; 404 for a user outside the admin's branch scope (a user whose every role lies in the admin's branches; a role over every branch needs an admin over every branch). Sessions end when the link is used. FR-IAM-15, ADR-042 |
 | GET | `/roles` | `core.users.read` | Catalogue with permissions |
 | GET | `/audit-events` | `core.audit.read` | Filters per FR-AUD-04 |
 | POST | `/audit-events/export` | `core.audit.export` | Same filters as the search; CSV, at most 10,000 rows, synchronous until the report runs of increment 8 (FR-RPT-04); the export is audited |

@@ -61,7 +61,7 @@ describe('requestPasswordReset', () => {
     fetchImpl.next = async () => json(202, { message: 'If an account matches, a reset link has been sent.' });
     expect(await requestPasswordReset('test01@example.test')).toBe('If an account matches, a reset link has been sent.');
     const request = fetchImpl.seen.at(-1)!;
-    expect(new URL(request.url).pathname).toBe('/api/v1/auth/staff/password-reset/request');
+    expect(new URL(request.url).pathname).toBe('/api/v1/auth/staff/password/forgot');
     expect(await request.clone().json()).toEqual({ login: 'test01@example.test' });
   });
 

@@ -46,7 +46,7 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }, fa
  * never says, and neither may the page.
  */
 export async function requestPasswordReset(login: string): Promise<string> {
-  const data = unwrap(await api.POST('/api/v1/auth/staff/password-reset/request', { body: { login } }), 'The request could not be sent. Try again.');
+  const data = unwrap(await api.POST('/api/v1/auth/staff/password/forgot', { body: { login } }), 'The request could not be sent. Try again.');
   return data.message ?? 'If an account matches, a reset link has been sent.';
 }
 

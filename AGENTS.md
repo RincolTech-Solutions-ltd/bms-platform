@@ -181,6 +181,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   pick-list unless the role is the administrator). The one-time invitation link is shown once with Copy and Send on WhatsApp; resend,
   change roles and deactivate follow the existing `/users` routes. Visible to `core.users.read`, actions to `core.users.manage`; the
   `staffAdmin` tour flag is on (`docs/sdd/07-api-design.md` section 7.11.4, UI notes).
+- **Built (forgot password, issue #320, FR-IAM-15, ADR-042):** migration `V99` (a placeholder number, renumbered at merge): `user_password_resets` (RLS, the token as SHA-256 only, `self` or `admin`, one hour, single use, a newer link revokes the older) and `password_reset` as a session revoke reason. `POST /auth/staff/password/forgot` always answers the same 202 after a 400 ms floor (20 an hour per address, 3 links an hour per account) and sends the link by email through the outbox (`identity.password_reset`); `POST /auth/staff/password/reset` sets the password under the invitation's rules, ends every session of the user, emails a notice, and signs in under the sign-in rules (a user with TOTP still needs the code; the reset does not clear the lock); `POST /users/{user_id}/reset-sign-in` (`core.users.manage`) returns the link once to a tenant admin for an active user. The sign-in page's Forgot password link, `/forgot-password` and `/reset-password`, and `resetUserSignIn()` in `frontend/src/api/sign-in-reset.ts` for the Users screen (#319).
 - **Built (lending staff screens 1 and 2, issue #280):** PWA only, no migration: Members (list with live search, add, change, the member's page with the check of the details, next of kin, ID photos, relationships, loans) and the collateral register (register, change, valuations, custody changes, photos, the release request), phone-first, with a tour each (`docs/specs/lending-ui-notes.md`, section "Members and collateral"). Loan application, appraisal and decision are slices 3 and 4.
 - **Built (increment 9, savings, issue #151, ADR-032):** migration `V30` (savings products,
   accounts, transactions, end-of-day balances, interest postings; the outbox accepts `sms`);
@@ -585,6 +586,9 @@ Accepted (this list is the ADR index):
   no secret), the cosign key lives only in the Keychain and a launchd signer (cosign v2.4.1) signs the digests a
   main run logged; the staging pointer waits for the signatures (hosted minutes are not used and the budget is
   not raised; proposed, #296; `deploy/runner/`, `deploy/signer/`)
+
+- ADR-042 A staff user who forgot the password gets back in with a one-time link, by email or from a tenant admin; the reset
+  never touches the second factor or the lock, and the form tells nobody whether an account exists (proposed, #320; FR-IAM-15)
 
 Pending (cite only as "pending ADR-NNN"):
 

@@ -259,24 +259,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/staff/password-reset/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15) */
-        post: operations["completePasswordReset"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/staff/password-reset/request": {
+    "/api/v1/auth/staff/password/forgot": {
         parameters: {
             query?: never;
             header?: never;
@@ -287,6 +270,23 @@ export interface paths {
         put?: never;
         /** Ask for a password reset link by email or phone; the answer never says whether an account matched (FR-IAM-15) */
         post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/staff/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15) */
+        post: operations["completePasswordReset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13566,30 +13566,6 @@ export interface operations {
             };
         };
     };
-    completePasswordReset: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PasswordResetCompleteRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInResponse"];
-                };
-            };
-        };
-    };
     requestPasswordReset: {
         parameters: {
             query?: never;
@@ -13610,6 +13586,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PasswordResetRequested"];
+                };
+            };
+        };
+    };
+    completePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInResponse"];
                 };
             };
         };

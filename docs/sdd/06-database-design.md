@@ -459,13 +459,22 @@ replaced as a set. FR-IAM-11.
 `invited_by uuid NOT NULL` (a staff user, or the platform operator who created the tenant; no
 foreign key).
 
+### `user_password_resets` (RLS)
+
+(std, no `version`; issue #320, FR-IAM-15, ADR-042; the migration is the placeholder `V99` until it is renumbered at merge)
+`user_id uuid NOT NULL` (FK `(tenant_id, user_id)`), `token_hash char(64) NOT NULL UNIQUE` (SHA-256 of the one-time token),
+`expires_at timestamptz NOT NULL` (one hour), `origin text NOT NULL` [`self`, `admin`], `requested_by uuid` (the tenant admin who
+issued an `admin` link; null for `self`; no foreign key; a CHECK ties the two), `used_at timestamptz` (the link set a password),
+`revoked_at timestamptz` (a newer link, or a deactivation, replaced it; a CHECK keeps used and revoked apart). Index
+`(tenant_id, user_id, created_at DESC)`. Grants `SELECT, INSERT, UPDATE`. The token itself is never stored.
+
 ### `auth_sessions` (RLS)
 
 (std, no `version`) `user_id uuid NOT NULL`, `family_id uuid NOT NULL`,
 `refresh_token_hash char(64) NOT NULL UNIQUE`, `expires_at timestamptz NOT NULL`,
 `idle_expires_at timestamptz NOT NULL`, `rotated_at timestamptz`,
 `revoked_at timestamptz`, `revoked_reason text` [`sign_out`, `rotation_reuse`,
-`user_deactivated`, `admin`, `mfa_reset`], `ip inet`, `user_agent text`.
+`user_deactivated`, `admin`, `mfa_reset`, `password_reset` (added by the migration of #320)], `ip inet`, `user_agent text`.
 One row per refresh token: a rotation marks the row `rotated_at` and inserts the next row of the
 same family; the access token's `sid` is the row id.
 Index `(tenant_id, user_id) WHERE revoked_at IS NULL`. FR-IAM-07, FR-IAM-08.

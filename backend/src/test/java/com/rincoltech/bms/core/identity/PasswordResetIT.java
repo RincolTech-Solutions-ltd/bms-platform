@@ -33,8 +33,8 @@ import tools.jackson.databind.JsonNode;
 @ExtendWith(OutputCaptureExtension.class)
 class PasswordResetIT extends IntegrationTest {
 
-    static final String REQUEST = "/api/v1/auth/staff/password-reset/request";
-    static final String COMPLETE = "/api/v1/auth/staff/password-reset/complete";
+    static final String REQUEST = "/api/v1/auth/staff/password/forgot";
+    static final String COMPLETE = "/api/v1/auth/staff/password/reset";
     static final String NEW_PASSWORD = "Another-Fabricated-Pass-27";
     /** Every request has its own documentation address (RFC 5737), so the per-address limit never crosses tests. */
     static final AtomicInteger ADDRESS = new AtomicInteger(10);
@@ -338,6 +338,22 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(late.getBody().get("code").asString()).isEqualTo("reset_link_expired");
         assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(audits("core.password_reset.used", userId)).isZero();
+    }
+
+    /** FR-IAM-15: of several uses of one link at the same moment, one wins. */
+    @Test
+    void aLinkUsedManyTimesAtOnceWorksOnce() throws Exception {
+        String email = Api.email("cashier");
+        UUID userId = user(email);
+        request(email);
+        String token = tokenOf(emailedLink(email));
+
+        List<org.springframework.http.HttpStatusCode> statuses = Api.race(4, () -> complete(token, NEW_PASSWORD));
+
+        assertThat(Api.count(statuses, HttpStatus.OK)).isEqualTo(1);
+        assertThat(Api.count(statuses, HttpStatus.UNPROCESSABLE_CONTENT)).isEqualTo(3);
+        assertThat(audits("core.password_reset.used", userId)).isEqualTo(1);
+        assertThat(emails("identity.password_changed", email)).isEqualTo(1);
     }
 
     /** FR-IAM-04: the link sets a password under the same rules as an invitation, and a refusal keeps the link. */

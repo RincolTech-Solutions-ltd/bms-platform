@@ -68,7 +68,7 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
       return;
     }
     void run(async () => {
-      const { data, error } = await api.POST('/api/v1/auth/staff/password-reset/complete', { body: { token, password } });
+      const { data, error } = await api.POST('/api/v1/auth/staff/password/reset', { body: { token, password } });
       if (error || !data) throw error;
       setPassword('');
       setConfirm('');

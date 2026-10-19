@@ -124,7 +124,7 @@ class StaffAuthController {
      * Always the same answer, after about the same time, whether or not an account matched (FR-IAM-15): the work that differs
      * (a lookup, or a lookup and a link and an outbox row) is padded to a floor, outside any transaction.
      */
-    @PostMapping("/staff/password-reset/request")
+    @PostMapping("/staff/password/forgot")
     @PublicEndpoint
     @Operation(
             summary =
@@ -144,7 +144,7 @@ class StaffAuthController {
                                 + " The link works once, for one hour."));
     }
 
-    @PostMapping("/staff/password-reset/complete")
+    @PostMapping("/staff/password/reset")
     @PublicEndpoint
     @Operation(
             summary = "Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15)",

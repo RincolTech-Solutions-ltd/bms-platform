@@ -17503,36 +17503,7 @@
         "tags" : [ "auth" ]
       }
     },
-    "/api/v1/auth/staff/password-reset/complete" : {
-      "post" : {
-        "operationId" : "completePasswordReset",
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/PasswordResetCompleteRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/SignInResponse"
-                }
-              }
-            },
-            "description" : "OK"
-          }
-        },
-        "summary" : "Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15)",
-        "tags" : [ "auth" ]
-      }
-    },
-    "/api/v1/auth/staff/password-reset/request" : {
+    "/api/v1/auth/staff/password/forgot" : {
       "post" : {
         "operationId" : "requestPasswordReset",
         "requestBody" : {
@@ -17558,6 +17529,35 @@
           }
         },
         "summary" : "Ask for a password reset link by email or phone; the answer never says whether an account matched (FR-IAM-15)",
+        "tags" : [ "auth" ]
+      }
+    },
+    "/api/v1/auth/staff/password/reset" : {
+      "post" : {
+        "operationId" : "completePasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetCompleteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SignInResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15)",
         "tags" : [ "auth" ]
       }
     },
