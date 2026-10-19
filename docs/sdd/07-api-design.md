@@ -442,6 +442,27 @@ re-encoded image of that tenant, and the keys of its enabled modules (no counts,
 | GET | `/audit-events` | `core.audit.read` | Filters per FR-AUD-04 |
 | POST | `/audit-events/export` | `core.audit.export` | Same filters as the search; CSV, at most 10,000 rows, synchronous until the report runs of increment 8 (FR-RPT-04); the export is audited |
 
+**UI notes: the staff Users screen (issue #319, FR-IAM-01, FR-IAM-02, FR-IAM-08).** The PWA's Users page
+(`/staff/users`, `frontend/src/areas/staff/users/`) uses only the routes above; no API change. Shown to
+holders of `core.users.read` (staff menu entry "Users" and a link on Business set-up); Invite someone,
+Send a new link, Change roles and Deactivate are shown only to holders of `core.users.manage`. The list
+is `GET /users` followed by its cursor, with `GET /roles` and `GET /branches` for the words; it shows each
+person's name, phone then email, every role with its branch ("every branch" when `branch_id` is null) and
+the status `invited`, `active` or `deactivated`, and searches in the browser as you type. The invite form
+(`/staff/users/new`) is phone first (a Uganda mobile number, checked the way the member forms check it),
+the email is optional, and one of the two is required; the role pick-list is the staff roles of
+`GET /roles`, each with a plain sentence and its key ("Sales person (retail_sales)"); a branch pick-list
+follows for every role except `tenant_admin`, which covers every branch and is sent without a
+`branch_id`. After `POST /users` (and after `POST /users/{user_id}/invitation`) the one-time
+`invitation.url` is shown once in a box with the expiry, a Copy button and a Send on WhatsApp button (a
+`wa.me` link with a short message and the link, opened on the invited phone when there is one). The link
+is held only in the screen's own state, never in a query cache, the browser storage or the URL, and is
+gone when the box is closed; to get another, an administrator uses Send a new link, which replaces the
+old one. Double taps send one request. Refusals are shown in plain words: `plan_limit_reached` (the plan
+caps staff users; people still invited count), `last_tenant_admin`, `cannot_deactivate_self` (the screen
+offers no Deactivate on one's own card), `duplicate_email`, `duplicate_phone`, `invalid_phone`.
+Deactivating asks first and ends every session of the person (FR-IAM-08).
+
 ### 7.11.5 Approvals
 
 | Method | Path | Permission | Notes |
