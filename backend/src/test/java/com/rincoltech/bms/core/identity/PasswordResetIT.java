@@ -877,20 +877,21 @@ class PasswordResetIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
     }
 
+    /** A lock column that was never set is NULL, and NULL > now() is NULL: read it as "not locked". */
     boolean stepUpLocked(UUID userId) {
-        return Boolean.TRUE.equals(TestDatabase.owner()
-                .sql("SELECT step_up_locked_until > now() FROM users WHERE id = ?")
+        return TestDatabase.owner()
+                .sql("SELECT coalesce(step_up_locked_until > now(), false) FROM users WHERE id = ?")
                 .param(userId)
                 .query(Boolean.class)
-                .single());
+                .single();
     }
 
     boolean signInLocked(UUID userId) {
-        return Boolean.TRUE.equals(TestDatabase.owner()
-                .sql("SELECT locked_until > now() FROM users WHERE id = ?")
+        return TestDatabase.owner()
+                .sql("SELECT coalesce(locked_until > now(), false) FROM users WHERE id = ?")
                 .param(userId)
                 .query(Boolean.class)
-                .single());
+                .single();
     }
 
     long stepUpFailures(UUID userId) {
