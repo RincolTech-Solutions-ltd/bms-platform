@@ -52,7 +52,7 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         api = new RetailTestSupport(http, t);
         hq = t.headOffice();
         product = api.product("WO-1", 600, 1_000);
-        api.stockUp(hq, product, "1000");
+        api.importedBalance(hq, product, "1000");
         setting(Map.of("returns", true));
     }
 

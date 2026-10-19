@@ -57,8 +57,8 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         hq = t.headOffice();
         br2 = t.secondBranch();
         product = api.product("CRD-1", 600, 1_000);
-        api.stockUp(hq, product, "1000");
-        api.stockUp(br2, product, "1000");
+        api.importedBalance(hq, product, "1000");
+        api.importedBalance(br2, product, "1000");
         capability(Map.of("returns", true));
     }
 
@@ -454,7 +454,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         TestDatabase.Fixture other = TestDatabase.tenant("retail-crd2", false, true);
         RetailTestSupport otherApi = new RetailTestSupport(http, other);
         UUID prod = otherApi.product("CRD-9", 600, 1_000);
-        otherApi.stockUp(other.headOffice(), prod, "10");
+        otherApi.importedBalance(other.headOffice(), prod, "10");
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", other.headOffice());
         body.put("payment_method", "credit");
