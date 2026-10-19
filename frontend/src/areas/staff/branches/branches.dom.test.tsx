@@ -28,7 +28,7 @@ const HEAD: AdminBranch = { id: 'b-head', code: 'HQ', name: 'Head office', is_he
 const SHOP: AdminBranch = { id: 'b-two', code: 'KLA', name: 'Test Shop Two', is_head_office: false, status: 'active', stocks_goods: true, version: 3 };
 const OLD: AdminBranch = {
   id: 'b-old', code: 'OLD', name: 'Test Old Shop', is_head_office: false, status: 'inactive', stocks_goods: true, version: 5,
-  closed_at: '2026-08-14T10:00:00Z', closed_reason: 'Test shop shut for good',
+  closed_at: '2026-08-14T10:00:00Z', closed_reason: 'Test shop shut for good', stock_items: 2, stock_value_minor: 45000,
 };
 
 const ADMIN = ['core.branches.read', 'core.branches.manage'];
@@ -69,6 +69,7 @@ describe('the list', () => {
     expect(screen.getByText('Closed', { selector: '.badge' })).toBeTruthy();
     expect(screen.getByText('Closed on 14 Aug 2026')).toBeTruthy();
     expect(screen.getByText('Reason: Test shop shut for good')).toBeTruthy();
+    expect(screen.getByText(/Still holds 2 items worth UGX 45,000, kept on record/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reopen this branch' })).toBeTruthy();
   });
 
@@ -151,10 +152,13 @@ describe('reopening and the stocking switch', () => {
       .mockResolvedValueOnce({ ...HEAD, stocks_goods: false });
     shell();
     await screen.findByText('Test Shop Two (KLA)');
-    const mark = screen.getAllByRole('button', { name: 'Mark as keeping no goods' })[0] as HTMLElement;
-    fireEvent.click(mark);
-    expect(await screen.findByText(/still holds stock worth UGX 3,000/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Mark as keeping no goods' })[0] as HTMLElement);
+    // One tap only asks: nothing is sent until the person confirms in plain words.
+    expect(screen.getByText(/Nothing can be sold, restocked, received or counted there afterwards/)).toBeTruthy();
+    expect(api.setStocking).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, mark it' }));
+    expect(await screen.findByText(/still holds stock worth UGX 3,000/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, mark it' }));
     await waitFor(() => expect(api.setStocking).toHaveBeenCalledTimes(2));
     expect(api.setStocking.mock.calls[1]?.[1]).toBe(false);
   });

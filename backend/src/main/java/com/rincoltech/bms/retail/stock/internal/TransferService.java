@@ -128,7 +128,8 @@ class TransferService {
 
     private Transfer record(TransferRequest r) {
         boolean dispatchOnly = capabilities.enabled(RetailCapabilities.TRANSFER_RECEIPT);
-        UUID from = branchContext.resolveStocking(PERMISSION, r.fromBranchId(), "from_branch_id");
+        // A branch that keeps no goods may still be the source, so stock stranded there can leave (ADR-041).
+        UUID from = branchContext.resolve(PERMISSION, r.fromBranchId(), "from_branch_id");
         LocalDate today = clock.today(tenant.profile().timezone());
         LocalDate on = r.transferDate() == null ? today : r.transferDate();
         List<FieldProblem> problems = new ArrayList<>();
@@ -329,6 +330,8 @@ class TransferService {
                 .orElseThrow(ApiException::notFound);
         Transfer t = h.transfer();
         requireInTransit(t, "received");
+        // A closed branch still receives what is on the road to it; a branch that keeps no goods does not (ADR-041).
+        branchContext.requireStocksReceiving(t.toBranchId(), "branch_id");
         List<StoredLine> lines = repo.storedLines(id);
         Map<UUID, BigDecimal> arrived = arrived(lines, r.lines());
         String note = r.note() == null || r.note().isBlank() ? null : r.note().trim();

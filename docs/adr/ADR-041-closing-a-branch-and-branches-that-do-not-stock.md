@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-20, issue #329). Builds on ADR-017 and ADR-020. The migration number in this change is a placeholder
+Proposed (2026-10-20, issue #329; not yet accepted by the product owner). Builds on ADR-017 and ADR-020. The migration number in this change is a placeholder
 (`V96`); the real number is chosen when the pull request merges.
 
 ## Context
@@ -33,11 +33,25 @@ screen.
   with the figures shown. Nothing is written off or moved automatically. The check is supplied by the module that keeps
   the goods through the port `core.tenancy.BranchClosingCheck` (retail implements it), so the core names no vertical.
 - **Not stocking is a branch flag, `branches.stocks_goods` (default true).** A branch that keeps no goods is refused for
-  sales (and their price resolution), restocks, purchase orders and goods receipts, transfers (as source or destination),
-  stock-takes, usage reports and the restock side of a customer return, with 422 `branch_not_stocking`, enforced on the
-  server in `RetailBranchContext.resolveStocking`. It stays in cash book and administrator scope exactly as before: only
-  goods are refused. Marking a branch as not stocking is refused (422 `branch_still_has_stock`) while it holds stock or
-  has a transfer on the road, because the stock would be stranded where nothing can move it; move it first.
+  sales (and their price resolution), restocks, purchase orders and goods receipts, transfers into it (and the receipt
+  of a transfer), stock-takes (made or committed) and the restock side of a customer return, with 422
+  `branch_not_stocking`, enforced on the server in `RetailBranchContext` (`resolveStocking`, `requireStocks`,
+  `requireStocksReceiving`). It stays in cash book and administrator scope exactly as before: only goods are refused.
+  Goods can still **leave** it: a branch that keeps no goods may be the source of a transfer and may report usage and
+  damage, so stock that ends up there (an old balance, or a void of a sale made before the flag was set) is never
+  stranded, and the flag need not be switched back to move it. Voids stay allowed, because the sale exists.
+  Marking a branch as not stocking is refused (422 `branch_still_has_stock`) while it holds stock, has a transfer on
+  the road or has a stock-take started and not committed, because the stock would arrive where nothing can take it in;
+  move it first.
+- **Concurrency.** Every retail write that names a branch reads the branch row `FOR SHARE` in its own transaction
+  (`Branches.lockBranch`), and a close or a not-stocking change holds it `FOR UPDATE`. A write that is checking the
+  branch therefore queues behind the change and sees it, and the change waits for a write already past its check, so
+  goods cannot land in a branch that has just stopped keeping them and a sale cannot commit at a branch that has just
+  closed. Read only requests read the branch plainly.
+- **A closed branch may still receive a transfer already on the road to it** (the goods are physically there); the
+  stock then sits in the closed branch, outside the default stock list but in the valuation, and the Branches screen
+  shows what a closed branch still holds. The importer refuses a balance row for a branch that keeps no goods and reports
+  it like any other refused row.
   `/me` reports `stocks_goods` per branch so the sale, restock and transfer forms skip it, and the default branch avoids it.
 - **Permission: the existing `core.branches.manage`** (tenant administrator only, chapter 8). Reads stay `core.branches.read`.
   No permission is added.
@@ -52,6 +66,9 @@ screen.
 - A head office that keeps no goods can no longer receive stock by mistake, whatever the screen.
 
 **Worse, and to watch:**
+- A tenant that already has an inactive branch holding stock will see its default all-branches stock total drop after
+  deploy (the branch is now left out unless asked for); the valuation does not change. The stock list says how many
+  closed shops are hidden, and the release note says so.
 - A closed branch's stock stays on its books until the owner moves it or writes it off before closing; the default stock
   total no longer includes it, while the valuation still does. The warning says so.
 - The migration adds three columns to `branches` (expand only). The real `V` number must be set at merge.

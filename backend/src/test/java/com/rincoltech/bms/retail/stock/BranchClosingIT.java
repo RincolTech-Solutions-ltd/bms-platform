@@ -232,6 +232,15 @@ class BranchClosingIT extends IntegrationTest {
         assertThat(movements(t.secondBranch()))
                 .as("no stock was moved or written off")
                 .isEqualTo(before);
+        // The administrator's list shows what is still on the closed branch's shelves.
+        JsonNode listed =
+                api.get("/api/v1/branches", admin.accessToken()).getBody().get("items");
+        JsonNode shown = StreamSupport.stream(listed.spliterator(), false)
+                .filter(b -> b.get("code").asString().equals("BR2"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(shown.get("stock_items").asInt()).isEqualTo(1);
+        assertThat(shown.get("stock_value_minor").asLong()).isEqualTo(20_000L);
         String after = TestDatabase.owner()
                 .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'core.branch.closed'"
                         + " AND entity_id = ?")
@@ -322,7 +331,7 @@ class BranchClosingIT extends IntegrationTest {
 
     // ---------------------------------------------------------------------------------------- not stocking
 
-    /** A branch that does not stock is refused for sales, restocks, transfers, stock-takes and usage. */
+    /** A branch that does not stock is refused for sales, restocks, transfers in and stock-takes, and still lets goods leave. */
     @Test
     void aBranchThatDoesNotStockIsRefusedEverywhereStockMoves() {
         retail.stockUp(t.secondBranch(), product, "10");
@@ -331,18 +340,19 @@ class BranchClosingIT extends IntegrationTest {
         UUID hq = t.headOffice();
 
         for (ResponseEntity<JsonNode> r : List.of(
-                retail.sell(hq, "cash", product, "1"),
-                restock(hq),
-                transfer(t.secondBranch(), hq),
-                transfer(hq, t.secondBranch()),
-                stocktake(hq),
-                usage(hq))) {
+                retail.sell(hq, "cash", product, "1"), restock(hq), transfer(t.secondBranch(), hq), stocktake(hq))) {
             assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
             assertThat(code(r)).isEqualTo("branch_not_stocking");
             assertThat(r.getBody().get("detail").asString())
                     .contains("not stocking goods")
                     .doesNotContain("null");
         }
+        // Goods stranded at the branch (a void or an old balance) can still leave: it may be a transfer source, and
+        // take
+        // usage and damage out (ADR-041); it still cannot take anything in.
+        retail.importedBalance(hq, product, "3");
+        assertThat(transfer(hq, t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(usage(hq).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         // The shop is untouched by the refusals and still trades.
         assertThat(retail.sell(t.secondBranch(), "cash", product, "1").getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
@@ -356,6 +366,20 @@ class BranchClosingIT extends IntegrationTest {
         // Switching it back on offers it again.
         assertThat(patch(hq, Map.of("stocks_goods", true)).getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(restock(hq).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    /** A stock-take started and not committed would write stock into the branch later, so it blocks marking the branch. */
+    @Test
+    void notStockingIsRefusedWhileAStockTakeIsOpen() {
+        UUID draft = RetailTestSupport.id(stocktake(t.headOffice()));
+        ResponseEntity<JsonNode> refused = patch(t.headOffice(), Map.of("stocks_goods", false));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("branch_still_has_stock");
+        assertThat(refused.getBody().get("open_stocktakes").asInt()).isEqualTo(1);
+        assertThat(refused.getBody().get("detail").asString()).contains("stock-take");
+        assertThat(retail.post("/stocktakes/" + draft + "/commit", Map.of(), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     /** Marking a branch as not stocking is refused while goods remain, so the stock is not stranded. */

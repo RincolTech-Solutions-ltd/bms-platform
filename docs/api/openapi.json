@@ -703,6 +703,16 @@
             "description" : "active, or inactive for a closed branch (the owner's word is closed, ADR-041)",
             "type" : "string"
           },
+          "stock_items" : {
+            "description" : "items still on the shelves of a closed branch; null for an open branch or when none",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stock_value_minor" : {
+            "description" : "their value at current cost, in minor units; null for an open branch or when none",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "stocks_goods" : {
             "description" : "false for a branch that keeps no goods, such as a head office (ADR-041)",
             "type" : "boolean"

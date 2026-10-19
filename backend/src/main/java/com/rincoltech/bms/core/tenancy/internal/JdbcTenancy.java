@@ -38,6 +38,16 @@ class JdbcTenancy implements Branches, CurrentTenant, TenantModules, TenantSeque
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<Branch> lockBranch(UUID branchId) {
+        return jdbc.sql(
+                        "SELECT id, code, name, is_head_office, status, stocks_goods FROM branches WHERE id = ? FOR SHARE")
+                .param(branchId)
+                .query(JdbcTenancy::branch)
+                .optional();
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public List<Branch> all() {
         return jdbc.sql(

@@ -72,7 +72,34 @@ class BranchService implements BranchProvisioning {
                 .list()
                 .stream()
                 .filter(b -> principal.may(READ, b.id()))
+                .map(this::withHoldings)
                 .toList();
+    }
+
+    /** A closed branch shows what is still on its shelves (ADR-041); an open one, or an empty one, shows nothing. */
+    private BranchResponse withHoldings(BranchResponse b) {
+        if ("active".equals(b.status())) {
+            return b;
+        }
+        return findings(b.id()).stream()
+                .filter(f -> f.kind().equals("stock"))
+                .findFirst()
+                .map(f -> new BranchResponse(
+                        b.id(),
+                        b.code(),
+                        b.name(),
+                        b.location(),
+                        b.isHeadOffice(),
+                        b.status(),
+                        b.stocksGoods(),
+                        b.closedAt(),
+                        b.closedReason(),
+                        f.count(),
+                        f.valueMinor(),
+                        b.createdAt(),
+                        b.updatedAt(),
+                        b.version()))
+                .orElse(b);
     }
 
     @Transactional(readOnly = true)
@@ -254,8 +281,8 @@ class BranchService implements BranchProvisioning {
                 "branch_still_has_stock",
                 "This branch still has goods",
                 describe(branch, findings)
-                        + " Move the stock to a shop and receive or cancel the transfers first, then mark it as not"
-                        + " stocking.",
+                        + " Move the stock to a shop, receive or cancel the transfers and finish the stock-takes first,"
+                        + " then mark it as not stocking.",
                 List.of(),
                 facts(findings));
     }
@@ -273,6 +300,11 @@ class BranchService implements BranchProvisioning {
                         .append(" (")
                         .append(f.count())
                         .append(f.count() == 1 ? " item)" : " items)");
+            } else if (f.kind().equals("open_stocktakes")) {
+                words.append("has ")
+                        .append(f.count())
+                        .append(f.count() == 1 ? " stock-take" : " stock-takes")
+                        .append(" started and not finished");
             } else {
                 words.append("has ")
                         .append(f.count())
@@ -291,6 +323,8 @@ class BranchService implements BranchProvisioning {
             if (f.kind().equals("stock")) {
                 facts.put("stock_items", f.count());
                 facts.put("stock_value_minor", f.valueMinor());
+            } else if (f.kind().equals("open_stocktakes")) {
+                facts.put("open_stocktakes", f.count());
             } else {
                 facts.put("transfers_in_flight", f.count());
                 facts.put("transfers_in_flight_value_minor", f.valueMinor());
@@ -345,6 +379,8 @@ class BranchService implements BranchProvisioning {
                 rs.getBoolean("stocks_goods"),
                 instant(rs.getTimestamp("closed_at")),
                 rs.getString("closed_reason"),
+                null,
+                null,
                 instant(rs.getTimestamp("created_at")),
                 instant(rs.getTimestamp("updated_at")),
                 rs.getInt("version"));

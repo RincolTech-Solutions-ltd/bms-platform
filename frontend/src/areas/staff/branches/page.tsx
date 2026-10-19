@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { type AdminBranch, BranchesError, branches } from '../../../api/branches';
 import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
+import { money } from '../retail/ui';
 import { branchLine, canManageBranches, closedCount, closedOn, isClosed, keepsGoods, showBranches, visibleBranches } from './state';
 
 // Branches (issue #329; ADR-041): which branches are open, close one without losing its history, reopen it, and say that a branch
@@ -13,7 +14,7 @@ import { branchLine, canManageBranches, closedCount, closedOn, isClosed, keepsGo
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.');
 
-type Panel = { id: string; warning: BranchesError | null; reason: string } | null;
+type Panel = { id: string; kind: 'close' | 'nostock'; warning: BranchesError | null; reason: string } | null;
 
 export function BranchesScreen() {
   const { me } = useStaff();
@@ -70,7 +71,7 @@ export function BranchesScreen() {
       (e) => {
         // The server found stock or transfers on the way: show its words and ask for a reason.
         if (e.code !== 'branch_close_needs_reason') return false;
-        setPanel({ id: branch.id ?? '', warning: e, reason });
+        setPanel({ id: branch.id ?? '', kind: 'close', warning: e, reason });
         return true;
       },
     );
@@ -127,6 +128,12 @@ export function BranchesScreen() {
                     <p className="hint">{branchLine(b)}</p>
                     {closed && closedOn(b) && <p className="hint">{closedOn(b)}</p>}
                     {closed && b.closed_reason && <p className="hint">Reason: {b.closed_reason}</p>}
+                    {closed && (b.stock_items ?? 0) > 0 && (
+                      <p className="hint">
+                        Still holds {b.stock_items} {b.stock_items === 1 ? 'item' : 'items'} worth {money(b.stock_value_minor ?? 0)}, kept on record. It is left out of the
+                        stock list unless you ask for closed branches there.
+                      </p>
+                    )}
                     {error?.id === b.id && <p role="alert" className="alert alert-danger">{error?.text}</p>}
                     {canManage && !open && (
                       <p className="cluster">
@@ -136,11 +143,23 @@ export function BranchesScreen() {
                           </button>
                         ) : (
                           <>
-                            <button type="button" className="btn-sm" disabled={busyId !== null} onClick={() => void stocking(b, !keepsGoods(b))}>
+                            <button
+                              type="button"
+                              className="btn-sm"
+                              disabled={busyId !== null}
+                              onClick={() => {
+                                if (keepsGoods(b)) {
+                                  setPanel({ id: b.id ?? '', kind: 'nostock', warning: null, reason: '' });
+                                  setError(null);
+                                } else {
+                                  void stocking(b, true);
+                                }
+                              }}
+                            >
                               {keepsGoods(b) ? 'Mark as keeping no goods' : 'Keeps goods again'}
                             </button>
                             {!b.is_head_office && (
-                              <button type="button" className="btn-ghost btn-sm" disabled={busyId !== null} onClick={() => { setPanel({ id: b.id ?? '', warning: null, reason: '' }); setError(null); }}>
+                              <button type="button" className="btn-ghost btn-sm" disabled={busyId !== null} onClick={() => { setPanel({ id: b.id ?? '', kind: 'close', warning: null, reason: '' }); setError(null); }}>
                                 Close this branch
                               </button>
                             )}
@@ -148,7 +167,21 @@ export function BranchesScreen() {
                         )}
                       </p>
                     )}
-                    {open && panel && (
+                    {open && panel && panel.kind === 'nostock' && (
+                      <div className="alert alert-warning stack" role="group" aria-label={`Mark ${branchLabel(b)} as keeping no goods`}>
+                        <p>
+                          Mark <strong>{branchLabel(b)}</strong> as keeping no goods? Nothing can be sold, restocked, received or counted there afterwards.
+                          Cash records still work, and goods left there can still be moved out. You can switch it back at any time.
+                        </p>
+                        <p className="cluster">
+                          <button type="button" className="rt-primary" disabled={busyId !== null} onClick={() => void stocking(b, false)}>
+                            {busyId === b.id ? 'Saving' : 'Yes, mark it'}
+                          </button>
+                          <button type="button" className="btn-ghost" disabled={busyId !== null} onClick={() => setPanel(null)}>Keep it as it is</button>
+                        </p>
+                      </div>
+                    )}
+                    {open && panel && panel.kind === 'close' && (
                       <div className="alert alert-warning stack" role="group" aria-label={`Close ${branchLabel(b)}`}>
                         {panel.warning ? (
                           <>

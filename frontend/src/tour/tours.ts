@@ -139,7 +139,7 @@ export const adminWelcome: Tour = {
       needs: ['core.branches.read'],
       optional: true,
       title: 'Your branches',
-      body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it any time.',
+      body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it later.',
     },
     {
       id: 'modules',
@@ -708,7 +708,7 @@ export const branchesPage: Tour = {
       id: 'list',
       target: 'branches-list',
       title: 'Your branches',
-      body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
+      body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Goods left there can still be moved out. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
     },
   ],
 };

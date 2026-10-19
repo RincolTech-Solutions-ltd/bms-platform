@@ -78,6 +78,12 @@ class BranchController {
             @Schema(description = "why it was closed, when it had to be confirmed; null otherwise")
             String closedReason,
 
+            @Schema(description = "items still on the shelves of a closed branch; null for an open branch or when none")
+            Integer stockItems,
+
+            @Schema(description = "their value at current cost, in minor units; null for an open branch or when none")
+            Long stockValueMinor,
+
             Instant createdAt,
             Instant updatedAt,
             int version) {}

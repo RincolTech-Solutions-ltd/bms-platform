@@ -47,6 +47,6 @@ export function stockValueWords(facts: CloseFacts | undefined): string | null {
 /** The one line under a branch's name: what it is, in the words of the people who run it. */
 export function branchLine(b: AdminBranch): string {
   if (isClosed(b)) return 'Closed. Its sales and stock records are kept for your reports.';
-  if (!keepsGoods(b)) return 'Keeps no goods: no sales, restocks or stock moves here. Cash records still work.';
+  if (!keepsGoods(b)) return 'Keeps no goods: no sales, restocks or stock-takes here, and no goods can be moved in. Cash records still work, and goods left here can be moved out.';
   return b.is_head_office ? 'Head office.' : 'Open.';
 }

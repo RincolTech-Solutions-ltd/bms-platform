@@ -230,7 +230,7 @@ export function StockPage() {
       {all && (showClosed || (many.data?.closed_branches ?? 0) > 0) && (
         <label style={{ fontWeight: 400 }}>
           <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} />
-          Show closed branches{!showClosed && ` (${many.data?.closed_branches ?? 0} hold stock)`}
+          {showClosed ? 'Showing closed branches' : `${many.data?.closed_branches ?? 0} closed ${many.data?.closed_branches === 1 ? 'shop' : 'shops'} with stock hidden. Show them`}
         </label>
       )}
       {!all && branchId === null && <BranchRequired permissions={needsOf('stock')} />}

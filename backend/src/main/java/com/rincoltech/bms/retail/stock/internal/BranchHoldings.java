@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * What retail still holds at a branch, for the tenancy module's close and not-stocking checks (issue #329, ADR-041): the stock
  * with a non-zero balance, valued at each product's current cost as the stock valuation does, and the transfers dispatched
- * from or to it and not yet received. Read only: nothing is moved, posted or written off.
+ * from or to it and not yet received, and the stock-takes started and not committed. Read only: nothing is moved, posted or written off.
  */
 @Component
 class BranchHoldings implements BranchClosingCheck {
@@ -47,6 +47,14 @@ class BranchHoldings implements BranchClosingCheck {
                 .single();
         if (road.count() > 0) {
             found.add(road);
+        }
+        // A count started and not committed: committing it later would write stock into the branch.
+        int drafts = jdbc.sql("SELECT count(*) FROM retail_stocktakes WHERE status = 'draft' AND branch_id = ?")
+                .param(branchId)
+                .query(Integer.class)
+                .single();
+        if (drafts > 0) {
+            found.add(new Finding("open_stocktakes", drafts, 0));
         }
         return found;
     }

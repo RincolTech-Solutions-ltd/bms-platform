@@ -5519,6 +5519,16 @@ export interface components {
             name?: string;
             /** @description active, or inactive for a closed branch (the owner's word is closed, ADR-041) */
             status?: string;
+            /**
+             * Format: int32
+             * @description items still on the shelves of a closed branch; null for an open branch or when none
+             */
+            stock_items?: number;
+            /**
+             * Format: int64
+             * @description their value at current cost, in minor units; null for an open branch or when none
+             */
+            stock_value_minor?: number;
             /** @description false for a branch that keeps no goods, such as a head office (ADR-041) */
             stocks_goods?: boolean;
             /** Format: date-time */

@@ -342,6 +342,9 @@ class StockService {
                     "Stock-take committed",
                     "This stock-take has been committed already.");
         }
+        // A draft made before the branch was closed or marked as not stocking must not write stock there (issue #329,
+        // ADR-041).
+        branches.requireStocks(s.branchId(), "branch_id");
         List<StocktakeLine> lines = new ArrayList<>(s.lines());
         lines.sort(Comparator.comparing(StocktakeLine::productId));
         List<Movement> movements = new ArrayList<>();

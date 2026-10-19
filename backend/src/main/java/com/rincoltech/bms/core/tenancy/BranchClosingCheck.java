@@ -14,8 +14,8 @@ public interface BranchClosingCheck {
     List<Finding> findings(UUID branchId);
 
     /**
-     * @param kind {@code stock} or {@code transfers_in_flight}
-     * @param count products with a balance (stock) or transfers on their way
+     * @param kind {@code stock}, {@code transfers_in_flight} or {@code open_stocktakes}
+     * @param count products with a balance (stock), transfers on their way, or stock-takes started and not committed
      * @param valueMinor the value at the products' current cost, in minor units of the tenant's currency
      */
     record Finding(String kind, int count, long valueMinor) {}

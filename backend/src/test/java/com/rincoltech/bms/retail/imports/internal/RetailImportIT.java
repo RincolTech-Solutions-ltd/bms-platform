@@ -447,6 +447,42 @@ class RetailImportIT extends IntegrationTest {
                 .isEqualTo(1);
     }
 
+    // JUSTIFICATION-A3: a new test for the importer's refusal of a balance at a branch that keeps no goods (issue
+    // #329).
+    /** Issue #329: a balance for a branch that keeps no goods is refused and reported; the other branch's balance is written. */
+    @Test
+    void refusesABalanceForABranchThatKeepsNoGoods(@TempDir Path dir) throws IOException {
+        owner.sql("UPDATE branches SET stocks_goods = false WHERE id = ?")
+                .param(t.headOffice())
+                .update();
+        Files.writeString(dir.resolve("categories.jsonl"), "{\"name\": \"Test Category\"}\n");
+        Files.writeString(dir.resolve("units.jsonl"), "{\"name\": \"piece\"}\n");
+        Files.writeString(dir.resolve("products.jsonl"), """
+                {"code": "TN-1", "description": "Test cup one", "category": "Test Category", "unit": "piece", "cost_minor": 100, "sell_minor": 150}
+                """);
+        Files.writeString(dir.resolve("balances.jsonl"), """
+                {"branch": "HQ", "product_code": "TN-1", "qty": "5"}
+                {"branch": "BR2", "product_code": "TN-1", "qty": "3"}
+                """);
+
+        ImportReport report = importer.run(t.slug(), dir, false);
+
+        assertThat(report.failed()).as(report.render()).isFalse();
+        assertThat(report.counts("balances.jsonl")).containsExactly(2, 1, 0, 1);
+        assertThat(report.anomalies()).anyMatch(a -> a.startsWith("balances.jsonl:1: branch HQ keeps no goods"));
+        assertThat(report.checksumLine()).contains("match=yes");
+        assertThat(owner.sql("SELECT count(*) FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ?")
+                        .params(t.tenantId(), t.headOffice())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(owner.sql("SELECT qty FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ?")
+                        .params(t.tenantId(), t.secondBranch())
+                        .query(BigDecimal.class)
+                        .single())
+                .isEqualByComparingTo("3");
+    }
+
     /** Issue #73: the 40 character limit applies to the normal form, and an over-long one skips the row. */
     @Test
     void checksTheCodeLengthAfterNormalisation(@TempDir Path dir) throws IOException {
