@@ -203,10 +203,7 @@ class ServicingRepository {
                         SELECT id FROM lending_loan_transactions
                          WHERE payment_method_key = 'gateway' AND external_reference = ?
                            AND txn_type IN ('repayment', 'recovery')
-                        """)
-                .param(externalReference)
-                .query(UUID.class)
-                .optional();
+                        """).param(externalReference).query(UUID.class).optional();
     }
 
     Optional<Txn> txn(UUID id) {

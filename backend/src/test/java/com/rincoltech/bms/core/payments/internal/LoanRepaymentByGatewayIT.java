@@ -119,12 +119,15 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                 .update();
         token = connect();
         TestDatabase.owner()
-                .sql("INSERT INTO payment_methods (id, tenant_id, method_key, gl_account_id) VALUES (?, ?, 'gateway', ?)")
+                .sql(
+                        "INSERT INTO payment_methods (id, tenant_id, method_key, gl_account_id) VALUES (?, ?, 'gateway', ?)")
                 .params(UUID.randomUUID(), t.tenantId(), t.account("gateway_clearing"))
                 .update();
         setSettings(Map.of("collections_enabled", true, "daily_ceiling_minor", 100_000_000L));
         // Nothing left due from an earlier test: only this test's intents are checked.
-        TestDatabase.owner().sql("UPDATE payment_intents SET next_check_at = NULL").update();
+        TestDatabase.owner()
+                .sql("UPDATE payment_intents SET next_check_at = NULL")
+                .update();
     }
 
     // ---- helpers ------------------------------------------------------------------------------
@@ -224,8 +227,7 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         body.put("external_reference", "TEST-DISB-216");
         HttpHeaders h = as(cashier, cashierPerms, "*", null);
         h.add("Idempotency-Key", "disb-" + UUID.randomUUID());
-        ResponseEntity<JsonNode> r =
-                send(HttpMethod.POST, LOANS + "/" + loan + "/disbursements", h, body);
+        ResponseEntity<JsonNode> r = send(HttpMethod.POST, LOANS + "/" + loan + "/disbursements", h, body);
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         ResponseEntity<JsonNode> d = send(
                 HttpMethod.POST,
@@ -294,21 +296,18 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
     /** The repayment rows of a loan, oldest first. */
     List<Map<String, Object>> repayments(String loan) {
         return TestDatabase.owner()
-                .sql("SELECT * FROM lending_loan_transactions WHERE loan_id = ? AND txn_type = 'repayment' ORDER BY created_at")
+                .sql(
+                        "SELECT * FROM lending_loan_transactions WHERE loan_id = ? AND txn_type = 'repayment' ORDER BY created_at")
                 .param(UUID.fromString(loan))
                 .query()
                 .listOfRows();
     }
 
     List<String> lines(Object entryId) {
-        return TestDatabase.owner()
-                .sql("""
+        return TestDatabase.owner().sql("""
                         SELECT a.system_key || ':' || l.debit || ':' || l.credit FROM journal_lines l
                           JOIN gl_accounts a ON a.id = l.account_id WHERE l.entry_id = ? ORDER BY l.line_no
-                        """)
-                .param(entryId)
-                .query(String.class)
-                .list();
+                        """).param(entryId).query(String.class).list();
     }
 
     // ---- the own-account rule -----------------------------------------------------------------
@@ -319,7 +318,8 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         long callsBefore = fake.calls().size();
         long creates = fake.creates();
         // The account is connected and collections are on, then a connection test fails: the account is not verified.
-        fake.failRegister(new GatewayException(GatewayException.Kind.AUTH, 200, "invalid_consumer_key_or_secret_provided"));
+        fake.failRegister(
+                new GatewayException(GatewayException.Kind.AUTH, 200, "invalid_consumer_key_or_secret_provided"));
         ResponseEntity<JsonNode> failed = call(HttpMethod.POST, "/api/v1/payments/merchant-account/test", null, null);
         assertThat(failed.getBody().get("status").asString()).isEqualTo("failed");
         callsBefore = fake.calls().size();
@@ -343,7 +343,8 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         TestDatabase.Fixture none = TestDatabase.tenant("loans-noacct", true);
         UUID admin = UUID.randomUUID();
         TestDatabase.owner()
-                .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff 216', ?, 'active')")
+                .sql(
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', 'Test Staff 216', ?, 'active')")
                 .params(admin, none.tenantId(), "staff-" + admin + "@example.test")
                 .update();
         long before = fake.calls().size();
@@ -356,7 +357,15 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                 "/api/v1/payments/intents",
                 HttpMethod.POST,
                 new HttpEntity<>(
-                        Map.of("purpose", PURPOSE, "subject_id", UUID.randomUUID(), "amount_minor", 1000, "payer_phone", "0700000216"),
+                        Map.of(
+                                "purpose",
+                                PURPOSE,
+                                "subject_id",
+                                UUID.randomUUID(),
+                                "amount_minor",
+                                1000,
+                                "payer_phone",
+                                "0700000216"),
                         withKey(h)),
                 JsonNode.class);
         assertThat(r.getStatusCode().value()).isEqualTo(422);
@@ -428,20 +437,23 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
 
         // The audit rows: the repayment's names its origin, the intent's the merchant account and the order.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT data->'after'->>'origin' FROM audit_log WHERE entity_id = ? AND action = 'lending.loan.repayment_recorded'")
+                        .sql(
+                                "SELECT data->'after'->>'origin' FROM audit_log WHERE entity_id = ? AND action = 'lending.loan.repayment_recorded'")
                         .param(UUID.fromString(gatewayLoan))
                         .query(String.class)
                         .single())
                 .isEqualTo("gateway");
         assertThat(TestDatabase.owner()
-                        .sql("SELECT data->'after'->>'merchant_id' || '/' || (data->'after'->>'order_tracking_id') FROM audit_log WHERE entity_id = ? AND action = 'core.payments.intent.booked'")
+                        .sql(
+                                "SELECT data->'after'->>'merchant_id' || '/' || (data->'after'->>'order_tracking_id') FROM audit_log WHERE entity_id = ? AND action = 'core.payments.intent.booked'")
                         .param(UUID.fromString(intent.get("id").asString()))
                         .query(String.class)
                         .single())
                 .isEqualTo(merchant + "/" + tracking(intent));
         // The receipt text is queued in the same transaction (the tenant has SMS on).
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM notification_outbox WHERE channel = 'sms' AND tenant_id = ? AND template_key = 'loan.repayment_received'")
+                        .sql(
+                                "SELECT count(*) FROM notification_outbox WHERE channel = 'sms' AND tenant_id = ? AND template_key = 'loan.repayment_received'")
                         .param(t.tenantId())
                         .query(Long.class)
                         .single())
@@ -464,8 +476,12 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         assertThat(row(partial).get("status")).isEqualTo("booked");
         assertThat(row(partial).get("paid_amount_minor")).isEqualTo(300_000L);
         assertThat(repayments(loan).getFirst().get("amount_minor")).isEqualTo(300_000L);
-        assertThat(get(loan, "").get("balances").get("principal_outstanding_minor").asLong())
-                // R-ALLOC: interest of the first instalment (120,000) before principal, so 180,000 of principal is paid.
+        assertThat(get(loan, "")
+                        .get("balances")
+                        .get("principal_outstanding_minor")
+                        .asLong())
+                // R-ALLOC: interest of the first instalment (120,000) before principal, so 180,000 of principal is
+                // paid.
                 .isEqualTo(1_200_000L - 180_000L);
 
         JsonNode excess = intentFor(loan, 520_000);
@@ -494,7 +510,10 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         ResponseEntity<JsonNode> notActive = startIntent(approved, 1000);
         assertThat(notActive.getStatusCode().value()).isEqualTo(422);
         assertThat(notActive.getBody().get("code").asString()).isEqualTo("subject_not_payable");
-        assertThat(startIntent(UUID.randomUUID().toString(), 1000).getBody().get("code").asString())
+        assertThat(startIntent(UUID.randomUUID().toString(), 1000)
+                        .getBody()
+                        .get("code")
+                        .asString())
                 .isEqualTo("subject_not_payable");
         assertThat(fake.creates()).isEqualTo(creates);
     }
@@ -509,7 +528,8 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         for (int i = 0; i < 3; i++) {
             ResponseEntity<JsonNode> r = http.exchange(
                     "/api/v1/payments/callbacks/pesapal/" + token + "?OrderTrackingId=" + tracking(intent)
-                            + "&OrderMerchantReference=" + intent.get("merchant_reference").asString()
+                            + "&OrderMerchantReference="
+                            + intent.get("merchant_reference").asString()
                             + "&OrderNotificationType=IPNCHANGE",
                     HttpMethod.GET,
                     HttpEntity.EMPTY,
@@ -521,17 +541,24 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         tick(Duration.ofMinutes(3));
         assertThat(row(intent).get("status")).isEqualTo("booked");
         assertThat(repayments(loan)).hasSize(1);
-        assertThat(get(loan, "").get("balances").get("principal_outstanding_minor").asLong())
+        assertThat(get(loan, "")
+                        .get("balances")
+                        .get("principal_outstanding_minor")
+                        .asLong())
                 .isEqualTo(1_200_000L - 400_000L);
     }
 
     @Test
     void thePortReturnsTheFirstTransactionForARepeatedConfirmationCodeAndTheIndexBacksIt() {
         String loan = activeLoan();
-        UUID first = tenantJobs.callForTenant(t.tenantId(), () -> port.recordRepayment(
-                UUID.fromString(loan), 100_000, TODAY, "gateway", staff, "CONF-216-0005", "gateway", false));
-        UUID again = tenantJobs.callForTenant(t.tenantId(), () -> port.recordRepayment(
-                UUID.fromString(loan), 100_000, TODAY, "gateway", staff, "CONF-216-0005", "gateway", false));
+        UUID first = tenantJobs.callForTenant(
+                t.tenantId(),
+                () -> port.recordRepayment(
+                        UUID.fromString(loan), 100_000, TODAY, "gateway", staff, "CONF-216-0005", "gateway", false));
+        UUID again = tenantJobs.callForTenant(
+                t.tenantId(),
+                () -> port.recordRepayment(
+                        UUID.fromString(loan), 100_000, TODAY, "gateway", staff, "CONF-216-0005", "gateway", false));
         assertThat(again).isEqualTo(first);
         assertThat(repayments(loan)).hasSize(1);
         // The seed and the import keep texting nobody: the port with queueReceiptNotice false queued nothing.
@@ -542,16 +569,14 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                         .single())
                 .isZero();
         // At the database: a second row with the same method and reference is refused for the table owner too.
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TestDatabase.owner()
-                        .sql("""
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> TestDatabase.owner().sql("""
                                 INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor, currency,
                                     value_date, payment_method_key, external_reference, receipt_no, journal_entry_id, source)
                                 SELECT gen_random_uuid(), tenant_id, branch_id, loan_id, txn_type, amount_minor, currency,
                                     value_date, payment_method_key, external_reference, 'RC-HQ-999999', journal_entry_id, source
                                   FROM lending_loan_transactions WHERE id = ?
-                                """)
-                        .param(first)
-                        .update())
+                                """).param(first).update())
                 .hasMessageContaining("lending_loan_transactions_gateway_reference");
     }
 

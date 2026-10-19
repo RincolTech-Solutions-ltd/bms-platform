@@ -839,7 +839,8 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), new byte[40], new byte[40], hex64(t.tenantId()), user)
                 .update();
-        // Money a purpose handler refused, held for a cashier (migration V59, #216). JUSTIFICATION-A3: one factory row per
+        // Money a purpose handler refused, held for a cashier (migration V59, #216). JUSTIFICATION-A3: one factory row
+        // per
         // tenant table; it points at the fixture intent and the fixture journal entry above.
         owner.sql("""
                         INSERT INTO unallocated_receipts (id, tenant_id, branch_id, intent_id, purpose, subject_type, subject_id,

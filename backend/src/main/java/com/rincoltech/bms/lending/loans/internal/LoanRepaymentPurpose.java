@@ -58,7 +58,8 @@ class LoanRepaymentPurpose implements PurposeHandler {
         if (!"active".equals(loan.status()) || !loan.currency().equals(currency)) {
             throw new PurposeRefusal("subject_not_payable");
         }
-        long payoff = servicer.quote(loan, clock.today(tenant.profile().timezone())).totalMinor();
+        long payoff =
+                servicer.quote(loan, clock.today(tenant.profile().timezone())).totalMinor();
         if (amountMinor > payoff) {
             throw new PurposeRefusal("exceeds_payoff");
         }
@@ -71,7 +72,8 @@ class LoanRepaymentPurpose implements PurposeHandler {
         if (!loan.currency().equals(booking.currency())) {
             throw new PurposeRefusal("currency_mismatch");
         }
-        String reference = booking.confirmationCode() != null ? booking.confirmationCode() : booking.providerReference();
+        String reference =
+                booking.confirmationCode() != null ? booking.confirmationCode() : booking.providerReference();
         try {
             return servicing.recordRepayment(
                     booking.subjectId(),

@@ -195,7 +195,10 @@ class PaymentBooker {
             extra.put("merchant_id", intent.merchantId().toString());
         }
         audit.system(intent, "booked_unallocated", "booked_unallocated", extra);
-        log.warn("payment intent {} not booked, the handler refused: {}; posted to unallocated receipts", intent.id(), refusal.code());
+        log.warn(
+                "payment intent {} not booked, the handler refused: {}; posted to unallocated receipts",
+                intent.id(),
+                refusal.code());
         return Outcome.REFUSED;
     }
 

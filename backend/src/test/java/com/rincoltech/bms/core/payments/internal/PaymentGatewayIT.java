@@ -900,7 +900,8 @@ class PaymentGatewayIT extends IntegrationTest {
         assertThat(handler.bookings).isEmpty();
         // One receipt for the intent, and a balanced journal: debit gateway_clearing, credit unallocated_receipts.
         var receipt = TestDatabase.owner()
-                .sql("SELECT amount_minor, refusal_code, status, journal_entry_id, confirmation_code FROM unallocated_receipts WHERE intent_id = ?")
+                .sql(
+                        "SELECT amount_minor, refusal_code, status, journal_entry_id, confirmation_code FROM unallocated_receipts WHERE intent_id = ?")
                 .param(UUID.fromString(id))
                 .query((rs, n) -> new Object[] {
                     rs.getLong(1), rs.getString(2), rs.getString(3), rs.getObject(4, UUID.class), rs.getString(5)
@@ -911,7 +912,8 @@ class PaymentGatewayIT extends IntegrationTest {
         assertThat(receipt[2]).isEqualTo("open");
         assertThat(receipt[4]).isEqualTo("CONF-0010");
         var lines = TestDatabase.owner()
-                .sql("SELECT a.system_key, l.debit, l.credit FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE l.entry_id = ? ORDER BY l.debit DESC")
+                .sql(
+                        "SELECT a.system_key, l.debit, l.credit FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE l.entry_id = ? ORDER BY l.debit DESC")
                 .param(receipt[3])
                 .query((rs, n) -> rs.getString(1) + ":" + rs.getLong(2) + ":" + rs.getLong(3))
                 .list();

@@ -138,7 +138,14 @@ class LoanServicer implements LoanServicing {
         }
         checkRepayable(loan, valueDate, paymentMethodKey);
         return repay(
-                loan, amountMinor, valueDate, paymentMethodKey, externalReference, recordedBy, origin, queueReceiptNotice);
+                loan,
+                amountMinor,
+                valueDate,
+                paymentMethodKey,
+                externalReference,
+                recordedBy,
+                origin,
+                queueReceiptNotice);
     }
 
     // ---- Disbursement (FR-DIS-01 to FR-DIS-03) --------------------------------------------
@@ -394,7 +401,8 @@ class LoanServicer implements LoanServicing {
         after.put("receipt_no", receipt);
         after.putAll(notices.audit(source, notifyMember, valueDate));
         if (GATEWAY.equals(source)) {
-            // The order and the merchant account are on the payment intent's own audit row, written in this transaction.
+            // The order and the merchant account are on the payment intent's own audit row, written in this
+            // transaction.
             after.put("origin", GATEWAY);
             after.put("external_reference", externalReference);
         }

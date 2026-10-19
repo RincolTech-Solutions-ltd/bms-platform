@@ -92,6 +92,7 @@ class UnallocatedReceipts {
     private LedgerAccounts.Account account(String systemKey) {
         return accounts.bySystemKey(systemKey)
                 .orElseThrow(() -> ApiException.rule(
-                        "lending_chart_missing", "The tenant has no active account with system key " + systemKey + "."));
+                        "lending_chart_missing",
+                        "The tenant has no active account with system key " + systemKey + "."));
     }
 }
