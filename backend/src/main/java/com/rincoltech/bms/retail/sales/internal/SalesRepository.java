@@ -100,6 +100,8 @@ class SalesRepository {
             String status,
             String owing,
             LocalDate today,
+            UUID sellerId,
+            UUID categoryId,
             boolean newestFirst,
             Instant afterCreated,
             UUID afterId,
@@ -110,7 +112,20 @@ class SalesRepository {
             return List.of();
         }
         appendFilters(
-                sql, params, branchIds, from, to, customerId, paymentMethod, productId, buyer, status, owing, today);
+                sql,
+                params,
+                branchIds,
+                from,
+                to,
+                customerId,
+                paymentMethod,
+                productId,
+                buyer,
+                status,
+                owing,
+                today,
+                sellerId,
+                categoryId);
         if (afterCreated != null) {
             sql.append(newestFirst ? " AND (created_at, id) < " : " AND (created_at, id) > ")
                     .append("(:afterCreated, :afterId)");
@@ -142,7 +157,9 @@ class SalesRepository {
             Search.Query buyer,
             String status,
             String owing,
-            LocalDate today) {
+            LocalDate today,
+            UUID sellerId,
+            UUID categoryId) {
         if (branchIds != null) {
             sql.append(" AND branch_id IN (:branchIds)");
             params.put("branchIds", branchIds);
@@ -167,6 +184,16 @@ class SalesRepository {
             sql.append(" AND EXISTS (SELECT 1 FROM retail_sale_lines l WHERE l.sale_id = retail_sales.id"
                     + " AND l.product_id = :productId)");
             params.put("productId", productId);
+        }
+        if (sellerId != null) {
+            sql.append(" AND retail_sales.created_by = :sellerId");
+            params.put("sellerId", sellerId);
+        }
+        if (categoryId != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM retail_sale_lines cl JOIN retail_products cp"
+                    + " ON cp.tenant_id = cl.tenant_id AND cp.id = cl.product_id"
+                    + " WHERE cl.sale_id = retail_sales.id AND cp.category_id = :categoryId)");
+            params.put("categoryId", categoryId);
         }
         if (buyer != null) {
             Search.Match match = buyer.match(BUYER_SEARCH);

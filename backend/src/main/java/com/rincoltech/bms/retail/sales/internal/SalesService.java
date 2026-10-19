@@ -616,6 +616,8 @@ class SalesService {
             String buyer,
             String status,
             String owing,
+            UUID sellerId,
+            UUID categoryId,
             boolean newestFirst,
             Integer limit,
             String cursor) {
@@ -665,6 +667,8 @@ class SalesService {
                 status,
                 owing,
                 today,
+                sellerId,
+                categoryId,
                 newestFirst,
                 afterCreated,
                 afterId,
