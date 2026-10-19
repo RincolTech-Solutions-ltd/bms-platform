@@ -94,7 +94,7 @@ export function BranchesScreen() {
   return (
     <main className="rt ln stack" data-tour="branches-list">
       <h1>Branches</h1>
-      <p>
+      <p data-tour="branches-intro">
         Your shops, stores and head office. Close a branch you no longer use: its sales and stock records stay for your reports,
         and it leaves the branch lists and the sale, restock and move-stock screens.
       </p>

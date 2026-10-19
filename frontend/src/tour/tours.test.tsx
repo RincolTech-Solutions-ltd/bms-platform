@@ -252,6 +252,7 @@ const ASSISTANT: Me = { ...ADMIN, full_name: 'Test Assistant Admin 01', permissi
 const AUDIENCE: Record<string, Me[]> = {
   'page-assistant': [ASSISTANT],
   'page-users': [ADMIN],
+  'page-branches': [ADMIN],
   'page-members': [CLERK, OFFICER],
   'page-member-new': [CLERK],
   'page-member': [CLERK, CHECKER],

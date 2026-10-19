@@ -689,6 +689,30 @@ export const usersPage: Tour = {
   ],
 };
 
+// The Branches page (issue #329): a page tour for whoever may read branches; closing and reopening need the manage permission.
+export const branchesPage: Tour = {
+  id: 'page-branches',
+  version: 1,
+  title: 'This page: branches',
+  audience: (me) => held(me, 'core.branches.read'),
+  autoStart: false,
+  page: '/staff/setup/branches',
+  steps: [
+    {
+      id: 'intro',
+      target: 'branches-intro',
+      title: 'Closing a branch keeps its history',
+      body: 'A closed branch keeps its sales and stock records for your reports. It only leaves the branch lists and the sale, restock and move-stock screens.',
+    },
+    {
+      id: 'list',
+      target: 'branches-list',
+      title: 'Your branches',
+      body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
+    },
+  ],
+};
+
 export const branchRolesCapability: Tour = {
   id: 'capability-branch-roles',
   version: 1,
@@ -1219,5 +1243,5 @@ export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
 ];
