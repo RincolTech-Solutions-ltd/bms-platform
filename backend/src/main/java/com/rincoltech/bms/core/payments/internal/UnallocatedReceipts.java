@@ -18,10 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * A completed payment its purpose handler refused is never stranded (ADR-035 decision 14, spec 3.4): the amount the
- * provider confirmed is posted out of {@code gateway_clearing} into the liability {@code unallocated_receipts}, a row in
+ * provider confirmed is posted out of the account the {@code gateway} method is mapped to at the branch (the account a
+ * repayment would have debited; {@code gateway_clearing} by its system key only when the method is unmapped, the very
+ * refusal that may have put the money here) into the liability {@code unallocated_receipts}, a row in
  * {@code unallocated_receipts} says whose money it is and why it was not booked, and a cashier allocates or refunds it
- * later (FR-PAY-04). The debit names the clearing account by its system key, not through the payment method's mapping, so
- * a method that is unmapped, the very refusal that put the money here, cannot block the way out.
+ * later (FR-PAY-04).
  *
  * <p>Runs in the booking's transaction (it refuses to run without one), after the handler's savepoint rolled back, so the
  * journal, the receipt row and the intent's new status commit together or not at all.
@@ -102,11 +103,10 @@ class UnallocatedReceipts {
      * money here.
      */
     private LedgerAccounts.Account gatewayAccount(UUID branchId) {
-        try {
-            return accounts.byRef(methods.accountRef("gateway", branchId)).orElseGet(() -> account(CLEARING));
-        } catch (ApiException e) {
-            return account(CLEARING);
-        }
+        // A lookup that cannot refuse: a refusal inside the booking's transaction would mark it rollback-only.
+        return methods.accountRefIfMapped("gateway", branchId)
+                .flatMap(accounts::byRef)
+                .orElseGet(() -> account(CLEARING));
     }
 
     private LedgerAccounts.Account account(String systemKey) {

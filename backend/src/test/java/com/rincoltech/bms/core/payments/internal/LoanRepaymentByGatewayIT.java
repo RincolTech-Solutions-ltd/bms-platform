@@ -414,7 +414,7 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
         assertThat(txn.get("id")).isEqualTo(intentRow.get("booked_subject_txn_id"));
         assertThat(txn.get("payment_method_key")).isEqualTo("gateway");
         assertThat(txn.get("source")).isEqualTo("gateway");
-        assertThat(txn.get("external_reference")).isEqualTo("CONF-216-0001");
+        assertThat(txn.get("external_reference")).isEqualTo(tracking(intent));
         assertThat(txn.get("recorded_by")).isEqualTo(staff);
         assertThat((String) txn.get("receipt_no")).matches("RC-HQ-\\d{6}");
         assertThat(txn.get("amount_minor")).isEqualTo(520_000L);
@@ -638,32 +638,101 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
     }
 
     @Test
-    void theSameConfirmationCodeForAnotherLoanIsNeverAReplayTheSecondPaymentIsHeldUnallocated() {
+    void theSameReferenceForAnotherLoanThroughThePortIsNeverAReplayAndTheHandlerHoldsItUnallocated() {
         String first = activeLoan();
         String second = activeLoan();
-        JsonNode a = intentFor(first, 520_000);
-        JsonNode b = intentFor(second, 520_000);
-        pay(a, 520_000, "CONF-216-SAME");
-        pay(b, 520_000, "CONF-216-SAME");
+        tenantJobs.callForTenant(
+                t.tenantId(),
+                () -> port.recordRepayment(
+                        UUID.fromString(first), 100_000, TODAY, "gateway", staff, "ORDER-216-SAME", "gateway", false));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> tenantJobs.callForTenant(
+                        t.tenantId(),
+                        () -> port.recordRepayment(
+                                UUID.fromString(second),
+                                100_000,
+                                TODAY,
+                                "gateway",
+                                staff,
+                                "ORDER-216-SAME",
+                                "gateway",
+                                false)))
+                .hasMessageContaining("already booked a different payment");
+        assertThat(repayments(second)).isEmpty();
+    }
+
+    @Test
+    void twoGenuinePaymentsOfTheSameAmountOnOneLoanWithTheSameConfirmationCodeBothBook() {
+        String loan = activeLoan();
+        JsonNode a = intentFor(loan, 100_000);
+        JsonNode b = intentFor(loan, 100_000);
+        pay(a, 100_000, "CONF-216-SAME");
+        pay(b, 100_000, "CONF-216-SAME");
         tick(Duration.ofMinutes(3));
-        // Whichever the poller met first is booked; the other is a different payment under a used code.
-        JsonNode booked = "booked".equals(row(a).get("status")) ? a : b;
-        JsonNode held = booked == a ? b : a;
-        String heldLoan = held == a ? first : second;
-        String bookedLoan = booked == a ? first : second;
-        Map<String, Object> heldRow = row(held);
-        assertThat(row(booked).get("status")).isEqualTo("booked");
-        assertThat(heldRow.get("status")).isEqualTo("booked_unallocated");
-        assertThat(heldRow.get("refusal_code")).isEqualTo("duplicate_reference");
-        assertThat(heldRow.get("booked_subject_txn_id")).isNull();
-        assertThat(repayments(bookedLoan)).hasSize(1);
-        assertThat(repayments(heldLoan)).isEmpty();
+        assertThat(row(a).get("status")).isEqualTo("booked");
+        assertThat(row(b).get("status")).isEqualTo("booked");
+        assertThat(row(a).get("booked_subject_txn_id")).isNotEqualTo(row(b).get("booked_subject_txn_id"));
+        assertThat(repayments(loan)).hasSize(2);
+        assertThat(repayments(loan).stream()
+                        .map(r -> r.get("external_reference"))
+                        .toList())
+                .containsExactlyInAnyOrder(tracking(a), tracking(b));
+        // The provider's code is on the intents' audit rows.
         assertThat(TestDatabase.owner()
-                        .sql("SELECT amount_minor FROM unallocated_receipts WHERE intent_id = ?")
-                        .param(UUID.fromString(held.get("id").asString()))
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE action = 'core.payments.intent.booked' AND data->'after'->>'confirmation_code' = 'CONF-216-SAME' AND tenant_id = ?")
+                        .param(t.tenantId())
                         .query(Long.class)
                         .single())
-                .isEqualTo(520_000L);
+                .isEqualTo(2L);
+        // The database backstop exists: one subject transaction is never the booking of two intents.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'payment_intents_one_booking_per_txn'")
+                        .query(String.class)
+                        .single())
+                .contains("UNIQUE", "booked_subject_txn_id");
+    }
+
+    @Test
+    void anUnallocatedReceiptDebitsTheAccountTheGatewayMethodIsMappedToAtTheBranch() {
+        String till = assetAccount("1099", "Test gateway till");
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE payment_methods SET gl_account_id = ?::uuid WHERE tenant_id = ? AND method_key = 'gateway'")
+                .params(till, t.tenantId())
+                .update();
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        cashRepayment(loan, 1_560_000);
+        pay(intent, 520_000, "CONF-216-MAP");
+        tick(Duration.ofMinutes(3));
+        assertThat(row(intent).get("status")).isEqualTo("booked_unallocated");
+        Object entry = TestDatabase.owner()
+                .sql("SELECT journal_entry_id FROM unallocated_receipts WHERE intent_id = ?")
+                .param(UUID.fromString(intent.get("id").asString()))
+                .query(UUID.class)
+                .single();
+        assertThat(codedLines(entry.toString())).containsExactly("1099:520000:0", "2040:0:520000");
+    }
+
+    @Test
+    void whenTheGatewayMethodIsUnmappedTheReceiptFallsBackToGatewayClearingAndCommits() {
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        TestDatabase.owner()
+                .sql("UPDATE payment_methods SET is_active = false WHERE tenant_id = ? AND method_key = 'gateway'")
+                .param(t.tenantId())
+                .update();
+        pay(intent, 520_000, "CONF-216-UNM");
+        tick(Duration.ofMinutes(3));
+        assertThat(row(intent).get("status")).isEqualTo("booked_unallocated");
+        assertThat(row(intent).get("refusal_code")).isEqualTo("payment_method_unmapped");
+        Object entry = TestDatabase.owner()
+                .sql("SELECT journal_entry_id FROM unallocated_receipts WHERE intent_id = ?")
+                .param(UUID.fromString(intent.get("id").asString()))
+                .query(UUID.class)
+                .single();
+        assertThat(lines(entry)).containsExactly("gateway_clearing:520000:0", "unallocated_receipts:0:520000");
+        assertThat(repayments(loan)).isEmpty();
     }
 
     @Test

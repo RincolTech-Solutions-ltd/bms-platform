@@ -2,7 +2,7 @@
 -- amendments of 2026-10-15 and 2026-10-18; docs/specs/client-extras.md sections 3.4, 3.4.1 and 3.7). Flyway runs with
 -- outOfOrder off: this number was the next free one on main and on every open branch when the work began.
 --
--- Expand only, safe on a populated database. Three things and nothing else:
+-- Expand only, safe on a populated database. Four things and nothing else:
 --
 --   1. `lending_loan_transactions.payment_method_key` accepts `gateway` (the payment method of a repayment the payments
 --      module booked, mapped to a ledger account by the tenant, FR-GL-08). The old check is replaced by a superset, so
@@ -36,6 +36,11 @@ CREATE UNIQUE INDEX lending_loan_transactions_gateway_reference
     ON lending_loan_transactions (tenant_id, payment_method_key, external_reference)
     WHERE payment_method_key = 'gateway' AND external_reference IS NOT NULL
       AND txn_type IN ('repayment', 'recovery');
+
+-- Backstop of the booker's one-booking-per-intent rule: no repayment, deposit or other subject transaction is the booking of
+-- two intents. Partial, and `payment_intents` holds no booked row yet on any server, so the build scans nothing that can collide.
+CREATE UNIQUE INDEX payment_intents_one_booking_per_txn
+    ON payment_intents (tenant_id, booked_subject_txn_id) WHERE booked_subject_txn_id IS NOT NULL;
 
 CREATE TABLE unallocated_receipts (
     id                uuid         NOT NULL PRIMARY KEY,

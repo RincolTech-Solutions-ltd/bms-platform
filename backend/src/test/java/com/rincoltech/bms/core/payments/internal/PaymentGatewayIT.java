@@ -887,6 +887,18 @@ class PaymentGatewayIT extends IntegrationTest {
     }
 
     @Test
+    void aRepaymentRefusedAsPeriodClosedIsRetriedOnceDatedToday() {
+        handler.refuseFirstOnly = "period_closed";
+        JsonNode intent = create(1500);
+        pay(intent, 1500, "UGX", "CONF-0012");
+        clock.set(clock.instant().plus(Duration.ofMinutes(3)));
+        tick();
+        assertThat(statusOf(intent.get("id").asString())).isEqualTo("booked");
+        assertThat(handler.calls).hasValue(2);
+        assertThat(handler.bookings.getFirst().valueDate()).isEqualTo(LocalDate.of(2026, 10, 16));
+    }
+
+    @Test
     void anyOtherBusinessRefusalNeverStrandsTheMoneyItIsPostedToUnallocatedReceipts() {
         handler.refuse = "loan_closed";
         JsonNode intent = create(1500);

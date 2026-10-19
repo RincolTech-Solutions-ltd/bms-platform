@@ -29,7 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>A handler refusal never strands the money. {@code before_last_repayment} is retried once with the value date moved
  * to today. Any other business refusal rolls the savepoint back, posts the amount to unallocated receipts (debit
- * {@code gateway_clearing}, credit {@code unallocated_receipts}, issue #216) and ends the intent {@code booked_unallocated}
+ * the account {@code gateway} is mapped to at the branch, credit {@code unallocated_receipts}, issue #216) and ends the intent {@code booked_unallocated}
  * with the refusal's code, for a cashier to allocate. An unexpected exception rolls the whole
  * booking back and counts a technical failure in a transaction of its own; the poller retries with a growing wait, and
  * the fifth failure in a row ends the intent {@code needs_attention}, so nothing completed is retried for ever.
@@ -136,6 +136,9 @@ class PaymentBooker {
         Map<String, Object> extra = new HashMap<>();
         extra.put("booked_subject_txn_id", transactionId.toString());
         extra.put("paid_amount_minor", intent.paidAmountMinor());
+        if (intent.confirmationCode() != null) {
+            extra.put("confirmation_code", intent.confirmationCode());
+        }
         if (intent.merchantId() != null) {
             // Whose merchant account the money went into: the tenant's own, bound at creation (ADR-035 amendment).
             extra.put("merchant_id", intent.merchantId().toString());

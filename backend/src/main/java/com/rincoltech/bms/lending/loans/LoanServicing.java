@@ -28,9 +28,10 @@ public interface LoanServicing {
      * seed and the import never needed.
      *
      * <ul>
-     *   <li>{@code externalReference} is the provider's confirmation code. For the {@code gateway} method a second call
-     *       with the same reference returns the first transaction and writes nothing, so a replayed notification, a poll
-     *       and a retry after a lost answer book one repayment. A unique index over (tenant, method, reference) backs it.
+     *   <li>{@code externalReference} is the provider's reference for the payment, the order tracking id (unique per
+     *       payment; a short confirmation code is not). For the {@code gateway} method a second call with the same
+     *       reference, loan and amount returns the first transaction and writes nothing, so a replay books one
+     *       repayment; the same reference for another loan or amount is refused {@code duplicate_reference}. A unique index over (tenant, method, reference) backs it.
      *   <li>{@code origin} is the transaction's {@code source}: {@code gateway} for a gateway booking.
      *   <li>{@code queueReceiptNotice} queues the receipt SMS in the same transaction (only when the tenant's SMS events
      *       are on, as for a staff repayment); the seed and the import pass false.

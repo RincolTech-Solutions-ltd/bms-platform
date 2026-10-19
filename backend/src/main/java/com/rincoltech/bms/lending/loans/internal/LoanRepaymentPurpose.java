@@ -92,8 +92,9 @@ class LoanRepaymentPurpose implements PurposeHandler {
             // recovery.
             throw new PurposeRefusal("invalid_status_transition");
         }
-        String reference =
-                booking.confirmationCode() != null ? booking.confirmationCode() : booking.providerReference();
+        // The order tracking id is unique per intent; a provider's short confirmation code is not (two genuine payments
+        // can carry one), so it is the reference the port is idempotent on. The code is on the intent's audit row.
+        String reference = booking.providerReference();
         try {
             return servicing.recordRepayment(
                     booking.subjectId(),
