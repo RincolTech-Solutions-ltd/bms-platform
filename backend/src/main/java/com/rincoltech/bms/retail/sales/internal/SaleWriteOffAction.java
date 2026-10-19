@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * Everything is checked again at execution against the sale as it is then, and the write-off is dated the day it executes.
  */
 @Component
-class WriteOffAction implements ApprovalAction {
+class SaleWriteOffAction implements ApprovalAction {
 
     static final String TYPE = "retail_sale_write_off";
     static final String REASON = "reason";
@@ -23,7 +23,7 @@ class WriteOffAction implements ApprovalAction {
     private final WriteOffsServicer servicer;
     private final SalesRepository sales;
 
-    WriteOffAction(WriteOffsServicer servicer, SalesRepository sales) {
+    SaleWriteOffAction(WriteOffsServicer servicer, SalesRepository sales) {
         this.servicer = servicer;
         this.sales = sales;
     }

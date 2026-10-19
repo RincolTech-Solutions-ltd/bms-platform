@@ -46,16 +46,16 @@ class WriteOffsService {
 
     private WriteOffOutcome writeOffOrAsk(UUID saleId, WriteOffRequest r) {
         Plan plan = servicer.plan(saleId);
-        long threshold = settings.approvalThresholdMinor(WriteOffAction.TYPE);
+        long threshold = settings.approvalThresholdMinor(SaleWriteOffAction.TYPE);
         if (threshold > 0 && plan.unpaidMinor() >= threshold) {
             Approvals.Outcome o = approvals.request(new ActionRequest(
-                    WriteOffAction.TYPE,
+                    SaleWriteOffAction.TYPE,
                     plan.sale().branchId(),
                     saleId,
                     plan.sale().version(),
                     plan.unpaidMinor(),
                     plan.sale().currency(),
-                    Map.of(WriteOffAction.REASON, r.reason().trim())));
+                    Map.of(SaleWriteOffAction.REASON, r.reason().trim())));
             return new WriteOffOutcome(false, o.approvalId(), null);
         }
         return new WriteOffOutcome(

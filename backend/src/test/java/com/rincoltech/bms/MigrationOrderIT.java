@@ -1468,7 +1468,8 @@ class MigrationOrderIT {
                         .single())
                 .as("no permission is added")
                 .isEqualTo(permissions);
-        assertThat(owner.sql("SELECT count(*) FROM gl_accounts")
+        // V95 (the write-off of a credit sale, #340) adds the chart account 5140, which is not V48's to answer for.
+        assertThat(owner.sql("SELECT count(*) FROM gl_accounts WHERE system_key IS DISTINCT FROM 'bad_debt_loss'")
                         .query(Long.class)
                         .single())
                 .as("no chart account is added")
