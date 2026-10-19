@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { retail, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
@@ -65,6 +65,8 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
   const queryClient = useQueryClient();
   const saleId = sale.id ?? '';
   const { key, draft, setDraft, discard } = usePersistedDraft<PayForm>(`sale-pay:${me.user_id ?? ''}:${saleId}`, blankPay(sale, today));
+  // A second press before the first request has started must not send a second one: the ref answers at once, the mutation state a render later.
+  const sending = useRef(false);
   const send = useMutation({
     mutationFn: () => retail.paySale(saleId, buildPayRequest(full ? fullPay(draft, sale) : draft), key),
     onSuccess: (result) => {
@@ -72,6 +74,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onDone(paidWords(result.payment?.amount_minor ?? 0, result.sale_balance_minor ?? 0));
     },
+    onSettled: () => { sending.current = false; },
   });
   return (
     <PayFormView
@@ -82,7 +85,11 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       busy={send.isPending}
       error={send.error}
       onChange={setDraft}
-      onSubmit={() => send.mutate()}
+      onSubmit={() => {
+        if (sending.current) return;
+        sending.current = true;
+        send.mutate();
+      }}
       onCancel={() => onDone(null)}
     />
   );
@@ -158,16 +165,22 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const sending = useRef(false);
   const send = useMutation({
     mutationFn: (reason: string) => retail.voidSale(sale.id ?? '', reason),
     onSuccess: () => {
       setOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
+    onSettled: () => { sending.current = false; },
   });
   if (sale.status !== 'completed' || !holdsAt(me, SALE_VOID, sale.branch_id)) return null;
   const blocked = voidBlocked(sale);
   if (blocked) return <p className="hint" data-testid="void-blocked">{blocked}</p>;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Void this sale</button></p>;
-  return <VoidFormView branchName={branchName} busy={send.isPending} error={send.error} onVoid={(reason) => send.mutate(reason)} onCancel={() => setOpen(false)} />;
+  return <VoidFormView branchName={branchName} busy={send.isPending} error={send.error} onVoid={(reason) => {
+    if (sending.current) return;
+    sending.current = true;
+    send.mutate(reason);
+  }} onCancel={() => setOpen(false)} />;
 }

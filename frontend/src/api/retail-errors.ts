@@ -100,9 +100,9 @@ const BY_CODE: Record<string, string> = {
   credit_stock_moved: 'The stock this credit note changed has moved on since, so it can no longer be voided.',
   retail_chart_missing: 'The accounts needed for this are not set up for this business. Ask your administrator or support.',
   amount_out_of_range: 'That amount is too large or too small. Check it.',
-  sale_voided: 'This sale has already been cancelled.',
+  sale_voided: 'This sale has already been voided.',
   // Payments on a credit sale and voiding a sale (issues #326, #327).
-  sale_not_payable: 'Only a credit sale that is not cancelled takes payments. Reload the page.',
+  sale_not_payable: 'Only a credit sale that is not voided takes payments. Reload the page.',
   sale_has_payments: 'This credit sale has had a payment. A sale with payments cannot be voided.',
   stocktake_committed: 'This stock-take has already been committed.',
   transfer_voided: 'This transfer has already been cancelled.',
