@@ -63,10 +63,12 @@ jobs:
       - name: Refuse a placeholder migration number (version 99)
         run: |
           # Every spelling Flyway reads as version 99 (V99__, V099__, V99.0__), the same pattern as the script.
-          if ls backend/src/main/resources/db/migration | grep -Eq '^V0*99(\.0+)?__'; then
-            echo "::error::A version 99 placeholder migration is on this commit. Renumber it to the next free number; nothing is built or deployed."
-            exit 1
-          fi
+          for file in backend/src/main/resources/db/migration/*; do
+            if printf '%s\n' "${file##*/}" | grep -Eq '^V0*99(\.0+)?__'; then
+              echo "::error::A version 99 placeholder migration is on this commit (${file##*/}). Renumber it to the next free number; nothing is built or deployed."
+              exit 1
+            fi
+          done
       - id: tags
         run: |
           commit="$(git rev-parse HEAD)"
