@@ -80,8 +80,13 @@ describe('recording a payment', () => {
   it('keeps an imported sale off the action and says why', () => {
     screenOf(admin, <PaySaleAction sale={{ ...credit, historical: true }} today={today} />);
     expect(screen.queryByRole('button', { name: 'Record payment' })).toBeNull();
-    expect(screen.getByTestId('imported-note').textContent).toMatch(/imported/i);
-    expect(screen.getByTestId('imported-note').textContent).toMatch(/debtor that was never recorded/i);
+    expect(screen.getByTestId('imported-note').textContent).toMatch(/imported from the old records.*accountant/i);
+    expect(screen.getByTestId('imported-note').textContent).not.toMatch(/debtor/i);
+  });
+
+  it('says it in one short line in a list row', () => {
+    screenOf(admin, <PaySaleAction compact sale={{ ...credit, historical: true }} today={today} />);
+    expect(screen.getByTestId('imported-note').textContent).toBe('Imported from the old records; record this payment with your accountant.');
   });
 
   it('starts with the balance and refuses an amount above it, nothing, or a date outside the sale and today', () => {
@@ -143,7 +148,7 @@ describe('recording a payment', () => {
     fireEvent.click(save());
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That is more than the buyer still owes on this sale. Lower the amount.'));
     fireEvent.click(save());
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/Only a credit sale that is not voided takes payments/));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/can no longer take a payment.*reloaded/));
     fireEvent.click(save());
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('the network dropped'));
     const keys = paySale.mock.calls.map((c) => c[2] as string);
@@ -162,6 +167,83 @@ describe('recording a payment', () => {
       await waitFor(() => expect(screen.queryByLabelText('Amount received')).toBeNull());
     }
     expect(paySale.mock.calls[0]?.[2]).not.toBe(paySale.mock.calls[1]?.[2]);
+  });
+
+  it('reloads the sale when the balance has moved, and in the fully paid form asks to check the new amount', async () => {
+    paySale.mockRejectedValueOnce(refusal('payment_exceeds_balance'));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const view = render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: admin, branch }}><PaySaleAction sale={credit} today={today} /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as fully paid' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as fully paid' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The balance has changed; check the new amount.'));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['retail'] });
+    // The reloaded sale owes less: the fixed amount follows it, and a part payment typed above it goes back to the balance.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: admin, branch }}><PaySaleAction sale={{ ...credit, paid_minor: 6000, balance_minor: 6000 }} today={today} /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(amount().value).toBe('6000');
+  });
+
+  it('reloads and says so when the sale can no longer take a payment', async () => {
+    paySale.mockRejectedValueOnce(refusal('sale_not_payable'));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: admin, branch }}><PaySaleAction sale={credit} today={today} /></StaffContext.Provider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    fireEvent.click(save());
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/can no longer take a payment.*reloaded/));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['retail'] });
+  });
+
+  it('keeps a separate key for each way of paying, so a lost answer on a part payment never poisons Mark as fully paid', async () => {
+    paySale.mockRejectedValueOnce(new Error('the network dropped')).mockResolvedValue({ payment: { amount_minor: 10000 }, sale_paid_minor: 12000, sale_balance_minor: 0 });
+    screenOf(admin, <PaySaleAction sale={credit} today={today} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    fireEvent.change(amount(), { target: { value: '4000' } });
+    fireEvent.click(save());
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('the network dropped'));
+    // The answer may have been lost: Cancel keeps that draft and its key for the retry.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as fully paid' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as fully paid' }));
+    await waitFor(() => expect(paySale).toHaveBeenCalledTimes(2));
+    expect(paySale.mock.calls[1]?.[2]).not.toBe(paySale.mock.calls[0]?.[2]);
+  });
+
+  it('forgets a form that was cancelled before anything was sent', () => {
+    screenOf(admin, <PaySaleAction sale={credit} today={today} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    fireEvent.change(amount(), { target: { value: '1234' } });
+    fireEvent.change(screen.getByLabelText('Date received'), { target: { value: '2026-10-12' } });
+    expect(sessionStorage.length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(sessionStorage.length).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    expect(amount().value).toBe('10000');
+    expect((screen.getByLabelText('Date received') as HTMLInputElement).value).toBe(today);
+  });
+
+  it('resets the form with a new key when the key was already used for a different payment', async () => {
+    paySale.mockRejectedValueOnce(refusal('idempotency_key_reused')).mockResolvedValue({ payment: { amount_minor: 10000 }, sale_paid_minor: 12000, sale_balance_minor: 0 });
+    screenOf(admin, <PaySaleAction sale={credit} today={today} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    fireEvent.click(save());
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/form has been reset/));
+    expect(screen.getByRole('alert').textContent).not.toMatch(/reload the page/i);
+    fireEvent.click(save());
+    await waitFor(() => expect(paySale).toHaveBeenCalledTimes(2));
+    expect(paySale.mock.calls[1]?.[2]).not.toBe(paySale.mock.calls[0]?.[2]);
   });
 
   it('never submits a form the rules refuse', () => {
@@ -226,9 +308,42 @@ describe('voiding a sale', () => {
     send();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This sale has returns against it. Void the returns first.'));
     send();
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/already been/));
+    await waitFor(() => expect(screen.queryByLabelText(/Why is this sale being voided/)).toBeNull());
+    cleanup();
+    voidSale.mockRejectedValueOnce(refusal('permission_denied', 403));
+    screenOf(admin, <VoidSaleAction sale={cash} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Void this sale' }));
+    fireEvent.change(screen.getByLabelText(/Why is this sale being voided/), { target: { value: 'Wrong buyer' } });
     send();
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('You do not have permission to do this.'));
+  });
+
+  it('keeps an imported sale off the action with a short note', () => {
+    screenOf(admin, <VoidSaleAction sale={{ ...cash, historical: true }} />);
+    expect(screen.queryByRole('button', { name: 'Void this sale' })).toBeNull();
+    expect(screen.getByTestId('void-blocked').textContent).toMatch(/imported from the old records.*cannot be voided here/);
+  });
+
+  it('treats a void that already went through as done, and hides the button until the sale reads voided', async () => {
+    voidSale.mockRejectedValueOnce(refusal('sale_voided', 409));
+    screenOf(admin, <VoidSaleAction sale={cash} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Void this sale' }));
+    fireEvent.change(screen.getByLabelText(/Why is this sale being voided/), { target: { value: 'Wrong buyer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Void this sale' }));
+    await waitFor(() => expect(screen.queryByLabelText(/Why is this sale being voided/)).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Void this sale' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('hides the button after a successful void, before the reloaded sale arrives', async () => {
+    voidSale.mockResolvedValue({ ...cash, status: 'voided' });
+    screenOf(admin, <VoidSaleAction sale={cash} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Void this sale' }));
+    fireEvent.change(screen.getByLabelText(/Why is this sale being voided/), { target: { value: 'Wrong buyer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Void this sale' }));
+    await waitFor(() => expect(voidSale).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByLabelText(/Why is this sale being voided/)).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Void this sale' })).toBeNull();
   });
 
   it('can be cancelled, and keeps the sale', () => {

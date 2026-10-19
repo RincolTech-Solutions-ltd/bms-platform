@@ -650,7 +650,8 @@ Frontend only: the routes `POST /retail/sales/{id}/payments` and `POST /retail/s
 `sale-actions.tsx`; their rules (what a form refuses before it asks the server, the words of a result) are `sale-actions-state.ts`. The server decides every rule
 again under the sale's lock; the screens only save a round trip and say each refusal in plain words (`api/retail-errors.ts`).
 
-- **Record payment** (an opened sale, and each row of Credit sales and All sales). Shown only for a live credit sale that is completed and still owes, to a holder of
+- **Record payment** (an opened sale, and each row of Credit sales and All sales; every list passes it to `SaleList` through the `action` prop, and
+  `sales-wiring.dom.test.tsx` fails if a list stops doing so). Shown only for a live credit sale that is completed and still owes, to a holder of
   `retail.sale.create` at the sale's branch. The form asks for the amount (the whole balance to start with, any part allowed, never more than is owed), how it was paid
   (cash, mobile money or bank) and the date received (from the sale's date to today). **Mark as fully paid** is the shortcut next to it: the amount is fixed at the
   balance, the way of paying and the date are still chosen. One `Idempotency-Key` is made when the form opens and kept in the tab with the draft
@@ -658,10 +659,18 @@ again under the sale's lock; the screens only save a round trip and say each ref
   way and a second press sends nothing. After a payment the sale and the lists are read again, so the state moves between Unpaid, Part paid and Paid, and a line says
   "Recorded UGX 4,000. Still owes UGX 6,000." or "This sale is now paid in full." The refusals say `payment_exceeds_balance` as "more than the buyer still owes" and
   `sale_not_payable` as "only a credit sale that is not voided takes payments".
-- **Imported sales.** An imported (historical) credit sale that still owes shows a note instead of the buttons: a payment on it would post cash against a debtor that was
-  never recorded here (`docs/runbooks/import-retail.md`), so it is left to the accountant, as the issue asks.
-- **Void this sale** (an opened sale only). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment shows
-  "A credit sale that has had a payment cannot be voided." instead of the button (the server refuses it as `sale_has_payments`). The form needs a reason of at least five
+- **Imported sales.** An imported (historical) credit sale that still owes shows a note instead of the buttons: one short line in a list row ("Imported from the old
+  records; record this payment with your accountant.") and a fuller one on the opened sale. A payment on it would post cash against a debtor that was never recorded
+  here (`docs/runbooks/import-retail.md`), so it is left to the accountant, as the issue asks. **Only the screen enforces this for now:** `recordPayment` in
+  `SalesService` does not check `historical` (the account payment route refuses it as `sale_historical`), so a direct API call still works. A backend rule is a separate issue.
+- **When the sale moves on.** If the balance changed since the screen read it (someone else took a payment), `payment_exceeds_balance`, `sale_not_payable` and
+  `sale_voided` make the lists and the sale load again. In Mark as fully paid the message is "The balance has changed; check the new amount."; a typed amount above
+  the new balance goes back to the balance. Record payment and Mark as fully paid keep separate drafts and keys, so a lost answer on one never blocks the other; Cancel
+  forgets the form unless a request went out and its answer may have been lost; `idempotency_key_reused` resets the form with a new key instead of asking for a reload.
+- **Void this sale** (an opened sale only). Shown on a completed sale to a holder of `retail.sale.void` at the sale's branch. A credit sale that has had a payment or a return shows
+  "A credit sale that has had a payment or a return cannot be voided." instead of the button (the server refuses it as `sale_has_payments`), and an imported sale
+  shows a short note instead (its stock and entries predate this system). A void that already went through (`sale_voided`) counts as done, and the button stays away
+  until the reloaded sale reads Voided. The form needs a reason of at least five
   characters and says plainly that the items go back into stock at the branch, the sale stops counting in reports and in what the buyer owes, and it cannot be undone.
   The schema gives this route no `Idempotency-Key`; a second void is refused by the server as `sale_voided`, and the button also waits while the request is on its way.
   A sale that has returns against it is refused by the server (`sale_has_returns`: "Void the returns first."). The sale then reads **Voided** with "Voided because" and
@@ -675,7 +684,7 @@ again under the sale's lock; the screens only save a round trip and say each ref
   needs.
 - **Mock.** `retail-mock.ts` answers both calls with the server's rules in small (balance, dates, the key replayed once, no void after a payment or twice) for
   `VITE_RETAIL_MOCK` and the tests. Tests: `sale-actions-state.test.ts` (the rules), `sale-actions.dom.test.tsx` (who sees what, validation, double submit,
-  retry with the same key, error words), `screens.test.tsx` and `analytics.test.tsx` (Price and Cost order and words).
+  retry with the same key, error words, a moved-on balance, key reuse), `sales-wiring.dom.test.tsx` (the lists and the opened sale on the mock show the buttons and a payment refreshes the list), `screens.test.tsx` and `analytics.test.tsx` (Price and Cost order and words).
 
 ## Left to do
 

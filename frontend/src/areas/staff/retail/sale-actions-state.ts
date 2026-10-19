@@ -1,4 +1,4 @@
-import { RETAIL_CURRENCY, type Sale, type SalePaymentRequest } from '../../../api/retail';
+import { RETAIL_CURRENCY, RetailError, type Sale, type SalePaymentRequest } from '../../../api/retail';
 import { formatMinor, parseMinor } from '../../../components/money';
 import { MIN_REASON, reasonOf } from './account-state';
 
@@ -64,15 +64,38 @@ export const paidWords = (paidMinor: number, balanceMinor: number): string =>
     ? `Recorded ${formatMinor(paidMinor, RETAIL_CURRENCY)}. This sale is now paid in full.`
     : `Recorded ${formatMinor(paidMinor, RETAIL_CURRENCY)}. Still owes ${formatMinor(balanceMinor, RETAIL_CURRENCY)}.`;
 
+/** The short line for an imported credit sale in a list row, and the fuller one on the opened sale. Only the screen enforces this for now. */
+export const IMPORTED_SHORT = 'Imported from the old records; record this payment with your accountant.';
+export const IMPORTED_FULL = 'This sale was imported from the old records. Payments on it are not recorded from this screen yet, so ask your accountant to record this payment.';
+export const IMPORTED_VOID = 'This sale was imported from the old records, so it cannot be voided here. Ask your accountant.';
+
 /**
- * Why a sale cannot be voided, in words, or null when it can (as far as the screen knows). A credit sale that has taken a
- * payment is refused by the server; returns made against a sale are only known to it, and it says so when asked.
+ * Why a sale cannot be voided, in words, or null when it can (as far as the screen knows). A credit sale whose paid amount has moved
+ * (a payment, or the credit of a return) is refused by the server; an imported sale is kept off the action because its stock and
+ * entries predate this system. Returns on a cash sale are only known to the server, which refuses with sale_has_returns.
  */
-export function voidBlocked(sale: Pick<Sale, 'status' | 'payment_method' | 'paid_minor'>): string | null {
+export function voidBlocked(sale: Pick<Sale, 'status' | 'payment_method' | 'paid_minor' | 'historical'>): string | null {
   if (sale.status === 'voided') return 'This sale is already voided.';
-  if (sale.payment_method === 'credit' && (sale.paid_minor ?? 0) > 0) return 'A credit sale that has had a payment cannot be voided.';
+  if (sale.historical === true) return IMPORTED_VOID;
+  if (sale.payment_method === 'credit' && (sale.paid_minor ?? 0) > 0) return 'A credit sale that has had a payment or a return cannot be voided.';
   return null;
 }
 
 /** The reason to send, or null while it is too short. */
 export const voidReasonOf = (text: string): string | null => reasonOf(text);
+
+const codeOf = (error: unknown): string | undefined => (error instanceof RetailError ? error.code : undefined);
+
+/** Refusals that mean the sale moved on since the screen read it: the balance, its state or its voiding changed. */
+export const saleMovedOn = (error: unknown): boolean => ['payment_exceeds_balance', 'sale_not_payable', 'sale_voided'].includes(codeOf(error) ?? '');
+
+/** The Idempotency-Key was already used for a different payment: the form must start again with a new key. */
+export const keyReused = (error: unknown): boolean => codeOf(error) === 'idempotency_key_reused';
+
+/** What to tell the person about a failed payment, when the plain refusal alone would leave them stuck. */
+export function payFailureWords(error: unknown, full: boolean): unknown {
+  if (keyReused(error)) return new Error('This payment was changed after it was first sent, so the form has been reset. Check the balance, then enter it again.');
+  if (codeOf(error) === 'payment_exceeds_balance' && full) return new Error('The balance has changed; check the new amount.');
+  if (codeOf(error) === 'sale_not_payable' || codeOf(error) === 'sale_voided') return new Error('This sale can no longer take a payment. It has been reloaded; check its state.');
+  return error;
+}

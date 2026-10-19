@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Sale } from '../../../api/retail';
+import { RetailError } from '../../../api/retail';
 import {
-  MIN_REASON, blankPay, buildPayRequest, fullPay, importedAndOwing, owedMinor, paidWords, payProblem, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
+  MIN_REASON, keyReused, payFailureWords, saleMovedOn, blankPay, buildPayRequest, fullPay, importedAndOwing, owedMinor, paidWords, payProblem, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
 } from './sale-actions-state';
 
 // The pure rules behind the record-payment and void forms (issues #326 and #327). Fabricated figures.
@@ -78,7 +79,8 @@ describe('voiding', () => {
   it('can void a completed sale, and says why not for the others', () => {
     expect(voidBlocked({ ...credit, paid_minor: 0 })).toBeNull();
     expect(voidBlocked({ status: 'completed', payment_method: 'cash', paid_minor: 5000 })).toBeNull();
-    expect(voidBlocked(credit)).toMatch(/had a payment/);
+    expect(voidBlocked(credit)).toMatch(/had a payment or a return/);
+    expect(voidBlocked({ ...credit, paid_minor: 0, historical: true })).toMatch(/imported from the old records/);
     expect(voidBlocked({ ...credit, status: 'voided' })).toMatch(/already voided/);
   });
 
@@ -87,5 +89,25 @@ describe('voiding', () => {
     expect(voidReasonOf('oops')).toBeNull();
     expect(voidReasonOf('   ')).toBeNull();
     expect(voidReasonOf('  Rang up twice ')).toBe('Rang up twice');
+  });
+});
+
+describe('refusals that need more than the plain words', () => {
+  const refusal = (code: string) => new RetailError('x', 422, code);
+
+  it('knows when the sale moved on and when the key was reused', () => {
+    for (const code of ['payment_exceeds_balance', 'sale_not_payable', 'sale_voided']) expect(saleMovedOn(refusal(code))).toBe(true);
+    expect(saleMovedOn(refusal('permission_denied'))).toBe(false);
+    expect(saleMovedOn(new Error('network'))).toBe(false);
+    expect(keyReused(refusal('idempotency_key_reused'))).toBe(true);
+  });
+
+  it('words them so the person is never left repeating the same refusal', () => {
+    expect(String(payFailureWords(refusal('payment_exceeds_balance'), true))).toMatch(/balance has changed; check the new amount/);
+    expect(payFailureWords(refusal('payment_exceeds_balance'), false)).toBeInstanceOf(RetailError);
+    expect(String(payFailureWords(refusal('sale_not_payable'), false))).toMatch(/can no longer take a payment/);
+    expect(String(payFailureWords(refusal('idempotency_key_reused'), false))).toMatch(/form has been reset/);
+    const other = new Error('boom');
+    expect(payFailureWords(other, true)).toBe(other);
   });
 });

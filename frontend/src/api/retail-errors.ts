@@ -102,8 +102,8 @@ const BY_CODE: Record<string, string> = {
   amount_out_of_range: 'That amount is too large or too small. Check it.',
   sale_voided: 'This sale has already been voided.',
   // Payments on a credit sale and voiding a sale (issues #326, #327).
-  sale_not_payable: 'Only a credit sale that is not voided takes payments. Reload the page.',
-  sale_has_payments: 'This credit sale has had a payment. A sale with payments cannot be voided.',
+  sale_not_payable: 'Only a credit sale that is not voided takes payments.',
+  sale_has_payments: 'This credit sale has had a payment or a return. A sale with payments cannot be voided.',
   stocktake_committed: 'This stock-take has already been committed.',
   transfer_voided: 'This transfer has already been cancelled.',
   received_exceeds_dispatched: 'More arrived than was sent for one of the items. Enter only what was sent.',

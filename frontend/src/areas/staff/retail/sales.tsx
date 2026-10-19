@@ -48,7 +48,10 @@ export function SaleList({ items, today, onOpen, credit, branchOf, term = '', ac
   branchOf?: (id: string | undefined) => string;
   /** The words searched for, marked in the buyer's name. */
   term?: string;
-  /** Something to show under a sale's Open button, such as the record-a-payment buttons (issue #326). */
+  /**
+   * Shown under each sale's Open button. Every list of sales passes the record-payment buttons here (issue #326, tested in
+   * sale-actions.dom.test.tsx): a list that renders SaleList, or rows of its own, without it has no way to take a payment.
+   */
   action?: (sale: Sale) => ReactNode;
 }) {
   if (items.length === 0) return <p className="empty-state">{credit ? 'No credit sales found.' : 'No sales found.'}</p>;
@@ -220,7 +223,7 @@ const OWING: { value: Owing; label: string }[] = [
   { value: 'paid', label: 'Paid' },
 ];
 
-function CreditSales() {
+export function CreditSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const search = useLiveSearch();
@@ -244,7 +247,7 @@ function CreditSales() {
           <Problem error={query.error} />
           {query.data && (
             <SearchResults fetching={fetching}>
-              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : <SaleList items={items} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction sale={s} today={today} />} />}
+              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : <SaleList items={items} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
             </SearchResults>
           )}
           <More query={query} />
@@ -254,7 +257,7 @@ function CreditSales() {
   );
 }
 
-function AllSales() {
+export function AllSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
@@ -304,7 +307,7 @@ function AllSales() {
           <Problem error={query.error} />
           {query.data && (
             <SearchResults fetching={fetching}>
-              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : <SaleList items={items} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction sale={s} today={today} />} />}
+              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : <SaleList items={items} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
             </SearchResults>
           )}
           <More query={query} />
