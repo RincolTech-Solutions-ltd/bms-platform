@@ -13,7 +13,10 @@ import { settledWords } from './returns-state';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { SaleDocuments } from './documents-ui';
-import { SalesGrouped, useOpenGroups, useRootFigures } from './sales-grouped';
+import { useRootFigures } from './sales-grouped';
+import { SalesChain, useChainView } from './sales-chain';
+import { chainUser, effectiveChain, type Selection } from './sales-chain-state';
+import { GroupBy } from './sales-group-by';
 import { PaySaleAction, VoidSaleAction } from './sale-actions';
 
 // Credit sales and All sales (#145): the lists the pilot's app has, 'Credit sales' and the sales
@@ -208,9 +211,11 @@ function More({ query }: { query: ReturnType<typeof useSales>['query'] }) {
 
 // JUSTIFICATION-A3: DaySales is the one small component that loads a day's sales with the screen's own useSales, SaleList and More (issue #328).
 /** The sales of one opened day (issue #328): loaded only now, with the list's own filters and cards. */
-function DaySales({ day, filter, today, credit, onOpen, branchOf, term, action }: {
+function DaySales({ day, range, filter, today, credit, onOpen, branchOf, term, action }: {
   /** Absent: no day range, the whole filtered list (Credit sales still owing, where grouping would hide the debts). */
   day?: string;
+  /** The days of a group of the chain (issue #341), instead of one day. */
+  range?: { from?: string; to?: string };
   filter: Omit<SalesQuery, 'cursor' | 'signal' | 'from' | 'to'>;
   today: string;
   credit?: boolean;
@@ -220,7 +225,7 @@ function DaySales({ day, filter, today, credit, onOpen, branchOf, term, action }
   /** The buttons under each sale (Record payment), as SaleList takes them: a day's list with none cannot take a payment. */
   action?: (sale: Sale) => ReactNode;
 }) {
-  const { query, items } = useSales({ ...filter, from: day, to: day }, true);
+  const { query, items } = useSales({ ...filter, from: range ? range.from : day, to: range ? range.to : day }, true);
   return (
     <>
       {query.isPending && <p className="loading">Loading</p>}
@@ -230,6 +235,11 @@ function DaySales({ day, filter, today, credit, onOpen, branchOf, term, action }
       <More query={query} />
     </>
   );
+}
+
+/** The sales list's filters for the group a person opened: the screen's own, narrowed by what was chosen above it (issue #341). */
+function salesFor<F extends Omit<SalesQuery, 'cursor' | 'signal' | 'from' | 'to'>>(filter: F, sel: Selection): F {
+  return { ...filter, branchId: sel.branchId ?? filter.branchId, sellerId: sel.sellerId, categoryId: sel.categoryId, productId: sel.itemId ?? filter.productId };
 }
 
 /** The sale shown open, if it was opened under this branch choice: a change of branch closes it. */
@@ -257,7 +267,9 @@ export function CreditSales() {
   const [owing, setOwing] = useState<Owing>('all');
   const [open, setOpen] = useOpenSale(all ? 'all' : (branchId ?? ''));
   const today = businessToday();
-  const groups = useOpenGroups(today);
+  const { me } = useStaff();
+  const view = useChainView(chainUser(me), 'credit');
+  const chain = effectiveChain(view.chain, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit' as const, owing: owing === 'all' ? undefined : owing };
   // Debts still owing or overdue are listed together, oldest groups included: only the current month is open in a grouped list.
   const flat = owing === 'owing' || owing === 'overdue';
@@ -277,11 +289,14 @@ export function CreditSales() {
           {flat ? (
             <DaySales filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />
           ) : (
-          <SalesGrouped
-            rootLabel="Credit sales" credit filter={filter} range={{}} enabled={all || branchId !== null} groups={groups}
-            empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : undefined}
-            renderDay={(day) => <DaySales day={day} filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
-          />
+          <>
+            <GroupBy chain={view.chain} onChange={view.setChain} />
+            <SalesChain
+              rootLabel="Credit sales" credit filter={filter} range={{}} chain={chain} view={view} enabled={all || branchId !== null}
+              empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : undefined}
+              renderSales={(sel) => <DaySales range={sel} filter={salesFor({ ...filter, status: 'completed' as const }, sel)} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
+            />
+          </>
           )}
         </>
       )}
@@ -304,7 +319,9 @@ export function AllSales() {
   useEffect(() => setProductId(''), [itemSearch]);
   const [open, setOpen] = useOpenSale(all ? 'all' : (branchId ?? ''));
   const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
-  const groups = useOpenGroups(today);
+  const { me } = useStaff();
+  const view = useChainView(chainUser(me), 'all');
+  const chain = effectiveChain(view.chain, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
   const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
   return (
@@ -335,10 +352,11 @@ export function AllSales() {
               </select>
             </>
           )}
-          <SalesGrouped
-            rootLabel="All sales" filter={filter} range={{ from, to }} credit={false} enabled={(all || branchId !== null) && from <= to} groups={groups}
+          <GroupBy chain={view.chain} onChange={view.setChain} />
+          <SalesChain
+            rootLabel="All sales" filter={filter} range={{ from: from || undefined, to }} credit={false} chain={chain} view={view} enabled={(all || branchId !== null) && from <= to}
             empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : undefined}
-            renderDay={(day) => <DaySales day={day} filter={filter} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
+            renderSales={(sel) => <DaySales range={sel} filter={salesFor(filter, sel)} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />}
           />
         </>
       )}
