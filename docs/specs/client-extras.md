@@ -447,6 +447,29 @@ recordings. Mobile money cannot be tested without an answer to question 9.
 | A tenant admin switches collections on and receives another lender's merchant account | There is no shared merchant: each tenant enters and tests its own account, switching on needs it verified, and the platform account is refused for tenant money in code and by a database check (3.11) |
 | A lost order-creation answer strands an intent or double-creates an order | One locked creator; the old reference is never reused; a new intent follows (3.5) |
 
+### 3.14 As built in slice #216 (loan repayment by mobile money; differences from, and sharpenings of, the design above)
+
+- **Purpose and screen.** `lending.loan_repayment` is registered by `lending.loans` (`LoanRepaymentPurpose`). The staff action "Collect by mobile money or card" is on an
+  active loan for a holder of `core.payments.collect` and `lending.loans.read`: amount (offered first: the arrears, else what is left on the first instalment not yet paid, never
+  more than the loan owes), the payer's mobile number, then the link with a QR code and a copy button, and a live status that asks every 3 seconds for 2 minutes and every 15
+  seconds after, with "Still waiting, we will update this screen" after the first two minutes (the member's phone is not defaulted yet: it waits for the portal). When the payment
+  is recorded the screen shows the repayment's receipt number. Cancel is offered while nothing has been paid. Off by default: the tenant's collections switch (section 3.11) is the
+  only switch, and the screen answers its refusals in plain words.
+- **The own-account rule.** Creating the intent goes only through the tenant-account path of `IntentService`: collections on, host ready, and a verified own merchant account
+  read `FOR SHARE` (ADR-035 decision 28). Without one: 422 `merchant_account_not_verified`, no provider call, no row. The intent keeps that account's `merchant_id`, and the audit
+  row of the booking names it with the order tracking id.
+- **Describe.** The loan must exist in the caller's visibility, be `active` and in the tenant's currency (else `subject_not_payable`), and the amount is at most today's payoff
+  quote (else `exceeds_payoff`); a written-off loan takes no gateway recovery.
+- **Booking** is `LoanServicing.recordRepayment(loanId, amount, valueDate, "gateway", recordedBy, confirmationCode, "gateway", true)` (3.4.1), recorded by the intent's initiator,
+  source `gateway`, idempotent on the confirmation code (the order tracking id when there is none): the same allocation, receipt number and journal as a cash repayment, the
+  receipt text queued in the same transaction for a tenant with SMS events on. The repayment's own audit row carries `origin` and `external_reference`; the order tracking id is on the
+  intent's audit row of the same transaction, which also names the booked transaction (the port takes no order id).
+- **Handler refusals** end as the table of 3.4 says, now built: `before_last_repayment` retried once dated today (`booked`, note "dated today"); any other business refusal posts the
+  amount debit `gateway_clearing` credit `unallocated_receipts`, inserts the `unallocated_receipts` row, ends the intent `booked_unallocated` and counts `booking_refused`. The
+  allocation screen and the refund are later slices; the table is append-only until then (migration V59).
+- **Not built here.** The non-login system user (spec 3.4, decision 16) is created by the slice that first acts as it, the reversal approval request (#224). A payment in another
+  currency than the intent's still ends `needs_attention` (the status checker never hands it to booking).
+
 ## 4. SMS (ADR-036)
 
 ### 4.1 Summary

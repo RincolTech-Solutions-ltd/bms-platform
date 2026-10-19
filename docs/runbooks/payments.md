@@ -78,13 +78,39 @@ check the notification arrived and the order booked.
 3. A tenant administrator opens Settings, payments, sets the daily ceiling in minor units and switches collections on
    (`PUT /payments/settings`, `If-Match`). With no provider or callback address on the host the answer is 409
    `gateway_not_configured`; with no ceiling 409 `daily_ceiling_required` (it cannot be removed while on).
-4. Collecting from a loan or a savings account needs the purpose handlers of slices #216 and #219; until they ship, only
-   the test purpose of the dev and test profiles exists, so no real intent can be created.
+4. Collecting a **loan repayment** (slice #216) is offered on the loan page as "Collect by mobile money or card" to staff with
+   `core.payments.collect`; see section 4d for what to watch. Savings deposits arrive with slice #219; until then only the loan
+   repayment purpose (and the test purpose of the dev and test profiles) exists.
 5. **Before the first live repayment:** ask KTA to confirm the own-account model (ADR-035 amendment of 2026-10-18). It is a gate on
    live money, not on staging with the sandbox.
 
 Switching off is never refused and stops new intents at once; intents already created are still checked and booked. A lender cannot
 remove or replace its account (other than a new secret for the same consumer key) while an intent still needs it (409 `payments_in_flight`).
+
+## 4d. Loan repayments by mobile money: operating them
+
+What happens: staff start a payment on a loan, the payer pays on their phone into **the lender's own** Pesapal account, the notification or the poller
+confirms it with an authenticated status query, and the booker records it as a repayment (method `gateway`, account the mapping of `gateway`, normally
+`gateway_clearing`) exactly like a cashier's, with a receipt number and the receipt text. Nothing is recorded on a notification alone.
+
+1. **Switch on per business, in this order:** the administrator connects and tests the business's own account (`connect-lender-pesapal-account.md`), the `gateway`
+   payment method is mapped, then collections are switched on with a daily ceiling (section 4, steps 1 to 3). The loan action appears for staff holding
+   `core.payments.collect`; a business without a verified account gets a plain refusal on the form and nothing reaches Pesapal.
+2. **Where the money is.** Each repayment settles into the lender's Pesapal merchant account, not ours. The `gateway_clearing` balance is what Pesapal owes the
+   business until the lender records the bank credit (chapter 12 section 12.4.2). The intent's `merchant_id` (and the audit row `core.payments.intent.booked`)
+   say which merchant account took the money.
+3. **A completed payment the loan could not take.** A closed loan, a date the books cannot take or an unmapped method does not leave the money unbooked: the intent ends
+   `booked_unallocated`, the amount is posted debit `gateway_clearing` credit `unallocated_receipts` and a row is written to `unallocated_receipts` with the refusal code.
+   The counter `booking_refused` (spec 9.2) is the alert. To list what is waiting (owner role, never the application role):
+   `SELECT created_at, tenant_id, amount_minor, refusal_code, confirmation_code, intent_id FROM unallocated_receipts WHERE status = 'open' ORDER BY created_at;`.
+   Allocating or refunding a receipt is the cashier's job through the allocation screen of a later slice (FR-PAY-04); until it ships, the accountant clears
+   it by a manual journal against the liability `unallocated_receipts`, naming the confirmation code, and the operator tells the lender.
+4. **Five technical failures in a row** (the database, not a refusal) end the intent `needs_attention` (`refusal_code technical_failures`) with an alert; the money is
+   safe at the provider and in the intent's stored paid amount. Look at the log lines `payment intent ... booking failed technically`, fix the cause and ask the
+   developer to re-queue; nothing is retried for ever.
+5. **A repeated confirmation code** returns the first repayment: a replayed notification, the poller and a retry after a lost answer all end in one. If a cashier also entered
+   the same mobile money receipt by hand it is a second repayment: the reconciliation report flags it (slice #224).
+6. **Receipt text.** Queued in the same transaction for a business with SMS events on (`sms-setup.md`); a business with SMS off sends none.
 
 ## 4a. Rotating the data key
 
