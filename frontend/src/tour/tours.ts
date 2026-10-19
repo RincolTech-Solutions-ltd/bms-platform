@@ -82,7 +82,8 @@ const branch: TourStep = {
 export const adminWelcome: Tour = {
   id: 'admin-welcome',
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
-  version: 5,
+  // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
+  version: 6,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -185,7 +186,7 @@ export const adminWelcome: Tour = {
       needs: ['retail.sale.read', SELL],
       optional: true,
       title: 'When a buyer pays what they owe',
-      body: 'Open Credit sales, find the buyer, and tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
+      body: 'Open Credit sales and pick Still owing to see every debt, or open the day of the sale. Then tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
     },
     {
       id: 'void-sale',
@@ -233,7 +234,8 @@ export const adminWelcome: Tour = {
 export const retailSales: Tour = {
   id: 'retail-sales',
   // Version 3 adds the credit payment step (issue #326), so whoever finished version 2 sees it once.
-  version: 3,
+  // Version 4 words that step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
+  version: 4,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -287,7 +289,7 @@ export const retailSales: Tour = {
       needs: ['retail.sale.read'],
       optional: true,
       title: 'When a buyer pays what they owe',
-      body: 'Open Credit sales, find the buyer, and tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
+      body: 'Open Credit sales and pick Still owing to see every debt, or open the day of the sale. Then tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
     },
     {
       id: 'stock',

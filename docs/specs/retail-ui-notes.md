@@ -665,6 +665,14 @@ pages in the browser.
   item search; Credit sales keeps the buyer search and Show (all, still owing, overdue, paid) and covers every date. Each
   level is asked with the same filters, so a group and the sales under it agree. A period of more than the server's bound (20
   years, 12 months, 31 days) ends with Show earlier years, months or days, which asks again from the server's `next_to`.
+- **Payment buttons stay.** The sales of an opened day, and the sales of the Still owing list, are the same cards with the same
+  `PaySaleAction` under each (`action` on `DaySales`, as on `SaleList`; issue #326): Record payment and Mark as fully paid on an
+  owing live credit sale, a note and no button on an imported one, nothing on a paid sale. `sales-lists-actions.dom.test.tsx`
+  renders both grouped lists and fails if a day stops passing the action. The tours `retail-sales` (version 4) and `admin-welcome`
+  (version 6) say "open the day of the sale, then tap Record payment".
+- **Debts are not hidden in a collapsed month.** On Credit sales, when Show is Still owing or Overdue the grouping steps aside
+  and every such sale is listed together, 50 at a time (a debt from an old month would otherwise sit inside a closed group);
+  All credit sales and Paid stay grouped. The search box shows the sales counted by the top level (the years' sales counts).
 - **Plain words for the odd cases.** While a level loads it says Loading; a failed level shows the message and Try again; a
   level with nothing says "No sales found." (or "No credit sales found."), "No sales in this month." or "No sales on this day.";
   a search with no match keeps the screen's no-results box with its Clear button.
