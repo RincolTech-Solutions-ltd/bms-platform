@@ -99,6 +99,10 @@ class AccountCredentials implements PesapalGateway.Credentials {
         String key = new String(keys.open(row.consumerKeyBox()), StandardCharsets.UTF_8);
         String secret = new String(keys.open(row.consumerSecretBox()), StandardCharsets.UTF_8);
         String ipnId = "verified".equals(row.status()) ? row.ipnId() : null;
+        if (settings.isRefusedKey(key)) {
+            // One of the platform operator's own keys: never used for a lender, whatever was saved and when.
+            return Optional.empty();
+        }
         return Optional.of(new PesapalSettings.Pair(key, secret, ipnId, null));
     }
 }

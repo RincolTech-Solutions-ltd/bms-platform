@@ -125,6 +125,7 @@ class MerchantAccountService {
     private final BusinessClock clock;
     private final AdminSecurity security;
     private final Outbox outbox;
+    private final VerifiedAccounts verifiedAccounts;
     private final com.rincoltech.bms.core.jobs.TenantJobs tenantJobs;
     private final TransactionTemplate tx;
     private final TransactionTemplate read;
@@ -140,6 +141,7 @@ class MerchantAccountService {
             BusinessClock clock,
             AdminSecurity security,
             Outbox outbox,
+            VerifiedAccounts verifiedAccounts,
             com.rincoltech.bms.core.jobs.TenantJobs tenantJobs,
             PlatformTransactionManager transactions) {
         this.store = store;
@@ -151,6 +153,7 @@ class MerchantAccountService {
         this.clock = clock;
         this.security = security;
         this.outbox = outbox;
+        this.verifiedAccounts = verifiedAccounts;
         this.tenantJobs = tenantJobs;
         this.tx = new TransactionTemplate(transactions);
         this.read = new TransactionTemplate(transactions);
@@ -192,7 +195,7 @@ class MerchantAccountService {
 
     /** The merchant account of the bound tenant when it is connected and tested, for an intent to record. */
     java.util.Optional<UUID> verifiedMerchant() {
-        return store.find().filter(a -> "verified".equals(a.status())).map(AccountStore.Account::merchantId);
+        return verifiedAccounts.merchant();
     }
 
     /** Saves the credentials sealed with the data key. Makes no call to the provider. */
@@ -226,17 +229,20 @@ class MerchantAccountService {
         try {
             saved = tx.execute(status -> {
                 AccountStore.Account before = store.lock().orElse(null);
+                // The same consumer key (a new secret for the account) is the same merchant; another key is another
+                // one.
+                UUID merchantId = merchantIdOf(tenant.profile().id(), key);
                 if (store.keyInUseElsewhere(
                         keys.blindIndexes(KEY_INDEX, key), tenant.profile().id())) {
                     throw inUse();
                 }
-                if (before != null && store.hasWorkInFlight() && !sameKey(before, key)) {
+                if (before != null
+                        && !merchantId.equals(before.merchantId())
+                        && store.hasWorkInFlight(before.merchantId())) {
                     throw inFlight();
                 }
                 Instant now = clock.now();
                 UUID id = before == null ? UUID.randomUUID() : before.id();
-                // The same consumer key (a new secret for the account) is the same merchant; another key is a new one.
-                UUID merchantId = before != null && sameKey(before, key) ? before.merchantId() : UUID.randomUUID();
                 String hint = key.substring(key.length() - 4);
                 store.save(
                         id,
@@ -256,6 +262,16 @@ class MerchantAccountService {
                         null,
                         state(before == null ? null : before.status(), before == null ? null : before.keyHint()),
                         state("saved", hint)));
+                int retired = store.retireIntentsOfOtherMerchants(merchantId, now);
+                if (retired > 0) {
+                    audit.record(new AuditLog.Entry(
+                            "core.payments.account.intents_retired",
+                            "payment_gateway_account",
+                            id,
+                            null,
+                            Map.of(),
+                            Map.of("intents", retired, "reason", "merchant_changed")));
+                }
                 notifyHolders(id, "saved", null, now);
                 return view(store.find().orElseThrow());
             });
@@ -307,6 +323,11 @@ class MerchantAccountService {
         }
         lastTest.put(tenantId, started);
         UUID user = CurrentPrincipal.require().userId();
+        if (verifiedAccounts.refused(row)) {
+            // Saved while the list was empty or before this key was added to it: it can never become a lender's
+            // account.
+            return failed(row, "account_not_allowed", user);
+        }
         // An account whose notification address is already registered keeps it (orders made before notify that address,
         // and a
         // new random token would kill it): the test only asks whether the credentials work. A new registration is made
@@ -354,7 +375,9 @@ class MerchantAccountService {
             }
             Instant now = clock.now();
             if (registered) {
-                store.markChecked(row.id(), now, user);
+                if (store.markChecked(row.id(), now, user) == 0) {
+                    throw changed();
+                }
             } else {
                 store.markVerified(row.id(), now, registeredId, AccountTokens.digest(token), user);
             }
@@ -422,7 +445,7 @@ class MerchantAccountService {
             if (before == null) {
                 return view(null);
             }
-            if (store.hasWorkInFlight()) {
+            if (store.hasWorkInFlight(before.merchantId())) {
                 throw inFlight();
             }
             store.delete(before.id());
@@ -465,18 +488,25 @@ class MerchantAccountService {
 
     /** The platform operator released the tenant's account: its administrators are told, in their own tenant's transaction. */
     void notifyReleased(UUID tenantId, UUID accountId) {
-        tenantJobs.callForTenant(tenantId, () -> {
-            notifyHolders(accountId, "removed by the platform operator", "the platform operator", clock.now());
-            return null;
-        });
+        // callAs, not callForTenant: that refuses a suspended tenant, whose administrators should still hear of it. The
+        // id is
+        // the operator's own request on the platform host (an existing tenant, checked by the release itself).
+        tenantJobs.callAs(
+                tenantId,
+                () -> tx.execute(status -> {
+                    notifyHolders(accountId, "removed by the platform operator", "the platform operator", clock.now());
+                    return null;
+                }));
     }
 
-    private boolean sameKey(AccountStore.Account before, String key) {
-        try {
-            return key.equals(new String(keys.open(before.consumerKeyBox()), StandardCharsets.UTF_8));
-        } catch (RuntimeException e) {
-            return false;
-        }
+    /**
+     * The merchant account a consumer key names, the same for the same key of the same tenant wherever and whenever it is saved
+     * (so reconnecting the same key after a release is the same merchant, and its orders are still booked), and another for
+     * another key. A name-based id of the tenant and the SHA-256 of the key: the key itself is not recoverable from it.
+     */
+    static UUID merchantIdOf(UUID tenantId, String key) {
+        return UUID.nameUUIDFromBytes((tenantId + ":" + java.util.HexFormat.of().formatHex(PesapalSettings.sha256(key)))
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     private static ApiException inFlight() {

@@ -143,6 +143,43 @@ class MerchantAccountStepUpIT extends IntegrationTest {
                 .isTrue();
     }
 
+    @Test
+    void fiveWrongPasswordsLockTheAccountButNeverEndASessionBecauseAnyoneCanSendThem() {
+        TestDatabase.Fixture t = TestDatabase.tenant("pay-pwlock", true);
+        String email = "admin-pw-" + UUID.randomUUID() + "@example.test";
+        UUID admin = Api.staff(t, email, new Role("tenant_admin", null));
+        Api api = Api.tenant(http, t.slug());
+        Session s = api.signIn(admin, email, Api.PASSWORD, null);
+        String path = "/api/v1/payments/merchant-account";
+        assertThat(api.call(HttpMethod.GET, path, null, s.accessToken())
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        // A stranger who knows the login name sends wrong passwords, unauthenticated.
+        for (int i = 0; i < 5; i++) {
+            assertThat(api.login(email, "not-the-password-" + i).getStatusCode().value())
+                    .isEqualTo(401);
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT locked_until IS NOT NULL FROM users WHERE id = ?")
+                        .param(admin)
+                        .query(Boolean.class)
+                        .single())
+                .as("the account is locked")
+                .isTrue();
+        // The signed-in session of the real administrator is untouched: nobody can log staff out by guessing.
+        assertThat(api.call(HttpMethod.GET, path, null, s.accessToken())
+                        .getStatusCode()
+                        .value())
+                .isEqualTo(200);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NOT NULL")
+                        .param(admin)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
     long count(TestDatabase.Fixture t) {
         return TestDatabase.owner()
                 .sql("SELECT count(*) FROM payment_gateway_accounts WHERE tenant_id = ?")

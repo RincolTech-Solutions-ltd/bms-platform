@@ -43,17 +43,17 @@ class PaymentsSettingsGroup implements ModuleSettingsGroup {
     private static final Set<String> KEYS = Set.of(ENABLED, CEILING);
 
     private final PesapalSettings pesapal;
-    private final AccountStore accounts;
+    private final VerifiedAccounts merchantAccounts;
     private final PaymentMethods methods;
     private final TransactionTemplate isolated;
 
     PaymentsSettingsGroup(
             PesapalSettings pesapal,
-            AccountStore accounts,
+            VerifiedAccounts merchantAccounts,
             PaymentMethods methods,
             PlatformTransactionManager transactions) {
         this.pesapal = pesapal;
-        this.accounts = accounts;
+        this.merchantAccounts = merchantAccounts;
         this.methods = methods;
         this.isolated = new TransactionTemplate(transactions);
         this.isolated.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -72,7 +72,7 @@ class PaymentsSettingsGroup implements ModuleSettingsGroup {
 
     /** True when this tenant has connected and tested its own merchant account (read in the caller's transaction). */
     boolean merchantAccountVerified() {
-        return accounts.find().filter(a -> "verified".equals(a.status())).isPresent();
+        return merchantAccounts.verified();
     }
 
     /** True when the host can serve a lender's own account at all (a provider and a callback address). */

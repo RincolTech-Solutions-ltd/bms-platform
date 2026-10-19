@@ -5,8 +5,9 @@
 --    redirects where every later repayment is paid, so it is held by the tenant admin only (not by branch managers or
 --    anyone with the general `core.settings.manage`) and every change asks for a second-factor code and tells the other
 --    holders. Two inserts into the catalogue; no table is touched.
--- 2. Validates `payment_intents_scope_purpose` (added NOT VALID by V56) in a transaction of its own: VALIDATE CONSTRAINT
---    holds only SHARE UPDATE EXCLUSIVE, so writes to payment_intents continue during the scan. If a row already breaks the
+-- 2. Validates `payment_intents_scope_purpose` (added NOT VALID by V56) in this migration, apart from V56's ACCESS EXCLUSIVE
+--    ALTER: VALIDATE CONSTRAINT holds only SHARE UPDATE EXCLUSIVE, so writes to payment_intents continue during the scan.
+--    (Flyway runs this file in one transaction with the permission inserts above, which take no table lock of note.) If a row already breaks the
 --    rule (a platform-scope row with a lender purpose, or the reverse) the constraint is left NOT VALID, which still binds
 --    every new row, and a warning names the count; the migration never fails a deploy over the history of a table that
 --    held no real payment when this was written.

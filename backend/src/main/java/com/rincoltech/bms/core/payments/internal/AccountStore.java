@@ -92,8 +92,16 @@ class AccountStore {
                            SET updated_at = EXCLUDED.updated_at, consumer_key_enc = EXCLUDED.consumer_key_enc,
                                consumer_secret_enc = EXCLUDED.consumer_secret_enc, consumer_key_hmac = EXCLUDED.consumer_key_hmac,
                                key_hint = EXCLUDED.key_hint,
-                               data_key_id = EXCLUDED.data_key_id, status = 'saved', ipn_id = NULL, ipn_token_hash = NULL,
-                               ipn_registered_at = NULL, last_checked_at = NULL, failure_reason = NULL,
+                               data_key_id = EXCLUDED.data_key_id, status = 'saved',
+                               -- The same merchant account keeps the notification address its orders were made with (a new secret
+                               -- for the same key); another merchant account has none yet.
+                               ipn_id = CASE WHEN payment_gateway_accounts.merchant_id = EXCLUDED.merchant_id
+                                             THEN payment_gateway_accounts.ipn_id END,
+                               ipn_token_hash = CASE WHEN payment_gateway_accounts.merchant_id = EXCLUDED.merchant_id
+                                                     THEN payment_gateway_accounts.ipn_token_hash END,
+                               ipn_registered_at = CASE WHEN payment_gateway_accounts.merchant_id = EXCLUDED.merchant_id
+                                                        THEN payment_gateway_accounts.ipn_registered_at END,
+                               last_checked_at = NULL, failure_reason = NULL,
                                updated_by = EXCLUDED.updated_by, merchant_id = EXCLUDED.merchant_id
                         """)
                 .params(
@@ -128,8 +136,8 @@ class AccountStore {
      * The credentials work again and the registration made earlier still stands: the account is verified with the same
      * notification address, so orders made before keep notifying a live one.
      */
-    void markChecked(UUID id, Instant now, UUID updatedBy) {
-        jdbc.sql("""
+    int markChecked(UUID id, Instant now, UUID updatedBy) {
+        return jdbc.sql("""
                         UPDATE payment_gateway_accounts
                            SET status = 'verified', last_checked_at = ?, failure_reason = NULL, updated_at = ?, updated_by = ?
                          WHERE id = ? AND ipn_id IS NOT NULL AND ipn_token_hash IS NOT NULL
@@ -154,12 +162,44 @@ class AccountStore {
     }
 
     /** True when an intent still needs the credentials: an order to check, a payment to book or a review to make. */
-    boolean hasWorkInFlight() {
+    boolean hasWorkInFlight(UUID merchantId) {
         // Only an intent still scheduled for a check needs the provider credentials: a paid one is booked from what was
-        // stored, and one that needs a person (needs_attention) is never re-checked, so neither blocks a change.
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM payment_intents WHERE next_check_at IS NOT NULL)")
+        // stored, and one that needs a person (needs_attention) is never re-checked, so neither blocks a change. Nor
+        // does an
+        // intent made under another merchant account: these credentials could not check it (it was retired when this
+        // one
+        // was connected).
+        return jdbc.sql(
+                        "SELECT EXISTS (SELECT 1 FROM payment_intents WHERE next_check_at IS NOT NULL AND (merchant_id IS NULL OR merchant_id = ?))")
+                .param(merchantId)
                 .query(Boolean.class)
                 .single();
+    }
+
+    /**
+     * The merchant account has changed: what was made under another one can never be checked with these credentials, so it
+     * is handed to a person (needs_attention, code merchant_changed) instead of waiting for ever, and stops being scheduled.
+     * An order not yet made is failed, a booked payment's daily review is just stopped. Returns the number of intents touched.
+     */
+    int retireIntentsOfOtherMerchants(UUID merchantId, Instant now) {
+        Object[] p = {IntentStore.ts(now), merchantId};
+        int a = jdbc.sql("""
+                        UPDATE payment_intents SET status = 'needs_attention', refusal_code = 'merchant_changed',
+                               next_check_at = NULL, check_requested_at = NULL, updated_at = ?
+                         WHERE merchant_id IS NOT NULL AND merchant_id <> ?
+                           AND status IN ('pending', 'expired', 'failed', 'cancelled') AND next_check_at IS NOT NULL
+                        """).params(p).update();
+        int b = jdbc.sql("""
+                        UPDATE payment_intents SET status = 'failed', failure_reason = 'merchant_changed',
+                               next_check_at = NULL, creation_lease_until = NULL, updated_at = ?
+                         WHERE merchant_id IS NOT NULL AND merchant_id <> ? AND status = 'created'
+                        """).params(p).update();
+        int c = jdbc.sql("""
+                        UPDATE payment_intents SET next_check_at = NULL, check_requested_at = NULL, updated_at = ?
+                         WHERE merchant_id IS NOT NULL AND merchant_id <> ? AND next_check_at IS NOT NULL
+                           AND status IN ('booked', 'booked_unallocated', 'reversed_pending_review')
+                        """).params(p).update();
+        return a + b + c;
     }
 
     /** Rows sealed with a key other than the current one (the bound tenant's). */

@@ -232,7 +232,7 @@ class AuthFlow {
         OptionalLong step =
                 Totp.verify(box.open(account.totpSecret()), code == null ? "" : code, now, account.totpLastStep());
         if (step.isEmpty() || !accounts.advanceTotpStep(userId, step.getAsLong())) {
-            fail(accounts, account, now, "core.mfa.failed");
+            fail(accounts, account, now, "core.mfa.failed", true);
             throw invalidCode(HttpStatus.UNPROCESSABLE_CONTENT);
         }
     }
@@ -253,7 +253,7 @@ class AuthFlow {
         }
         OptionalLong step = Totp.verify(box.open(account.totpSecret()), code, now, account.totpLastStep());
         if (step.isEmpty() || !accounts.advanceTotpStep(userId, step.getAsLong())) {
-            fail(accounts, account, now, "core.mfa.failed");
+            fail(accounts, account, now, "core.mfa.failed", true);
             throw invalidCode(HttpStatus.UNPROCESSABLE_CONTENT);
         }
         List<String> codes = issueRecoveryCodes(accounts, userId);
@@ -389,6 +389,15 @@ class AuthFlow {
      * and the lock come back from one atomic statement, so parallel failures cannot be lost.
      */
     private void fail(Accounts accounts, Account account, Instant now, String action) {
+        fail(accounts, account, now, action, false);
+    }
+
+    /**
+     * @param endSessionsAtLock true only for a failure of a step-up code by a signed-in session: reaching the lock then ends all
+     *     the user's sessions. A wrong password is unauthenticated (anyone who knows a login name can send one), so it locks but
+     *     never ends a session: otherwise a stranger could log a lender's staff out at will.
+     */
+    private void fail(Accounts accounts, Account account, Instant now, String action, boolean endSessionsAtLock) {
         Accounts.Failures failures = accounts.recordFailure(account.id(), now, MAX_FAILURES, now.plus(LOCK));
         accounts.audit(action, account.id(), Map.of("consecutive_failures", failures.consecutive()));
         // Only the failure that reached the threshold set the lock; later ones keep it.
@@ -396,7 +405,9 @@ class AuthFlow {
             accounts.audit("core.auth.account_locked", account.id(), Map.of("locked_minutes", LOCK.toMinutes()));
             // A lock ends every session of the user: whoever holds one (a stolen session guessing codes) signs in
             // again.
-            accounts.sessions().revokeAllOf(account.id(), "admin", now);
+            if (endSessionsAtLock) {
+                accounts.sessions().revokeAllOf(account.id(), "admin", now);
+            }
         }
     }
 

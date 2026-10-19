@@ -234,9 +234,14 @@ final class PesapalGateway implements PaymentGateway {
     public void checkCredentials(Account account) throws GatewayException {
         PesapalSettings.Pair pair = requirePair(account);
         // A fresh token, never the cached one: this answers "do the credentials work now?", and the cache must not.
-        tokens.remove(account);
-        authBackoff.remove(account);
-        token(account, pair);
+        // Under the
+        // account's own lock, as the token fetch is, so a check never interleaves with another fetch for the same
+        // account.
+        synchronized (locks.computeIfAbsent(account, a -> new Object())) {
+            tokens.remove(account);
+            authBackoff.remove(account);
+            token(account, pair);
+        }
     }
 
     @Override

@@ -14,6 +14,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.UUID;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -108,7 +109,12 @@ class MerchantAccountOperatorController {
         try {
             accounts.notifyReleased(tenantId, UUID.randomUUID());
         } catch (RuntimeException e) {
-            // The release stands; a notice that could not be queued is not a reason to undo it.
+            // The release stands; a notice that could not be queued is not a reason to undo it, but it is not silent.
+            LoggerFactory.getLogger(MerchantAccountOperatorController.class)
+                    .error(
+                            "the release notice for tenant {} could not be queued: {}",
+                            tenantId,
+                            e.getClass().getSimpleName());
         }
         return new Status("not_connected", null, null);
     }

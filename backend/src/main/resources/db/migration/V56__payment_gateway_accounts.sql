@@ -55,8 +55,7 @@ CREATE TABLE payment_gateway_accounts (
     FOREIGN KEY (tenant_id, updated_by) REFERENCES users (tenant_id, id),
     CHECK (status <> 'verified' OR (ipn_id IS NOT NULL AND ipn_token_hash IS NOT NULL
                                     AND ipn_registered_at IS NOT NULL AND last_checked_at IS NOT NULL)),
-    CHECK (status <> 'failed' OR (failure_reason IS NOT NULL AND last_checked_at IS NOT NULL)),
-    CHECK (status <> 'saved' OR (ipn_id IS NULL AND ipn_token_hash IS NULL))
+    CHECK (status <> 'failed' OR (failure_reason IS NOT NULL AND last_checked_at IS NOT NULL))
 );
 CREATE INDEX payment_gateway_accounts_by_key ON payment_gateway_accounts (data_key_id);
 

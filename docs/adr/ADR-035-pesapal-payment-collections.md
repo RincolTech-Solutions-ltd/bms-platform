@@ -407,3 +407,17 @@ environment, bound to a named tenant"; the rest of the ADR stands.
 24. **Notices go to every holder of the permission, the actor included, and name who** (a business with one administrator hears of a hijacked session's change). The
     operator's release needs a reason (10 to 300 characters), removes the account and writes its platform audit row in one transaction, and emails the tenant's administrators.
     The wrong-token pre-check looks at the address's own count only, so a flood from elsewhere cannot shut out a lender's genuine notification.
+
+### Review round 3 (PR #308), decisions added
+
+25. **The refused list is checked whenever a key is used, not only when saved.** A key saved while the gateway was off or the list empty is refused the moment the list
+    names it: Test connection marks the account `failed` (`account_not_allowed`), the account is not a verified account (so collections cannot be switched on and no intent
+    can be made), and its credentials resolve to nothing (`VerifiedAccounts`, `AccountCredentials`).
+26. **A wrong password never ends a session.** Locking at five wrong passwords stays, but only a failed second-factor step-up (a signed-in session guessing a code) ends the
+    user's sessions; an unauthenticated stranger who knows a login name can lock the account (as before) but cannot log staff out.
+27. **One merchant, one id, however often it is connected.** `merchant_id` is derived from the tenant and the SHA-256 of the consumer key, so the same key after a release is the
+    same merchant and its orders are still checked and booked; another key retires the old merchant's scheduled intents (`needs_attention`, `merchant_changed`; an order not yet
+    made fails, a booked payment's review stops) instead of leaving them waiting for ever, and only the current merchant's intents block a change. A new secret for the same
+    key keeps the registered notification address (V56 no longer forbids a saved account carrying a registration). The operator's release notice reaches a suspended
+    tenant's administrators and a failure to queue it is logged.
+
