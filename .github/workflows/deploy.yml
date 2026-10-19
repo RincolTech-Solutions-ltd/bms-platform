@@ -62,9 +62,9 @@ jobs:
       # it needs nothing on the runner. .github/scripts/placeholder_migration_guard.py is the same rule.
       - name: Refuse a placeholder migration number (version 99)
         run: |
-          # Every spelling Flyway reads as version 99 (V99__, V099__, V99.0__), the same pattern as the script.
+          # Every spelling Flyway reads as version 99 (V99__, V099__, V99.0__, V99_0__, V99.0.0__), the same pattern as the script.
           for file in backend/src/main/resources/db/migration/*; do
-            if printf '%s\n' "${file##*/}" | grep -Eq '^V0*99(\.0+)?__'; then
+            if printf '%s\n' "${file##*/}" | grep -Eq '^V0*99([._]0+)*__'; then
               echo "::error::A version 99 placeholder migration is on this commit (${file##*/}). Renumber it to the next free number; nothing is built or deployed."
               exit 1
             fi

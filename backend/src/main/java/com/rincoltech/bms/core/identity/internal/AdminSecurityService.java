@@ -33,7 +33,8 @@ class AdminSecurityService implements AdminSecurity, PasswordStepUp, SealedSecre
 
     @Override
     public void requirePassword(String password) {
-        flow.confirmPassword(accounts, CurrentPrincipal.require().userId(), password);
+        var caller = CurrentPrincipal.require();
+        flow.confirmPassword(accounts, caller.userId(), caller.sessionId(), password);
     }
 
     @Override

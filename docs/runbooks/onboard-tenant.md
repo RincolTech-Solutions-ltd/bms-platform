@@ -233,11 +233,13 @@ For a user with no email on file, an unreachable inbox, or a host without SMTP, 
 `POST /api/v1/users/{user_id}/reset-sign-in` and hands the returned link to the user once; it is not emailed, and the user is emailed
 that a reset was issued. The body proves the admin is still themselves: `{"totp_code": "<the current code from their own
 authenticator>"}` when they have two-step sign-in, otherwise `{"password": "<their own current password>"}` (two-step sign-in is
-optional; a wrong password counts toward the same 15 minute lock as at sign-in). **This is API only for now:** the Users screen has no
+optional on staging; a wrong password counts toward the same 15 minute lock as at sign-in, and the fifth wrong password ends the session that sent it). **This is API only for now:** the Users screen has no
 button yet (issue #339). A tenant admin cannot be reset this way, nor can an admin reset themselves.
 
-**Staging note.** The V2 seed makes two-step sign-in required for the `tenant_admin` role (`roles.mfa_required = true`), but the staging
-database has it `false` by the owner's order, so a staging admin can have no authenticator. That is allowed: such an admin resets other
+**Staging note.** The V2 seed makes two-step sign-in required for the `tenant_admin` role (`roles.mfa_required = true`), and only the staging
+database has it `false`, by the owner's hand edit (not a migration). On a fresh database (production, CI) a tenant admin with no authenticator
+is sent to enrolment and gets no session, so the password step-up below is reachable only where the seed was edited. On staging a no-factor
+admin is allowed, and whoever reads that admin's mailbox can take the account over (accepted by Hillary until #348 lands). Such an admin is allowed: such an admin resets other
 users with their own password, and, where SMTP is set up, can use Forgot password themselves. A user for whom a factor IS required
 (the role setting, or the tenant's `require_mfa_all_staff`) and has none gets no link by email and is helped by an administrator or the
 operator. A per-tenant policy for this is #348.

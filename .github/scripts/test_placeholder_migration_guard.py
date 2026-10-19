@@ -53,7 +53,16 @@ class PlaceholderMigrationGuardTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, (body, event))
 
     def test_every_spelling_flyway_reads_as_version_99_fails(self) -> None:
-        for name in ("V099__x.sql", "V0099__x.sql", "V99.0__x.sql", "V99.00__x.sql", "V099.0__x.sql"):
+        for name in (
+            "V099__x.sql",
+            "V0099__x.sql",
+            "V99.0__x.sql",
+            "V99.00__x.sql",
+            "V099.0__x.sql",
+            "V99_0__x.sql",
+            "V99.0.0__x.sql",
+            "V99_0_0__x.sql",
+        ):
             (self.dir / name).write_text("-- placeholder\n")
             self.assertEqual(run(self.dir).returncode, 1, name)
             (self.dir / name).unlink()
@@ -63,6 +72,8 @@ class PlaceholderMigrationGuardTest(unittest.TestCase):
             "V990__not_the_placeholder.sql",
             "V9__lending.sql",
             "V99.1__a_later_point_release.sql",
+            "V99_1__another_point_release.sql",
+            "V199__far_above.sql",
             "V98__just_below.sql",
             "V100__just_above.sql",
         ):
@@ -131,6 +142,10 @@ class DeployWorkflowTest(unittest.TestCase):
             ("V99__a.sql", True),
             ("V099__a.sql", True),
             ("V99.0__a.sql", True),
+            ("V99_0__a.sql", True),
+            ("V99.0.0__a.sql", True),
+            ("V199__a.sql", False),
+            ("V99_1__a.sql", False),
             ("V64__a.sql", False),
             ("V990__a.sql", False),
             ("V99.1__a.sql", False),

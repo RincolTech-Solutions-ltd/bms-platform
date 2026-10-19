@@ -9,8 +9,8 @@ public interface PasswordStepUp {
 
     /**
      * Checks the signed-in user's own password. A wrong one is counted on the sign-in counter and lock exactly as at sign-in (422
-     * {@code invalid_password}; the fifth locks the account, 423 {@code account_locked}); a caller with no staff account is refused
-     * (401). Must be called before the transaction of the action. The password is never logged, audited or echoed.
+     * {@code invalid_password}; the fifth locks the account, 423 {@code account_locked}); the fifth wrong password a session makes
+     * here also ends that session; a caller with no active staff account is refused (401). Must be called before the transaction of the action. The password is never logged, audited or echoed.
      */
     void requirePassword(String password);
 }

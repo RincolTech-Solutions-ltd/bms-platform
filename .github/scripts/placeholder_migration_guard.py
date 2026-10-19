@@ -8,7 +8,8 @@ highest one on any open branch) uses V99 as a placeholder and is renumbered by t
 is no longer version 99, so there is no escape word and no override: any such file fails, on a pull request, on a push to main and
 in the first job of the deploy workflow (which refuses to build or to move the staging pointer).
 
-Version 99 is every spelling Flyway reads as that version: V99__x.sql, V099__x.sql, V0099__x.sql and V99.0__x.sql (the same
+Version 99 is every spelling Flyway reads as that version, with a dot or an underscore between the parts: V99__x.sql, V099__x.sql,
+V99.0__x.sql, V99_0__x.sql and V99.0.0__x.sql (the same
 pattern is written in the deploy workflow's shell step, and a test keeps the two equal).
 
 MIGRATIONS may point at another directory, for the tests of this script (test_placeholder_migration_guard.py).
@@ -18,7 +19,7 @@ import pathlib
 import re
 import sys
 
-PATTERN = r"^V0*99(\.0+)?__"
+PATTERN = r"^V0*99([._]0+)*__"
 DEFAULT_DIR = "backend/src/main/resources/db/migration"
 
 

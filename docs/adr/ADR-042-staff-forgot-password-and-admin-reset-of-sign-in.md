@@ -76,10 +76,13 @@ inbox.
    is refused for such a user** (the same generic 202, no link, no row, audited as `refused` with reason
    `mfa_not_enrolled`), and a self-service link asked for before the requirement existed is refused when used. Such a
    user is helped by an administrator (decision 9) or the operator, who hand the link over out of band. **Where the
-   requirement is off, a user with no factor resets by mailbox exactly as before** and is signed in. The V2 seed has
-   `mfa_required = true` for `tenant_admin` globally, but the staging database has it `false` by the owner's order, so
-   there a tenant admin without a factor can use the sign-in page's Forgot password when SMTP is set up. A per-tenant
-   policy, default off, with a recommendation prompt, replaces the global switch (#348).
+   requirement is off, a user with no factor resets by mailbox exactly as before** and is signed in. **That optionality is true today only on staging.** The V2 seed has
+   `mfa_required = true` for `tenant_admin` globally, and only the staging database has it `false`, by the owner's hand edit
+   (not a migration). On a fresh database (production, CI) a tenant admin without a factor is sent to enrolment at sign-in and never
+   gets a session, so the password branch of decision 9(c) and the mailbox reset for a no-factor admin are reachable only where
+   the seed was edited. On staging, a tenant admin without a factor can use the sign-in page's Forgot password when SMTP is set up,
+   and **whoever reads that admin's mailbox can take the account over; Hillary accepted this on 20 October 2026 until #348
+   lands.** A per-tenant policy, default off, with a recommendation prompt, replaces the global switch (#348).
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
@@ -105,9 +108,15 @@ inbox.
    422 `invalid_password` for a wrong one). Two-step sign-in is optional, so an admin without it must not be locked out
    of this route (an earlier draft refused them, 409 `mfa_not_enrolled`; Hillary decided against it). A wrong
    password counts on the account's sign-in counter and lock exactly as one at sign-in does (the fifth locks the account
-   for 15 minutes, 423 `account_locked`, audited; a locked account is refused, the right password included), so the
-   route is no cheaper a place to guess a password than the sign-in page; it ends no session, because anyone can feed
-   that counter. A stolen session or token does not give the password (nor the code), so the takeover chain stays closed.
+   for 15 minutes, 423 `account_locked`, audited; a locked account is refused, the right password included). **It also
+   counts on the step-up counter, which only a signed-in session can feed, and the fifth wrong password there ends the
+   CALLING session's family and no other** (and locks step-up for 15 minutes, audited as
+   `core.auth.step_up_session_ended`): a thief with a stolen admin token cannot keep a live session and guess the password on
+   the sign-in lock alone (about 480 tries a day, with the real admin locked out of sign-in most of the time). Nothing a
+   stranger does at sign-in feeds the step-up counter, so a stranger's wrong sign-ins plus one real slip here, or the
+   admin's other devices, are not logged out (the sign-in count is shared and may lock the account; that is the same as at
+   sign-in). The sign-in counter is the one a stranger can feed, which is why it ends no session. A right password starts
+   the sign-in failure count again, as at sign-in, and leaves a lock alone; the account must be active. A stolen session or token does not give the password (nor the code), so the takeover chain stays closed.
    An admin who has an authenticator cannot swap the code for the password. A caller with no staff account at all is
    refused (401). Neither credential is logged, audited or echoed. The target is checked first (read-only), then the
    credential, then the link: a call that would be refused does not spend a code or count a wrong password;
@@ -174,9 +183,9 @@ inbox.
 
 **Worse:**
 
-- An account with no second factor, where no role or tenant setting requires one, is as safe as its mailbox. That is the
-  default everywhere two-step sign-in is optional, tenant admins included (the staging database has it off for
-  `tenant_admin`). An account whose role or tenant requires TOTP and has it set up is not exposed this way, and one that
+- An account with no second factor, where no role or tenant setting requires one, is as safe as its mailbox. For a
+  `tenant_admin` that is true only on staging, where the owner switched the requirement off by hand; elsewhere the V2 seed
+  requires it (decision 7), so such an admin never gets a session. An account whose role or tenant requires TOTP and has it set up is not exposed this way, and one that
   requires it and has not set it up gets no link by email (decision 7). The owner is emailed when a password changes, and
   every device is signed out.
 - A tenant admin who has not set up two-step sign-in, or who is locked out, cannot recover alone: the operator issues

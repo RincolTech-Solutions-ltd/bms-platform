@@ -271,27 +271,57 @@ class AuthFlow {
     /**
      * A re-entry of the signed-in user's own password for one sensitive action, for an account with no second factor (the admin
      * reset of a sign-in, ADR-042): the step-up of {@link #confirmTotp} where there is no authenticator to ask. A stolen session or
-     * token does not give the password. A wrong password counts on the account's sign-in counter and lock exactly as a wrong
-     * password at sign-in does (the fifth locks the account for 15 minutes, audited), a locked account is refused, and nothing here
-     * ends a session (the unauthenticated-failures reasoning of {@link #failStepUp} holds for a counter anyone can feed). The
-     * password is never logged, audited or echoed.
+     * token does not give the password. The account must be active and not locked, and a wrong password:
+     *
+     * <ul>
+     *   <li>counts on the account's sign-in counter and lock exactly as a wrong password at sign-in does (the fifth locks the
+     *       account for 15 minutes, audited; the count is the shared one, so a stranger's wrong sign-ins add to it);
+     *   <li>also counts on the step-up counter, which only an authenticated session can feed. The fifth wrong password there
+     *       locks step-up for 15 minutes and ends the CALLING session's family and no other: a stolen token cannot go on guessing
+     *       the password from a live session (about 480 tries a day on the sign-in lock alone), while a stranger's wrong sign-ins
+     *       and the admin's other devices are untouched. This is the counterpart of {@link #failStepUp}, which ends every session
+     *       because a wrong code is only ever sent by a caller who holds a session.
+     * </ul>
+     *
+     * A right password starts the sign-in failure count again, as at sign-in, and leaves any lock alone. The password is never
+     * logged, audited or echoed.
+     *
+     * @param sessionId the calling session, whose family a fifth wrong password ends; {@code null} for a caller with no session
      */
     @Transactional(noRollbackFor = ApiException.class)
-    void confirmPassword(Accounts accounts, UUID userId, String password) {
+    void confirmPassword(Accounts accounts, UUID userId, UUID sessionId, String password) {
         Instant now = clock.now();
         Account account = accounts.byIdForUpdate(userId).orElseThrow(AuthFlow::invalidCredentials);
-        if (account.lockedAt(now)) {
+        if (!account.active()) {
+            throw invalidCredentials();
+        }
+        if (account.lockedAt(now) || accounts.stepUpLockedAt(account.id(), now)) {
             accounts.audit("core.auth.step_up_refused_locked", account.id(), Map.of());
             throw locked();
         }
         if (!passwords.matches(password == null ? "" : password, account.passwordHash())) {
             fail(accounts, account, now, "core.auth.step_up_password_failed");
+            Accounts.Failures stepUp = accounts.recordStepUpFailure(account.id(), now, MAX_FAILURES, now.plus(LOCK));
+            if (stepUp.consecutive() == MAX_FAILURES) {
+                int ended = sessionId == null
+                        ? 0
+                        : accounts.sessions()
+                                .byId(sessionId)
+                                .map(row -> accounts.sessions().revokeFamily(row.familyId(), "admin", now))
+                                .orElse(0);
+                accounts.audit(
+                        "core.auth.step_up_session_ended",
+                        account.id(),
+                        Map.of("locked_minutes", LOCK.toMinutes(), "sessions_ended", ended));
+            }
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_CONTENT,
                     "invalid_password",
                     "Invalid password",
                     "The password is not correct.");
         }
+        accounts.clearFailedLogins(account.id());
+        accounts.clearStepUpFailures(account.id());
     }
 
     /** New recovery codes replace every old one; needs a current TOTP code (FR-IAM-11). */

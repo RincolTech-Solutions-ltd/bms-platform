@@ -803,10 +803,16 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(wrong.getBody().toString()).doesNotContain("Not-The-Password-1");
         assertThat(failedLogins(admin)).isEqualTo(1);
         assertThat(openLinks(userId)).isZero();
+        // Three more wrong ones, then the right one: the count starts again, as at sign-in.
+        for (int i = 0; i < 3; i++) {
+            api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
+        }
+        assertThat(failedLogins(admin)).isEqualTo(4);
 
         // The right password works, and the link is made as for an admin with a code.
         ResponseEntity<JsonNode> ok = api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken());
         assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(failedLogins(admin)).isZero();
         assertThat(ok.getHeaders().getFirst("Cache-Control")).isEqualTo("no-store");
         assertThat(ok.getBody().get("url").asString()).contains("/reset-password#token=");
         assertThat(openLinks(userId)).isEqualTo(1);
@@ -824,26 +830,133 @@ class PasswordResetIT extends IntegrationTest {
                 .single();
     }
 
-    /** Wrong passwords here share the sign-in lock: the fifth locks the account, and the right password is then refused too. */
+    /**
+     * Round 4, item 1: wrong passwords here share the sign-in lock (the fifth locks the account), and the fifth also ends the
+     * CALLING session, so a stolen token cannot go on guessing from a live session; the admin's other session is not touched.
+     */
     @Test
-    void wrongPasswordsOnTheRouteLockTheAccountLikeSignIn() {
+    void wrongPasswordsOnTheRouteLockTheAccountLikeSignInAndTheFifthEndsTheCallingSession() {
         UUID userId = user(Api.email("cashier"));
         String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        // A second device of the same admin, signed in while the admin still had an authenticator.
+        Session otherDevice = api.signIn(admin, userEmail(admin), Api.PASSWORD, adminSession.totpSecret());
         dropTheAdminsSecondFactor();
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 4; i++) {
             ResponseEntity<JsonNode> wrong =
                     api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
             assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_password");
+            // Four wrong passwords end nothing: the session still works.
+            assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
         }
+        ResponseEntity<JsonNode> fifth =
+                api.post(path, Map.of("password", "Not-The-Password-4"), adminSession.accessToken());
+        assertThat(fifth.getBody().get("code").asString()).isEqualTo("invalid_password");
         assertThat(audits("core.auth.account_locked", admin)).isEqualTo(1);
+        assertThat(audits("core.auth.step_up_session_ended", admin)).isEqualTo(1);
 
-        ResponseEntity<JsonNode> locked = api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken());
+        // The calling session is over: its next call is a 401, whatever the call.
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(api.refresh(adminSession.refreshToken()).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        // The admin's other device is another family and is not logged out by a stranger's or a thief's guesses.
+        assertThat(api.get("/api/v1/me", otherDevice.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // Nothing was issued, and the sign-in lock holds too: the right password is refused at sign-in.
+        assertThat(openLinks(userId)).isZero();
+        assertThat(api.login(userEmail(admin), Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+        // While the lock holds, the other device is refused at this route as well (423), without being logged out.
+        ResponseEntity<JsonNode> locked = api.post(path, Map.of("password", Api.PASSWORD), otherDevice.accessToken());
         assertThat(locked.getStatusCode()).isEqualTo(HttpStatus.LOCKED);
         assertThat(locked.getBody().get("code").asString()).isEqualTo("account_locked");
+        assertThat(api.get("/api/v1/me", otherDevice.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /** Round 4, item 1: a stranger's wrong sign-ins do not log the admin out; only the admin's own session's failures do. */
+    @Test
+    void aStrangersWrongSignInsDoNotEndTheAdminsSessionEvenWithOneSlipHere() {
+        UUID userId = user(Api.email("cashier"));
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        dropTheAdminsSecondFactor();
+        String adminEmail = userEmail(admin);
+
+        for (int i = 0; i < 4; i++) {
+            assertThat(api.login(adminEmail, "Not-The-Password-" + i).getStatusCode())
+                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+        // One slip of the admin's own on this route reaches the sign-in lock (the count is shared) but not the step-up
+        // one.
+        ResponseEntity<JsonNode> slip =
+                api.post(path, Map.of("password", "Not-The-Password-X"), adminSession.accessToken());
+        assertThat(slip.getBody().get("code").asString()).isEqualTo("invalid_password");
+        assertThat(audits("core.auth.account_locked", admin)).isEqualTo(1);
+        assertThat(audits("core.auth.step_up_session_ended", admin)).isZero();
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    /** Round 4, item 3: the password step-up needs an active account (a dev principal reaches it with no session check). */
+    @Test
+    void aDeactivatedAccountCannotProveItsPasswordHere() {
+        UUID userId = user(Api.email("cashier"));
+        UUID gone = user(Api.email("gone"), "tenant_admin");
+        TestDatabase.owner()
+                .sql("UPDATE users SET status = 'deactivated' WHERE id = ?")
+                .param(gone)
+                .update();
+        Map<String, String> asGone = Map.of(
+                "X-Dev-User-Id", gone.toString(),
+                "X-Dev-Permissions", "core.users.manage",
+                "X-Dev-Branch-Ids", "*");
+
+        ResponseEntity<JsonNode> response = api.call(
+                HttpMethod.POST,
+                "/api/v1/users/" + userId + "/reset-sign-in",
+                Map.of("password", Api.PASSWORD),
+                null,
+                asGone);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody().get("code").asString()).isEqualTo("invalid_credentials");
         assertThat(openLinks(userId)).isZero();
-        // The same lock stops a sign-in with the right password.
-        assertThat(api.login(userEmail(admin), Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+    }
+
+    /**
+     * Round 4, item 5: the tenant-wide switch refuses the mailbox reset for a user with no factor even when their role needs
+     * none; the setting is put back afterwards.
+     */
+    @Test
+    void theTenantWideRequirementRefusesTheMailboxResetForAUserWithNoFactor() {
+        var owner = TestDatabase.owner();
+        owner.sql("INSERT INTO tenant_settings (id, tenant_id, settings) VALUES (?, ?, CAST(? AS jsonb))"
+                        + " ON CONFLICT (tenant_id) DO UPDATE SET settings = EXCLUDED.settings")
+                .params(UUID.randomUUID(), t.tenantId(), "{\"require_mfa_all_staff\": true}")
+                .update();
+        try {
+            String email = Api.email("cashier");
+            UUID userId = user(email);
+
+            ResponseEntity<JsonNode> response = request(email);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+            assertThat(emailedLink(email)).isNull();
+            assertThat(audits("core.password_reset.refused", userId)).isEqualTo(1);
+            assertThat(owner.sql("SELECT data->'after'->>'reason' FROM audit_log WHERE entity_id = ?"
+                                    + " AND action = 'core.password_reset.refused'")
+                            .param(userId)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("mfa_not_enrolled");
+        } finally {
+            owner.sql("UPDATE tenant_settings SET settings = '{}'::jsonb WHERE tenant_id = ?")
+                    .param(t.tenantId())
+                    .update();
+        }
     }
 
     /** A refused target does not make the password count either: it is checked before the credential. */

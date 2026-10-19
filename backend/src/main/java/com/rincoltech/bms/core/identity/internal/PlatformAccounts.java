@@ -114,6 +114,13 @@ class PlatformAccounts implements Accounts {
     }
 
     @Override
+    public void clearFailedLogins(UUID id) {
+        jdbc.sql("UPDATE platform_users SET failed_login_count = 0 WHERE id = ? AND failed_login_count <> 0")
+                .param(id)
+                .update();
+    }
+
+    @Override
     public void recordSuccess(UUID id, Instant at) {
         jdbc.sql(
                         "UPDATE platform_users SET failed_login_count = 0, locked_until = NULL, last_login_at = ? WHERE id = ?")
