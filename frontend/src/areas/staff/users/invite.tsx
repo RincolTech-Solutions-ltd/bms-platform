@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
-import { users } from '../../../api/users';
+import { UsersError, users } from '../../../api/users';
 import { useShellBrand } from '../../../app/branding';
 import { useStaff } from '../context';
 import { LinkBox, type ShownLink } from './link-box';
@@ -26,6 +26,8 @@ export function InviteScreen() {
   // A second tap before the first answer would invite twice; a ref closes that gap before React re-renders.
   const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // The person may already be on the staff (a lost answer, or a second tap): point at the list, where Send a new link is.
+  const [lookInList, setLookInList] = useState(false);
   const [link, setLink] = useState<ShownLink | null>(null);
 
   if (!allowed) {
@@ -46,6 +48,7 @@ export function InviteScreen() {
     sending.current = true;
     setBusy(true);
     setError(null);
+    setLookInList(false);
     try {
       const invited = await users.invite(inviteBody(draft));
       void queryClient.invalidateQueries({ queryKey: ['staff-users'] });
@@ -61,6 +64,12 @@ export function InviteScreen() {
       setTouched(false);
     } catch (e) {
       setError(messageOf(e));
+      const code = e instanceof UsersError ? e.code : undefined;
+      if (code === 'network' || code === 'duplicate_phone' || code === 'duplicate_email') {
+        setLookInList(true);
+        // The invitation may have been made before the answer was lost: have the list ready and current.
+        void queryClient.invalidateQueries({ queryKey: ['staff-users'] });
+      }
     } finally {
       sending.current = false;
       setBusy(false);
@@ -117,6 +126,11 @@ export function InviteScreen() {
         />
 
         {error && <p role="alert" className="alert alert-danger">{error}</p>}
+        {error && lookInList && (
+          <p className="hint">
+            Did you just invite this person? Open <Link to="/staff/users">the staff list</Link>: if they are there, tap Send a new link next to their name.
+          </p>
+        )}
         <p className="cluster">
           <button type="submit" className="rt-primary" disabled={busy || roles.isPending}>{busy ? 'Inviting' : 'Invite'}</button>
           <Link to="/staff/users" className="btn-ghost btn">Cancel</Link>

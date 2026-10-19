@@ -23,7 +23,7 @@ vi.mock('../../../api/users', async (original) => {
 });
 vi.mock('../../../app/branding', () => ({ useShellBrand: () => ({ name: 'Test Trading Co' }) }));
 
-const { UsersError } = await import('../../../api/users');
+const { UsersError, NETWORK_WORDS } = await import('../../../api/users');
 const { UsersScreen } = await import('./page');
 const { InviteScreen } = await import('./invite');
 
@@ -145,6 +145,40 @@ describe('the invite form', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/at most 3 staff users/);
     // The form is still there, with what was typed, so nothing is lost.
     expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Test Cashier 05');
+  });
+});
+
+describe('an invite whose answer was lost', () => {
+  it('says so in plain words and points at the staff list, where Send a new link is', async () => {
+    api.invite.mockRejectedValue(new UsersError(NETWORK_WORDS, 0, 'network'));
+    shell(<InviteScreen />);
+    await fillInvite();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+    expect((await screen.findByRole('alert')).textContent).toBe(NETWORK_WORDS);
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+    const list = screen.getByRole('link', { name: 'the staff list' }) as HTMLAnchorElement;
+    expect(list.getAttribute('href')).toBe('/staff/users');
+    // What was typed is still there, so nothing has to be typed twice.
+    expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Test Cashier 05');
+  });
+
+  it('adds the same hint when the second tap meets the person already invited', async () => {
+    api.invite.mockRejectedValue(new UsersError('Someone on your staff already uses this phone number.', 409, 'duplicate_phone'));
+    shell(<InviteScreen />);
+    await fillInvite();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/already uses this phone number/);
+    expect(screen.getByText(/Did you just invite this person/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'the staff list' })).toBeTruthy();
+  });
+
+  it('adds no hint for a refusal that has nothing to do with a repeat', async () => {
+    api.invite.mockRejectedValue(new UsersError('Your plan allows at most 3 staff users.', 422, 'plan_limit_reached'));
+    shell(<InviteScreen />);
+    await fillInvite();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/Did you just invite this person/)).toBeNull();
   });
 });
 
