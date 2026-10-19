@@ -618,7 +618,8 @@ class RetailParityIT extends IntegrationTest {
                 .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
                 .param(t.secondBranch())
                 .update();
-        // Issue #329: the default list is the branches that trade; the closed one that holds stock is counted, not shown.
+        // Issue #329: the default list is the branches that trade; the closed one that holds stock is counted, not
+        // shown.
         JsonNode plain = ok(api.get("/stock/all-branches", ADMIN));
         assertThat(plain.get("branches")).hasSize(1);
         assertThat(plain.get("closed_branches").asInt()).isEqualTo(1);
