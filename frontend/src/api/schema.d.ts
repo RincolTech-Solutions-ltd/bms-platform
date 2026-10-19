@@ -259,6 +259,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/staff/password-reset/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15) */
+        post: operations["completePasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/staff/password-reset/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask for a password reset link by email or phone; the answer never says whether an account matched (FR-IAM-15) */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches": {
         parameters: {
             query?: never;
@@ -5179,6 +5213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/reset-sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15) */
+        post: operations["resetUserSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{user_id}/roles": {
         parameters: {
             query?: never;
@@ -7336,6 +7387,17 @@ export interface components {
             /** @description Channels whose sender is configured; rows of the others stay pending */
             enabled_channels?: string[];
             failures?: components["schemas"]["OutboxFailure"][];
+        };
+        PasswordResetCompleteRequest: {
+            password: string;
+            token: string;
+        };
+        PasswordResetRequest: {
+            /** @description Email or phone of the staff account */
+            login: string;
+        };
+        PasswordResetRequested: {
+            message?: string;
         };
         PaymentIntent: {
             /** Format: int64 */
@@ -12609,6 +12671,11 @@ export interface components {
             login: string;
             password: string;
         };
+        SignInResetLink: {
+            /** Format: date-time */
+            expires_at?: string;
+            url?: string;
+        };
         SignInResponse: {
             access_token?: string;
             /** Format: int64 */
@@ -13495,6 +13562,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignInResponse"];
+                };
+            };
+        };
+    };
+    completePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInResponse"];
+                };
+            };
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetRequested"];
                 };
             };
         };
@@ -22532,6 +22647,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
+                };
+            };
+        };
+    };
+    resetUserSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInResetLink"];
                 };
             };
         };

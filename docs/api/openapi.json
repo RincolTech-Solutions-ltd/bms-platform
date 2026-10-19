@@ -5188,6 +5188,39 @@
           }
         }
       },
+      "PasswordResetCompleteRequest" : {
+        "properties" : {
+          "password" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "token" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "password", "token" ]
+      },
+      "PasswordResetRequest" : {
+        "properties" : {
+          "login" : {
+            "description" : "Email or phone of the staff account",
+            "maxLength" : 320,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "login" ]
+      },
+      "PasswordResetRequested" : {
+        "properties" : {
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
       "PaymentIntent" : {
         "properties" : {
           "amount_minor" : {
@@ -15664,6 +15697,17 @@
         },
         "required" : [ "login", "password" ]
       },
+      "SignInResetLink" : {
+        "properties" : {
+          "expires_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        }
+      },
       "SignInResponse" : {
         "properties" : {
           "access_token" : {
@@ -17456,6 +17500,64 @@
           }
         },
         "summary" : "Second factor: TOTP or recovery code (FR-IAM-06, FR-IAM-11)",
+        "tags" : [ "auth" ]
+      }
+    },
+    "/api/v1/auth/staff/password-reset/complete" : {
+      "post" : {
+        "operationId" : "completePasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetCompleteRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SignInResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set a new password with the one-time reset token, end every session, then sign in (FR-IAM-15)",
+        "tags" : [ "auth" ]
+      }
+    },
+    "/api/v1/auth/staff/password-reset/request" : {
+      "post" : {
+        "operationId" : "requestPasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PasswordResetRequested"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Ask for a password reset link by email or phone; the answer never says whether an account matched (FR-IAM-15)",
         "tags" : [ "auth" ]
       }
     },
@@ -31501,6 +31603,34 @@
           }
         },
         "summary" : "Reset another user's lost second factor (FR-IAM-12)",
+        "tags" : [ "users" ]
+      }
+    },
+    "/api/v1/users/{user_id}/reset-sign-in" : {
+      "post" : {
+        "operationId" : "resetUserSignIn",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "user_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SignInResetLink"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15)",
         "tags" : [ "users" ]
       }
     },
