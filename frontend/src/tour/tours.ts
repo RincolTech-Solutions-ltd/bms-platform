@@ -81,7 +81,8 @@ const branch: TourStep = {
 // the set-up checklist after the first run, and this tour starts there.
 export const adminWelcome: Tour = {
   id: 'admin-welcome',
-  version: 4,
+  // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
+  version: 5,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
