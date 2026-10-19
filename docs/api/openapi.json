@@ -12052,6 +12052,7 @@
           "available_levels" : {
             "description" : "Every level group_by accepts",
             "items" : {
+              "description" : "Every level group_by accepts",
               "type" : "string"
             },
             "type" : "array"
@@ -12077,6 +12078,7 @@
           "levels" : {
             "description" : "The chain the request asked for, in order",
             "items" : {
+              "description" : "The chain the request asked for, in order",
               "type" : "string"
             },
             "type" : "array"
