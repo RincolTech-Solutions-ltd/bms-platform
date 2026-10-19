@@ -73,16 +73,19 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
   until a provider is chosen that port records messages only, so no flow waits for one.
 - **Forgotten password** (FR-IAM-15, ADR-042): on the sign-in page the user types an email or phone and, if an active account has
   an email on file, gets a link there through the outbox (`identity.password_reset`; SMS stays off). A tenant admin can instead
-  issue a link for an active user (`POST /users/{user_id}/reset-sign-in`, `core.users.manage`), shown once to the admin and
-  never emailed. The token is 256 random bits in the link's fragment, stored as a SHA-256 hash only and found by that hash
+  issue a link for an active user who is not a tenant admin and not themselves (`POST /users/{user_id}/reset-sign-in`,
+  `core.users.manage`; a fresh authenticator code in the body when the acting admin has two-step sign-in), and the
+  platform operator one for a tenant admin (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`): shown once,
+  never emailed, no-store. The token is 256 random bits in the link's fragment, stored as a SHA-256 hash only and found by that hash
   (no comparison of secrets in application code), single use, valid one hour; a newer link revokes the older ones. The link's
   host is built from the tenant's slug under `BMS_TENANT_HOST_PATTERN` (`PlatformHost.tenantOrigin`), never from a request
   header. Using it sets the password under the invitation's rules and hashing, revokes every session and refresh token of the
   user (`revoked_reason = password_reset`), queues an email that the password changed (no link) and then signs in through
-  the same rules as a sign-in: a user with TOTP is asked for the code (`mfa_required`), a role that requires a second factor
+  the same rules as a sign-in (a link issued by an administrator or the operator also emails the user at once, without
+  the link): a user with TOTP is asked for the code (`mfa_required`), a role that requires a second factor
   is sent to enrolment, and the failed-attempt lock is not cleared (the user is told to sign in later, `sign_in_required`), so
-  a reset can never switch the second factor off, skip it or reset its guess counter. A deactivated user (the open links are
-  revoked and the link is refused anyway) and a user still invited get no reset. Audited as `core.password_reset.requested`,
+  a reset can never switch the second factor off, skip it or reset its guess counter. A user whose role (or the tenant) requires a second factor that is not set up gets no link by email, and a deactivated user
+  (the open links are revoked and the link is refused anyway) and a user still invited get no reset. Audited as `core.password_reset.requested`,
   `.refused` (with a reason, for a known account that was not acted on), `.link_revealed` (admin path) and `.used`; the token
   is in no audit row, log line or error. Section 8.2a gives the threat model.
 - Access tokens are ES256 JWS signed with the key of section 8.7; the 5 minute MFA token between
@@ -118,14 +121,15 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 | Finding out who has an account by asking for a reset | One generic 202 body for every login, a response floor of 400 ms so the work that differs (a lookup, or a lookup, a link and an outbox row) is not visible in the time, the work done inside a transaction that is not held during the wait, and every difference (no account, not active, no email, too many links) visible only in the audit log. The address limit (429) depends on the caller alone |
 | Flooding a mailbox or the outbox | 3 links an hour per account, counted in the database and answered like any other request; 20 requests an hour per address; the message is queued once per link with an idempotency key and lapses with the token |
 | Guessing a link | 256 random bits; looked up by SHA-256, so no secret comparison and no partial match; 30 attempts per 10 minutes per address; single use; one hour |
-| Reading a link from the database, a backup or a log | Only the hash is stored; the outbox row carries the link until it is sent and then its parameters are cleared, and it lapses with the token; no log line, audit row or error holds a token |
+| Reading a link from the database, a backup or a log | The token is stored as a hash. The outbox row of an emailed link holds it in plain text until the email is sent or the link expires; a job every 5 minutes then clears the parameters, so the window is the hour plus 5 minutes at most, or until sent (ADR-042 decision 11); a backup taken in that window holds it, one hour old and single use. No log line, audit row or error holds a token |
 | A link sent to the wrong place or a phishing host | Sent only to the email on file (never to the address typed on the form); the host is the tenant's own, from configuration, never a request header; the token travels in the fragment, so it reaches no server log or Referer |
-| Account takeover by whoever reads the mailbox | Unavoidable for an account with no second factor, which is why the owner of the mailbox is emailed when a password is changed and every device is signed out; an account with TOTP still needs the code, and the reset neither disables it nor clears the failed-attempt lock, so it gives no extra guesses at a code |
+| Account takeover by whoever reads the mailbox | An account with TOTP still needs the code, and the reset neither disables it nor clears the failed-attempt lock. A user whose role requires a second factor but who has not set it up gets no link by email (the request is answered like any other and refused inside), because the reader of the mailbox could otherwise choose the password and enrol their own authenticator; that user is helped by an administrator or the operator. What is left is an account with no second factor and a role that does not require one, which is as safe as its mailbox; the owner of the mailbox is emailed when a password is changed and every device is signed out |
 | A stale or stolen session surviving a reset | Every session and refresh token of the user ends in the transaction that sets the password |
 | A reset for an account that should not get back in | Only active users; a deactivated user's open links are revoked and refused; an invited user keeps the invitation path |
 | One tenant's link or admin reaching another's user | The table has forced row-level security with the tenant policy; the lookup runs inside the tenant of the host, so a link of tenant A used on tenant B's host is not found, and an admin of B cannot issue a link for A's user (`PasswordResetIT`, `RlsIsolationIT`) |
 | An admin resetting users outside their branches | The route needs `core.users.manage`; an admin whose scope is not every branch reaches only users whose every role is inside it |
-| A link in the admin's hand used by the admin | Possible by design (an admin who can reset a sign-in could also deactivate and invite): the issue and the reveal are audited with the admin's identity, and the user is emailed when the password changes |
+| A hijacked tenant admin session chaining the MFA reset and the sign-in reset to take an account over | The tenant route refuses oneself and any tenant admin (a locked-out admin is recovered by the platform operator), asks the acting admin for a fresh authenticator code when they have one, and emails the user when a link is issued. Accepted risk: an acting admin with no second factor enrolled is not asked for a code (ADR-042 decision 9) |
+| A link in the admin's hand used by the admin | Possible by design for an ordinary user (an admin who can reset a sign-in could also deactivate and invite): the issue and the reveal are audited with the admin's identity, the user is emailed when it is issued and again when the password changes |
 
 ## 8.3 Role-based access control
 

@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.identity.internal;
 
 import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.identity.TenantAdmins.ResetLink;
 import com.rincoltech.bms.core.identity.internal.Accounts.Account;
 import com.rincoltech.bms.core.identity.internal.UserApi.SignInResetLink;
 import com.rincoltech.bms.core.notifications.Outbox;
@@ -10,6 +11,7 @@ import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.RequestContext;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -27,14 +29,16 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * A staff user who forgot the password gets back in with a one-time link (FR-IAM-15, ADR-042): asked for on the sign-in page
- * (the link goes to the email on file) or issued by a tenant admin (the link is shown once to the admin). The token is 256
- * random bits, stored as a SHA-256 hash, single use, valid for one hour; a newer link revokes the older ones. Using it sets the
- * password under the same rules and hashing as an invitation and ends every session of the user. It never touches the second
- * factor, the failed-attempt lock or the user's status: only an active user can reset, and a user still invited keeps the
- * invitation path.
+ * (the link goes to the email on file), issued by a tenant admin for an ordinary user, or issued by the platform operator for
+ * a tenant admin (the link is shown once to whoever issued it). The token is 256 random bits, stored as a SHA-256 hash,
+ * single use, valid for one hour; a newer link revokes the older ones. Using it sets the password under the same rules and
+ * hashing as an invitation and ends every session of the user. It never touches the second factor, the failed-attempt lock or
+ * the user's status: only an active user can reset, and a user still invited keeps the invitation path.
  *
  * <p>The request for a link answers the same whether or not an account matched; everything that differs (no account, not
- * active, no email, too many links this hour) happens inside and is visible only in the audit log.
+ * active, no email, a role that needs a second factor the user has not set up, too many links this hour) happens inside and is
+ * visible only in the audit log. A tenant admin never resets a tenant admin or themselves: that is the platform operator's
+ * path, or the sign-in page for one's own account.
  */
 @Service
 class PasswordResets {
@@ -48,6 +52,7 @@ class PasswordResets {
 
     static final String RESET_TEMPLATE = "identity.password_reset";
     static final String CHANGED_TEMPLATE = "identity.password_changed";
+    static final String ISSUED_TEMPLATE = "identity.password_reset_issued";
 
     private final JdbcClient jdbc;
     private final StaffAccounts accounts;
@@ -81,12 +86,23 @@ class PasswordResets {
 
     /**
      * The user asks for a link on the sign-in page. Returns nothing, on purpose: the caller must not be able to tell what
-     * happened.
+     * happened. The actor of every row is nobody (the caller is not signed in); the client address is in the row.
      */
     @Transactional
     void request(String login) {
-        Optional<Account> found = accounts.byLogin(login == null ? null : login.trim());
+        String typed = login == null ? "" : login.trim();
+        Optional<Account> found = accounts.byLogin(typed);
         if (found.isEmpty()) {
+            audit.record(
+                    new AuditLog.Entry(
+                            "core.password_reset.unknown_login",
+                            "core.user",
+                            null,
+                            null,
+                            Map.of(),
+                            data("login", typed)),
+                    null,
+                    "staff");
             return;
         }
         Target user = lock(found.get().id());
@@ -99,6 +115,12 @@ class PasswordResets {
         }
         if (user.email() == null) {
             refused(user, "no_email");
+            return;
+        }
+        if (needsSecondFactorFirst(found.get())) {
+            // Whoever reads the mailbox would otherwise set the password and enrol their own authenticator (ADR-042
+            // decision 7).
+            refused(user, "mfa_not_enrolled");
             return;
         }
         Instant now = clock.now();
@@ -120,18 +142,16 @@ class PasswordResets {
                         user.id(),
                         null,
                         Map.of(),
-                        Map.of(
-                                "origin",
-                                "self",
-                                "expires_at",
-                                issued.expiresAt().toString())),
-                user.id(),
+                        data("origin", "self", "expires_at", issued.expiresAt().toString())),
+                null,
                 "staff");
         Map<String, String> params = new LinkedHashMap<>();
         params.put("tenant_name", tenant.profile().name());
         params.put("link", issued.url());
         params.put("expires_at", stamp(issued.expiresAt()));
-        // The row carries the link until it is sent (then the parameters are cleared) and lapses with the token.
+        // The row carries the link until it is sent (then the parameters are cleared) or until it expires (a frequent
+        // job
+        // clears it then), so the token is in the database in plain text for the hour at most plus the job's interval.
         outbox.enqueue(new Outbox.Message(
                 Outbox.EMAIL,
                 user.email(),
@@ -142,7 +162,20 @@ class PasswordResets {
                 issued.expiresAt()));
     }
 
-    /** A tenant admin issues a link for an active user; it is returned once and never emailed (FR-IAM-15). */
+    /** Whether the signed-in user (the acting admin) has a second factor enrolled, for the step-up the route asks for. */
+    @Transactional(readOnly = true)
+    boolean actorHasSecondFactor() {
+        return jdbc.sql("SELECT mfa_enabled FROM users WHERE id = ? AND kind = 'staff'")
+                .param(CurrentPrincipal.require().userId())
+                .query(Boolean.class)
+                .optional()
+                .orElse(false);
+    }
+
+    /**
+     * A tenant admin issues a link for an active user who is not a tenant admin and not themselves; it is returned once and
+     * never emailed, but the user is told by email that one was issued (without the link) (FR-IAM-15).
+     */
     @Transactional
     SignInResetLink issueForAdmin(UUID userId) {
         Principal admin = CurrentPrincipal.require();
@@ -151,14 +184,20 @@ class PasswordResets {
             throw ApiException.notFound();
         }
         requireInScope(admin, userId);
-        if (!"active".equals(user.status())) {
+        if (admin.userId().equals(userId)) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
-                    "invalid_status_transition",
-                    "Invalid status transition",
-                    "invited".equals(user.status())
-                            ? "This user has not accepted the invitation yet; send the invitation link again."
-                            : "A deactivated user cannot reset the password.");
+                    "cannot_reset_own_sign_in",
+                    "Not allowed",
+                    "Use Forgot password on the sign-in page for your own account.");
+        }
+        requireActive(user);
+        if (isTenantAdmin(userId)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "admin_reset_by_operator",
+                    "Not allowed",
+                    "An administrator's sign-in is reset by the platform operator. Ask them.");
         }
         Instant now = clock.now();
         Issued issued = issue(userId, "admin", admin.userId(), now);
@@ -168,7 +207,7 @@ class PasswordResets {
                 userId,
                 null,
                 Map.of(),
-                Map.of("origin", "admin", "expires_at", issued.expiresAt().toString())));
+                data("origin", "admin", "expires_at", issued.expiresAt().toString())));
         // The token never reaches the audit log: the row records that the link was shown.
         audit.record(new AuditLog.Entry(
                 "core.password_reset.link_revealed",
@@ -176,8 +215,50 @@ class PasswordResets {
                 userId,
                 null,
                 Map.of(),
-                Map.of("expires_at", issued.expiresAt().toString())));
+                data("expires_at", issued.expiresAt().toString())));
+        notifyIssued(user, issued, now);
         return new SignInResetLink(issued.url(), issued.expiresAt());
+    }
+
+    /** The platform operator issues a link for a tenant admin whom nobody in the tenant may reset (ADR-042 decision 9). */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    ResetLink issueForOperator(UUID userId, UUID operatorId) {
+        Target user = lock(userId);
+        if (user == null) {
+            throw ApiException.notFound();
+        }
+        if (!isTenantAdmin(userId)) {
+            throw ApiException.rule("not_a_tenant_admin", "The platform resets the sign-in of tenant admins only.");
+        }
+        requireActive(user);
+        Instant now = clock.now();
+        Issued issued = issue(userId, "operator", operatorId, now);
+        audit.record(
+                new AuditLog.Entry(
+                        "core.password_reset.requested",
+                        "core.user",
+                        userId,
+                        null,
+                        Map.of(),
+                        data(
+                                "origin",
+                                "operator",
+                                "expires_at",
+                                issued.expiresAt().toString())),
+                operatorId,
+                "platform");
+        audit.record(
+                new AuditLog.Entry(
+                        "core.password_reset.link_revealed",
+                        "core.user",
+                        userId,
+                        null,
+                        Map.of(),
+                        data("expires_at", issued.expiresAt().toString())),
+                operatorId,
+                "platform");
+        notifyIssued(user, issued, now);
+        return new ResetLink(issued.url(), issued.expiresAt());
     }
 
     /**
@@ -203,6 +284,10 @@ class PasswordResets {
         if (user == null || !"active".equals(user.status())) {
             throw linkInvalid();
         }
+        if ("self".equals(link.origin()) && needsSecondFactorFirst(account)) {
+            // Asked for before the role gained its second factor requirement: the same refusal as at the request.
+            throw linkInvalid();
+        }
         passwords.checkStrength(password, user.email(), user.phone());
         jdbc.sql(
                         "UPDATE user_credentials SET password_hash = ?, password_changed_at = ?, updated_at = ? WHERE user_id = ?")
@@ -213,12 +298,15 @@ class PasswordResets {
                 .update();
         revokeOpen(user.id(), now);
         int revoked = accounts.sessions().revokeAllOf(user.id(), "password_reset", now);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("origin", link.origin());
-        data.put("sessions_revoked", revoked);
         audit.record(
-                new AuditLog.Entry("core.password_reset.used", "core.user", user.id(), null, Map.of(), data),
-                user.id(),
+                new AuditLog.Entry(
+                        "core.password_reset.used",
+                        "core.user",
+                        user.id(),
+                        null,
+                        Map.of(),
+                        data("origin", link.origin(), "sessions_revoked", revoked)),
+                null,
                 "staff");
         if (user.email() != null) {
             // Tells the owner of the mailbox the password changed; carries no link, so a stale copy of it is harmless.
@@ -267,19 +355,70 @@ class PasswordResets {
         revokeOpen(userId, now);
         String token = Secrets.token();
         UUID id = UUID.randomUUID();
+        // created_at from the kernel clock, never the database's: the per-account count of the last hour compares it
+        // with it.
         jdbc.sql("""
-                        INSERT INTO user_password_resets (id, tenant_id, user_id, token_hash, expires_at, origin, requested_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
+                        INSERT INTO user_password_resets (id, tenant_id, created_at, user_id, token_hash, expires_at, origin, requested_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?)
                         """)
-                .params(id, userId, Secrets.sha256(token), Timestamp.from(expires), origin, requestedBy)
+                .params(
+                        id,
+                        Timestamp.from(now),
+                        userId,
+                        Secrets.sha256(token),
+                        Timestamp.from(expires),
+                        origin,
+                        requestedBy)
                 .update();
         String url = hosts.tenantOrigin(tenant.profile().slug()) + "/reset-password#token=" + token;
         return new Issued(id, url, expires);
     }
 
+    /** The user is told that a reset was issued, without the link: the admin or operator hands it over. */
+    private void notifyIssued(Target user, Issued issued, Instant now) {
+        if (user.email() == null) {
+            return;
+        }
+        outbox.enqueue(new Outbox.Message(
+                Outbox.EMAIL,
+                user.email(),
+                ISSUED_TEMPLATE,
+                Map.of("tenant_name", tenant.profile().name(), "when", stamp(now)),
+                ISSUED_TEMPLATE + ":" + issued.id(),
+                "password-reset:" + user.id(),
+                now.plus(Duration.ofDays(1))));
+    }
+
+    /**
+     * Whether the account must have a second factor (its role or the tenant's setting requires one) and has none yet. A link
+     * by email would let the reader of the mailbox choose the password and then enrol their own authenticator.
+     */
+    private boolean needsSecondFactorFirst(Account account) {
+        return !account.mfaEnabled() && accounts.mfaRequired(account.id());
+    }
+
+    private void requireActive(Target user) {
+        if (!"active".equals(user.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "invalid_status_transition",
+                    "Invalid status transition",
+                    "invited".equals(user.status())
+                            ? "This user has not accepted the invitation yet; send the invitation link again."
+                            : "A deactivated user cannot reset the password.");
+        }
+    }
+
+    private boolean isTenantAdmin(UUID userId) {
+        return jdbc.sql("""
+                                SELECT count(*) FROM user_role_assignments
+                                 WHERE user_id = ? AND role_key = 'tenant_admin' AND revoked_at IS NULL
+                                """).param(userId).query(Long.class).single() > 0;
+    }
+
     /**
      * A tenant admin whose permission covers some branches only may reset a user whose every role is in those branches. A user
-     * with a role over every branch (a tenant admin) needs an admin who covers every branch.
+     * with a role over every branch, or with no role at all, needs an admin who covers every branch.
      */
     private void requireInScope(Principal admin, UUID userId) {
         boolean all = admin.scopeOf("core.users.manage")
@@ -316,16 +455,23 @@ class PasswordResets {
     private void refused(Target user, String reason) {
         audit.record(
                 new AuditLog.Entry(
-                        "core.password_reset.refused",
-                        "core.user",
-                        user.id(),
-                        null,
-                        Map.of(),
-                        Map.of("reason", reason)),
-                user.id(),
+                        "core.password_reset.refused", "core.user", user.id(), null, Map.of(), data("reason", reason)),
+                null,
                 "staff");
     }
 
+    /** Audit data with the client address, which the audit search shows (the column beside it is not in the search). */
+    private static Map<String, Object> data(Object... pairs) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            data.put((String) pairs[i], pairs[i + 1]);
+        }
+        String ip = RequestContext.clientIp();
+        data.put("ip", ip == null ? "unknown" : ip);
+        return data;
+    }
+
+    /** The time as a message shows it. */
     private static String stamp(Instant at) {
         return STAMP.format(at.atOffset(ZoneOffset.UTC));
     }

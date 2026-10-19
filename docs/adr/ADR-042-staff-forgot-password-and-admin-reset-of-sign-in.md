@@ -24,10 +24,12 @@ inbox.
 
 ## Decision
 
-1. **Two ways to a link, one reset.** The user asks on the sign-in page (`POST /auth/staff/password/forgot`, a
-   login that is an email or a phone), or a tenant admin issues a link for an active user (`POST
-   /users/{user_id}/reset-sign-in`, `core.users.manage`). Both create one `user_password_resets` row and both end
-   in `POST /auth/staff/password/reset`.
+1. **Three ways to a link, one reset.** The user asks on the sign-in page (`POST /auth/staff/password/forgot`, a
+   login that is an email or a phone); a tenant admin issues a link for an active user who is not a tenant admin
+   (`POST /users/{user_id}/reset-sign-in`, `core.users.manage`); or the platform operator issues one for a tenant
+   admin (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`). Each creates one
+   `user_password_resets` row (`origin` `self`, `admin` or `operator`) and all end in
+   `POST /auth/staff/password/reset`.
 2. **The token is the invitation's token.** 256 random bits, base64url, in the link's fragment
    (`/reset-password#token=...`, so it reaches no server log or Referer), stored as SHA-256 only and found by that
    hash (a unique index lookup: nothing secret is compared in application code). Valid one hour, single use
@@ -56,29 +58,65 @@ inbox.
    is refused and audited, an admin gets 409).
 6. **A reset ends every session.** In the transaction that writes the password, every session and refresh token of
    the user is revoked (`revoked_reason = password_reset`, a new value allowed by the migration), every other open
-   link is revoked, and an email "your password was changed" (no link) is queued to the address on file.
-7. **A reset never touches the second factor or the lock.** It does not read, clear or replace the TOTP secret, the
-   recovery codes or `mfa_enabled`, and it does not reset `failed_login_count` or `locked_until`. After it the user
-   is signed in by the same rules as a sign-in (`AuthFlow.afterReset`, like `afterInvitation`): a user with TOTP
-   gets `mfa_required` and must type the code (or a recovery code), a role that requires a second factor is sent to
-   enrolment, a user without either is signed in, and a locked account is told `sign_in_required` and gets no
-   session. Clearing the lock would let anyone who reads the mailbox keep guessing the code: reset, five guesses,
-   reset. With the lock kept, a reset gives no extra guess.
+   link is revoked, and an email "your password was changed" (no link) is queued to the address on file. When an
+   administrator or the operator **issues** a link the user is told by email at once too ("a reset was issued", no
+   link), so a reset made behind their back is known before it is used.
+7. **A reset never touches the second factor or the lock, and a link by email never lets in someone who has not set one
+   up.** It does not read, clear or replace the TOTP secret, the recovery codes or `mfa_enabled`, and it does not
+   reset `failed_login_count` or `locked_until`. After it the user is signed in by the same rules as a sign-in
+   (`AuthFlow.afterReset`, like `afterInvitation`): a user with TOTP gets `mfa_required` and must type the code (or a
+   recovery code), a user without one whose role (or the tenant) requires one is sent to enrolment, a user without
+   either is signed in, and a locked account is told `sign_in_required` and gets no session. Clearing the lock would
+   let anyone who reads the mailbox keep guessing the code: reset, five guesses, reset. With the lock kept, a reset
+   gives no extra guess. The enrolment step is the one hole: a user whose **role requires** a second factor but who
+   has not enrolled (`roles.mfa_required` or `require_mfa_all_staff`, `mfa_enabled = false`) would let whoever reads
+   the mailbox request a link, choose the password and enrol their own authenticator. So the **self-service request is
+   refused for such a user** (the same generic 202, no link, no row, audited as `refused` with reason
+   `mfa_not_enrolled`), and a self-service link asked for before the requirement existed is refused when used. Such a
+   user is helped by an administrator (decision 9) or the operator, who hand the link over out of band.
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
-   policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE`, and a
-   factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
+   policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
+   and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
    is the placeholder `V99__staff_password_reset.sql`, renumbered at merge; it also widens the `auth_sessions`
    `revoked_reason` check (added `NOT VALID`, last, behind a five second `lock_timeout`).
-9. **The admin reset returns the link once and sends nothing.** Same shape as the invitation link (`{url,
-   expires_at}`), audited as `core.password_reset.requested` and `core.password_reset.link_revealed`, never with the
-   token. It is not emailed: it exists for the user who cannot read the inbox, and a token sent to a mailbox the
-   admin is working around widens the exposure. It is refused for a user still invited or deactivated (409), and a
-   branch scoped admin reaches only a user whose every role lies inside the admin's branches (404 otherwise; a role
-   over every branch needs an admin over every branch). The admin's own account is allowed: it is the same as asking on
-   the page. It is not a maker-checker action, for the reason ADR-014 gives for the MFA reset: a tenant with one admin
-   has no second person.
-10. **Logging.** No token, password, link or address reaches a log, an audit row or an error body. The audit rows
-    carry the user id, the origin (`self` or `admin`), the expiry and counts.
+9. **The admin and operator resets return the link once, are not emailed, and are narrow.** Same shape as the
+   invitation link (`{url, expires_at}`), no store (`Cache-Control: no-store`), audited as
+   `core.password_reset.requested` and `core.password_reset.link_revealed`, never with the token, and the user is
+   told by email that one was issued (decision 6). The link is not emailed: it exists for the user who cannot read
+   the inbox, and a token sent to a mailbox the admin is working around widens the exposure. The review of #322 found
+   that anyone holding a tenant admin session (a stolen token, a rogue admin) could chain the MFA reset of an admin
+   with a reset of the same admin's sign-in and take the account over, so the tenant route is narrow:
+   (a) **never one's own account** (409 `cannot_reset_own_sign_in`: use Forgot password on the sign-in page, as
+   `mfa/reset` and deactivation also refuse one's own);
+   (b) **never a tenant admin** (409 `admin_reset_by_operator`), mirroring how an admin's second factor is reset by the
+   platform: a tenant admin who is locked out is recovered by the platform operator
+   (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`, `platform.tenants.manage`, a tenant admin
+   target only, audited in both audit logs, the link shown once to the operator);
+   (c) **a fresh authenticator code from the acting admin** when the acting admin has two-step sign-in
+   (`AdminSecurity.requireTotp` before the transaction, as the payment account does: 422 `totp_required` without
+   one, 422 `invalid_mfa_code` for a wrong or used one), so a stolen session alone is not enough. **Accepted risk:**
+   an admin with **no second factor enrolled** (a tenant whose admin role does not require one and who has not set one up) is
+   not asked; a stolen session of such an admin can issue links for ordinary users, which is no more than the same session
+   can already do by changing a user's contact details and inviting again. It still cannot reach itself or another tenant
+   admin, and the user is emailed that a link was issued;
+   (d) the user is told by email when a link is **issued**, not only when it is used.
+   An invited or deactivated user is refused (409). A branch scoped admin reaches only a user whose every role lies
+   inside the admin's branches (404 otherwise, also for a user with no role). It is not a maker-checker action, for
+   the reason ADR-014 gives for the MFA reset.
+10. **Logging and audit.** No token, password, link or email address reaches a log, an audit row or an error body.
+    The rows of the public routes (`requested`, `refused`, `used`, and `unknown_login` for a login that matched
+    nobody, like `core.auth.sign_in_failed`) have **no actor** (the caller is not signed in; the user is the entity) and
+    carry the client address in `data.ip` (the audit search shows `data`, not the `ip` column). The admin and operator
+    rows name the admin or operator as the actor. The rows carry the origin, the expiry and counts.
+11. **The token is in the database in plain text while an email is waiting, and not for long.** The outbox row of the
+    emailed link holds the link in its parameters until it is sent (they are then cleared) or until it expires. The
+    nightly purge alone would leave an unsent link (an SMTP host not set up) for up to a day, so a job every 5
+    minutes (`core.notifications.outbox-expired-links`) clears the parameters of any row past its expiry and marks
+    it failed. The window is therefore the hour plus at most 5 minutes, or until the email is sent. The recording
+    notifier keeps raw links in memory outside tests (#324, the staff invitation path); this path does not use it.
+12. **Retention.** `user_password_resets` rows are deleted 30 days after they were made by a nightly job
+    (`core.identity.password-reset-purge`) through a definer function; the application role has no DELETE grant
+    on the table and, with no tenant bound in a job, could not see the rows anyway.
 
 ## Threat model
 
@@ -87,13 +125,14 @@ inbox.
 | Learning who has an account | Decision 3: one body, one status, a time floor, differences only in the audit log |
 | Flooding a mailbox or the outbox | Decision 3 bounds (3 an hour per account in the database, 20 an hour per address), an idempotency key per link, rows that lapse with the token |
 | Guessing a link | 256 bits, found by hash, single use, one hour, 30 tries per 10 minutes per address |
-| Reading a link from storage | Only the hash is stored; the outbox keeps the link until sent, then clears it; it lapses with the token |
+| Reading a link from storage | The token is stored as a hash. The outbox row of an emailed link holds it in plain text until it is sent or expires, then a job (every 5 minutes) clears it: the window is the hour plus 5 minutes at most, or until sent (decision 11) |
 | Sending to the wrong place or to a phishing host | Email on file only; tenant host from configuration; fragment, not query |
-| Account takeover by the owner of the mailbox | Not preventable for an account with no second factor; limited by the notice email, by ending every session, and, for an account with TOTP, by decision 7 |
+| Account takeover by whoever reads the mailbox | An account with TOTP still needs the code, and a reset neither disables it nor clears the lock (decision 7). A user whose role requires a second factor but who has not enrolled gets no link by email at all (decision 7), so the reader cannot set the password and enrol their own authenticator. What is left is an account with no second factor and a role that does not require one: as safe as its mailbox, limited by the notice email and by ending every session |
 | Surviving sessions after a reset | Decision 6, in the same transaction |
 | A reset for someone who should not get back in | Decision 5: active users only; deactivation revokes links |
 | Crossing tenants | Decision 8; the lookup runs inside the tenant of the host; `PasswordResetIT` proves a link, a login and an admin do not cross |
 | An admin reaching users outside their branches | Decision 9 scope rule; the route needs `core.users.manage` |
+| A hijacked tenant admin session taking an account over by chaining the MFA reset and the sign-in reset | Decision 9: never a tenant admin, never oneself, a fresh authenticator code from the acting admin, an email to the user when a link is issued; the operator path for a locked-out admin. Accepted risk: an acting admin with no second factor enrolled is not asked |
 | Deadlock or a double use under parallel requests | The user's row is locked before the link's in every path; the link row is locked and re-read before it is used, so of two parallel uses one wins |
 
 ## Consequences
@@ -110,8 +149,13 @@ inbox.
 
 **Worse:**
 
-- An account with no second factor is as safe as its mailbox. Roles that require TOTP (the tenant admin) are not
-  exposed this way, but the others are exactly as safe as their email.
+- An account with no second factor and a role that does not require one is as safe as its mailbox. A role that
+  requires TOTP and has it set up is not exposed this way, and one that requires it and has not set it up gets no
+  link by email (decision 7); every other account is exactly as safe as its email.
+- A tenant admin who has not set up two-step sign-in, or who is locked out, cannot recover alone: the operator issues
+  the link (decision 9). A tenant with one admin therefore needs the operator in that case.
+- The acting admin's own second factor is asked for on the tenant route, but not when the admin has none enrolled
+  (accepted risk, decision 9).
 - The 400 ms floor holds a request thread for up to that long per request; the address limit (20 an hour) bounds the
   cost.
 - The address buckets are per instance and lost on restart (the account bound, in the database, is not). Behind more
@@ -122,9 +166,9 @@ inbox.
 
 **Watch for:**
 
-- Staff invitations still go through the recording notifier, not the outbox (ADR-014): on a host without a real
-  provider an invited user's link reaches only the inviting admin's screen. The reset path does not share that gap
-  but depends on the outbox sender being configured.
+- Staff invitations still go through the recording notifier, not the outbox (ADR-014), which keeps raw links in memory
+  (#324): on a host without a real provider an invited user's link reaches only the inviting admin's screen. The
+  reset path does not share that gap but depends on the outbox sender being configured.
 - A new way to sign in (a passkey, single sign-on) must say what a reset means for it, and must be revoked by the same
   transaction.
 - Do not add the user's name, the tenant's figures or any text a stranger typed to the reset email: the form sends

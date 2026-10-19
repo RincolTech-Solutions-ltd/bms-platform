@@ -5459,6 +5459,18 @@
           }
         }
       },
+      "PlatformSignInResetLink" : {
+        "description" : "Shown once to the operator, who hands it to the tenant admin",
+        "properties" : {
+          "expires_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "url" : {
+            "type" : "string"
+          }
+        }
+      },
       "PlatformTenant" : {
         "properties" : {
           "created_at" : {
@@ -5810,6 +5822,17 @@
           },
           "report_key" : {
             "description" : "A key from the catalogue, for example lending.par",
+            "type" : "string"
+          }
+        }
+      },
+      "ResetSignInRequest" : {
+        "description" : "Required when the signed-in admin has two-step sign-in",
+        "properties" : {
+          "totp_code" : {
+            "description" : "A current 6 digit code from the admin's own authenticator app",
+            "maxLength" : 20,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -23806,6 +23829,42 @@
         "tags" : [ "platform" ]
       }
     },
+    "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in" : {
+      "post" : {
+        "operationId" : "platformResetAdminSignIn",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "user_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformSignInResetLink"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15)",
+        "tags" : [ "platform" ]
+      }
+    },
     "/api/v1/report-runs" : {
       "get" : {
         "operationId" : "listReportRuns",
@@ -31618,6 +31677,15 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResetSignInRequest"
+              }
+            }
+          }
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -31630,7 +31698,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15)",
+        "summary" : "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15)",
         "tags" : [ "users" ]
       }
     },

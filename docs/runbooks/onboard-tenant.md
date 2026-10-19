@@ -226,11 +226,14 @@ administration instead.
 
 The user types the email or phone on the sign-in page's "Forgot password?" and a link (valid one hour, once) goes to the email on
 file; nothing tells the page whether an account matched (FR-IAM-15, ADR-042). It needs the SMTP variables above on the host: until
-they are set the link is queued and not sent. For a user with no email on file, an unreachable inbox, or a host without SMTP, a tenant
-admin calls `POST /api/v1/users/{user_id}/reset-sign-in` (the Users screen's reset action) and hands the returned link to the user
+they are set the link is queued and not sent. A user whose role requires two-step sign-in that is not set up yet (a new tenant admin) gets no link by email. For a user with no
+email on file, an unreachable inbox, or a host without SMTP, a tenant
+admin (with the current code from their own authenticator in the body, if they have one) calls `POST /api/v1/users/{user_id}/reset-sign-in` (the Users screen's reset action) and hands the returned link to the user
 once; it is not emailed. A reset never turns off the second factor: a user with two-step sign-in still types a code (a lost phone is
-the case above). The link of a user still invited is the invitation's (`POST /api/v1/users/{user_id}/invitation`). A tenant whose only
-admin forgot the password uses the sign-in page too; an admin who cannot get the email uses the host path below.
+the case above). The link of a user still invited is the invitation's (`POST /api/v1/users/{user_id}/invitation`). A tenant admin cannot be reset by a tenant admin or by themselves: the platform operator calls
+`POST /api/v1/platform/tenants/{id}/users/{user_id}/reset-sign-in` after verifying the request with the tenant out of band, and
+hands the returned link over once (it is `no-store`, and the admin is emailed that a reset was issued). An admin who can read their
+email and has set up two-step sign-in uses the sign-in page instead.
 
 If a tenant has lost every admin account, invite a new one from the host with
 `deploy/sql/invite-tenant-admin.sql`, with the dev lead, and record why in the tenant's ticket.

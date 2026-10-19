@@ -117,6 +117,20 @@ class OutboxTemplates {
 
                     Rincoltech
                     """),
+            // Sent to the user when an administrator or the platform operator issues a reset link for them. No link: it
+            // is handed over, and nothing has changed until it is used.
+            "identity.password_reset_issued",
+            new Template("A password reset was issued for your BMS sign-in", """
+                    Hello,
+
+                    An administrator issued a password reset for your BMS sign-in at {tenant_name} on {when}.
+                    Nothing has changed yet: your password stays as it is until the reset link, which the
+                    administrator gives you, is used.
+
+                    If you did not expect this, tell another administrator at once.
+
+                    Rincoltech
+                    """),
             // Sent after a reset is used, to the address on file, so the owner of the mailbox hears of it. No link.
             "identity.password_changed",
             new Template("Your BMS password was changed", """

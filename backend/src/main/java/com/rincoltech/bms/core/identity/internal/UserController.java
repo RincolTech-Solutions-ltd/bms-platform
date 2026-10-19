@@ -1,16 +1,21 @@
 package com.rincoltech.bms.core.identity.internal;
 
+import com.rincoltech.bms.core.identity.AdminSecurity;
 import com.rincoltech.bms.core.identity.internal.UserApi.InvitationLink;
 import com.rincoltech.bms.core.identity.internal.UserApi.InviteUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.InvitedUserResponse;
+import com.rincoltech.bms.core.identity.internal.UserApi.ResetSignInRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleAssignmentRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.SignInResetLink;
 import com.rincoltech.bms.core.identity.internal.UserApi.UpdateUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserPage;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserResponse;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.NoStore;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import java.net.URI;
@@ -39,10 +44,12 @@ class UserController {
 
     private final UserService service;
     private final PasswordResets resets;
+    private final AdminSecurity security;
 
-    UserController(UserService service, PasswordResets resets) {
+    UserController(UserService service, PasswordResets resets, AdminSecurity security) {
         this.service = service;
         this.resets = resets;
+        this.security = security;
     }
 
     @GetMapping
@@ -119,13 +126,29 @@ class UserController {
         return service.resetMfa(userId);
     }
 
+    /**
+     * The acting admin proves they are still the person who enrolled their authenticator before the link is made (a hijacked
+     * session cannot take an account over); an admin with no second factor enrolled is not asked (ADR-042, accepted risk).
+     * The step-up runs before the transaction of the action, as {@link AdminSecurity#requireTotp} requires.
+     */
     @PostMapping("/{user_id}/reset-sign-in")
     @RequiresPermission("core.users.manage")
     @Operation(
             summary =
-                    "Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15)",
+                    "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15)",
             operationId = "resetUserSignIn")
-    SignInResetLink resetSignIn(@PathVariable("user_id") UUID userId) {
+    SignInResetLink resetSignIn(
+            @PathVariable("user_id") UUID userId,
+            @Valid @RequestBody(required = false) ResetSignInRequest request,
+            HttpServletResponse response) {
+        NoStore.apply(response);
+        if (resets.actorHasSecondFactor()) {
+            String code = request == null ? null : request.totpCode();
+            if (code == null || code.isBlank()) {
+                throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
+            }
+            security.requireTotp(code);
+        }
         return resets.issueForAdmin(userId);
     }
 }

@@ -25,6 +25,8 @@ const MESSAGES: Record<string, string | undefined> = {
   permission_denied: 'Only a tenant administrator can reset someone’s sign-in.',
   not_found: 'This user could not be found. Reload the list and try again.',
   rate_limited: 'Too many tries from here. Wait a few minutes and try again.',
+  totp_required: 'Enter the current 6 digit code from your authenticator app.',
+  invalid_mfa_code: 'That code is not right. Codes change every 30 seconds; type the next one.',
 };
 
 function failure(error: unknown, status: number, fallback: string): SignInResetError {
@@ -52,13 +54,21 @@ export async function requestPasswordReset(login: string): Promise<string> {
 
 /**
  * Issues a one-time link for an active user (POST /api/v1/users/{id}/reset-sign-in, permission core.users.manage). The link is
- * returned once and never emailed: show it to the admin to hand over, and do not keep it. Issuing another replaces it. A user who
- * has not accepted the invitation yet (409) keeps the invitation link, and a deactivated user (409) cannot reset; the error's
- * message says which, in plain words.
+ * returned once and never emailed (the user is emailed that one was issued, without the link): show it to the admin to hand over,
+ * and do not keep it. Issuing another replaces it.
+ *
+ * `totpCode` is the current 6 digit code from the signed-in admin's own authenticator app. It is required when that admin has
+ * two-step sign-in (`me.mfa_enabled`): without it the server answers 422 `totp_required`, with a wrong or already used one 422
+ * `invalid_mfa_code`; an admin with no second factor passes nothing. The call is refused, with a plain sentence in the error's
+ * message, for the admin's own account and for a tenant admin (409: an administrator's sign-in is reset by the platform operator),
+ * for a user who has not accepted the invitation yet (409: use the invitation link) and for a deactivated user (409).
  */
-export async function resetUserSignIn(userId: string): Promise<SignInResetLink> {
+export async function resetUserSignIn(userId: string, totpCode?: string): Promise<SignInResetLink> {
   const data = unwrap(
-    await api.POST('/api/v1/users/{user_id}/reset-sign-in', { params: { path: { user_id: userId } } }),
+    await api.POST('/api/v1/users/{user_id}/reset-sign-in', {
+      params: { path: { user_id: userId } },
+      body: totpCode ? { totp_code: totpCode } : undefined,
+    }),
     'The link could not be made. Try again.',
   );
   if (!data.url || !data.expires_at) throw new SignInResetError('The link could not be made. Try again.', 200);

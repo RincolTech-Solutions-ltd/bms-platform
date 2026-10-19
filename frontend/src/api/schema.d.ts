@@ -2705,6 +2705,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15) */
+        post: operations["platformResetAdminSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/report-runs": {
         parameters: {
             query?: never;
@@ -5222,7 +5239,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time link to set a new password for an active user; shown once, valid for one hour (FR-IAM-15) */
+        /** Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15) */
         post: operations["resetUserSignIn"];
         delete?: never;
         options?: never;
@@ -7502,6 +7519,12 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
         };
+        /** @description Shown once to the operator, who hands it to the tenant admin */
+        PlatformSignInResetLink: {
+            /** Format: date-time */
+            expires_at?: string;
+            url?: string;
+        };
         PlatformTenant: {
             /** Format: date-time */
             created_at?: string;
@@ -7651,6 +7674,11 @@ export interface components {
             };
             /** @description A key from the catalogue, for example lending.par */
             report_key?: string;
+        };
+        /** @description Required when the signed-in admin has two-step sign-in */
+        ResetSignInRequest: {
+            /** @description A current 6 digit code from the admin's own authenticator app */
+            totp_code?: string;
         };
         RetailAccountAllocation: {
             /** Format: int64 */
@@ -17892,6 +17920,29 @@ export interface operations {
             };
         };
     };
+    platformResetAdminSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSignInResetLink"];
+                };
+            };
+        };
+    };
     listReportRuns: {
         parameters: {
             query?: {
@@ -22660,7 +22711,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResetSignInRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

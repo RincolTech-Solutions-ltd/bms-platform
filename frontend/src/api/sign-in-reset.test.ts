@@ -38,6 +38,34 @@ describe('resetUserSignIn (the Users screen calls this)', () => {
     expect(new URL(request.url).pathname).toBe(`/api/v1/users/${USER}/reset-sign-in`);
   });
 
+  it('sends the code of the admin in the body when there is one, and no body when there is none', async () => {
+    fetchImpl.next = async () => json(200, { url: 'https://test-bms.example.test/reset-password#token=fabricated', expires_at: '2026-10-19T13:00:00Z' });
+    await resetUserSignIn(USER, '123456');
+    expect(await fetchImpl.seen.at(-1)!.clone().json()).toEqual({ totp_code: '123456' });
+    await resetUserSignIn(USER);
+    expect(await fetchImpl.seen.at(-1)!.clone().text()).toBe('');
+  });
+
+  it('says in plain words that a code is needed, and when it is wrong', async () => {
+    fetchImpl.next = async () => json(422, { code: 'totp_required', detail: 'Enter the current code from your authenticator app.' });
+    const missing = (await resetUserSignIn(USER).catch((e: unknown) => e)) as SignInResetError;
+    expect(missing.status).toBe(422);
+    expect(missing.code).toBe('totp_required');
+    expect(missing.message).toMatch(/6 digit code/);
+    fetchImpl.next = async () => json(422, { code: 'invalid_mfa_code', detail: 'The code is not valid.' });
+    const wrong = (await resetUserSignIn(USER, '000000').catch((e: unknown) => e)) as SignInResetError;
+    expect(wrong.message).toMatch(/not right/);
+  });
+
+  it('carries the server sentence of a refusal for oneself or a tenant admin', async () => {
+    fetchImpl.next = async () =>
+      json(409, { code: 'admin_reset_by_operator', detail: "An administrator's sign-in is reset by the platform operator. Ask them." });
+    const error = (await resetUserSignIn(USER, '123456').catch((e: unknown) => e)) as SignInResetError;
+    expect(error.status).toBe(409);
+    expect(error.code).toBe('admin_reset_by_operator');
+    expect(error.message).toContain('platform operator');
+  });
+
   it('carries the server sentence of a refusal, with its status and code', async () => {
     fetchImpl.next = async () =>
       json(409, { code: 'invalid_status_transition', detail: 'This user has not accepted the invitation yet; send the invitation link again.' });

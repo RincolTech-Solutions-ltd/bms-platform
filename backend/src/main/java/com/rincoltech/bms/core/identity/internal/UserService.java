@@ -208,6 +208,12 @@ class UserService implements TenantAdmins {
         return new Invitation(id, link.url(), link.expiresAt());
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ResetLink resetAdminSignIn(UUID userId, UUID platformUserId) {
+        return resets.issueForOperator(userId, platformUserId);
+    }
+
     // ---- Reads ----------------------------------------------------------------------------
 
     @Transactional(readOnly = true)

@@ -314,6 +314,20 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** FR-IAM-15, platform path: a tenant admin who forgot the password; nobody in the tenant may reset an admin. */
+    TenantAdmins.ResetLink resetAdminSignIn(UUID tenantId, UUID userId) {
+        UUID operator = CurrentPrincipal.require().userId();
+        transactions.execute(status -> tenant(tenantId));
+        return TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    TenantAdmins.ResetLink link = tenantAdmins.resetAdminSignIn(userId, operator);
+                    platformAudit.record(
+                            "platform.tenant_admin.sign_in_reset", operator, tenantId, Map.of("user_id", userId));
+                    return link;
+                }));
+    }
+
     private List<String> checkModules(List<String> modules) {
         List<String> unique = modules.stream().distinct().sorted().toList();
         for (String module : unique) {

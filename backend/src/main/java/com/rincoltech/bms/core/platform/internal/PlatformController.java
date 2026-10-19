@@ -1,9 +1,12 @@
 package com.rincoltech.bms.core.platform.internal;
 
+import com.rincoltech.bms.core.identity.TenantAdmins;
+import com.rincoltech.bms.kernel.NoStore;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -97,6 +100,11 @@ class PlatformController {
             @NotNull @Valid HeadOfficeRequest headOffice,
             @NotNull @Valid FirstAdminRequest admin) {}
 
+    @Schema(
+            name = "PlatformSignInResetLink",
+            description = "Shown once to the operator, who hands it to the tenant admin")
+    record SignInResetLink(String url, Instant expiresAt) {}
+
     @Schema(name = "FirstAdminInvitation", description = "Shown once to the operator, and sent to the admin")
     record FirstAdminInvitation(UUID userId, String url, Instant expiresAt) {}
 
@@ -174,6 +182,20 @@ class PlatformController {
     @Operation(summary = "Resume a suspended tenant (FR-TEN-06)", operationId = "platformResumeTenant")
     TenantResponse resume(@PathVariable("tenant_id") UUID tenantId) {
         return service.setSubscription(tenantId, "active", null);
+    }
+
+    @PostMapping("/tenants/{tenant_id}/users/{user_id}/reset-sign-in")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary = "Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15)",
+            operationId = "platformResetAdminSignIn")
+    SignInResetLink resetAdminSignIn(
+            @PathVariable("tenant_id") UUID tenantId,
+            @PathVariable("user_id") UUID userId,
+            HttpServletResponse response) {
+        NoStore.apply(response);
+        TenantAdmins.ResetLink link = service.resetAdminSignIn(tenantId, userId);
+        return new SignInResetLink(link.url(), link.expiresAt());
     }
 
     @PostMapping("/tenants/{tenant_id}/users/{user_id}/mfa/reset")

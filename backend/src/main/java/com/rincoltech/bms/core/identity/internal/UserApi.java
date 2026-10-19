@@ -65,6 +65,11 @@ final class UserApi {
     @Schema(name = "SignInResetLink")
     record SignInResetLink(String url, Instant expiresAt) {}
 
+    @Schema(name = "ResetSignInRequest", description = "Required when the signed-in admin has two-step sign-in")
+    record ResetSignInRequest(
+            @Size(max = 20) @Schema(description = "A current 6 digit code from the admin's own authenticator app")
+            String totpCode) {}
+
     @Schema(name = "InvitedUser")
     record InvitedUserResponse(UserResponse user, InvitationLink invitation) {}
 

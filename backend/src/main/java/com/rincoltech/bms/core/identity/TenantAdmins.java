@@ -23,5 +23,14 @@ public interface TenantAdmins {
      */
     void resetAdminMfa(UUID userId, UUID platformUserId);
 
+    /**
+     * Issues a one-time link (one hour, shown once to the platform operator, who hands it over) for a tenant admin who forgot
+     * the password and cannot be reset by anyone in the tenant (FR-IAM-15, ADR-042). Refuses a user who is not an active
+     * tenant admin. The admin is told by email that a reset was issued, without the link.
+     */
+    ResetLink resetAdminSignIn(UUID userId, UUID platformUserId);
+
     record Invitation(UUID userId, String url, Instant expiresAt) {}
+
+    record ResetLink(String url, Instant expiresAt) {}
 }

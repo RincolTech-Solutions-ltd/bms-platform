@@ -463,10 +463,12 @@ foreign key).
 
 (std, no `version`; issue #320, FR-IAM-15, ADR-042; the migration is the placeholder `V99` until it is renumbered at merge)
 `user_id uuid NOT NULL` (FK `(tenant_id, user_id)`), `token_hash char(64) NOT NULL UNIQUE` (SHA-256 of the one-time token),
-`expires_at timestamptz NOT NULL` (one hour), `origin text NOT NULL` [`self`, `admin`], `requested_by uuid` (the tenant admin who
-issued an `admin` link; null for `self`; no foreign key; a CHECK ties the two), `used_at timestamptz` (the link set a password),
+`expires_at timestamptz NOT NULL` (one hour), `origin text NOT NULL` [`self`, `admin`, `operator`], `requested_by uuid` (the tenant admin
+who issued an `admin` link or the platform operator who issued an `operator` link; null for `self`; no foreign key; a CHECK ties the two), `used_at timestamptz` (the link set a password),
 `revoked_at timestamptz` (a newer link, or a deactivation, replaced it; a CHECK keeps used and revoked apart). Index
-`(tenant_id, user_id, created_at DESC)`. Grants `SELECT, INSERT, UPDATE`. The token itself is never stored.
+`(tenant_id, user_id, created_at DESC)`. Grants `SELECT, INSERT, UPDATE`; `created_at` is written by the application's clock. Rows are deleted 30
+days after they were made by `user_password_resets_purge(timestamptz)` (a definer function the nightly job `core.identity.password-reset-purge` calls; there is no
+DELETE grant). The token itself is never stored.
 
 ### `auth_sessions` (RLS)
 
