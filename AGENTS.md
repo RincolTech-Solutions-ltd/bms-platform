@@ -295,6 +295,13 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   events). The channel cleans every value (a line feed becomes a space, invisible and direction-changing characters go) whichever
   wording is used.
 - **Built (extras slice A2, issue #213, ADR-035 second amendment):** migration `V54` (`payment_intents`, `payment_callbacks`, two platform tables for unknown notifications and counters, definer functions); `core.payments`: the gateway port, the Pesapal adapter (token cache following `expiryDate`, the http 200 with body status 500 envelope, whole shillings enforced, RegisterIPN spacing), a fake, intents (30 minute offer, 48 hour polling, one locked creator), the public notification endpoints that never trust their request and always re-query the status, the poller job `core.payments.poll`, the purpose handler registry (no real purpose until #216 and #219), audit of every transition, and the settings group `payments` (`GET` and `PUT /payments/settings`, `GET /payments/intents/{id}`, `POST /payments/intents`, `.../cancel`) off by default and bound to `BMS_PESAPAL_TENANT_ID`; outside production only the sandbox base URL starts. No permission added. Runbook: `docs/runbooks/payments.md`.
+- **Built (retail sales grouping, issue #328):** no migration. `GET /retail/sales/summary?group_by=year|month|day` with the sales
+  list's filters and branch scope: one grouped query per level over `retail_sales` (completed sales only in the figures, voided
+  ones counted apart, per payment method counts and amounts, `profit_minor` only with `retail.profit.read` in every branch the
+  figures cover), bounded to 20 years, 12 months or 31 days with `has_more` and `next_to`; the list and the summary share
+  `SalesRepository.appendFilters`. All sales and Credit sales are collapsible year, month and day groups with a summary on every
+  header, the current month open by day, a day's sales loaded only when it opens (`sales-grouped.tsx`, `sales-grouped-state.ts`,
+  `docs/specs/retail-ui-notes.md`), with the Help tours `page-sales` and `page-credit-sales`.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are

@@ -1770,6 +1770,12 @@ Credit buyers: `name varchar(200)`, `contact varchar(100)` kept as entered, `cre
 | `sale_entry_id`, `cost_entry_id` | uuid | The two journal entries |
 | `historical` | boolean | Imported history posts no journal (FR-RET-12) |
 
+The sales summary (issue #328, `GET /retail/sales/summary`) reads this table only, with no migration: one grouped query per
+level (`date_trunc` of `sale_date` to year, month or day, counts and sums by status and payment method, and the sale's
+profit as `total_minor - cost_total_minor` over completed sales), ranged on `sale_date` through the existing indexes
+`retail_sales_list` (tenant, branch, sale date) and `retail_sales_by_date` (tenant, sale date). The result is bounded
+(20 years, 12 months or 31 days) so the cost never grows with the age of the tenant.
+
 The trigger `retail_sales_guard_update` (V14, review F10) lets an UPDATE change only `paid_minor`
 (upwards), the void columns (once, `completed` to `voided`), `updated_at`, `version` and the two
 entry ids (once, from null); any other change is refused, for `bms_app` and the owner alike (the
