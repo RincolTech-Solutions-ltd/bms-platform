@@ -800,6 +800,47 @@ class SavingsDepositByGatewayIT extends LoanFixtures {
         assertThat(deposits(account).getFirst().get("value_date").toString()).isEqualTo("2026-11-01");
     }
 
+    @Test
+    void cashAndGatewayDepositsInterleavedOnOneAccountKeepTheRunningBalanceExact() {
+        String account = account();
+        cashDeposit(account, 10_000);
+        JsonNode a = intentFor(account, 20_000);
+        pay(a, 20_000, "CONF-219-IL1");
+        cashDeposit(account, 5_000);
+        tick(Duration.ofMinutes(3));
+        JsonNode b = intentFor(account, 7_000);
+        cashDeposit(account, 1_000);
+        pay(b, 7_000, "CONF-219-IL2");
+        tick(Duration.ofMinutes(3));
+        assertThat(row(a).get("status")).isEqualTo("booked");
+        assertThat(row(b).get("status")).isEqualTo("booked");
+        List<Map<String, Object>> rows = deposits(account);
+        assertThat(rows.stream().map(r -> r.get("seq")).toList()).containsExactly(1, 2, 3, 4, 5);
+        assertThat(rows.stream().map(r -> r.get("balance_after_minor")).toList())
+                .containsExactly(10_000L, 15_000L, 35_000L, 36_000L, 43_000L);
+        assertThat(balance(account)).isEqualTo(43_000L);
+        booksAgree();
+    }
+
+    @Test
+    void thePortRefusesAGatewayDepositToAFrozenAccountItself() {
+        String account = account();
+        setStatus(account, "frozen");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> tenantJobs.callForTenant(
+                        t.tenantId(),
+                        () -> port.deposit(
+                                UUID.fromString(account),
+                                10_000,
+                                TODAY,
+                                "gateway",
+                                staff,
+                                "ORDER-219-FRZ",
+                                "gateway",
+                                false)))
+                .hasMessageContaining("frozen");
+        assertThat(deposits(account)).isEmpty();
+    }
+
     /** A technical failure on every savings transaction insert, to keep a confirmed payment waiting for its booking. */
     void failInserts(boolean on) {
         if (on) {

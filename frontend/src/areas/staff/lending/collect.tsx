@@ -83,7 +83,7 @@ export function SavingsCollectPanel({ account }: { account: SavingsAccount }) {
 
 export function CollectForm({ target }: { target: CollectTarget }) {
   const { me } = useStaff();
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<CollectDraft>(`${target.kind}-collect:${me.user_id ?? ''}:${target.id}`, {
+  const { key, draft, setDraft, finish, discard } = usePersistedDraft<CollectDraft>(`${target.kind === 'loan' ? 'lending' : target.kind}-collect:${me.user_id ?? ''}:${target.id}`, {
     amount: target.suggested === null ? '' : String(target.suggested),
     phone: '',
   });

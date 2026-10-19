@@ -1,7 +1,8 @@
 -- V60: savings deposit by mobile money into the lender's own account (extras slice A4, issue #219; ADR-035 and its
 -- amendments of 2026-10-15 and 2026-10-18; docs/specs/client-extras.md sections 3.4, 3.4.1 and 3.7). The twin of V59 for
 -- savings. Flyway runs with outOfOrder off: this number was the next free one on main and on every open branch when the
--- work began (the open lending pull requests #270 to #272 and #290 carry no migration yet and must take V61 or above).
+-- work began. The open lending pull requests #270 to #272 and #290 carry V54__lending_arrears_and_collections.sql and must
+-- be renumbered to V61 or above before they merge.
 --
 -- Expand only, safe on a populated database. Two things and nothing else:
 --
@@ -21,8 +22,8 @@
 --
 -- Locks, said plainly: the check swap takes ACCESS EXCLUSIVE on `lending_savings_transactions` and holds it to the commit
 -- (one transaction), so the validation scan and the index build both run with writes to that table blocked. Both are short
--- on the tables of the first tenants; `lock_timeout` makes the migration fail and be retried rather than queue every writer
--- behind it. NOT VALID followed by VALIDATE in the same transaction would gain no lock relief, so the check is added
+-- on the tables of the first tenants; `lock_timeout` makes the migration fail rather than queue every writer
+-- behind it. Flyway does not retry on its own: a failed migration fails the deploy, and the deploy must be run again. NOT VALID followed by VALIDATE in the same transaction would gain no lock relief, so the check is added
 -- validated.
 
 SET LOCAL lock_timeout = '5s';

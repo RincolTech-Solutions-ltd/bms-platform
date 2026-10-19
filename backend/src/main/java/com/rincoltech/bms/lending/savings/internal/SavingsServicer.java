@@ -112,7 +112,9 @@ class SavingsServicer implements SavingsServicing {
         }
         AccountRow a = repo.lock(accountId).orElseThrow(ApiException::notFound);
         if (GATEWAY.equals(paymentMethodKey) && externalReference != null) {
-            // The account row is locked, so two callers with one payment reference meet here one after the other.
+            // The account row is locked, so two callers for one account meet here one after the other. A reference
+            // presented for two different accounts is not serialised by either lock: the unique index
+            // lending_savings_transactions_gateway_reference decides it (the loser fails and is retried as a replay).
             Optional<SavingsRepository.GatewayDeposit> first = repo.gatewayDeposit(externalReference);
             if (first.isPresent()) {
                 SavingsRepository.GatewayDeposit d = first.get();
@@ -124,6 +126,10 @@ class SavingsServicer implements SavingsServicing {
                 throw ApiException.rule(
                         "duplicate_reference", "That payment reference already booked a different payment.");
             }
+        }
+        if (GATEWAY.equals(paymentMethodKey) && "frozen".equals(a.status())) {
+            // Staff decide what happens to money for a frozen account: the payments module holds it unallocated.
+            throw ApiException.rule("account_frozen", "The account is frozen.");
         }
         checkDeposit(a, amountMinor, valueDate, paymentMethodKey);
         return deposit(a, amountMinor, valueDate, paymentMethodKey, externalReference, by, origin, queueReceiptNotice);
