@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.identity.internal;
 
 import com.rincoltech.bms.core.identity.AdminSecurity;
+import com.rincoltech.bms.core.identity.PasswordStepUp;
 import com.rincoltech.bms.core.identity.internal.UserApi.InvitationLink;
 import com.rincoltech.bms.core.identity.internal.UserApi.InviteUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.InvitedUserResponse;
@@ -21,7 +22,6 @@ import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -46,11 +46,13 @@ class UserController {
     private final UserService service;
     private final PasswordResets resets;
     private final AdminSecurity security;
+    private final PasswordStepUp passwords;
 
-    UserController(UserService service, PasswordResets resets, AdminSecurity security) {
+    UserController(UserService service, PasswordResets resets, AdminSecurity security, PasswordStepUp passwords) {
         this.service = service;
         this.resets = resets;
         this.security = security;
+        this.passwords = passwords;
     }
 
     @GetMapping
@@ -128,36 +130,36 @@ class UserController {
     }
 
     /**
-     * The order matters: the target is checked first (read-only), then the acting admin proves they are still the person who
-     * enrolled their authenticator (so a stolen session alone cannot take an account over, and a code is not spent on a call
-     * that would be refused), then the link is made, which checks the target again under a lock. An admin with no authenticator
-     * enrolled is refused (409 {@code mfa_not_enrolled}): the route fails closed (ADR-042). The step-up runs before the
-     * transaction of the action, as {@link AdminSecurity#requireTotp} requires.
+     * The order matters: the target is checked first (read-only), then the acting admin proves they are still themselves, then
+     * the link is made, which checks the target again under a lock. The proof is a fresh code from their own authenticator when
+     * they have one enrolled, otherwise their own current password (counted on the sign-in lock like a wrong password at sign-in):
+     * two-step sign-in is optional, so an admin without it must not be locked out of this route, and a stolen session or token
+     * alone gives neither (ADR-042). The step-up runs before the transaction of the action, as {@link AdminSecurity#requireTotp}
+     * requires. Neither credential is ever logged.
      */
     @PostMapping("/{user_id}/reset-sign-in")
     @RequiresPermission("core.users.manage")
     @Operation(
             summary =
-                    "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15)",
+                    "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs the admin's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-15)",
             operationId = "resetUserSignIn")
     SignInResetLink resetSignIn(
             @PathVariable("user_id") UUID userId,
-            @Valid @RequestBody(required = false) ResetSignInRequest request,
+            @Valid @RequestBody ResetSignInRequest request,
             HttpServletResponse response) {
         NoStore.apply(response);
         resets.precheckForAdmin(userId);
-        if (!resets.actorHasSecondFactor()) {
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
-                    "mfa_not_enrolled",
-                    "MFA not enrolled",
-                    "Turn on two-step sign-in for your own account first: this change asks for a code from your authenticator app.");
+        if (resets.actorHasSecondFactor()) {
+            if (request.totpCode() == null || request.totpCode().isBlank()) {
+                throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
+            }
+            security.requireTotp(request.totpCode());
+        } else {
+            if (request.password() == null || request.password().isEmpty()) {
+                throw ApiException.rule("password_required", "Enter your own password to confirm.");
+            }
+            passwords.requirePassword(request.password());
         }
-        String code = request == null ? null : request.totpCode();
-        if (code == null || code.isBlank()) {
-            throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
-        }
-        security.requireTotp(code);
         return resets.issueForAdmin(userId);
     }
 }

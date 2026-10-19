@@ -5838,10 +5838,16 @@
         }
       },
       "ResetSignInRequest" : {
-        "description" : "Required when the signed-in admin has two-step sign-in",
+        "description" : "Proof that the signed-in admin is still themselves: the code from their authenticator app when they have two-step sign-in, otherwise their own password. Exactly the one that applies is required; never logged",
         "properties" : {
+          "password" : {
+            "description" : "The admin's own current password, for an admin with no two-step sign-in",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "totp_code" : {
-            "description" : "A current 6 digit code from the admin's own authenticator app",
+            "description" : "The current 6 digit code from the admin's own authenticator app",
             "maxLength" : 20,
             "minLength" : 0,
             "type" : "string"
@@ -31715,7 +31721,8 @@
                 "$ref" : "#/components/schemas/ResetSignInRequest"
               }
             }
-          }
+          },
+          "required" : true
         },
         "responses" : {
           "200" : {
@@ -31729,7 +31736,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15)",
+        "summary" : "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs the admin's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-15)",
         "tags" : [ "users" ]
       }
     },

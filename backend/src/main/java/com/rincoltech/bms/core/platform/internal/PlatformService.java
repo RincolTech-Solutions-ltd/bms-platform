@@ -314,6 +314,17 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** Read-only: what {@link #resetAdminMfa} would refuse, checked before the operator's authenticator code is spent. */
+    void requireTenantAdmin(UUID tenantId, UUID userId) {
+        transactions.execute(status -> tenant(tenantId));
+        TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    tenantAdmins.requireTenantAdmin(userId);
+                    return null;
+                }));
+    }
+
     /** Read-only: what {@link #resetAdminSignIn} would refuse, checked before the operator's authenticator code is spent. */
     void requireResettableAdmin(UUID tenantId, UUID userId) {
         transactions.execute(status -> tenant(tenantId));

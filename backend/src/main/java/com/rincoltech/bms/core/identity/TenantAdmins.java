@@ -36,6 +36,12 @@ public interface TenantAdmins {
      */
     void requireResettableAdmin(UUID userId);
 
+    /**
+     * Everything {@link #resetAdminMfa} would refuse (not found, not a tenant admin), read-only and without a lock, so the platform
+     * operator's authenticator code is not spent on a call that cannot succeed.
+     */
+    void requireTenantAdmin(UUID userId);
+
     record Invitation(UUID userId, String url, Instant expiresAt) {}
 
     record ResetLink(String url, Instant expiresAt) {}

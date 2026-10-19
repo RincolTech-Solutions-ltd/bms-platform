@@ -5239,7 +5239,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15) */
+        /** Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs the admin's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-15) */
         post: operations["resetUserSignIn"];
         delete?: never;
         options?: never;
@@ -7679,9 +7679,11 @@ export interface components {
             /** @description A key from the catalogue, for example lending.par */
             report_key?: string;
         };
-        /** @description Required when the signed-in admin has two-step sign-in */
+        /** @description Proof that the signed-in admin is still themselves: the code from their authenticator app when they have two-step sign-in, otherwise their own password. Exactly the one that applies is required; never logged */
         ResetSignInRequest: {
-            /** @description A current 6 digit code from the admin's own authenticator app */
+            /** @description The admin's own current password, for an admin with no two-step sign-in */
+            password?: string;
+            /** @description The current 6 digit code from the admin's own authenticator app */
             totp_code?: string;
         };
         RetailAccountAllocation: {
@@ -22723,7 +22725,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": components["schemas"]["ResetSignInRequest"];
             };

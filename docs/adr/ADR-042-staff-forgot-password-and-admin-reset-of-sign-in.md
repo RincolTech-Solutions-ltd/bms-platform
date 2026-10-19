@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #320; requirement FR-IAM-15; the Users screen action is #339). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
+Proposed (issue #320; requirement FR-IAM-15; the Users screen action is #339; the per-tenant policy for two-step sign-in is #348). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
 codes, revocable server-side sessions, invitations), ADR-025 (accepting an invitation signs the user in under the
 sign-in rules), ADR-003 (row-level security) and ADR-017 (per-permission branch scope). Does not supersede any of
 them. The contract is in chapter 7 section 7.11.2 and 7.11.4, the threat model in chapter 8 section 8.2a.
@@ -68,12 +68,18 @@ inbox.
    recovery code), a user without one whose role (or the tenant) requires one is sent to enrolment, a user without
    either is signed in, and a locked account is told `sign_in_required` and gets no session. Clearing the lock would
    let anyone who reads the mailbox keep guessing the code: reset, five guesses, reset. With the lock kept, a reset
-   gives no extra guess. The enrolment step is the one hole: a user whose **role requires** a second factor but who
-   has not enrolled (`roles.mfa_required` or `require_mfa_all_staff`, `mfa_enabled = false`) would let whoever reads
-   the mailbox request a link, choose the password and enrol their own authenticator. So the **self-service request is
-   refused for such a user** (the same generic 202, no link, no row, audited as `refused` with reason
+   gives no extra guess. **Two-step sign-in is optional** (Hillary, 20 October 2026), tenant admins included, so the
+   mailbox reset stays open to a user who has not enrolled **unless the data says a factor is required**: the check
+   reads `roles.mfa_required` for the user's current roles and the tenant setting `require_mfa_all_staff`, never a
+   role name. Where one of them requires a factor the user has not enrolled (`mfa_enabled = false`), whoever reads the
+   mailbox could request a link, choose the password and enrol their own authenticator. So the **self-service request
+   is refused for such a user** (the same generic 202, no link, no row, audited as `refused` with reason
    `mfa_not_enrolled`), and a self-service link asked for before the requirement existed is refused when used. Such a
-   user is helped by an administrator (decision 9) or the operator, who hand the link over out of band.
+   user is helped by an administrator (decision 9) or the operator, who hand the link over out of band. **Where the
+   requirement is off, a user with no factor resets by mailbox exactly as before** and is signed in. The V2 seed has
+   `mfa_required = true` for `tenant_admin` globally, but the staging database has it `false` by the owner's order, so
+   there a tenant admin without a factor can use the sign-in page's Forgot password when SMTP is set up. A per-tenant
+   policy, default off, with a recommendation prompt, replaces the global switch (#348).
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
@@ -92,16 +98,23 @@ inbox.
    platform: a tenant admin who is locked out is recovered by the platform operator
    (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`, `platform.tenants.manage`, a tenant admin
    target only, audited in both audit logs, the link shown once to the operator);
-   (c) **a fresh authenticator code from the acting admin, and the route fails closed** (`AdminSecurity.requireTotp`
-   before the transaction, as the payment account does: 422 `totp_required` without one, 422 `invalid_mfa_code` for a
-   wrong or used one), so a stolen session alone is not enough. An acting admin with **no authenticator enrolled is
-   refused** (409 `mfa_not_enrolled`), not waved through: the permission `core.users.manage` belongs to the tenant admin
-   role alone and that role requires two-step sign-in, so the case does not arise for a real admin, and an earlier
-   draft that skipped the code for such a caller failed open for any principal without a staff user row. The target is
-   checked first (read-only), then the code, then the link: a call that would be refused does not spend a code;
-   (b2) **the operator routes need the operator's own fresh code too.** Both `POST /platform/tenants/{tenant_id}/users/
+   (c) **proof from the acting admin that they are still themselves, by whichever factor they have.** With an authenticator
+   enrolled it is a fresh code (`AdminSecurity.requireTotp`, single use, as the payment account does: 422
+   `totp_required` without one, 422 `invalid_mfa_code` for a wrong or used one); **with none enrolled it is the admin's
+   own current password** in the body (`password`, `PasswordStepUp.requirePassword`: 422 `password_required` without it,
+   422 `invalid_password` for a wrong one). Two-step sign-in is optional, so an admin without it must not be locked out
+   of this route (an earlier draft refused them, 409 `mfa_not_enrolled`; Hillary decided against it). A wrong
+   password counts on the account's sign-in counter and lock exactly as one at sign-in does (the fifth locks the account
+   for 15 minutes, 423 `account_locked`, audited; a locked account is refused, the right password included), so the
+   route is no cheaper a place to guess a password than the sign-in page; it ends no session, because anyone can feed
+   that counter. A stolen session or token does not give the password (nor the code), so the takeover chain stays closed.
+   An admin who has an authenticator cannot swap the code for the password. A caller with no staff account at all is
+   refused (401). Neither credential is logged, audited or echoed. The target is checked first (read-only), then the
+   credential, then the link: a call that would be refused does not spend a code or count a wrong password;
+   (b2) **the operator routes need the operator's own fresh code too, and only the code:** operators always enrol, so there is no
+   password alternative on the platform side. Both `POST /platform/tenants/{tenant_id}/users/
    {user_id}/reset-sign-in` and the existing `.../mfa/reset` take `{totp_code}` and check it with the operator's own
-   enrolment before anything else (`OperatorSecurity.requireTotp`: the same single-use step, the same step-up counter and
+   enrolment after a read-only check of the target and before anything is done (`OperatorSecurity.requireTotp`: the same single-use step, the same step-up counter and
    lock, five wrong codes end the operator's sessions). Without it a stolen operator token could reset the second factor
    of any tenant's admin and then issue a link for the same admin, which is the chain decision 9(a) to (c) closes for a
    tenant;
@@ -143,7 +156,7 @@ inbox.
 | A reset for someone who should not get back in | Decision 5: active users only; deactivation revokes links |
 | Crossing tenants | Decision 8; the lookup runs inside the tenant of the host; `PasswordResetIT` proves a link, a login and an admin do not cross |
 | An admin reaching users outside their branches | Decision 9 scope rule; the route needs `core.users.manage` |
-| A hijacked tenant admin session taking an account over by chaining the MFA reset and the sign-in reset | Decision 9: never a tenant admin, never oneself, a fresh authenticator code from the acting admin, and the route fails closed for an admin with none enrolled (409); an email to the user when a link is issued; the operator path for a locked-out admin |
+| A hijacked tenant admin session taking an account over by chaining the MFA reset and the sign-in reset | Decision 9: never a tenant admin, never oneself, proof from the acting admin by their authenticator code, or their own password when they have none (a stolen session or token has neither); an email to the user when a link is issued; the operator path for a locked-out admin |
 | A stolen platform operator token resetting a tenant admin's second factor and then issuing a link for the same admin, on any tenant | Decision 9(b2): both operator routes need the operator's own fresh, single-use authenticator code and fail closed without one; five wrong codes lock the step-up and end the operator's sessions; both audit logs record the act. The blast radius of a stolen token plus a stolen authenticator is every tenant's admin, which is what the operator role is; the detective control is the email to the admin that a reset was issued, sent when it is issued and before it is used (the link is handed over out of band, so the admin hears of an unexpected one) |
 | Deadlock or a double use under parallel requests | The user's row is locked before the link's in every path; the link row is locked and re-read before it is used, so of two parallel uses one wins |
 
@@ -161,13 +174,18 @@ inbox.
 
 **Worse:**
 
-- An account with no second factor and a role that does not require one is as safe as its mailbox. A role that
-  requires TOTP and has it set up is not exposed this way, and one that requires it and has not set it up gets no
-  link by email (decision 7); every other account is exactly as safe as its email.
+- An account with no second factor, where no role or tenant setting requires one, is as safe as its mailbox. That is the
+  default everywhere two-step sign-in is optional, tenant admins included (the staging database has it off for
+  `tenant_admin`). An account whose role or tenant requires TOTP and has it set up is not exposed this way, and one that
+  requires it and has not set it up gets no link by email (decision 7). The owner is emailed when a password changes, and
+  every device is signed out.
 - A tenant admin who has not set up two-step sign-in, or who is locked out, cannot recover alone: the operator issues
   the link (decision 9). A tenant with one admin therefore needs the operator in that case.
-- The tenant route and both operator routes need the caller's own authenticator and fail closed without one; an admin who
-  has lost their phone cannot issue links until their second factor is reset (by another admin, or the operator).
+- The tenant route needs the admin's authenticator code or, with none enrolled, their own password; an admin who has lost
+  their phone cannot issue links until their second factor is reset (by another admin, or the operator), or they enter
+  their password once it is off. Both operator routes need the operator's authenticator, who always has one.
+- A password typed into this route is one more place a password is sent; it travels only in the request body over TLS,
+  is never logged or audited, and a wrong one counts on the sign-in lock.
 - The operator routes changed shape: `.../mfa/reset` now takes `{totp_code}` (an existing caller must send one).
 - The 400 ms floor holds a request thread for up to that long per request; the address limit (20 an hour) bounds the
   cost.

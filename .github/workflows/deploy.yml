@@ -60,10 +60,11 @@ jobs:
       # last gate: every other job needs this one, so no image is built and the staging pointer never moves to a commit that holds a
       # V99 migration (Flyway runs with outOfOrder off: the host would apply V99 and V61 to V98 could never run). Plain shell, so
       # it needs nothing on the runner. .github/scripts/placeholder_migration_guard.py is the same rule.
-      - name: Refuse a placeholder migration number (V99)
+      - name: Refuse a placeholder migration number (version 99)
         run: |
-          if ls backend/src/main/resources/db/migration/V99__*.sql > /dev/null 2>&1; then
-            echo "::error::A V99 placeholder migration is on this commit. Renumber it to the next free number; nothing is built or deployed."
+          # Every spelling Flyway reads as version 99 (V99__, V099__, V99.0__), the same pattern as the script.
+          if ls backend/src/main/resources/db/migration | grep -Eq '^V0*99(\.0+)?__'; then
+            echo "::error::A version 99 placeholder migration is on this commit. Renumber it to the next free number; nothing is built or deployed."
             exit 1
           fi
       - id: tags

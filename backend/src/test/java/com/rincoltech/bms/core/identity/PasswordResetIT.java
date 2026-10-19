@@ -712,8 +712,18 @@ class PasswordResetIT extends IntegrationTest {
         String path = "/api/v1/users/" + userId + "/reset-sign-in";
 
         ResponseEntity<JsonNode> none = api.post(path, null, adminSession.accessToken());
-        assertThat(none.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(none.getBody().get("code").asString()).isEqualTo("totp_required");
+        // No body at all is a 400; a body with no code, or a blank one, is asked for the code.
+        assertThat(none.getStatusCode().is4xxClientError()).isTrue();
+        for (Map<String, String> body : List.of(Map.<String, String>of(), Map.of("totp_code", " "))) {
+            ResponseEntity<JsonNode> missing = api.post(path, body, adminSession.accessToken());
+            assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(missing.getBody().get("code").asString()).isEqualTo("totp_required");
+        }
+        // A stolen session knows no code, and an admin who has one cannot swap it for the password.
+        ResponseEntity<JsonNode> password =
+                api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken());
+        assertThat(password.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(password.getBody().get("code").asString()).isEqualTo("totp_required");
         ResponseEntity<JsonNode> wrong = api.post(path, Map.of("totp_code", "000000"), adminSession.accessToken());
         assertThat(wrong.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_mfa_code");
@@ -732,26 +742,173 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(replay.getBody().get("code").asString()).isEqualTo("invalid_mfa_code");
     }
 
-    /** Round 2, m1: the route fails closed. A caller with no authenticator enrolled (here: no staff user at all) is refused. */
+    /** A caller with no staff account at all cannot prove anything: no password to check, so nothing is issued. */
     @Test
-    void anAdminWithNoSecondFactorEnrolledIsRefusedNotWaved() {
+    void aCallerWithNoAccountCannotProveAPassword() {
         UUID userId = user(Api.email("cashier"));
-        Map<String, String> noFactor = Map.of(
+        Map<String, String> noAccount = Map.of(
                 "X-Dev-User-Id", UUID.randomUUID().toString(),
                 "X-Dev-Permissions", "core.users.manage",
                 "X-Dev-Branch-Ids", "*");
-        String path = "/api/v1/users/" + userId + "/reset-sign-in";
 
-        ResponseEntity<JsonNode> without = api.call(HttpMethod.POST, path, null, null, noFactor);
-        ResponseEntity<JsonNode> withCode =
-                api.call(HttpMethod.POST, path, Map.of("totp_code", "123456"), null, noFactor);
+        ResponseEntity<JsonNode> response = api.call(
+                HttpMethod.POST,
+                "/api/v1/users/" + userId + "/reset-sign-in",
+                Map.of("password", Api.PASSWORD),
+                null,
+                noAccount);
 
-        for (ResponseEntity<JsonNode> response : List.of(without, withCode)) {
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-            assertThat(response.getBody().get("code").asString()).isEqualTo("mfa_not_enrolled");
-        }
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(openLinks(userId)).isZero();
         assertThat(emails("identity.password_reset_issued", userEmail(userId))).isZero();
+    }
+
+    /** Takes the admin of setUp back to an admin with no second factor (two-step sign-in is optional); the session lives on. */
+    void dropTheAdminsSecondFactor() {
+        TestDatabase.owner()
+                .sql("UPDATE user_credentials SET totp_secret_enc = NULL, totp_last_step = NULL WHERE user_id = ?")
+                .param(admin)
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE users SET mfa_enabled = false WHERE id = ?")
+                .param(admin)
+                .update();
+    }
+
+    /**
+     * Two-step sign-in is optional (Hillary, 20 Oct 2026): an admin with no authenticator proves themselves with their own current
+     * password and is not locked out of the route; a stolen session or token has no password.
+     */
+    @Test
+    void anAdminWithNoSecondFactorProvesThemselvesWithTheirPassword() {
+        UUID userId = user(Api.email("cashier"));
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        dropTheAdminsSecondFactor();
+
+        // The session alone, a blank password, and a code they do not have: nothing is issued.
+        for (Map<String, String> body :
+                List.of(Map.<String, String>of(), Map.of("password", ""), Map.of("totp_code", "123456"))) {
+            ResponseEntity<JsonNode> refused = api.post(path, body, adminSession.accessToken());
+            assertThat(refused.getStatusCode()).as(body.toString()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("password_required");
+        }
+        assertThat(openLinks(userId)).isZero();
+
+        // A wrong password is refused, in plain words, counted on the sign-in counter, and the password is nowhere in
+        // the answer.
+        ResponseEntity<JsonNode> wrong =
+                api.post(path, Map.of("password", "Not-The-Password-1"), adminSession.accessToken());
+        assertThat(wrong.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_password");
+        assertThat(wrong.getBody().toString()).doesNotContain("Not-The-Password-1");
+        assertThat(failedLogins(admin)).isEqualTo(1);
+        assertThat(openLinks(userId)).isZero();
+
+        // The right password works, and the link is made as for an admin with a code.
+        ResponseEntity<JsonNode> ok = api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken());
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ok.getHeaders().getFirst("Cache-Control")).isEqualTo("no-store");
+        assertThat(ok.getBody().get("url").asString()).contains("/reset-password#token=");
+        assertThat(openLinks(userId)).isEqualTo(1);
+        assertThat(audits("core.password_reset.link_revealed", userId)).isEqualTo(1);
+        // The password reaches no audit row.
+        assertThat(auditsMentioning("Not-The-Password-1")).isZero();
+        assertThat(auditsMentioning(Api.PASSWORD)).isZero();
+    }
+
+    long failedLogins(UUID userId) {
+        return TestDatabase.owner()
+                .sql("SELECT failed_login_count FROM users WHERE id = ?")
+                .param(userId)
+                .query(Long.class)
+                .single();
+    }
+
+    /** Wrong passwords here share the sign-in lock: the fifth locks the account, and the right password is then refused too. */
+    @Test
+    void wrongPasswordsOnTheRouteLockTheAccountLikeSignIn() {
+        UUID userId = user(Api.email("cashier"));
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        dropTheAdminsSecondFactor();
+
+        for (int i = 0; i < 5; i++) {
+            ResponseEntity<JsonNode> wrong =
+                    api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
+            assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_password");
+        }
+        assertThat(audits("core.auth.account_locked", admin)).isEqualTo(1);
+
+        ResponseEntity<JsonNode> locked = api.post(path, Map.of("password", Api.PASSWORD), adminSession.accessToken());
+        assertThat(locked.getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+        assertThat(locked.getBody().get("code").asString()).isEqualTo("account_locked");
+        assertThat(openLinks(userId)).isZero();
+        // The same lock stops a sign-in with the right password.
+        assertThat(api.login(userEmail(admin), Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+    }
+
+    /** A refused target does not make the password count either: it is checked before the credential. */
+    @Test
+    void aRefusedTargetDoesNotCountAWrongPassword() {
+        dropTheAdminsSecondFactor();
+        ResponseEntity<JsonNode> own = api.post(
+                "/api/v1/users/" + admin + "/reset-sign-in",
+                Map.of("password", "Not-The-Password-1"),
+                adminSession.accessToken());
+        assertThat(own.getBody().get("code").asString()).isEqualTo("cannot_reset_own_sign_in");
+        assertThat(failedLogins(admin)).isZero();
+    }
+
+    /**
+     * Two-step sign-in is optional: a user whose role does not require it, on a tenant that does not, resets by mailbox as before,
+     * decided by the data (roles.mfa_required) and not by a name. The role is switched off for this test only.
+     */
+    @Test
+    void aRoleThatDoesNotRequireASecondFactorResetsByMailbox() {
+        var owner = TestDatabase.owner();
+        owner.sql("UPDATE roles SET mfa_required = false WHERE key = 'tenant_admin'")
+                .update();
+        try {
+            String email = Api.email("optional");
+            UUID userId = user(email, "tenant_admin");
+
+            ResponseEntity<JsonNode> response = request(email);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+            assertThat(emailedLink(email)).isNotNull();
+            assertThat(audits("core.password_reset.refused", userId)).isZero();
+            // And it works end to end: a user with no factor is signed in, as before.
+            ResponseEntity<JsonNode> done = complete(tokenOf(emailedLink(email)), NEW_PASSWORD);
+            assertThat(done.getBody().get("status").asString()).isEqualTo("signed_in");
+        } finally {
+            owner.sql("UPDATE roles SET mfa_required = true WHERE key = 'tenant_admin'")
+                    .update();
+        }
+    }
+
+    /** Round 3, item 1: the platform mfa/reset checks its target before it spends the operator's code, like the sign-in route. */
+    @Test
+    void thePlatformMfaResetDoesNotSpendTheCodeOnARefusedTarget() {
+        Api platform = Api.platform(http);
+        String operatorEmail = Api.email("operator");
+        UUID operatorId = Api.platformUser(operatorEmail);
+        Session operator = platform.signIn(operatorId, operatorEmail, Api.PASSWORD, null);
+        UUID cashier = user(Api.email("cashier"));
+        UUID target = user(Api.email("lockedout"), "tenant_admin");
+        String base = "/api/v1/platform/tenants/" + t.tenantId() + "/users/";
+        String code = operatorCode(operator);
+
+        ResponseEntity<JsonNode> notAdmin =
+                platform.post(base + cashier + "/mfa/reset", Map.of("totp_code", code), operator.accessToken());
+        assertThat(notAdmin.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(notAdmin.getBody().get("code").asString()).isEqualTo("not_a_tenant_admin");
+        ResponseEntity<JsonNode> missing = platform.post(
+                base + UUID.randomUUID() + "/mfa/reset", Map.of("totp_code", code), operator.accessToken());
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        // The same code still works for a real tenant admin.
+        assertThat(platform.post(base + target + "/mfa/reset", Map.of("totp_code", code), operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     String userEmail(UUID userId) {

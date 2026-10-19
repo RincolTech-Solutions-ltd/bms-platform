@@ -230,16 +230,26 @@ they are set the link is queued and not sent. A user whose role requires two-ste
 gets no link by email.
 
 For a user with no email on file, an unreachable inbox, or a host without SMTP, a tenant admin calls
-`POST /api/v1/users/{user_id}/reset-sign-in` with `{"totp_code": "<the current code from their own authenticator>"}` and hands the
-returned link to the user once; it is not emailed, and the user is emailed that a reset was issued. **This is API only for now:** the
-Users screen has no button yet (issue #339). An admin with no authenticator enrolled is refused (409 `mfa_not_enrolled`). A tenant
-admin cannot be reset this way, nor can an admin reset themselves.
+`POST /api/v1/users/{user_id}/reset-sign-in` and hands the returned link to the user once; it is not emailed, and the user is emailed
+that a reset was issued. The body proves the admin is still themselves: `{"totp_code": "<the current code from their own
+authenticator>"}` when they have two-step sign-in, otherwise `{"password": "<their own current password>"}` (two-step sign-in is
+optional; a wrong password counts toward the same 15 minute lock as at sign-in). **This is API only for now:** the Users screen has no
+button yet (issue #339). A tenant admin cannot be reset this way, nor can an admin reset themselves.
 
-A tenant admin who forgot the password and cannot use the sign-in page (no authenticator set up, or no email) is helped by the platform
+**Staging note.** The V2 seed makes two-step sign-in required for the `tenant_admin` role (`roles.mfa_required = true`), but the staging
+database has it `false` by the owner's order, so a staging admin can have no authenticator. That is allowed: such an admin resets other
+users with their own password, and, where SMTP is set up, can use Forgot password themselves. A user for whom a factor IS required
+(the role setting, or the tenant's `require_mfa_all_staff`) and has none gets no link by email and is helped by an administrator or the
+operator. A per-tenant policy for this is #348.
+
+A tenant admin who forgot the password and cannot use the sign-in page (no email, or SMTP not set up) is helped by the platform
 operator after verifying the request with the tenant out of band: `POST /api/v1/platform/tenants/{id}/users/{user_id}/reset-sign-in` with
-`{"totp_code": "<the operator's current code>"}` (the platform's `mfa/reset` now needs the operator's code as well). The link is returned
-once and `no-store`, and the admin is emailed that a reset was issued. No operator screen calls it yet. A user still invited gets the
-invitation's link (`POST /api/v1/users/{user_id}/invitation`).
+`{"totp_code": "<the operator's current code>"}` (operators always enrol; the platform's `mfa/reset` needs the operator's code as
+well). The link is returned once and `no-store`, and the admin is emailed that a reset was issued. No operator screen calls it yet. A user
+still invited gets the invitation's link (`POST /api/v1/users/{user_id}/invitation`).
+
+The lost-phone case above: the platform reset needs the operator's own code too, so the call is
+`POST /api/v1/platform/tenants/{id}/users/{user_id}/mfa/reset` with `{"totp_code": "<the operator's current code>"}`.
 
 If a tenant has lost every admin account, invite a new one from the host with
 `deploy/sql/invite-tenant-admin.sql`, with the dev lead, and record why in the tenant's ticket.

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Tests of placeholder_migration_guard.py: it has no escape, whatever the event or the pull request text says."""
+"""Tests of placeholder_migration_guard.py: it has no escape, whatever the event or the pull request text says, and the deploy
+workflow's first job holds the same rule and every other job waits for it."""
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 
-SCRIPT = pathlib.Path(__file__).with_name("placeholder_migration_guard.py")
+HERE = pathlib.Path(__file__).resolve().parent
+SCRIPT = HERE / "placeholder_migration_guard.py"
+DEPLOY = HERE.parent / "workflows" / "deploy.yml"
 
 
 def run(directory: pathlib.Path, **env: str) -> subprocess.CompletedProcess:
@@ -48,10 +52,91 @@ class PlaceholderMigrationGuardTest(unittest.TestCase):
                 result = run(self.dir, GITHUB_EVENT_NAME=event, PR_BODY=body)
                 self.assertEqual(result.returncode, 1, (body, event))
 
-    def test_only_the_placeholder_number_is_refused(self) -> None:
-        (self.dir / "V990__not_the_placeholder.sql").write_text("-- a number far above, not V99\n")
-        (self.dir / "V9__lending.sql").write_text("-- a real V9\n")
+    def test_every_spelling_flyway_reads_as_version_99_fails(self) -> None:
+        for name in ("V099__x.sql", "V0099__x.sql", "V99.0__x.sql", "V99.00__x.sql", "V099.0__x.sql"):
+            (self.dir / name).write_text("-- placeholder\n")
+            self.assertEqual(run(self.dir).returncode, 1, name)
+            (self.dir / name).unlink()
+
+    def test_only_version_99_is_refused(self) -> None:
+        for name in (
+            "V990__not_the_placeholder.sql",
+            "V9__lending.sql",
+            "V99.1__a_later_point_release.sql",
+            "V98__just_below.sql",
+            "V100__just_above.sql",
+        ):
+            (self.dir / name).write_text("-- a real one\n")
         self.assertEqual(run(self.dir).returncode, 0)
+
+
+def deploy_jobs() -> dict[str, str]:
+    """The text of each job of deploy.yml, by name, in order (no YAML library: the runner may not have one)."""
+    text = DEPLOY.read_text()
+    jobs_at = re.search(r"^jobs:\s*$", text, re.M)
+    assert jobs_at, "deploy.yml has no jobs:"
+    body = text[jobs_at.end():]
+    names = list(re.finditer(r"^  ([a-z][a-z0-9-]*):\s*$", body, re.M))
+    return {m.group(1): body[m.end(): names[i + 1].start() if i + 1 < len(names) else len(body)] for i, m in enumerate(names)}
+
+
+def v99_pattern(job_text: str):
+    """The pattern the V99 step greps the migration folder with (not the release tag check of the next step)."""
+    step = job_text[job_text.index("Refuse a placeholder migration number"): job_text.index("id: tags")]
+    return re.search(r"grep -Eq '([^']+)'", step)
+
+
+def needs_of(job_text: str) -> list[str]:
+    inline = re.search(r"^    needs:\s*\[([^\]]*)\]", job_text, re.M)
+    if inline:
+        return [n.strip() for n in inline.group(1).split(",") if n.strip()]
+    single = re.search(r"^    needs:\s*([a-z][a-z0-9-]*)\s*$", job_text, re.M)
+    return [single.group(1)] if single else []
+
+
+class DeployWorkflowTest(unittest.TestCase):
+    def test_the_first_job_holds_the_v99_step_with_the_same_pattern_as_the_script(self) -> None:
+        jobs = deploy_jobs()
+        first = next(iter(jobs))
+        self.assertEqual(first, "meta")
+        self.assertIn("migration", jobs["meta"])
+        pattern = v99_pattern(jobs["meta"])
+        self.assertIsNotNone(pattern, "the meta job has no V99 step")
+        sys.path.insert(0, str(HERE))
+        import placeholder_migration_guard
+
+        self.assertEqual(pattern.group(1), placeholder_migration_guard.PATTERN)
+        self.assertRegex(jobs["meta"], r"exit 1")
+
+    def test_the_step_comes_before_anything_else_in_the_job_runs(self) -> None:
+        meta = deploy_jobs()["meta"]
+        self.assertLess(meta.index("Refuse a placeholder migration number"), meta.index("id: tags"))
+
+    def test_every_other_job_reaches_meta_through_needs(self) -> None:
+        jobs = deploy_jobs()
+        graph = {name: needs_of(text) for name, text in jobs.items()}
+
+        def reaches_meta(name: str, seen: frozenset = frozenset()) -> bool:
+            if name == "meta":
+                return True
+            return name not in seen and any(reaches_meta(n, seen | {name}) for n in graph.get(name, []))
+
+        for name in jobs:
+            if name != "meta":
+                self.assertTrue(reaches_meta(name), f"job {name} does not wait for meta (needs: {graph[name]})")
+
+    def test_the_deploy_step_matches_the_spellings_with_the_real_shell(self) -> None:
+        pattern = v99_pattern(deploy_jobs()["meta"]).group(1)
+        for name, expected in (
+            ("V99__a.sql", True),
+            ("V099__a.sql", True),
+            ("V99.0__a.sql", True),
+            ("V64__a.sql", False),
+            ("V990__a.sql", False),
+            ("V99.1__a.sql", False),
+        ):
+            result = subprocess.run(["grep", "-Eq", pattern], input=name + "\n", text=True, check=False)
+            self.assertEqual(result.returncode == 0, expected, name)
 
 
 if __name__ == "__main__":

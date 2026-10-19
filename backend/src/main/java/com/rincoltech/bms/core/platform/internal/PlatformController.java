@@ -196,8 +196,8 @@ class PlatformController {
 
     /**
      * Both reset routes below ask the signed-in operator for a current code from their own authenticator, used once, before
-     * anything is done (ADR-042): a stolen operator token alone cannot take a tenant's admin over. The check of the target
-     * comes first on the sign-in route, so a code is not spent on a call that would be refused.
+     * anything is done (ADR-042): a stolen operator token alone cannot take a tenant's admin over. The target is checked first
+     * (read-only) on both, so a code is not spent on a call that would be refused.
      */
     @PostMapping("/tenants/{tenant_id}/users/{user_id}/reset-sign-in")
     @RequiresPermission("platform.tenants.manage")
@@ -227,6 +227,7 @@ class PlatformController {
             @PathVariable("tenant_id") UUID tenantId,
             @PathVariable("user_id") UUID userId,
             @Valid @RequestBody StepUpRequest request) {
+        service.requireTenantAdmin(tenantId, userId);
         security.requireTotp(request.totpCode());
         service.resetAdminMfa(tenantId, userId);
         return ResponseEntity.noContent().build();

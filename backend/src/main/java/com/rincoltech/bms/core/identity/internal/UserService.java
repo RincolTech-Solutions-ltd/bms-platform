@@ -220,6 +220,15 @@ class UserService implements TenantAdmins {
         resets.precheckForOperator(userId);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public void requireTenantAdmin(UUID userId) {
+        find(userId).orElseThrow(ApiException::notFound);
+        if (!isTenantAdmin(userId)) {
+            throw ApiException.rule("not_a_tenant_admin", "The platform resets the MFA of tenant admins only.");
+        }
+    }
+
     // ---- Reads ----------------------------------------------------------------------------
 
     @Transactional(readOnly = true)

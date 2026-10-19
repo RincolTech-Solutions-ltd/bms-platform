@@ -400,8 +400,8 @@ class PlatformIT extends IntegrationTest {
                 .isEqualTo("mfa_required");
 
         // JUSTIFICATION-A3: the platform reset routes now need the operator's own fresh authenticator code (ADR-042),
-        // so this existing
-        // call sends one; the case itself is unchanged.
+        // so this
+        // existing call sends one; the case itself is unchanged.
         Api.allowTotpReuse(operatorId);
         ResponseEntity<JsonNode> reset = platform.post(
                 "/api/v1/platform/tenants/" + tenantId + "/users/" + adminId + "/mfa/reset",
