@@ -202,6 +202,7 @@ class BranchClosingIT extends IntegrationTest {
         assertThat(reopen(t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(codes(api.get("/api/v1/me", admin.accessToken()).getBody(), "branches"))
                 .containsExactly("HQ", "BR2");
+        retail.stockUp(t.secondBranch(), product, "5");
         assertThat(retail.sell(t.secondBranch(), "cash", product, "0.5").getStatusCode())
                 .as("a reopened branch trades again")
                 .isEqualTo(HttpStatus.CREATED);
@@ -232,7 +233,7 @@ class BranchClosingIT extends IntegrationTest {
                 .as("no stock was moved or written off")
                 .isEqualTo(before);
         String after = TestDatabase.owner()
-                .sql("SELECT after_values::text FROM audit_log WHERE tenant_id = ? AND action = 'core.branch.closed'"
+                .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'core.branch.closed'"
                         + " AND entity_id = ?")
                 .params(t.tenantId(), t.secondBranch())
                 .query(String.class)
@@ -304,14 +305,14 @@ class BranchClosingIT extends IntegrationTest {
         JsonNode plain = retail.get("/stock/all-branches", ADMIN).getBody();
         assertThat(codes(plain, "branches")).containsExactly("HQ");
         assertThat(plain.get("closed_branches").asInt()).isEqualTo(1);
-        assertThat(plain.get("items").get(0).get("total_qty").asString()).isEqualTo("4");
+        assertThat(plain.get("items").get(0).get("total_qty").asString()).isEqualTo("4.000");
 
         JsonNode withClosed =
                 retail.get("/stock/all-branches?include_closed=true", ADMIN).getBody();
         assertThat(codes(withClosed, "branches")).containsExactly("HQ", "BR2");
         assertThat(withClosed.get("branches").get(1).get("closed").asBoolean()).isTrue();
         assertThat(withClosed.get("closed_branches").asInt()).isZero();
-        assertThat(withClosed.get("items").get(0).get("total_qty").asString()).isEqualTo("10");
+        assertThat(withClosed.get("items").get(0).get("total_qty").asString()).isEqualTo("10.000");
 
         // The report by store and shop is a report: the closed branch stays in it, flagged.
         JsonNode byLocation = retail.get("/reports/stock-by-location", ADMIN).getBody();
@@ -339,7 +340,7 @@ class BranchClosingIT extends IntegrationTest {
             assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
             assertThat(code(r)).isEqualTo("branch_not_stocking");
             assertThat(r.getBody().get("detail").asString())
-                    .contains("does not stock goods")
+                    .contains("not stocking goods")
                     .doesNotContain("null");
         }
         // The shop is untouched by the refusals and still trades.
