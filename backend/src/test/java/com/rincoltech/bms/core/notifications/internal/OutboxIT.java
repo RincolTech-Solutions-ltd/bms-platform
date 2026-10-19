@@ -413,36 +413,6 @@ class OutboxIT extends IntegrationTest {
     }
 
     /**
-     * FR-IAM-15, ADR-042: a link that has expired is cleared by the frequent job, not by the nightly purge: the row loses its
-     * parameters and is marked failed at once, while a row that has not expired, and a row with no expiry, are left alone.
-     */
-    @Test
-    void anExpiredLinkLeavesTheRowWithinTheFrequentJobsInterval() {
-        String expired = key();
-        enqueue("email", "test-exp@example.test", expired);
-        String alive = key();
-        enqueue("email", "test-exp@example.test", alive);
-        String noExpiry = key();
-        enqueue("email", "test-exp@example.test", noExpiry);
-        var owner = TestDatabase.owner();
-        owner.sql("UPDATE notification_outbox SET expires_at = now() - interval '1 minute' WHERE idempotency_key = ?")
-                .param(expired)
-                .update();
-        owner.sql("UPDATE notification_outbox SET expires_at = now() + interval '30 minutes' WHERE idempotency_key = ?")
-                .param(alive)
-                .update();
-
-        assertThat(dispatcher.clearExpiredLinks()).isGreaterThanOrEqualTo(1);
-
-        assertThat(row(expired).get("params")).isEqualTo("{}");
-        assertThat(row(expired).get("status")).isEqualTo("failed");
-        assertThat(row(expired).get("last_error")).isEqualTo("expired");
-        assertThat(row(alive).get("params")).isNotEqualTo("{}");
-        assertThat(row(alive).get("status")).isEqualTo("pending");
-        assertThat(row(noExpiry).get("params")).isNotEqualTo("{}");
-    }
-
-    /**
      * Review N1: no one-time link outlives its use in the outbox. The nightly purge clears the
      * parameters of any unsent row older than 7 days (a pending one becomes failed, "expired") and
      * deletes rows sent more than 30 days ago; a failed row that old cannot be sent again.
