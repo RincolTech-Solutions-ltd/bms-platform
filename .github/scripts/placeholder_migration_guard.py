@@ -12,7 +12,8 @@ Version 99 is every spelling Flyway reads as that version, with a dot or an unde
 V99.0__x.sql, V99_0__x.sql and V99.0.0__x.sql (the same
 pattern is written in the deploy workflow's shell step, and a test keeps the two equal).
 
-MIGRATIONS may point at another directory, for the tests of this script (test_placeholder_migration_guard.py).
+MIGRATIONS may name other directories (separated like a PATH), for the tests of this script (test_placeholder_migration_guard.py).
+Every file under them counts, subfolders included.
 """
 import os
 import pathlib
@@ -20,17 +21,21 @@ import re
 import sys
 
 PATTERN = r"^V0*99([._]0+)*__"
-DEFAULT_DIR = "backend/src/main/resources/db/migration"
+# Flyway scans db/migration on the classpath, subfolders included: the SQL files under resources and the Java migrations
+# (V99__X.java) under src/main/java.
+DEFAULT_DIRS = "backend/src/main/resources/db/migration:backend/src/main/java/db/migration"
 
 
 def main() -> int:
-    directory = pathlib.Path(os.environ.get("MIGRATIONS", DEFAULT_DIR))
-    found = sorted(p.name for p in directory.iterdir() if re.match(PATTERN, p.name))
+    directories = [pathlib.Path(d) for d in os.environ.get("MIGRATIONS", DEFAULT_DIRS).split(os.pathsep) if d]
+    found = sorted(
+        str(p) for d in directories if d.is_dir() for p in d.rglob("*") if p.is_file() and re.match(PATTERN, p.name)
+    )
     if not found:
         print("No placeholder (version 99) migration. Guard passes.")
         return 0
-    for name in found:
-        print(f"::error file={directory}/{name}::placeholder migration version 99. Renumber it to the next free number "
+    for path in found:
+        print(f"::error file={path}::placeholder migration version 99. Renumber it to the next free number "
               "before it merges (Flyway runs with outOfOrder off: a version 99 on main blocks every later migration).")
     return 1
 

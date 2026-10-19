@@ -81,8 +81,9 @@ inbox.
    (not a migration). On a fresh database (production, CI) a tenant admin without a factor is sent to enrolment at sign-in and never
    gets a session, so the password branch of decision 9(c) and the mailbox reset for a no-factor admin are reachable only where
    the seed was edited. On staging, a tenant admin without a factor can use the sign-in page's Forgot password when SMTP is set up,
-   and **whoever reads that admin's mailbox can take the account over; Hillary accepted this on 20 October 2026 until #348
-   lands.** A per-tenant policy, default off, with a recommendation prompt, replaces the global switch (#348).
+   and **whoever reads that admin's mailbox can take the account over. Hillary decided on 20 October 2026 that two-step
+   sign-in stays optional; this consequence follows from that decision and is listed here for his explicit acceptance, until
+   #348 lands.** It is not recorded as his decision. A per-tenant policy, default off, with a recommendation prompt, replaces the global switch (#348).
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
@@ -116,7 +117,12 @@ inbox.
    stranger does at sign-in feeds the step-up counter, so a stranger's wrong sign-ins plus one real slip here, or the
    admin's other devices, are not logged out (the sign-in count is shared and may lock the account; that is the same as at
    sign-in). The sign-in counter is the one a stranger can feed, which is why it ends no session. A right password starts
-   the sign-in failure count again, as at sign-in, and leaves a lock alone; the account must be active. A stolen session or token does not give the password (nor the code), so the takeover chain stays closed.
+   the sign-in failure count again, as at sign-in, and leaves a lock alone; the account must be active. **The step-up lock
+   is checked on its own** (not only the sign-in lock): a thief with two stolen sessions who sends three wrong passwords,
+   waits for the real admin to sign in (which resets the sign-in count), and sends two more ends the first session at
+   the fifth step-up failure while the sign-in count is only 2, and the second stolen session must still be refused for the
+   15 minutes (tested). The step-up counter is shared with wrong authenticator codes, so enrolling an authenticator starts
+   it again: someone with four wrong passwords who then enrols is not one wrong code from losing every session. A stolen session or token does not give the password (nor the code), so the takeover chain stays closed.
    An admin who has an authenticator cannot swap the code for the password. A caller with no staff account at all is
    refused (401). Neither credential is logged, audited or echoed. The target is checked first (read-only), then the
    credential, then the link: a call that would be refused does not spend a code or count a wrong password;

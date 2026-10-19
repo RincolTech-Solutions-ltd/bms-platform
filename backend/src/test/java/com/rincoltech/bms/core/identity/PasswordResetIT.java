@@ -877,6 +877,120 @@ class PasswordResetIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
     }
 
+    boolean stepUpLocked(UUID userId) {
+        return Boolean.TRUE.equals(TestDatabase.owner()
+                .sql("SELECT step_up_locked_until > now() FROM users WHERE id = ?")
+                .param(userId)
+                .query(Boolean.class)
+                .single());
+    }
+
+    boolean signInLocked(UUID userId) {
+        return Boolean.TRUE.equals(TestDatabase.owner()
+                .sql("SELECT locked_until > now() FROM users WHERE id = ?")
+                .param(userId)
+                .query(Boolean.class)
+                .single());
+    }
+
+    long stepUpFailures(UUID userId) {
+        return TestDatabase.owner()
+                .sql("SELECT step_up_failed_count FROM users WHERE id = ?")
+                .param(userId)
+                .query(Long.class)
+                .single();
+    }
+
+    /**
+     * Final review, item 1: the step-up lock holds on its own. A thief with two stolen sessions sends three wrong passwords; the
+     * real admin signs in elsewhere (which starts the sign-in count again); the thief sends two more. The step-up count reaches
+     * five and ends the first session, while the sign-in count is only two, so only the step-up lock can refuse the second stolen
+     * session, for 15 minutes.
+     */
+    @Test
+    void theStepUpLockHoldsOnItsOwnAfterTheSignInCountWasReset() {
+        UUID userId = user(Api.email("cashier"));
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        String adminEmail = userEmail(admin);
+        Session secondStolen = api.signIn(admin, adminEmail, Api.PASSWORD, adminSession.totpSecret());
+        dropTheAdminsSecondFactor();
+        var owner = TestDatabase.owner();
+        // The real admin must be able to sign in without a second factor for this scenario (the requirement is data).
+        owner.sql("UPDATE roles SET mfa_required = false WHERE key = 'tenant_admin'")
+                .update();
+        try {
+            for (int i = 0; i < 3; i++) {
+                api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
+            }
+            assertThat(failedLogins(admin)).isEqualTo(3);
+            assertThat(stepUpFailures(admin)).isEqualTo(3);
+
+            // The real admin signs in elsewhere: the sign-in count starts again, the step-up count does not.
+            ResponseEntity<JsonNode> signedIn = api.login(adminEmail, Api.PASSWORD);
+            assertThat(signedIn.getBody().get("status").asString()).isEqualTo("signed_in");
+            assertThat(failedLogins(admin)).isZero();
+            assertThat(stepUpFailures(admin)).isEqualTo(3);
+
+            for (int i = 3; i < 5; i++) {
+                api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
+            }
+            assertThat(stepUpFailures(admin)).isEqualTo(5);
+            assertThat(failedLogins(admin)).isEqualTo(2);
+            assertThat(signInLocked(admin)).isFalse();
+            assertThat(stepUpLocked(admin)).isTrue();
+            assertThat(audits("core.auth.account_locked", admin)).isZero();
+            assertThat(audits("core.auth.step_up_session_ended", admin)).isEqualTo(1);
+            assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+
+            // The second stolen session, with the right password, is refused by the step-up lock alone.
+            ResponseEntity<JsonNode> locked =
+                    api.post(path, Map.of("password", Api.PASSWORD), secondStolen.accessToken());
+            assertThat(locked.getStatusCode()).isEqualTo(HttpStatus.LOCKED);
+            assertThat(locked.getBody().get("code").asString()).isEqualTo("account_locked");
+            assertThat(openLinks(userId)).isZero();
+
+            // Fifteen minutes later (the lock's end moved into the past) the same call goes through.
+            owner.sql("UPDATE users SET step_up_locked_until = now() - interval '1 minute' WHERE id = ?")
+                    .param(admin)
+                    .update();
+            ResponseEntity<JsonNode> later =
+                    api.post(path, Map.of("password", Api.PASSWORD), secondStolen.accessToken());
+            assertThat(later.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(stepUpFailures(admin)).isZero();
+        } finally {
+            owner.sql("UPDATE roles SET mfa_required = true WHERE key = 'tenant_admin'")
+                    .update();
+        }
+    }
+
+    /**
+     * Final review, item 8: the step-up count is shared by wrong passwords and wrong codes, so enrolling an authenticator starts it
+     * again: four wrong passwords and then an enrolment leave the next wrong code the first, not the fifth.
+     */
+    @Test
+    void enrollingAnAuthenticatorStartsTheStepUpCountAgain() {
+        UUID userId = user(Api.email("cashier"));
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+        dropTheAdminsSecondFactor();
+        for (int i = 0; i < 4; i++) {
+            api.post(path, Map.of("password", "Not-The-Password-" + i), adminSession.accessToken());
+        }
+        assertThat(stepUpFailures(admin)).isEqualTo(4);
+
+        // The role requires a second factor, so signing in again walks through the enrolment.
+        Session enrolled = api.signIn(admin, userEmail(admin), Api.PASSWORD, null);
+
+        assertThat(enrolled.totpSecret()).isNotNull();
+        assertThat(stepUpFailures(admin)).isZero();
+        // One wrong code now is the first, and ends nothing: the older session still lives.
+        ResponseEntity<JsonNode> wrong = api.post(path, Map.of("totp_code", "000000"), enrolled.accessToken());
+        assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_mfa_code");
+        assertThat(stepUpFailures(admin)).isEqualTo(1);
+        assertThat(api.get("/api/v1/me", adminSession.accessToken()).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+    }
+
     /** Round 4, item 1: a stranger's wrong sign-ins do not log the admin out; only the admin's own session's failures do. */
     @Test
     void aStrangersWrongSignInsDoNotEndTheAdminsSessionEvenWithOneSlipHere() {

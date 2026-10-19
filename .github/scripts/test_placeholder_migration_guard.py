@@ -67,6 +67,28 @@ class PlaceholderMigrationGuardTest(unittest.TestCase):
             self.assertEqual(run(self.dir).returncode, 1, name)
             (self.dir / name).unlink()
 
+    def test_a_placeholder_in_a_subfolder_fails(self) -> None:
+        sub = self.dir / "tenant" / "extra"
+        sub.mkdir(parents=True)
+        (sub / "V99__deep.sql").write_text("-- placeholder\n")
+        result = run(self.dir)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("V99__deep.sql", result.stdout)
+
+    def test_a_java_migration_with_version_99_fails(self) -> None:
+        java = pathlib.Path(self._tmp.name + "-java") / "db" / "migration"
+        java.mkdir(parents=True)
+        try:
+            (java / "V99__Placeholder.java").write_text("// placeholder\n")
+            result = run(self.dir, MIGRATIONS=os.pathsep.join([str(self.dir), str(java)]))
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("V99__Placeholder.java", result.stdout)
+            # A folder that does not exist (no Java migrations yet) is no failure.
+            missing = run(self.dir, MIGRATIONS=os.pathsep.join([str(self.dir), str(self.dir / "no-such-folder")]))
+            self.assertEqual(missing.returncode, 0)
+        finally:
+            (java / "V99__Placeholder.java").unlink(missing_ok=True)
+
     def test_only_version_99_is_refused(self) -> None:
         for name in (
             "V990__not_the_placeholder.sql",
@@ -94,7 +116,14 @@ def deploy_jobs() -> dict[str, str]:
 def v99_pattern(job_text: str):
     """The pattern the V99 step greps the migration folder with (not the release tag check of the next step)."""
     step = job_text[job_text.index("Refuse a placeholder migration number"): job_text.index("id: tags")]
-    return re.search(r"grep -Eq '([^']+)'", step)
+    return re.search(r"grep -Eq? '([^']+)'", step)
+
+
+def v99_step_script(job_text: str) -> str:
+    """The shell of the V99 step, dedented, to run for real in a scratch folder."""
+    step = job_text[job_text.index("Refuse a placeholder migration number"): job_text.index("id: tags")]
+    lines = step.split("run: |\n", 1)[1].splitlines()
+    return "\n".join(line[10:] for line in lines)
 
 
 def needs_of(job_text: str) -> list[str]:
@@ -106,6 +135,36 @@ def needs_of(job_text: str) -> list[str]:
 
 
 class DeployWorkflowTest(unittest.TestCase):
+    def run_step(self, *files: str) -> subprocess.CompletedProcess:
+        """Runs the real shell of the deploy workflow's V99 step in a scratch checkout holding the given files."""
+        with tempfile.TemporaryDirectory() as root:
+            for folder in ("backend/src/main/resources/db/migration", "backend/src/main/java/db/migration"):
+                pathlib.Path(root, folder).mkdir(parents=True)
+            for name in files:
+                target = pathlib.Path(root, name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("-- fabricated\n")
+            return subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", v99_step_script(deploy_jobs()["meta"])],
+                cwd=root, capture_output=True, text=True, check=False,
+            )
+
+    def test_the_real_step_passes_a_clean_tree_and_refuses_every_placeholder(self) -> None:
+        base = "backend/src/main/resources/db/migration/"
+        java = "backend/src/main/java/db/migration/"
+        self.assertEqual(self.run_step(base + "V1__a.sql", base + "V64__b.sql").returncode, 0)
+        for path in (
+            base + "V99__a.sql",
+            base + "V099__a.sql",
+            base + "V99_0__a.sql",
+            base + "V99.0.0__a.sql",
+            base + "sub/folder/V99__a.sql",
+            java + "V99__Placeholder.java",
+        ):
+            self.assertEqual(self.run_step(path).returncode, 1, path)
+        for path in (base + "V990__a.sql", base + "V99.1__a.sql", java + "V100__Real.java"):
+            self.assertEqual(self.run_step(path).returncode, 0, path)
+
     def test_the_first_job_holds_the_v99_step_with_the_same_pattern_as_the_script(self) -> None:
         jobs = deploy_jobs()
         first = next(iter(jobs))

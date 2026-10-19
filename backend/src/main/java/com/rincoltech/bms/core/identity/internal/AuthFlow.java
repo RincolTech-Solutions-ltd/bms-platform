@@ -234,6 +234,10 @@ class AuthFlow {
             throw invalidCode(HttpStatus.UNPROCESSABLE_CONTENT);
         }
         accounts.enableTotp(userId, account.totpPendingSecret(), step.getAsLong());
+        // Wrong passwords at the password step-up share this counter with wrong codes at the code step-up: someone who
+        // made four
+        // wrong passwords and then enrols must not be one wrong code from losing every session (ADR-042).
+        accounts.clearStepUpFailures(userId);
         List<String> codes = issueRecoveryCodes(accounts, userId);
         accounts.audit("core.mfa.enrolled", userId, Map.of("recovery_codes_issued", codes.size()));
         if (signIn) {

@@ -239,7 +239,7 @@ button yet (issue #339). A tenant admin cannot be reset this way, nor can an adm
 **Staging note.** The V2 seed makes two-step sign-in required for the `tenant_admin` role (`roles.mfa_required = true`), and only the staging
 database has it `false`, by the owner's hand edit (not a migration). On a fresh database (production, CI) a tenant admin with no authenticator
 is sent to enrolment and gets no session, so the password step-up below is reachable only where the seed was edited. On staging a no-factor
-admin is allowed, and whoever reads that admin's mailbox can take the account over (accepted by Hillary until #348 lands). Such an admin is allowed: such an admin resets other
+admin is allowed, and whoever reads that admin's mailbox can take the account over (a consequence of the optional setting, listed for Hillary's explicit acceptance until #348 lands). Such an admin such an admin resets other
 users with their own password, and, where SMTP is set up, can use Forgot password themselves. A user for whom a factor IS required
 (the role setting, or the tenant's `require_mfa_all_staff`) and has none gets no link by email and is helped by an administrator or the
 operator. A per-tenant policy for this is #348.
