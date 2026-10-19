@@ -44,6 +44,9 @@ export type CustomerBalance = S['RetailCustomerBalance'];
 export type OpenSale = S['RetailOpenSale'];
 export type AccountPayment = S['RetailAccountPayment'];
 export type AccountPaymentRequest = S['RetailAccountPaymentRequest'];
+/** One payment against one credit sale (FR-RET-05) and the sale's figures after it. */
+export type SalePaymentRequest = S['RetailPaymentRequest'];
+export type SalePaymentResult = S['RetailPaymentResult'];
 export type AccountPaymentPage = S['RetailAccountPaymentList'];
 /** Optional documents (documents capability, ADR-033, issue #197): quotations, invoices and delivery notes, numbered per branch. */
 export type RetailDocument = S['RetailDocument'];
@@ -299,6 +302,10 @@ export interface RetailApi {
   /** Groups of sales by year, month or day with the totals of each, newest first; `next_to` continues into older periods (#328). */
   salesSummary(q: SalesSummaryQuery): Promise<SalesSummary>;
   getSale(id: string): Promise<Sale>;
+  /** A payment, partial allowed, against a credit sale (retail.sale.create at the branch); takes the Idempotency-Key of its form. */
+  paySale(saleId: string, body: SalePaymentRequest, idempotencyKey: string): Promise<SalePaymentResult>;
+  /** Voids a sale by reversal (retail.sale.void at the branch). The schema has no Idempotency-Key for it: a second void is refused as sale_voided. */
+  voidSale(saleId: string, reason: string): Promise<Sale>;
   listCustomers(): Promise<Customer[]>;
   /** The credit buyers screen: server-side search and cursor paging. */
   listCustomerPage(q: { query?: string; cursor?: string; signal?: AbortSignal }): Promise<CustomerPage>;
@@ -660,6 +667,14 @@ const realRetail: RetailApi = {
 
   async getSale(id) {
     return unwrap(await api.GET('/api/v1/retail/sales/{sale_id}', { params: { path: { sale_id: id } } }));
+  },
+
+  async paySale(saleId, body, key) {
+    return unwrap(await api.POST('/api/v1/retail/sales/{sale_id}/payments', { params: { path: { sale_id: saleId }, header: { 'Idempotency-Key': key } }, body }));
+  },
+
+  async voidSale(saleId, reason) {
+    return unwrap(await api.POST('/api/v1/retail/sales/{sale_id}/void', { params: { path: { sale_id: saleId } }, body: { reason } }));
   },
 
   async listCustomers() {
