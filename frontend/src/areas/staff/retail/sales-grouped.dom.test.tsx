@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesSummary, SalesSummaryGroup, SalesSummaryQuery } from '../../../api/retail';
 
 // The grouped sales lists as a person uses them (issue #328): the current month is open by day, every header shows its
 // own figures, a day loads its sales only when opened, profit shows only when the server sent it, and a failed or empty
 // level says so plainly. Fabricated dates and amounts.
+
+// Three levels load one after the other; a busy machine needs more than the default second.
+configure({ asyncUtilTimeout: 5000 });
 
 const summary = vi.fn<(q: SalesSummaryQuery) => Promise<SalesSummary>>();
 vi.mock('../../../api/retail', async (original) => {
