@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
+import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { businessToday, daysBefore, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
 import { receiptNote } from './price-state';
@@ -13,6 +13,7 @@ import { settledWords } from './returns-state';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { SaleDocuments } from './documents-ui';
+import { SalesGrouped, useOpenGroups } from './sales-grouped';
 
 // Credit sales and All sales (#145): the lists the pilot's app has, 'Credit sales' and the sales
 // history, read from the sales list API in the branch chosen at the top of the page (every branch the
@@ -196,6 +197,28 @@ function More({ query }: { query: ReturnType<typeof useSales>['query'] }) {
   );
 }
 
+// JUSTIFICATION-A3: DaySales is the one small component that loads a day's sales with the screen's own useSales, SaleList and More (issue #328).
+/** The sales of one opened day (issue #328): loaded only now, with the list's own filters and cards. */
+function DaySales({ day, filter, today, credit, onOpen, branchOf, term }: {
+  day: string;
+  filter: Omit<SalesQuery, 'cursor' | 'signal' | 'from' | 'to'>;
+  today: string;
+  credit?: boolean;
+  onOpen: (id: string) => void;
+  branchOf?: (id: string | undefined) => string;
+  term: string;
+}) {
+  const { query, items } = useSales({ ...filter, from: day, to: day }, true);
+  return (
+    <>
+      {query.isPending && <p className="loading">Loading</p>}
+      <Problem error={query.error} />
+      {query.data && <SaleList items={items} today={today} credit={credit} onOpen={onOpen} branchOf={branchOf} term={term} />}
+      <More query={query} />
+    </>
+  );
+}
+
 /** The sale shown open, if it was opened under this branch choice: a change of branch closes it. */
 export function openUnder(opened: { key: string; id: string } | null, key: string): string | null {
   return opened && opened.key === key ? opened.id : null;
@@ -214,14 +237,15 @@ const OWING: { value: Owing; label: string }[] = [
   { value: 'paid', label: 'Paid' },
 ];
 
-function CreditSales() {
+export function CreditSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const search = useLiveSearch();
   const [owing, setOwing] = useState<Owing>('all');
   const [open, setOpen] = useOpenSale(all ? 'all' : (branchId ?? ''));
   const today = businessToday();
-  const { query, items, fetching } = useSales({ branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit', status: 'completed', owing: owing === 'all' ? undefined : owing }, all || branchId !== null);
+  const groups = useOpenGroups(today);
+  const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit' as const, owing: owing === 'all' ? undefined : owing };
   return (
     <Gate screen="creditSales" title="Credit sales">
       {open ? (
@@ -229,26 +253,23 @@ function CreditSales() {
       ) : (
         <>
           <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-          <SearchBox id="credit-buyer" label="Buyer, phone or sale number" search={search} fetching={fetching} count={query.data ? items.length : undefined} more={query.hasNextPage} />
+          <SearchBox id="credit-buyer" label="Buyer, phone or sale number" search={search} fetching={false} count={undefined} />
           <label htmlFor="credit-owing">Show</label>
-          <select id="credit-owing" value={owing} onChange={(e) => setOwing(e.target.value as Owing)}>
+          <select id="credit-owing" data-tour="credit-owing" value={owing} onChange={(e) => setOwing(e.target.value as Owing)}>
             {OWING.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          {query.isPending && query.fetchStatus !== 'idle' && <p className="loading">Loading</p>}
-          <Problem error={query.error} />
-          {query.data && (
-            <SearchResults fetching={fetching}>
-              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : <SaleList items={items} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />}
-            </SearchResults>
-          )}
-          <More query={query} />
+          <SalesGrouped
+            rootLabel="Credit sales" credit filter={filter} range={{}} enabled={all || branchId !== null} groups={groups}
+            empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : undefined}
+            renderDay={(day) => <DaySales day={day} filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />}
+          />
         </>
       )}
     </Gate>
   );
 }
 
-function AllSales() {
+export function AllSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
@@ -262,10 +283,8 @@ function AllSales() {
   useEffect(() => setProductId(''), [itemSearch]);
   const [open, setOpen] = useOpenSale(all ? 'all' : (branchId ?? ''));
   const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
-  const { query, items, fetching } = useSales(
-    { branchId: all ? undefined : (branchId ?? undefined), from, to, buyer: search.term, paymentMethod: method || undefined, productId },
-    (all || branchId !== null) && from <= to,
-  );
+  const groups = useOpenGroups(today);
+  const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
   return (
     <Gate screen="salesHistory" title="All sales">
       {open ? (
@@ -273,12 +292,12 @@ function AllSales() {
       ) : (
         <>
           <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-          <div className="rt-row">
+          <div className="rt-row" data-tour="sales-range">
             <div><label htmlFor="sales-from">From</label><input id="sales-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
             <div><label htmlFor="sales-to">To</label><input id="sales-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           </div>
           {from > to && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
-          <SearchBox id="sales-buyer" label="Buyer, phone or sale number" search={search} fetching={fetching} count={query.data ? items.length : undefined} more={query.hasNextPage} />
+          <SearchBox id="sales-buyer" label="Buyer, phone or sale number" search={search} fetching={false} count={undefined} />
           <label htmlFor="sales-method">Paid by</label>
           <select id="sales-method" value={method} onChange={(e) => setMethod(e.target.value as SalePayment | '')}>
             <option value="">Any way</option>
@@ -294,14 +313,11 @@ function AllSales() {
               </select>
             </>
           )}
-          {query.isPending && query.fetchStatus !== 'idle' && <p className="loading">Loading</p>}
-          <Problem error={query.error} />
-          {query.data && (
-            <SearchResults fetching={fetching}>
-              {items.length === 0 && search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : <SaleList items={items} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />}
-            </SearchResults>
-          )}
-          <More query={query} />
+          <SalesGrouped
+            rootLabel="All sales" filter={filter} range={{ from, to }} credit={false} enabled={(all || branchId !== null) && from <= to} groups={groups}
+            empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : undefined}
+            renderDay={(day) => <DaySales day={day} filter={filter} today={today} onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />}
+          />
         </>
       )}
     </Gate>
