@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The tenant settings group {@code retail.capabilities} (ADR-033, docs/specs/trade-capabilities.md
- * section 1): eight booleans, absent meaning off, and the profile {@code shop} or {@code trade}.
+ * section 1): eight booleans, absent meaning off, the profile {@code shop} or {@code trade}, and the policy
+ * {@code credit_sale_recognition} ({@code on_sale} by default, or {@code on_payment}; ADR-043).
  * A profile is a preset that writes a bundle of the flags in one change; the module reads the
  * flags and never the profile. The core stores the group and calls this class to validate it.
  */
@@ -20,6 +21,10 @@ import org.springframework.stereotype.Component;
 class RetailCapabilityGroup implements ModuleSettingsGroup {
 
     static final String PROFILE = "profile";
+    /** How credit sales count in the reports and the daily savings (ADR-043); {@code on_sale} is the default. */
+    static final String CREDIT_RECOGNITION = "credit_sale_recognition";
+
+    static final List<String> CREDIT_RECOGNITIONS = List.of("on_sale", "on_payment");
     static final List<String> CAPABILITIES = List.of(
             "branch_roles",
             "units",
@@ -47,13 +52,21 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
     public Map<String, Object> normalise(Map<String, Object> current, Map<String, Object> proposed) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put(PROFILE, current.get(PROFILE) instanceof String p && isProfile(p) ? p : "shop");
+        out.put(
+                CREDIT_RECOGNITION,
+                current.get(CREDIT_RECOGNITION) instanceof String c && CREDIT_RECOGNITIONS.contains(c) ? c : "on_sale");
         for (String key : CAPABILITIES) {
             out.put(key, Boolean.TRUE.equals(current.get(key)));
         }
         List<FieldProblem> problems = new ArrayList<>();
         proposed.forEach((key, value) -> {
-            if (!key.equals(PROFILE) && !CAPABILITIES.contains(key)) {
+            if (!key.equals(PROFILE) && !key.equals(CREDIT_RECOGNITION) && !CAPABILITIES.contains(key)) {
                 problems.add(new FieldProblem(key, "unknown", "Not a retail capability."));
+            } else if (key.equals(CREDIT_RECOGNITION)
+                    && !(value instanceof String c && CREDIT_RECOGNITIONS.contains(c))) {
+                problems.add(new FieldProblem(CREDIT_RECOGNITION, "invalid", "Use on_sale or on_payment."));
+            } else if (key.equals(CREDIT_RECOGNITION)) {
+                // valid: applied below
             } else if (key.equals(PROFILE) && !(value instanceof String p && isProfile(p))) {
                 problems.add(new FieldProblem(PROFILE, "invalid", "Use shop or trade."));
             } else if (!key.equals(PROFILE) && !(value instanceof Boolean)) {
@@ -62,6 +75,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         });
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
+        }
+        if (proposed.get(CREDIT_RECOGNITION) instanceof String recognition) {
+            out.put(CREDIT_RECOGNITION, recognition);
         }
         if (proposed.get(PROFILE) instanceof String profile) {
             out.put(PROFILE, profile);

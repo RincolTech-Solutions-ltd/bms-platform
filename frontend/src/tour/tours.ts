@@ -83,7 +83,8 @@ export const adminWelcome: Tour = {
   id: 'admin-welcome',
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
-  version: 6,
+  // Version 7 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
+  version: 7,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -187,6 +188,16 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'When a buyer pays what they owe',
       body: 'Open Credit sales and pick Still owing to see every debt, or open the day of the sale. Then tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
+    },
+    {
+      id: 'credit-counting',
+      route: '/staff/retail',
+      target: 'retail-tiles',
+      module: 'retail',
+      needs: ['retail.profit.read'],
+      optional: true,
+      title: 'When a credit sale counts as profit',
+      body: 'A credit sale can wait to count until the buyer pays. Then the home page shows Sold, Received and On credit apart. The daily savings use only the profit of money received. You choose this in Retail settings.',
     },
     {
       id: 'void-sale',
@@ -594,7 +605,8 @@ export const stocktakePage: Tour = {
 
 export const retailSettingsPage: Tour = {
   id: 'page-retail-settings',
-  version: 1,
+  // Version 2 adds the credit sale step (issue #340, ADR-043).
+  version: 2,
   title: 'This page: retail settings',
   audience: isTenantAdmin,
   autoStart: false,
@@ -617,6 +629,12 @@ export const retailSettingsPage: Tour = {
       target: 'retail-settings-save',
       title: 'Check, then save',
       body: 'Tap Review changes to read what will change. Nothing is saved until you tap Confirm.',
+    },
+    {
+      id: 'credit',
+      target: 'retail-credit-recognition',
+      title: 'When a credit sale counts',
+      body: 'Choose whether a credit sale counts as income and profit when it is made, or only when the buyer pays. Your daily savings follow this choice. You read the change before you confirm it.',
     },
   ],
 };

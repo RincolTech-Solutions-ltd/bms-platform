@@ -29,6 +29,14 @@ class DashboardRepository {
     record Position(UUID branchId, long atPrice, long atCost, int out, int low) {}
 
     List<DaySales> sales(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        return sales(branchIds, from, to, false);
+    }
+
+    /**
+     * As above; with {@code paidOnly} (credit sales counted when the buyer pays, ADR-043) a credit sale that is not an
+     * imported one is left out, with the lines its returns took back, since it reaches the figures through the payments.
+     */
+    List<DaySales> sales(List<UUID> branchIds, LocalDate from, LocalDate to, boolean paidOnly) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -45,6 +53,7 @@ class DashboardRepository {
                         + " count(DISTINCT s.id) AS sale_count"
                         + "  FROM " + SalesAnalysisRepository.NET_LINES
                         + " WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to" + branch
+                        + (paidOnly ? " AND (s.payment_method <> 'credit' OR s.historical)" : "")
                         + " GROUP BY s.branch_id, s.sale_date, (s.payment_method = 'credit')")
                 .params(params)
                 .query((rs, n) -> new DaySales(

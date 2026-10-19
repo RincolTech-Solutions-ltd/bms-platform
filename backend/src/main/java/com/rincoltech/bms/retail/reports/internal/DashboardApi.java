@@ -27,15 +27,35 @@ final class DashboardApi {
             @Schema(description = "Sales on credit, whether or not paid since")
             long creditMinor,
 
-            @Schema(description = PROFIT_ONLY + "; sales less the cost snapshots")
-            Long grossProfitMinor) {}
+            @Schema(
+                    description = PROFIT_ONLY
+                            + "; sales less the cost snapshots. With credit_sale_recognition on_payment: the profit of the"
+                            + " money received today, a part payment giving part of the sale's profit (ADR-043)")
+            Long grossProfitMinor,
+
+            @Schema(
+                    description =
+                            "Only with on_payment: money collected today for sales, paid at the sale or as a payment on a credit"
+                                    + " sale (Received). sales_minor is then Sold, everything sold today")
+            Long receivedMinor,
+
+            @Schema(
+                    description =
+                            "Only with on_payment: what buyers still owe on credit sales made on the system, all dates (On credit)")
+            Long onCreditMinor,
+
+            @Schema(description = "Only with on_payment: the number of credit sales still owing")
+            Integer onCreditCount) {}
 
     @Schema(name = "RetailDashboardDay")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Day(
             LocalDate date,
             long salesMinor,
-            @Schema(description = PROFIT_ONLY) Long grossProfitMinor) {}
+            @Schema(description = PROFIT_ONLY) Long grossProfitMinor,
+
+            @Schema(description = "Only with on_payment: money collected on the day (Received)")
+            Long receivedMinor) {}
 
     @Schema(name = "RetailDashboardStock")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -74,7 +94,12 @@ final class DashboardApi {
             Long stockAtCostMinor,
 
             @Schema(description = STOCK_ONLY) Integer outOfStock,
-            @Schema(description = STOCK_ONLY) Integer lowStock) {}
+            @Schema(description = STOCK_ONLY) Integer lowStock,
+
+            @Schema(
+                    description =
+                            "Only with on_payment, and with retail.sale.read in this branch: money collected today in this shop")
+            Long todayReceivedMinor) {}
 
     @Schema(name = "RetailDashboard")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -95,5 +120,17 @@ final class DashboardApi {
             @Schema(description = PROFIT_ONLY) Long last7GrossProfitMinor,
             @Schema(description = PROFIT_ONLY) Long last30GrossProfitMinor,
             @Schema(description = STOCK_ONLY) Stock stock,
-            List<Shop> shops) {}
+            List<Shop> shops,
+
+            @Schema(
+                    allowableValues = {"on_sale", "on_payment"},
+                    description =
+                            "How credit sales are counted (ADR-043): on_sale when they are made, on_payment when the buyer pays")
+            String creditSaleRecognition,
+
+            @Schema(description = "Only with on_payment: money collected in the last 7 days")
+            Long last7ReceivedMinor,
+
+            @Schema(description = "Only with on_payment: money collected in the last 30 days")
+            Long last30ReceivedMinor) {}
 }

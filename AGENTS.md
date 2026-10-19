@@ -303,6 +303,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   header, the current month open by day, a day's sales loaded only when it opens (`sales-grouped.tsx`, `sales-grouped-state.ts`,
   `docs/specs/retail-ui-notes.md`), with the Help tours `page-sales` and `page-credit-sales`.
 - **Built (retail sale actions, issues #326, #327 and #330, frontend only):** no migration, permission or route. An opened sale and the Credit sales and All sales lists take **Record payment** and **Mark as fully paid** on a live credit sale that still owes (`POST /retail/sales/{id}/payments` with an `Idempotency-Key` kept by `usePersistedDraft`; amount defaults to the balance, cash, mobile money or bank, a date from the sale to today; shown to a holder of `retail.sale.create` at the sale's branch; an imported sale shows a note instead, which only the screen enforces for now; the payments route does not check `historical`), and an opened completed sale takes **Void this sale** (`POST /retail/sales/{id}/void`, a reason of five characters, a plain warning that stock goes back and reports drop it; shown to a holder of `retail.sale.void` at the branch; the sale then reads Voided with its reason). The forms are in `sale-actions.tsx` and their rules in `sale-actions-state.ts`; the home cards, stock list and stock value say Price and Cost, cost first. Notes: `docs/specs/retail-ui-notes.md` (Sale actions).
+- **Built (credit sale recognition, issue #340, ADR-043):** slice 1, no migration. The tenant setting `credit_sale_recognition` in the group `retail.capabilities` (`on_sale`, the default and today's behaviour, or `on_payment`, the owner's rule), changed with `PUT /retail/settings/capabilities` and shown in Retail settings in plain words. Under `on_payment` a credit sale is Sold and On credit, and counts as Received and as profit only as the buyer pays, a part payment giving part of the profit by the sale's margin (`ProfitFigures`, `CreditRecognition`): the daily profit report, the home cards and the cash book's daily savings (half of the received profit per shop per day) read the same figures; stock and the ledger are unchanged; imported credit sales stay outside the rule. `/retail/sales/summary` is not changed here (issue #341). The write-off of a buyer who never pays is slice 2.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -585,6 +586,9 @@ Accepted (this list is the ADR index):
   no secret), the cosign key lives only in the Keychain and a launchd signer (cosign v2.4.1) signs the digests a
   main run logged; the staging pointer waits for the signatures (hosted minutes are not used and the budget is
   not raised; proposed, #296; `deploy/runner/`, `deploy/signer/`)
+
+- ADR-043 Credit sales count when the buyer pays (a per-tenant setting, `on_sale` by default), and a write-off for buyers who
+  never pay (proposed, #340; amends ADR-022 decision 11 for a tenant that chooses `on_payment`)
 
 Pending (cite only as "pending ADR-NNN"):
 

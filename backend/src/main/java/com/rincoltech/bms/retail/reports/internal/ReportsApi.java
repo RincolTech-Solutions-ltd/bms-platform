@@ -122,7 +122,15 @@ final class ReportsApi {
             long grossProfitMinor,
             long usageCostMinor,
             @Schema(description = DIFFERENCE) long stocktakeDifferenceMinor,
-            long profitMinor) {}
+            long profitMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only when credit_sale_recognition is on_payment: everything sold on the day, credit"
+                                    + " sales included (Sold). Then sales_minor is Received, the money collected for sales,"
+                                    + " and the profit columns are the profit of the money received (ADR-043)")
+            Long soldMinor) {}
 
     @Schema(name = "RetailDailyProfit")
     record DailyProfit(
@@ -134,5 +142,24 @@ final class ReportsApi {
             long costOfSalesMinor,
             long usageCostMinor,
             @Schema(description = DIFFERENCE) long stocktakeDifferenceMinor,
-            long profitMinor) {}
+            long profitMinor,
+
+            @Schema(
+                    allowableValues = {"on_sale", "on_payment"},
+                    description =
+                            "How credit sales were counted (ADR-043): on_sale when they are made, on_payment when the buyer pays")
+            String creditSaleRecognition,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only with on_payment: everything sold in the period, credit sales included (Sold)")
+            Long soldMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit);"
+                                    + " not part of the period")
+            Long onCreditMinor) {}
 }

@@ -52,6 +52,13 @@ class CapabilitiesController {
             boolean transferReceipt,
             boolean returns,
 
+            @Schema(
+                    allowableValues = {"on_sale", "on_payment"},
+                    description =
+                            "How credit sales count in the reports, the dashboard and the daily savings (ADR-043):"
+                                    + " on_sale (the default) counts them when they are made, on_payment only when the buyer pays")
+            String creditSaleRecognition,
+
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
@@ -70,7 +77,10 @@ class CapabilitiesController {
             Boolean documents,
             Boolean purchasing,
             Boolean transferReceipt,
-            Boolean returns) {}
+            Boolean returns,
+
+            @Schema(allowableValues = {"on_sale", "on_payment"})
+            String creditSaleRecognition) {}
 
     @GetMapping
     @RequiresPermission("core.settings.manage")
@@ -97,6 +107,7 @@ class CapabilitiesController {
         put(proposed, "purchasing", r.purchasing());
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
+        put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
         transfers.guardSwitchOff(proposed);
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
         return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);
@@ -120,6 +131,7 @@ class CapabilitiesController {
                 flag(g, "purchasing"),
                 flag(g, "transfer_receipt"),
                 flag(g, "returns"),
+                g.get(RetailCapabilities.CREDIT_RECOGNITION) instanceof String c ? c : RetailCapabilities.ON_SALE,
                 threshold > 0 ? threshold : null);
     }
 

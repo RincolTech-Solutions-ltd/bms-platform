@@ -7981,6 +7981,11 @@ export interface components {
         };
         RetailCapabilities: {
             branch_roles?: boolean;
+            /**
+             * @description How credit sales count in the reports, the dashboard and the daily savings (ADR-043): on_sale (the default) counts them when they are made, on_payment only when the buyer pays
+             * @enum {string}
+             */
+            credit_sale_recognition?: "on_sale" | "on_payment";
             customer_accounts?: boolean;
             documents?: boolean;
             price_lists?: boolean;
@@ -8498,14 +8503,29 @@ export interface components {
         RetailDailyProfit: {
             /** Format: int64 */
             cost_of_sales_minor?: number;
+            /**
+             * @description How credit sales were counted (ADR-043): on_sale when they are made, on_payment when the buyer pays
+             * @enum {string}
+             */
+            credit_sale_recognition?: "on_sale" | "on_payment";
             currency?: string;
             /** Format: date */
             from?: string;
+            /**
+             * Format: int64
+             * @description Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit); not part of the period
+             */
+            on_credit_minor?: number;
             /** Format: int64 */
             profit_minor?: number;
             rows?: components["schemas"]["RetailDailyProfitRow"][];
             /** Format: int64 */
             sales_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with on_payment: everything sold in the period, credit sales included (Sold)
+             */
+            sold_minor?: number;
             /**
              * Format: int64
              * @description Committed stock-take differences at cost: negative for a loss, positive for a gain; included in profit_minor
@@ -8531,6 +8551,11 @@ export interface components {
             sales_minor?: number;
             /**
              * Format: int64
+             * @description Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is Received, the money collected for sales, and the profit columns are the profit of the money received (ADR-043)
+             */
+            sold_minor?: number;
+            /**
+             * Format: int64
              * @description Committed stock-take differences at cost: negative for a loss, positive for a gain; included in profit_minor
              */
             stocktake_difference_minor?: number;
@@ -8538,6 +8563,11 @@ export interface components {
             usage_cost_minor?: number;
         };
         RetailDashboard: {
+            /**
+             * @description How credit sales are counted (ADR-043): on_sale when they are made, on_payment when the buyer pays
+             * @enum {string}
+             */
+            credit_sale_recognition?: "on_sale" | "on_payment";
             currency?: string;
             /** Format: date */
             date?: string;
@@ -8548,6 +8578,11 @@ export interface components {
              * @description Present only with retail.profit.read in every branch the report covers
              */
             last30_gross_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Only with on_payment: money collected in the last 30 days
+             */
+            last30_received_minor?: number;
             /** Format: int64 */
             last30_sales_minor?: number;
             /**
@@ -8555,6 +8590,11 @@ export interface components {
              * @description Present only with retail.profit.read in every branch the report covers
              */
             last7_gross_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Only with on_payment: money collected in the last 7 days
+             */
+            last7_received_minor?: number;
             /** Format: int64 */
             last7_sales_minor?: number;
             /** @description True when profit figures are included */
@@ -8572,6 +8612,11 @@ export interface components {
              * @description Present only with retail.profit.read in every branch the report covers
              */
             gross_profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Only with on_payment: money collected on the day (Received)
+             */
+            received_minor?: number;
             /** Format: int64 */
             sales_minor?: number;
         };
@@ -8615,6 +8660,11 @@ export interface components {
             today_gross_profit_minor?: number;
             /**
              * Format: int64
+             * @description Only with on_payment, and with retail.sale.read in this branch: money collected today in this shop
+             */
+            today_received_minor?: number;
+            /**
+             * Format: int64
              * @description Present only with retail.sale.read in this branch
              */
             today_sales_minor?: number;
@@ -8653,9 +8703,24 @@ export interface components {
             credit_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots
+             * @description Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots. With credit_sale_recognition on_payment: the profit of the money received today, a part payment giving part of the sale's profit (ADR-043)
              */
             gross_profit_minor?: number;
+            /**
+             * Format: int32
+             * @description Only with on_payment: the number of credit sales still owing
+             */
+            on_credit_count?: number;
+            /**
+             * Format: int64
+             * @description Only with on_payment: what buyers still owe on credit sales made on the system, all dates (On credit)
+             */
+            on_credit_minor?: number;
+            /**
+             * Format: int64
+             * @description Only with on_payment: money collected today for sales, paid at the sale or as a payment on a credit sale (Received). sales_minor is then Sold, everything sold today
+             */
+            received_minor?: number;
             /** Format: int64 */
             sale_count?: number;
             /** Format: int64 */
@@ -13029,6 +13094,8 @@ export interface components {
         };
         UpdateRetailCapabilitiesRequest: {
             branch_roles?: boolean;
+            /** @enum {string} */
+            credit_sale_recognition?: "on_sale" | "on_payment";
             customer_accounts?: boolean;
             documents?: boolean;
             price_lists?: boolean;

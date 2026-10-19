@@ -6612,6 +6612,11 @@
           "branch_roles" : {
             "type" : "boolean"
           },
+          "credit_sale_recognition" : {
+            "description" : "How credit sales count in the reports, the dashboard and the daily savings (ADR-043): on_sale (the default) counts them when they are made, on_payment only when the buyer pays",
+            "enum" : [ "on_sale", "on_payment" ],
+            "type" : "string"
+          },
           "customer_accounts" : {
             "type" : "boolean"
           },
@@ -7607,12 +7612,22 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "credit_sale_recognition" : {
+            "description" : "How credit sales were counted (ADR-043): on_sale when they are made, on_payment when the buyer pays",
+            "enum" : [ "on_sale", "on_payment" ],
+            "type" : "string"
+          },
           "currency" : {
             "type" : "string"
           },
           "from" : {
             "format" : "date",
             "type" : "string"
+          },
+          "on_credit_minor" : {
+            "description" : "Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit); not part of the period",
+            "format" : "int64",
+            "type" : "integer"
           },
           "profit_minor" : {
             "format" : "int64",
@@ -7625,6 +7640,11 @@
             "type" : "array"
           },
           "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sold_minor" : {
+            "description" : "Present only with on_payment: everything sold in the period, credit sales included (Sold)",
             "format" : "int64",
             "type" : "integer"
           },
@@ -7669,6 +7689,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "sold_minor" : {
+            "description" : "Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is Received, the money collected for sales, and the profit columns are the profit of the money received (ADR-043)",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "stocktake_difference_minor" : {
             "description" : "Committed stock-take differences at cost: negative for a loss, positive for a gain; included in profit_minor",
             "format" : "int64",
@@ -7682,6 +7707,11 @@
       },
       "RetailDashboard" : {
         "properties" : {
+          "credit_sale_recognition" : {
+            "description" : "How credit sales are counted (ADR-043): on_sale when they are made, on_payment when the buyer pays",
+            "enum" : [ "on_sale", "on_payment" ],
+            "type" : "string"
+          },
           "currency" : {
             "type" : "string"
           },
@@ -7701,12 +7731,22 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "last30_received_minor" : {
+            "description" : "Only with on_payment: money collected in the last 30 days",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "last30_sales_minor" : {
             "format" : "int64",
             "type" : "integer"
           },
           "last7_gross_profit_minor" : {
             "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last7_received_minor" : {
+            "description" : "Only with on_payment: money collected in the last 7 days",
             "format" : "int64",
             "type" : "integer"
           },
@@ -7741,6 +7781,11 @@
           },
           "gross_profit_minor" : {
             "description" : "Present only with retail.profit.read in every branch the report covers",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "received_minor" : {
+            "description" : "Only with on_payment: money collected on the day (Received)",
             "format" : "int64",
             "type" : "integer"
           },
@@ -7791,6 +7836,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "today_received_minor" : {
+            "description" : "Only with on_payment, and with retail.sale.read in this branch: money collected today in this shop",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "today_sales_minor" : {
             "description" : "Present only with retail.sale.read in this branch",
             "format" : "int64",
@@ -7838,7 +7888,22 @@
             "type" : "integer"
           },
           "gross_profit_minor" : {
-            "description" : "Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots",
+            "description" : "Present only with retail.profit.read in every branch the report covers; sales less the cost snapshots. With credit_sale_recognition on_payment: the profit of the money received today, a part payment giving part of the sale's profit (ADR-043)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "on_credit_count" : {
+            "description" : "Only with on_payment: the number of credit sales still owing",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "on_credit_minor" : {
+            "description" : "Only with on_payment: what buyers still owe on credit sales made on the system, all dates (On credit)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "received_minor" : {
+            "description" : "Only with on_payment: money collected today for sales, paid at the sale or as a payment on a credit sale (Received). sales_minor is then Sold, everything sold today",
             "format" : "int64",
             "type" : "integer"
           },
@@ -16663,6 +16728,10 @@
         "properties" : {
           "branch_roles" : {
             "type" : "boolean"
+          },
+          "credit_sale_recognition" : {
+            "enum" : [ "on_sale", "on_payment" ],
+            "type" : "string"
           },
           "customer_accounts" : {
             "type" : "boolean"

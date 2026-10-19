@@ -16,6 +16,7 @@ import com.rincoltech.bms.retail.reports.internal.ReportsApi.ValuationRow;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.DayFigures;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.Holding;
 import com.rincoltech.bms.retail.stock.Quantities;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -40,12 +41,22 @@ class ReportsService {
     static final int MAX_DAYS = 366;
 
     private final ReportsRepository repo;
+    private final ProfitFigures profitFigures;
+    private final CreditRecognitionRepository credit;
     private final LedgerAccounts accounts;
     private final CurrentTenant tenant;
     private final BusinessClock clock;
 
-    ReportsService(ReportsRepository repo, LedgerAccounts accounts, CurrentTenant tenant, BusinessClock clock) {
+    ReportsService(
+            ReportsRepository repo,
+            ProfitFigures profitFigures,
+            CreditRecognitionRepository credit,
+            LedgerAccounts accounts,
+            CurrentTenant tenant,
+            BusinessClock clock) {
         this.repo = repo;
+        this.profitFigures = profitFigures;
+        this.credit = credit;
         this.accounts = accounts;
         this.tenant = tenant;
         this.clock = clock;
@@ -212,11 +223,22 @@ class ReportsService {
         Map<String, long[]> days = new java.util.TreeMap<>();
         Map<String, UUID> branchOf = new LinkedHashMap<>();
         Map<String, LocalDate> dateOf = new LinkedHashMap<>();
-        for (DayFigures d : repo.daily(filter, start, end)) {
+        // ADR-043: with credit sales counted when the buyer pays, the figures are the money received, and Sold
+        // (everything
+        // sold, credit included) comes beside them.
+        boolean onPayment = profitFigures.onPayment();
+        Map<String, Long> sold = new java.util.TreeMap<>();
+        for (DayFigures d : profitFigures.daily(filter, start, end)) {
             long[] f = figures(days, branchOf, dateOf, d.branchId(), d.date());
             f[0] = d.sales();
             f[1] = d.costOfSales();
             f[2] = d.usageCost();
+        }
+        if (onPayment) {
+            for (DayFigures d : repo.daily(filter, start, end)) {
+                figures(days, branchOf, dateOf, d.branchId(), d.date());
+                sold.put(d.date() + "|" + d.branchId(), d.sales());
+            }
         }
         for (ReportsRepository.Difference d : repo.stocktakeDifferences(filter, start, end)) {
             long[] f = figures(days, branchOf, dateOf, d.branchId(), d.date());
@@ -228,6 +250,7 @@ class ReportsService {
         long costOfSales = 0;
         long usage = 0;
         long difference = 0;
+        long soldTotal = 0;
         for (Map.Entry<String, long[]> e : days.entrySet()) {
             long[] f = e.getValue();
             long gross = Math.subtractExact(f[0], f[1]);
@@ -239,7 +262,9 @@ class ReportsService {
                     gross,
                     f[2],
                     f[3],
-                    Math.addExact(Math.subtractExact(gross, f[2]), f[3])));
+                    Math.addExact(Math.subtractExact(gross, f[2]), f[3]),
+                    onPayment ? sold.getOrDefault(e.getKey(), 0L) : null));
+            soldTotal = Math.addExact(soldTotal, sold.getOrDefault(e.getKey(), 0L));
             sales = Math.addExact(sales, f[0]);
             costOfSales = Math.addExact(costOfSales, f[1]);
             usage = Math.addExact(usage, f[2]);
@@ -254,7 +279,10 @@ class ReportsService {
                 costOfSales,
                 usage,
                 difference,
-                Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference));
+                Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference),
+                onPayment ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
+                onPayment ? soldTotal : null,
+                onPayment ? credit.onCredit(filter)[0] : null);
     }
 
     /** One row of sales, cost of sales, usage and stock-take difference per day then branch (hex order, as the database sorts uuids). */

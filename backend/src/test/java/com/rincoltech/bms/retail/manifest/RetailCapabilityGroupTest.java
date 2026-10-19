@@ -61,4 +61,36 @@ class RetailCapabilityGroupTest {
         assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("profile", "wholesale")))
                 .isInstanceOf(ApiException.class);
     }
+
+    @Test
+    void creditSaleRecognitionDefaultsToOnSaleSoNothingChangesForAnyTenant() {
+        Map<String, Object> g = group.normalise(Map.of(), Map.of());
+
+        assertThat(g.get("credit_sale_recognition")).isEqualTo("on_sale");
+        assertThat(group.enabledCapabilities(g)).doesNotContain("credit_sale_recognition");
+        // A group saved before the setting existed reads on_sale too.
+        assertThat(group.normalise(Map.of("profile", "trade", "returns", true), Map.of())
+                        .get("credit_sale_recognition"))
+                .isEqualTo("on_sale");
+    }
+
+    @Test
+    void creditSaleRecognitionTakesOnlyTheTwoValuesAndSurvivesProfileAndFlagChanges() {
+        Map<String, Object> on = group.normalise(Map.of(), Map.of("credit_sale_recognition", "on_payment"));
+
+        assertThat(on.get("credit_sale_recognition")).isEqualTo("on_payment");
+        assertThat(group.normalise(on, Map.of("profile", "trade")).get("credit_sale_recognition"))
+                .isEqualTo("on_payment");
+        assertThat(group.normalise(on, Map.of("profile", "shop")).get("credit_sale_recognition"))
+                .isEqualTo("on_payment");
+        assertThat(group.normalise(on, Map.of("returns", true)).get("credit_sale_recognition"))
+                .isEqualTo("on_payment");
+        assertThat(group.normalise(on, Map.of("credit_sale_recognition", "on_sale"))
+                        .get("credit_sale_recognition"))
+                .isEqualTo("on_sale");
+        assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("credit_sale_recognition", "later")))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("credit_sale_recognition", true)))
+                .isInstanceOf(ApiException.class);
+    }
 }

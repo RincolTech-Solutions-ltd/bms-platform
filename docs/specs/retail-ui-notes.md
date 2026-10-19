@@ -415,6 +415,12 @@ The administrator's two screens for the trade capabilities, and the rule every c
   capability on, after the first-run tour; a dismissal is for good and a new version shows once more. The Retail
   settings page has a page tour in Help. Built: the branch roles tour.
 
+## Credit sales: when they count (#340, ADR-043)
+
+- **Retail settings** gains one question under the features: "When does a credit sale count as income and profit?", two plain choices (When the sale is made, today's way and the default; When the buyer pays). A different choice is read back in words and confirmed before it is saved; the server audits it. The page tour has a step for it.
+- **Home cards** under "When the buyer pays": Sales today (everything sold, credit included, with the count), Cash and mobile money (money received today, payments on earlier credit sales included), On credit (what buyers still owe and how many sales, with a hint that it is not profit) and Profit today (from the money received). The 7 and 30 day tiles keep Sold and add Received. With the default the cards are exactly as before.
+- **Daily profit** under "When the buyer pays": Sales becomes Received, Sold is a column and a headline figure beside it, On credit now is a headline figure, and the profit line says it is from money received. The savings screens read the same profit.
+
 ## Trade screens (#193, ADR-033)
 
 Two screens and a changed one, all behind a tenant capability that `/me` lists as `module_capabilities.retail`;

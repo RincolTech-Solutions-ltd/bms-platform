@@ -95,6 +95,21 @@ class ReportsRepository {
      * supplier invoice or credit note is not in this report, as it never was.
      */
     List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        return daily(branchIds, from, to, false);
+    }
+
+    /**
+     * The same figures; with {@code received} (credit sales counted when the buyer pays, ADR-043) a credit sale that is
+     * not an imported one leaves the sales leg and the sales and cost of its returns, since its sales and cost reach the
+     * report through {@link CreditRecognition} on the days the money comes in. What a return writes off as damaged stays
+     * a usage cost on the day of the return: the goods are lost whether or not the buyer paid.
+     */
+    List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to, boolean received) {
+        String deferredSale = received ? " AND (s.payment_method <> 'credit' OR s.historical)" : "";
+        String deferredReturn = received
+                ? "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
+                        + " AND rs.payment_method = 'credit' AND NOT rs.historical) "
+                : "false ";
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("from", Date.valueOf(from));
         params.put("to", Date.valueOf(to));
@@ -119,14 +134,19 @@ class ReportsRepository {
                             SELECT s.branch_id, s.sale_date AS day, l.line_total_minor AS sales,
                                    l.line_cost_minor AS cost, 0 AS usage
                               FROM retail_sale_lines l JOIN retail_sales s ON s.id = l.sale_id
-                             WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to""" + salesFilter + """
+                             WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to""" + deferredSale + salesFilter + """
 
                             UNION ALL
                             SELECT branch_id, occurred_on, 0, 0, cost_total_minor FROM retail_usage_reports
                              WHERE occurred_on BETWEEN :from AND :to""" + usageFilter + """
 
                             UNION ALL
-                            SELECT r.branch_id, r.returned_on, -r.total_minor, -r.cost_minor,
+                            SELECT r.branch_id, r.returned_on,
+                                   CASE WHEN """ + deferredReturn + """
+ THEN 0 ELSE -r.total_minor END,
+                                   CASE WHEN """
+                        + deferredReturn + """
+ THEN 0 ELSE -r.cost_minor END,
                                    coalesce((SELECT sum(l.line_cost_minor) FROM retail_sale_return_lines l
                                               WHERE l.return_id = r.id AND l.disposition = 'write_off'), 0)
                               FROM retail_sale_returns r

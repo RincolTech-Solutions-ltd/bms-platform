@@ -27,6 +27,14 @@ public class RetailCapabilities {
     public static final String PURCHASING = "purchasing";
     private static final String MODULE = "retail";
 
+    /** Credit sales count when they are made: the behaviour before ADR-043 and the default. */
+    public static final String ON_SALE = "on_sale";
+
+    /** Credit sales count as sales, cash and profit only when the buyer pays (ADR-043). */
+    public static final String ON_PAYMENT = "on_payment";
+
+    public static final String CREDIT_RECOGNITION = "credit_sale_recognition";
+
     private final ModuleSettings settings;
 
     RetailCapabilities(ModuleSettings settings) {
@@ -35,6 +43,16 @@ public class RetailCapabilities {
 
     public boolean enabled(String capability) {
         return Boolean.TRUE.equals(settings.group(MODULE).get(capability));
+    }
+
+    /** The tenant's credit sale recognition, {@link #ON_SALE} unless the owner chose {@link #ON_PAYMENT} (ADR-043). */
+    public String creditRecognition() {
+        return ON_PAYMENT.equals(settings.group(MODULE).get(CREDIT_RECOGNITION)) ? ON_PAYMENT : ON_SALE;
+    }
+
+    /** True when credit sales are reported as received money only (ADR-043). */
+    public boolean recognisesOnPayment() {
+        return ON_PAYMENT.equals(creditRecognition());
     }
 
     /** 404 {@code capability_not_enabled} for a route of a capability that is off. */

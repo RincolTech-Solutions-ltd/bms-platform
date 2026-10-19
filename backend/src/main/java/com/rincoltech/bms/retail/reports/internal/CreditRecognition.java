@@ -1,0 +1,109 @@
+package com.rincoltech.bms.retail.reports.internal;
+
+import com.rincoltech.bms.retail.reports.internal.ReportsRepository.DayFigures;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * The recognised sales and cost of credit sales under the tenant setting {@code credit_sale_recognition = on_payment}
+ * (ADR-043). A credit sale counts only as the buyer pays, and a part payment counts a part of the sale's profit.
+ *
+ * <p>For one sale and the end of a day, with {@code total} and {@code cost} from the sale, {@code returned} and
+ * {@code returnedCost} the value and cost of the returns that stand, {@code refunded} the money given back on them and
+ * {@code paid} the payments received less the payments reversed:
+ *
+ * <pre>
+ *   net      = total - returned                     what the sale is worth now
+ *   kept     = paid - refunded                      money the shop keeps for it
+ *   revenue  = min(net, kept), at least 0           received
+ *   cost     = round_half_up(revenue * (cost - returnedCost) / net)
+ *   profit   = revenue - cost
+ * </pre>
+ *
+ * Each of the two figures is cumulative, and the figure of a day is the change since the sale's last earlier event, so
+ * the days add up exactly to the whole and an early payment is never recounted. With no return this is the payment times
+ * the sale's profit margin. Only integers: the one division is rounded half up once on the cumulative amount.
+ */
+final class CreditRecognition {
+
+    private CreditRecognition() {}
+
+    /** One day of one credit sale: the sums of what happened on it (see {@code ReportsRepository}'s event query). */
+    record Event(
+            UUID saleId,
+            UUID branchId,
+            long totalMinor,
+            long costMinor,
+            LocalDate day,
+            long paidMinor,
+            long returnedMinor,
+            long returnedCostMinor,
+            long refundedMinor) {}
+
+    /** The cumulative figures of one sale at the end of a day. */
+    record State(long revenue, long cost) {}
+
+    static State state(long total, long cost, long paid, long returned, long returnedCost, long refunded) {
+        long net = total - returned;
+        long kept = paid - refunded;
+        long revenue = Math.max(0, Math.min(net, kept));
+        long remainingCost = Math.max(0, cost - returnedCost);
+        long recognisedCost = net <= 0 || revenue == 0
+                ? 0
+                : BigDecimal.valueOf(revenue)
+                        .multiply(BigDecimal.valueOf(remainingCost))
+                        .divide(BigDecimal.valueOf(net), 0, RoundingMode.HALF_UP)
+                        .longValueExact();
+        return new State(revenue, recognisedCost);
+    }
+
+    /**
+     * The change of each sale's figures on each day of the window, summed per branch and day, as report figures (sales =
+     * received, cost of sales = its cost, usage 0). {@code events} must be ordered by sale then day, as the query returns
+     * them and hold every event up to the end of the window.
+     */
+    static List<DayFigures> deltas(List<Event> events, LocalDate from, LocalDate to) {
+        Map<String, long[]> out = new LinkedHashMap<>();
+        Map<String, UUID> branchOf = new LinkedHashMap<>();
+        Map<String, LocalDate> dayOf = new LinkedHashMap<>();
+        UUID current = null;
+        long paid = 0;
+        long returned = 0;
+        long returnedCost = 0;
+        long refunded = 0;
+        State before = new State(0, 0);
+        for (Event e : events) {
+            if (!e.saleId().equals(current)) {
+                current = e.saleId();
+                paid = 0;
+                returned = 0;
+                returnedCost = 0;
+                refunded = 0;
+                before = new State(0, 0);
+            }
+            paid = Math.addExact(paid, e.paidMinor());
+            returned = Math.addExact(returned, e.returnedMinor());
+            returnedCost = Math.addExact(returnedCost, e.returnedCostMinor());
+            refunded = Math.addExact(refunded, e.refundedMinor());
+            State after = state(e.totalMinor(), e.costMinor(), paid, returned, returnedCost, refunded);
+            if (!e.day().isBefore(from) && !e.day().isAfter(to)) {
+                String key = e.day() + "|" + e.branchId();
+                branchOf.putIfAbsent(key, e.branchId());
+                dayOf.putIfAbsent(key, e.day());
+                long[] f = out.computeIfAbsent(key, k -> new long[2]);
+                f[0] = Math.addExact(f[0], after.revenue() - before.revenue());
+                f[1] = Math.addExact(f[1], after.cost() - before.cost());
+            }
+            before = after;
+        }
+        List<DayFigures> rows = new ArrayList<>();
+        out.forEach((key, f) -> rows.add(new DayFigures(branchOf.get(key), dayOf.get(key), f[0], f[1], 0)));
+        return rows;
+    }
+}

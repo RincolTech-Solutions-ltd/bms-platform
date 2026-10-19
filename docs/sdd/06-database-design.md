@@ -2117,6 +2117,7 @@ For a branch and a business date, in the tenant's zone:
   remainder is reported as `other_movements_minor`. Imported days have no journals, so they carry
   `ledger_basis: false` and no opening or closing.
 - **Savings suggestion** = daily profit (section 6.11.3) times `retail.cashbook.savings_rate_bp`
+  Under the tenant setting `credit_sale_recognition` `on_payment` (settings group `retail.capabilities`, ADR-043, FR-RET-42) the daily profit is the profit of the money received: the sales leg leaves credit sales that are not imported, the sales and cost of their returns leave with them, and `CreditRecognition` adds, per credit sale and day, the change in `min(total - returned, payments - reversals - refunds)` with its half-up share of the remaining cost, from `retail_sale_payments`, the reversal of `retail_account_payments` and `retail_sale_returns`. No table or column is added for this; the default `on_sale` reads exactly as before.
   (tenant setting, default 5000), rounded half up per branch and day.
 
 Tenant settings added (chapter 6 `tenant_settings`, default if unset): `retail.cashbook.savings_rate_bp`

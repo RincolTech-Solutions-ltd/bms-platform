@@ -155,7 +155,7 @@ registers into through its manifest at startup:
 | Registry (core) | What the vertical registers | Example |
 |---|---|---|
 | Module manifest | Module key, routers, permissions, default chart of accounts entries, notification templates | `lending` |
-| Module settings group | A tenant settings group the core stores as opaque jsonb, validates through the vertical and lists in `/me` (ADR-033; built: `retail.capabilities`, supplied by `retail.manifest`) | Retail capability flags |
+| Module settings group | A tenant settings group the core stores as opaque jsonb, validates through the vertical and lists in `/me` (ADR-033; built: `retail.capabilities`, supplied by `retail.manifest`, which also carries the policy `credit_sale_recognition`, ADR-043: `retail.reports` reads it through `RetailCapabilities` and `ProfitFigures` decides the basis of the profit figures for the daily profit report, the dashboard and the cash book's daily savings, so they cannot disagree) | Retail capability flags |
 | Approval actions | One `ApprovalAction` bean per action type it owns (ADR-015) | `loan_disbursement` executes the disbursement |
 | Branch deactivation guards | Whether a branch still has open accounts of the module | Loans, savings, investments |
 | Import templates | Parser, classifier, normaliser, committer | `pilot_loan_register_v1` |
