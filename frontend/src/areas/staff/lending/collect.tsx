@@ -35,6 +35,8 @@ export function CollectPanel({ loan, schedule }: { loan: Loan; schedule: LoanSch
   const start = useMutation({
     mutationFn: () => payments.startLoanRepayment(loanId, amountMinor ?? 0, draft.phone.trim(), key),
     onSuccess: (made) => {
+      // The payer's number is not kept in the tab once the link exists; the intent holds it masked.
+      finish();
       setIntent(made);
     },
   });

@@ -449,16 +449,19 @@ Additive; nothing above is rewritten.
     transaction. Partial and larger payments follow spec 3.7: what was paid is booked, and the excess on a settled loan is the loan's
     credit balance (R-ALLOC step 4).
 31. **Refusals never strand money, as built.** The booker retries `before_last_repayment` once dated today. Any other business refusal
-    (a closed loan, `value_date_in_future`, `payment_method_unmapped`, a currency the loan does not hold) rolls the handler's
+    (a closed or written-off loan, `value_date_in_future`, `payment_method_unmapped`, `duplicate_reference`, a loan currency other than the payment's) rolls the handler's
     savepoint back, then in the same transaction posts the confirmed amount debit `gateway_clearing` (by system key, so an unmapped
     method cannot block it) credit `unallocated_receipts`, inserts the `unallocated_receipts` row (migration V59), stores the refusal code
     and ends the intent `booked_unallocated`, audited with the receipt id and the merchant. It is dated the payment's day, or today when
-    that period is closed. A failure of that posting is a technical failure (retried, five in a row end `needs_attention`), never a
+    that period is closed; the debit is the account the `gateway` method is mapped to at the branch, `gateway_clearing` only when it is unmapped. A `period_closed` refusal is retried once dated today, like
+    `before_last_repayment`. Idempotency is by loan and amount: the same confirmation code for another loan or amount is `duplicate_reference`, never a replay. Staff cannot reverse a gateway
+    repayment (`gateway_reversal_pending`) until #224. The branch permission is checked before the handler describes the loan. A failure of that posting is a technical failure (retried, five in a row end `needs_attention`), never a
     lost payment. Allocating or refunding a receipt (FR-PAY-04) is a later slice; the table is append-only until then.
 32. **Duplicates.** One booking per intent (row lock and status check, as before) and one repayment per confirmation code (the port's
     idempotency and the unique index), so a replayed notification, a poll that finds the same completed order and a retry after a lost
     answer end in one repayment. A payment that completes after the link expired books normally and is flagged `late`.
 33. **Not built here.** The per-tenant non-login system user is created by the slice that first needs it, the reversal request of a
     booked payment (#224), since nothing in this slice acts as it; the audit actor of a booking stays the intent's initiator (spec 3.4). A
-    payment in another currency than the intent's still ends `needs_attention` (decision 4); posting it to unallocated receipts needs
+    payment in another currency than the intent's still ends `needs_attention` (decision 4; decision 31 concerns the loan's currency, which the handler refuses, and the
+    posting throws if the payment's currency is not the accounts' own); posting it to unallocated receipts needs
     the status checker to hand over a row that is not `paid` and is left to the slice that builds the allocation screen.

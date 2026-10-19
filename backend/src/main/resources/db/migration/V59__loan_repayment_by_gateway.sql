@@ -5,9 +5,9 @@
 -- Expand only, safe on a populated database. Three things and nothing else:
 --
 --   1. `lending_loan_transactions.payment_method_key` accepts `gateway` (the payment method of a repayment the payments
---      module booked, mapped to a ledger account by the tenant, FR-GL-08). The old check is replaced by one that adds a
---      value, added NOT VALID and then validated, so the validation scan holds only a SHARE UPDATE EXCLUSIVE lock and
---      writes continue. Every existing row satisfies the new check because it is a superset of the old one.
+--      module booked, mapped to a ledger account by the tenant, FR-GL-08). The old check is replaced by a superset, so
+--      every existing row satisfies it. It is added NOT VALID and validated in the same transaction: that gains no lock
+--      relief (Flyway holds the ACCESS EXCLUSIVE lock to the commit) and is kept only so the validation is explicit.
 --   2. A unique index over (tenant, payment method, external reference) for the method `gateway`, so a confirmation code
 --      books one repayment however many times it is presented (spec 3.4.1). It is partial: no existing row has the
 --      method `gateway` (the check above refused it until now), so building it scans the table once and finds nothing to
@@ -19,8 +19,8 @@
 --      cashier to allocate or refund it (FR-PAY-04, a later slice). The table is append-only for now: the application role
 --      gets SELECT and INSERT, and the slice that allocates a receipt adds the update with its own guard.
 --
--- Locks, said plainly: the check swap takes ACCESS EXCLUSIVE on `lending_loan_transactions` for the instant of the two
--- catalogue statements, and the index build blocks writes to that table while it runs. Both are short on the tables of
+-- Locks, said plainly: the check swap takes ACCESS EXCLUSIVE on `lending_loan_transactions` and holds it to the commit
+-- (one transaction), so the validation scan and the index build both run with writes to that table blocked. Both are short on the tables of
 -- the first tenants; `lock_timeout` makes the migration fail and be retried rather than queue every writer behind it.
 --
 -- PRIVACY: the table holds identifiers and an amount, never the payer's phone number or a provider body.
