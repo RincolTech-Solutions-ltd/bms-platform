@@ -1,6 +1,6 @@
 import { Link, createLazyRoute, useNavigate } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
-import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
+import { api, type MfaEnrolment, problemOf } from '../../api/client';
 import { invitationToken, normaliseSecondFactor, plainProblem } from '../../auth/codes';
 import { setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
@@ -17,6 +17,48 @@ export type Step =
   | { kind: 'enrol'; enrolment: MfaEnrolment; mfaToken: string }
   | { kind: 'codes'; codes: string[] }
   | { kind: 'sign-in' };
+
+export type Next = { kind: 'home' } | Step;
+
+// The token of the link, read once and taken out of the address bar and the browser history at the same moment, so it is not left
+// in the address for a screenshot, a shared screen or a back button. It is kept in memory only (never in storage) until the password
+// is saved. Reading it again after it was taken gives the same token, so a second render (React may run an initialiser twice) does
+// not lose it.
+let kept: string | null = null;
+
+export function takeResetToken(): string | null {
+  const found = invitationToken(window.location.hash);
+  if (found) {
+    kept = found;
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  return kept;
+}
+
+export function forgetResetToken(): void {
+  kept = null;
+}
+
+/** Saves the new password with the token and says where the user goes next; the token is forgotten once the server accepted it. */
+export async function submitNewPassword(token: string, password: string): Promise<Next> {
+  const { data, error } = await api.POST('/api/v1/auth/staff/password/reset', { body: { token, password } });
+  if (error || !data) throw error;
+  forgetResetToken();
+  if (data.status === 'signed_in' && data.access_token) {
+    setAccessToken(data.access_token);
+    return { kind: 'home' };
+  }
+  if (data.status === 'mfa_required' && data.mfa_token) {
+    return { kind: 'challenge', mfaToken: data.mfa_token };
+  }
+  if (data.status === 'mfa_enrolment_required' && data.mfa_token) {
+    const mfaToken = data.mfa_token;
+    const { data: enrolment, error: enrolError } = await api.POST('/api/v1/auth/staff/mfa/enrol', { body: { mfa_token: mfaToken } });
+    if (enrolError || !enrolment) throw enrolError;
+    return { kind: 'enrol', enrolment, mfaToken };
+  }
+  return { kind: 'sign-in' };
+}
 
 /** `initial` lets a test open any step; the page always starts at the password. */
 export function ResetPassword({ token, initial = { kind: 'password' } }: { token: string | null; initial?: Step }) {
@@ -43,24 +85,6 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
 
   const home = () => void navigate({ to: '/staff' });
 
-  async function afterPassword(body: SignInResponse) {
-    // The token has done its job; drop it from the address bar and the history.
-    window.history.replaceState(null, '', window.location.pathname);
-    if (body.status === 'signed_in' && body.access_token) {
-      setAccessToken(body.access_token);
-      home();
-    } else if (body.status === 'mfa_required' && body.mfa_token) {
-      setStep({ kind: 'challenge', mfaToken: body.mfa_token });
-    } else if (body.status === 'mfa_enrolment_required' && body.mfa_token) {
-      const mfaToken = body.mfa_token;
-      const { data, error } = await api.POST('/api/v1/auth/staff/mfa/enrol', { body: { mfa_token: mfaToken } });
-      if (error || !data) throw error;
-      setStep({ kind: 'enrol', enrolment: data, mfaToken });
-    } else {
-      setStep({ kind: 'sign-in' });
-    }
-  }
-
   function submitPassword(e: FormEvent) {
     e.preventDefault();
     if (!token || !passwordReady(password, confirm)) {
@@ -68,11 +92,11 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
       return;
     }
     void run(async () => {
-      const { data, error } = await api.POST('/api/v1/auth/staff/password/reset', { body: { token, password } });
-      if (error || !data) throw error;
+      const next = await submitNewPassword(token, password);
       setPassword('');
       setConfirm('');
-      await afterPassword(data);
+      if (next.kind === 'home') home();
+      else setStep(next);
     }, 'Your password could not be saved. Try again.');
   }
 
@@ -186,7 +210,7 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
 }
 
 function ResetPasswordPage() {
-  const [token] = useState(() => invitationToken(window.location.hash));
+  const [token] = useState(takeResetToken);
   return <ResetPassword token={token} />;
 }
 

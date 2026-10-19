@@ -77,7 +77,7 @@ inbox.
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
-   is the placeholder `V99__staff_password_reset.sql`, renumbered at merge; it also widens the `auth_sessions`
+   is the placeholder `V99__staff_password_reset.sql`, renumbered at merge (`placeholder-migration-guard` fails a pull request that still holds a `V99` file, because a `V99` on main would make every later migration a number below an applied one); it also widens the `auth_sessions`
    `revoked_reason` check (added `NOT VALID`, last, behind a five second `lock_timeout`).
 9. **The admin and operator resets return the link once, are not emailed, and are narrow.** Same shape as the
    invitation link (`{url, expires_at}`), no store (`Cache-Control: no-store`), audited as

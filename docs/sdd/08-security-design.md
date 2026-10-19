@@ -87,7 +87,7 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
   a reset can never switch the second factor off, skip it or reset its guess counter. A user whose role (or the tenant) requires a second factor that is not set up gets no link by email, and a deactivated user
   (the open links are revoked and the link is refused anyway) and a user still invited get no reset. Audited as `core.password_reset.requested`,
   `.refused` (with a reason, for a known account that was not acted on), `.link_revealed` (admin path) and `.used`; the token
-  is in no audit row, log line or error. Section 8.2a gives the threat model.
+  is in no audit row, log line or error. The reset page takes the token out of the address bar and the browser history the moment it reads it and keeps it in memory only (never in storage) until the server accepts the password. Section 8.2a gives the threat model.
 - Access tokens are ES256 JWS signed with the key of section 8.7; the 5 minute MFA token between
   the password and the second factor is signed with the same key and cannot be used as an access
   token.
