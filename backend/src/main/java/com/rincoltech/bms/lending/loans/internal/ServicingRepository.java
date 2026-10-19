@@ -198,12 +198,15 @@ class ServicingRepository {
     }
 
     /** The repayment a gateway confirmation code already booked, if any (spec 3.4.1: idempotent at the port). */
-    Optional<UUID> gatewayRepayment(String externalReference) {
+    Optional<Txn> gatewayRepayment(String externalReference) {
         return jdbc.sql("""
-                        SELECT id FROM lending_loan_transactions
+                        SELECT * FROM lending_loan_transactions
                          WHERE payment_method_key = 'gateway' AND external_reference = ?
                            AND txn_type IN ('repayment', 'recovery')
-                        """).param(externalReference).query(UUID.class).optional();
+                        """)
+                .param(externalReference)
+                .query(ServicingRepository::txn)
+                .optional();
     }
 
     Optional<Txn> txn(UUID id) {

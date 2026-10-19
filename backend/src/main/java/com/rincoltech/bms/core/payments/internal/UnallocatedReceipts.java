@@ -5,6 +5,7 @@ import com.rincoltech.bms.core.ledger.LedgerPosting;
 import com.rincoltech.bms.core.ledger.LedgerPosting.EntryRequest;
 import com.rincoltech.bms.core.ledger.LedgerPosting.Line;
 import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
+import com.rincoltech.bms.core.ledger.PaymentMethods;
 import com.rincoltech.bms.core.payments.internal.IntentStore.Intent;
 import com.rincoltech.bms.kernel.ApiException;
 import java.time.LocalDate;
@@ -33,11 +34,13 @@ class UnallocatedReceipts {
     static final String SOURCE_MODULE = "core.payments";
     static final String SOURCE_TYPE = "unallocated_receipt";
 
+    private final PaymentMethods methods;
     private final LedgerAccounts accounts;
     private final LedgerPosting ledger;
     private final JdbcClient jdbc;
 
-    UnallocatedReceipts(LedgerAccounts accounts, LedgerPosting ledger, JdbcClient jdbc) {
+    UnallocatedReceipts(PaymentMethods methods, LedgerAccounts accounts, LedgerPosting ledger, JdbcClient jdbc) {
+        this.methods = methods;
         this.accounts = accounts;
         this.ledger = ledger;
         this.jdbc = jdbc;
@@ -50,8 +53,12 @@ class UnallocatedReceipts {
     @Transactional(propagation = Propagation.MANDATORY)
     UUID post(Intent intent, LocalDate preferred, LocalDate fallback, String refusalCode) {
         LocalDate date = ledger.periodOpen(preferred) ? preferred : fallback;
-        LedgerAccounts.Account clearing = account(CLEARING);
+        LedgerAccounts.Account clearing = gatewayAccount(intent.branchId());
         LedgerAccounts.Account liability = account(LIABILITY);
+        if (!clearing.currency().equals(intent.paidCurrency())
+                || !liability.currency().equals(intent.paidCurrency())) {
+            throw new IllegalStateException("currency mismatch between the payment and the clearing accounts");
+        }
         long amount = intent.paidAmountMinor();
         UUID id = UUID.randomUUID();
         PostedEntry entry = ledger.post(new EntryRequest(
@@ -87,6 +94,19 @@ class UnallocatedReceipts {
                         entry.entryId())
                 .update();
         return id;
+    }
+
+    /**
+     * The account a repayment by method gateway was debited to at this branch (the mapping), so the receipt moves the
+     * same account; {@code gateway_clearing} only when the method is unmapped, the very refusal that may have put the
+     * money here.
+     */
+    private LedgerAccounts.Account gatewayAccount(UUID branchId) {
+        try {
+            return accounts.byRef(methods.accountRef("gateway", branchId)).orElseGet(() -> account(CLEARING));
+        } catch (ApiException e) {
+            return account(CLEARING);
+        }
     }
 
     private LedgerAccounts.Account account(String systemKey) {

@@ -114,7 +114,7 @@ class PaymentBooker {
         try {
             transactionId = attempt(handler.get(), intent, paidOn, late);
         } catch (PurposeRefusal first) {
-            if (!PurposeHandler.BEFORE_LAST_REPAYMENT.equals(first.code())) {
+            if (!PurposeHandler.BEFORE_LAST_REPAYMENT.equals(first.code()) && !"period_closed".equals(first.code())) {
                 return refused(intent, now, first, paidOn, zone);
             }
             // A repayment cannot be dated before the loan's last one: the money came today as far as the books go.

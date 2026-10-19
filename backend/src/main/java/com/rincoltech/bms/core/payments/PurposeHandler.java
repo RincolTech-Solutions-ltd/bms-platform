@@ -20,6 +20,15 @@ public interface PurposeHandler {
     String purpose();
 
     /**
+     * The branch the subject belongs to, if the caller can see it: asked first, so the permission check is made before
+     * {@link #describe} says anything about the subject (a limit on the amount would otherwise tell an unauthorised
+     * caller).
+     */
+    default java.util.Optional<UUID> branchOf(UUID subjectId) {
+        return java.util.Optional.empty();
+    }
+
+    /**
      * Called when an intent is created. Checks that the subject exists, is visible to the caller and can take this
      * amount, and says which branch the money belongs to. Refuses with a {@link PurposeRefusal} (the codes of chapter 7
      * section 7.11.10: {@code subject_not_payable}, {@code exceeds_payoff}); the caller turns it into a 422.

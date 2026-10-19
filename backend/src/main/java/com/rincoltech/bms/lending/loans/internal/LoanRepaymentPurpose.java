@@ -28,6 +28,16 @@ class LoanRepaymentPurpose implements PurposeHandler {
     static final String PURPOSE = "lending.loan_repayment";
     static final String METHOD = "gateway";
 
+    /** The business refusals of the cash route that become an unallocated receipt; any other failure is retried. */
+    private static final java.util.Set<String> REFUSALS = java.util.Set.of(
+            "before_last_repayment",
+            "value_date_in_future",
+            "before_disbursement",
+            "payment_method_unmapped",
+            "invalid_status_transition",
+            "duplicate_reference",
+            "period_closed");
+
     private final LoanRepository loans;
     private final LoanServicer servicer;
     private final LoanServicing servicing;
@@ -53,6 +63,11 @@ class LoanRepaymentPurpose implements PurposeHandler {
     }
 
     @Override
+    public java.util.Optional<UUID> branchOf(UUID subjectId) {
+        return loans.find(subjectId).map(Loan::branchId);
+    }
+
+    @Override
     public Subject describe(UUID subjectId, long amountMinor, String currency) throws PurposeRefusal {
         Loan loan = loans.find(subjectId).orElseThrow(() -> new PurposeRefusal("subject_not_payable"));
         if (!"active".equals(loan.status()) || !loan.currency().equals(currency)) {
@@ -72,6 +87,11 @@ class LoanRepaymentPurpose implements PurposeHandler {
         if (!loan.currency().equals(booking.currency())) {
             throw new PurposeRefusal("currency_mismatch");
         }
+        if (!"active".equals(loan.status())) {
+            // Closed, written off or anything else: the money goes to unallocated receipts (spec 3.14), never a
+            // recovery.
+            throw new PurposeRefusal("invalid_status_transition");
+        }
         String reference =
                 booking.confirmationCode() != null ? booking.confirmationCode() : booking.providerReference();
         try {
@@ -85,7 +105,7 @@ class LoanRepaymentPurpose implements PurposeHandler {
                     "gateway",
                     true);
         } catch (ApiException e) {
-            if (e.status().is4xxClientError()) {
+            if (REFUSALS.contains(e.code())) {
                 throw new PurposeRefusal(e.code());
             }
             throw e;

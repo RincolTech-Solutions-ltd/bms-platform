@@ -131,9 +131,15 @@ class LoanServicer implements LoanServicing {
         Loan loan = loans.lock(loanId).orElseThrow(ApiException::notFound);
         if (GATEWAY.equals(paymentMethodKey) && externalReference != null) {
             // The loan row is locked, so two callers with one confirmation code meet here one after the other.
-            Optional<UUID> first = repo.gatewayRepayment(externalReference);
+            Optional<Txn> first = repo.gatewayRepayment(externalReference);
             if (first.isPresent()) {
-                return first.get();
+                Txn t = first.get();
+                if (t.loanId().equals(loanId) && t.amountMinor() == amountMinor) {
+                    return t.id();
+                }
+                // The same code for another loan or amount is not a replay: never hand back someone else's repayment.
+                throw ApiException.rule(
+                        "duplicate_reference", "That confirmation code already booked a different payment.");
             }
         }
         checkRepayable(loan, valueDate, paymentMethodKey);
@@ -473,6 +479,13 @@ class LoanServicer implements LoanServicing {
     Txn checkReversible(Loan loan, Txn txn) {
         if (!txn.loanId().equals(loan.id())) {
             throw ApiException.notFound();
+        }
+        if ("gateway".equals(txn.paymentMethodKey())) {
+            // The clearing debit and the confirmation code would be left behind; the reversal of a gateway payment is
+            // the payments module's review (issue #224).
+            throw ApiException.rule(
+                    "gateway_reversal_pending",
+                    "A payment collected by mobile money cannot be reversed here yet; it is reviewed with the payment provider.");
         }
         if (!Set.of("repayment", "recovery").contains(txn.txnType())) {
             throw ApiException.rule("not_reversible", "Only a repayment or a recovery is reversed here.");

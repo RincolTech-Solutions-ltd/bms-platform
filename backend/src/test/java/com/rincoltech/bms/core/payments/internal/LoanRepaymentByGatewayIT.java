@@ -636,4 +636,95 @@ class LoanRepaymentByGatewayIT extends LoanFixtures {
                         .single())
                 .isEqualTo(1L);
     }
+
+    @Test
+    void theSameConfirmationCodeForAnotherLoanIsNeverAReplayTheSecondPaymentIsHeldUnallocated() {
+        String first = activeLoan();
+        String second = activeLoan();
+        JsonNode a = intentFor(first, 520_000);
+        JsonNode b = intentFor(second, 520_000);
+        pay(a, 520_000, "CONF-216-SAME");
+        pay(b, 520_000, "CONF-216-SAME");
+        tick(Duration.ofMinutes(3));
+        // Whichever the poller met first is booked; the other is a different payment under a used code.
+        JsonNode booked = "booked".equals(row(a).get("status")) ? a : b;
+        JsonNode held = booked == a ? b : a;
+        String heldLoan = held == a ? first : second;
+        String bookedLoan = booked == a ? first : second;
+        Map<String, Object> heldRow = row(held);
+        assertThat(row(booked).get("status")).isEqualTo("booked");
+        assertThat(heldRow.get("status")).isEqualTo("booked_unallocated");
+        assertThat(heldRow.get("refusal_code")).isEqualTo("duplicate_reference");
+        assertThat(heldRow.get("booked_subject_txn_id")).isNull();
+        assertThat(repayments(bookedLoan)).hasSize(1);
+        assertThat(repayments(heldLoan)).isEmpty();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT amount_minor FROM unallocated_receipts WHERE intent_id = ?")
+                        .param(UUID.fromString(held.get("id").asString()))
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(520_000L);
+    }
+
+    @Test
+    void aLoanWrittenOffBeforeTheMoneyArrivedTurnsItIntoAnUnallocatedReceiptNotARecovery() {
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        TestDatabase.owner()
+                .sql("UPDATE lending_loans SET status = 'written_off' WHERE id = ?")
+                .param(UUID.fromString(loan))
+                .update();
+        pay(intent, 520_000, "CONF-216-WO");
+        tick(Duration.ofMinutes(3));
+        assertThat(row(intent).get("status")).isEqualTo("booked_unallocated");
+        assertThat(row(intent).get("refusal_code")).isEqualTo("invalid_status_transition");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM lending_loan_transactions WHERE loan_id = ? AND txn_type = 'recovery'")
+                        .param(UUID.fromString(loan))
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    @Test
+    void aGatewayRepaymentCannotBeReversedByStaffUntilTheProviderReviewExists() {
+        String loan = activeLoan();
+        JsonNode intent = intentFor(loan, 520_000);
+        pay(intent, 520_000, "CONF-216-REV");
+        tick(Duration.ofMinutes(3));
+        Object txn = repayments(loan).getFirst().get("id");
+        HttpHeaders h = as(staff, adminPerms, "*", null);
+        h.add("Idempotency-Key", "rev-" + UUID.randomUUID());
+        ResponseEntity<JsonNode> r = send(
+                HttpMethod.POST,
+                LOANS + "/" + loan + "/transactions/" + txn + "/reverse",
+                h,
+                Map.of("reason", "Test reversal of a gateway payment"));
+        assertThat(r.getStatusCode().value()).as("%s", r.getBody()).isEqualTo(422);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("gateway_reversal_pending");
+    }
+
+    @Test
+    void aStaffMemberWithoutCollectInTheLoansBranchIsRefusedBeforeTheAmountIsChecked() {
+        String loan = activeLoan();
+        HttpHeaders h = as(staff, "lending.loans.read", "*", null);
+        h.add("Idempotency-Key", "k-" + UUID.randomUUID());
+        ResponseEntity<JsonNode> r = http.exchange(
+                "/api/v1/payments/intents",
+                HttpMethod.POST,
+                new HttpEntity<>(
+                        Map.of(
+                                "purpose",
+                                PURPOSE,
+                                "subject_id",
+                                loan,
+                                "amount_minor",
+                                99_999_999,
+                                "payer_phone",
+                                "0700000216"),
+                        h),
+                JsonNode.class);
+        assertThat(r.getStatusCode().value()).isEqualTo(403);
+    }
 }
