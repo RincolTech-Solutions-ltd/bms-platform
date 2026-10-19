@@ -1,12 +1,12 @@
-import { DEFAULT_CHAIN, LEVEL_NAMES, addLevel, dropLevel, droppedLevels, moveLevel, type ChainLevel } from './sales-chain-state';
+import { LEVEL_NAMES, addLevel, dropLevel, droppedLevels, moveLevel, type ChainLevel } from './sales-chain-state';
 
 // The "Group by" control of All sales and Credit sales (issue #341): the levels the list is grouped by, in order. A
 // person moves a level up or down, takes it out, or puts it back; the choice is kept for them by the screen. Buttons
 // rather than dragging, so it works with a thumb on a phone and with a keyboard.
 
-export function GroupBy({ chain, onChange }: { chain: ChainLevel[]; onChange: (next: ChainLevel[]) => void }) {
-  const out = droppedLevels(chain);
-  const usual = chain.length === DEFAULT_CHAIN.length && chain.every((l, i) => l === DEFAULT_CHAIN[i]);
+export function GroupBy({ chain, levels, onChange }: { chain: ChainLevel[]; /** The levels this person may use, in the usual order. */ levels: readonly ChainLevel[]; onChange: (next: ChainLevel[]) => void }) {
+  const out = droppedLevels(chain, levels);
+  const usual = chain.length === levels.length && chain.every((l, i) => l === levels[i]);
   return (
     <details className="rt-groupby" data-tour="sales-group-by">
       <summary>
@@ -31,7 +31,7 @@ export function GroupBy({ chain, onChange }: { chain: ChainLevel[]; onChange: (n
           ))}
         </p>
       )}
-      {!usual && <button type="button" onClick={() => onChange([...DEFAULT_CHAIN])}>Use the usual order</button>}
+      {!usual && <button type="button" onClick={() => onChange([...levels])}>Use the usual order</button>}
     </details>
   );
 }

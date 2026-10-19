@@ -45,8 +45,17 @@ export function addLevel(chain: readonly ChainLevel[], level: ChainLevel): Chain
   return at < 0 ? [...chain, level] : [...chain.slice(0, at), level, ...chain.slice(at)];
 }
 
+/** The levels a person may use: the salesperson level is for those who may read profit (a cashier sees no ranking of colleagues). */
+export const usableLevels = (sellerAllowed: boolean): ChainLevel[] => DEFAULT_CHAIN.filter((l) => sellerAllowed || l !== 'seller');
+
+/** The chain with the levels the person may not use taken out; the usual order if nothing is left. */
+export function usableChain(chain: readonly ChainLevel[], sellerAllowed: boolean): ChainLevel[] {
+  const kept = chain.filter((l) => sellerAllowed || l !== 'seller');
+  return kept.length > 0 ? kept : usableLevels(sellerAllowed);
+}
+
 /** The levels not in the chain, in the usual order. */
-export const droppedLevels = (chain: readonly ChainLevel[]): ChainLevel[] => DEFAULT_CHAIN.filter((l) => !chain.includes(l));
+export const droppedLevels = (chain: readonly ChainLevel[], usable: readonly ChainLevel[] = DEFAULT_CHAIN): ChainLevel[] => usable.filter((l) => !chain.includes(l));
 
 /** A stored chain, or null when the text is not a non-empty list of known levels, each once. */
 export function parseChain(text: string | null): ChainLevel[] | null {
@@ -63,8 +72,8 @@ export function parseChain(text: string | null): ChainLevel[] | null {
 /** Which list the choice belongs to: All sales and Credit sales each remember their own. */
 export type ChainList = 'all' | 'credit';
 
-/** Who the remembered Group by belongs to. */
-export const chainUser = (me: { email?: string; phone_e164?: string; full_name?: string }) => me.email ?? me.phone_e164 ?? me.full_name ?? 'staff';
+/** Who the remembered Group by belongs to: the user's id, never an email or a phone number. */
+export const chainUser = (me: { user_id?: string }) => me.user_id ?? 'staff';
 
 const storeKey = (user: string, list: ChainList) => `bms.salesChain.${list}.${user}`;
 
@@ -89,6 +98,13 @@ export function writeChain(user: string, list: ChainList, chain: readonly ChainL
 export function effectiveChain(chain: readonly ChainLevel[], shopChosen: boolean): ChainLevel[] {
   const without = chain.filter((l) => l !== 'branch');
   return shopChosen && without.length > 0 ? without : [...chain];
+}
+
+/** Whether a group at `index` offers "Show the sales": on a day, on any level when the chain has no day, and on the level above a last item level. */
+export function offersSales(chain: readonly ChainLevel[], index: number): boolean {
+  const level = chain[index];
+  const last = chain.length - 1;
+  return level === 'day' || !chain.includes('day') || (index + 1 === last && chain[last] === 'item');
 }
 
 /** What the user opened above a level: it travels to the server as filters. */
@@ -124,6 +140,16 @@ export function selectGroup(sel: Selection, level: ChainLevel, group: Picked): S
     case 'item': return { ...sel, itemId: group.key };
     default: return { ...sel, ...narrowed(group, sel) };
   }
+}
+
+/** True when the figures at `level` under `sel` are summed over sale lines, not whole sales (a category or an item is the level or was chosen above). */
+export const overLines = (level: ChainLevel, sel: Selection): boolean => level === 'category' || level === 'item' || !!sel.categoryId || !!sel.itemId;
+
+/** The words above the sales listed under a chosen category or item: they are whole sales, so their totals can be more than the line above. */
+export function wholeSalesNote(sel: Selection): string | null {
+  if (sel.itemId) return 'Whole sales that include this item.';
+  if (sel.categoryId) return 'Whole sales that include this category.';
+  return null;
 }
 
 export const pathKey = (parent: string, level: ChainLevel, key: string) => `${parent}/${level}:${key}`;

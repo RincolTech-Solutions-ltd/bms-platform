@@ -2,7 +2,7 @@ import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { retail, type SalesSummaryGroup, type SalesSummaryQuery } from '../../../api/retail';
 import {
-  LEVEL_PLURALS, emptyChainWords, isTimeLevel, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, writeChain,
+  LEVEL_PLURALS, emptyChainWords, isTimeLevel, offersSales, overLines, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, wholeSalesNote, writeChain,
   type ChainLevel, type ChainList, type OpenGroups, type Selection,
 } from './sales-chain-state';
 import { methodLines, periodTitle, salesWord } from './sales-grouped-state';
@@ -62,7 +62,16 @@ function useLevel(level: ChainLevel, chain: ChainLevel[], filter: ChainFilter, s
     enabled,
     placeholderData: keepPreviousData,
   });
-  return { query, items: (query.data?.pages ?? []).flatMap((p) => p.items ?? []) };
+  // A group can come twice when pages are cut by an order that moves between requests (the others are ordered by their
+  // total): the first one stands, so a row is never drawn twice.
+  const seen = new Set<string>();
+  const items = (query.data?.pages ?? []).flatMap((p) => p.items ?? []).filter((g) => {
+    const key = g.key ?? '';
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return { query, items };
 }
 
 export function SalesChain({ range, rootLabel, empty, ...shared }: Shared & { range: Selection; rootLabel: string; empty?: ReactNode }) {
@@ -122,14 +131,15 @@ function LevelList({ index, sel, parent, root, empty, ...shared }: Shared & { in
   );
 }
 
-function Figures({ group, credit }: { group: SalesSummaryGroup; credit: boolean }) {
+/** `lines`: the figures are summed over sale lines, so the number of sales is "in N sales" (those that hold the category or the item). */
+function Figures({ group, credit, lines: overLines }: { group: SalesSummaryGroup; credit: boolean; lines: boolean }) {
   const lines = credit ? [] : methodLines(group.by_method);
   return (
     <>
       <span className="rt-group-total">{money(group.total_minor ?? 0)}</span>{' '}
       <span className="rt-group-meta">
         {group.quantity !== undefined && <>{group.quantity} sold, </>}
-        {salesWord(group.sales_count ?? 0)}
+        {overLines ? 'in ' : ''}{salesWord(group.sales_count ?? 0)}
         {group.profit_minor !== undefined && <>, profit {money(group.profit_minor)}</>}
         {!credit && (group.voided_count ?? 0) > 0 && <>, {group.voided_count} voided (not counted)</>}
       </span>{' '}
@@ -147,17 +157,6 @@ function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { in
   const path = pathKey(parent, level, key);
   const title = titleOf(level, group);
   const last = index === chain.length - 1;
-  // An item at the end of the chain is the bottom: its figures are the answer, there is nothing to open.
-  if (level === 'item' && last) {
-    return (
-      <li className="rt-group">
-        <div className="rt-group-head rt-item-row">
-          <span className="rt-group-title">{title}</span>{' '}
-          <Figures group={group} credit={credit} />
-        </div>
-      </li>
-    );
-  }
   const bodyId = `group-${path.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const isOpen = view.open.has(path);
   const here = selectGroup(sel, level, { key, from: group.from, to: group.to });
@@ -166,16 +165,16 @@ function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { in
       {/* No aria-label: the visible words are the name, so the profit, the voided note and the methods are read too. */}
       <button type="button" className="rt-group-head" aria-expanded={isOpen} aria-controls={isOpen ? bodyId : undefined} onClick={() => view.toggle(path, title)}>
         <span className="rt-group-title">{title}</span>{' '}
-        <Figures group={group} credit={credit} />
+        <Figures group={group} credit={credit} lines={overLines(level, sel)} />
       </button>
       {isOpen && (
         <div className="rt-group-body" id={bodyId}>
           {last ? (
-            renderSales(here)
+            <SalesUnder sel={here} renderSales={renderSales} />
           ) : (
             <>
               <LevelList index={index + 1} sel={here} parent={path} {...shared} />
-              {level === 'day' && <SalesOfDay sel={here} renderSales={renderSales} />}
+              {offersSales(chain, index) && <SalesButton day={level === 'day'} sel={here} renderSales={renderSales} />}
             </>
           )}
         </div>
@@ -184,13 +183,25 @@ function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { in
   );
 }
 
-/** A day that opens onto categories can still show its sales: on request, so the categories stay the first thing seen. */
-function SalesOfDay({ sel, renderSales }: { sel: Selection; renderSales: (sel: Selection) => ReactNode }) {
+/** The sales of a group, with a word when they are whole sales that include a category or an item (their totals can be more than the line). */
+function SalesUnder({ sel, renderSales }: { sel: Selection; renderSales: (sel: Selection) => ReactNode }) {
+  const note = wholeSalesNote(sel);
+  return (
+    <>
+      {note && <p className="rt-group-note">{note}</p>}
+      {renderSales(sel)}
+    </>
+  );
+}
+
+/** A group that opens onto more groups can still show its sales: on request, so the groups stay the first thing seen. */
+function SalesButton({ day, sel, renderSales }: { day: boolean; sel: Selection; renderSales: (sel: Selection) => ReactNode }) {
   const [shown, setShown] = useState(false);
+  const what = day ? 'the sales of this day' : 'the sales here';
   return (
     <div className="rt-day-sales">
-      <button type="button" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide the sales of this day' : 'Show the sales of this day'}</button>
-      {shown && renderSales(sel)}
+      <button type="button" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? `Hide ${what}` : `Show ${what}`}</button>
+      {shown && <SalesUnder sel={sel} renderSales={renderSales} />}
     </div>
   );
 }

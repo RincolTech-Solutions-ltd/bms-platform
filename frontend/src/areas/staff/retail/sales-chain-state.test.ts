@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  DEFAULT_CHAIN, addLevel, dropLevel, droppedLevels, effectiveChain, moveLevel, parseChain, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, writeChain,
+  DEFAULT_CHAIN, addLevel, chainUser, dropLevel, droppedLevels, effectiveChain, moveLevel, offersSales, overLines, parseChain, pathKey, readChain, selectGroup, shutGroup, toggleGroup, trailOf, usableChain, usableLevels, wholeSalesNote, writeChain,
   type ChainLevel,
 } from './sales-chain-state';
 
@@ -38,6 +38,44 @@ describe('changing the chain', () => {
     expect(effectiveChain(DEFAULT_CHAIN, true)).toEqual(['year', 'month', 'seller', 'day', 'category', 'item']);
     expect(effectiveChain(DEFAULT_CHAIN, false)).toEqual([...DEFAULT_CHAIN]);
     expect(effectiveChain(chain('branch'), true)).toEqual(['branch']);
+  });
+});
+
+describe('who may use which level', () => {
+  it('keeps the salesperson level for those who may read profit', () => {
+    expect(usableLevels(true)).toEqual([...DEFAULT_CHAIN]);
+    expect(usableLevels(false)).toEqual(['branch', 'year', 'month', 'day', 'category', 'item']);
+    expect(usableChain(DEFAULT_CHAIN, false)).toEqual(['branch', 'year', 'month', 'day', 'category', 'item']);
+    expect(usableChain(chain('seller', 'day'), false)).toEqual(['day']);
+    expect(usableChain(chain('seller'), false)).toEqual(usableLevels(false));
+    expect(usableChain(chain('seller', 'day'), true)).toEqual(['seller', 'day']);
+    expect(droppedLevels(chain('year'), usableLevels(false))).not.toContain('seller');
+  });
+
+  it('keys the remembered chain by the user id, with a neutral fallback', () => {
+    expect(chainUser({ user_id: 'abc' })).toBe('abc');
+    expect(chainUser({})).toBe('staff');
+  });
+});
+
+describe('where the sales can be reached', () => {
+  it('offers them on a day, on every level when there is no day, and above a last item', () => {
+    expect(offersSales(DEFAULT_CHAIN, 4)).toBe(true);
+    expect(offersSales(DEFAULT_CHAIN, 3)).toBe(false);
+    expect(offersSales(DEFAULT_CHAIN, 5)).toBe(true);
+    expect(offersSales(chain('branch', 'year', 'month', 'seller', 'category', 'item'), 0)).toBe(true);
+    expect(offersSales(chain('year', 'day', 'category'), 0)).toBe(false);
+    expect(offersSales(chain('year', 'day', 'item', 'category'), 1)).toBe(true);
+  });
+
+  it('knows when figures are summed over lines and what to say about the sales under them', () => {
+    expect(overLines('year', {})).toBe(false);
+    expect(overLines('category', {})).toBe(true);
+    expect(overLines('day', { categoryId: 'c' })).toBe(true);
+    expect(overLines('day', { itemId: 'p' })).toBe(true);
+    expect(wholeSalesNote({})).toBeNull();
+    expect(wholeSalesNote({ categoryId: 'c' })).toBe('Whole sales that include this category.');
+    expect(wholeSalesNote({ categoryId: 'c', itemId: 'p' })).toBe('Whole sales that include this item.');
   });
 });
 

@@ -2,6 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Me } from '../../../api/client';
 import type { Sale, SalesSummary, SalesSummaryGroup, SalesSummaryQuery } from '../../../api/retail';
 import { mockMe } from '../../../api/retail-mock';
 import { ALL_BRANCHES } from '../../../auth/branch';
@@ -54,10 +55,10 @@ const sale = (id: string, buyer: string, over: Partial<Sale> = {}): Sale => ({
   total_minor: 3000, paid_minor: 0, balance_minor: 3000, due_date: '2026-10-19', historical: false, ...over,
 });
 
-function show(node: React.ReactElement, branch: string = ALL_BRANCHES) {
+function show(node: React.ReactElement, branch: string = ALL_BRANCHES, who: Me = me) {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <StaffContext.Provider value={{ me, branch }}>{node}</StaffContext.Provider>
+      <StaffContext.Provider value={{ me: who, branch }}>{node}</StaffContext.Provider>
     </QueryClientProvider>,
   );
 }
@@ -98,10 +99,26 @@ describe('the default chain', () => {
     expect(item.textContent).toContain('4 sold');
     expect(item.textContent).toContain('UGX 8,000');
     expect(item.textContent).toContain('profit UGX 2,000');
-    expect(within(item).queryByRole('button')).toBeNull();
+    // The category and the item sum their own lines, and say so: "in 3 sales", not "3 sales".
+    expect((await head(/^Test Category Cables /)).textContent).toContain('in 3 sales');
+    expect(gayaza.textContent).not.toContain('in 3 sales');
     expect(summary).toHaveBeenLastCalledWith(expect.objectContaining({
       level: 'item', branchId: 'b1', sellerId: 'u1', categoryId: 'c1', from: '2026-10-19', to: '2026-10-19',
     }));
+  });
+
+  it('reaches the sales and Record payment on the default chain through "Show the sales of this day"', async () => {
+    show(<AllSales />);
+    fireEvent.click(await head(/^Test Branch Gayaza /));
+    fireEvent.click(await head(/^2026 /));
+    fireEvent.click(await head(/^October 2026 /));
+    fireEvent.click(await head(/^Test Seller One /));
+    fireEvent.click(await head(/^[A-Z][a-z]+ 19 October 2026 /));
+    expect(screen.queryByText('Test Buyer One')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the sales of this day' }));
+    await screen.findByText('Test Buyer One');
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeTruthy();
+    expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ branchId: 'b1', sellerId: 'u1', from: '2026-10-19', to: '2026-10-19' }));
   });
 
   it('shows the open path as a breadcrumb and a crumb shuts what is inside it', async () => {
@@ -163,6 +180,100 @@ describe('the default chain', () => {
     expect(await head(/^2026 /)).toBeTruthy();
     expect(summary).toHaveBeenCalledWith(expect.objectContaining({ level: 'year', chain: ['year', 'month', 'seller', 'day', 'category', 'item'] }));
     expect(screen.queryByRole('button', { name: /^Test Branch / })).toBeNull();
+  });
+});
+
+describe('a chain without a Day level, or ending in Item, can still reach a sale', () => {
+  it('offers the sales on any group when the chain has no day', async () => {
+    writeChain(chainUser(me), 'all', ['branch', 'year', 'month', 'seller', 'category', 'item']);
+    show(<AllSales />);
+    fireEvent.click(await head(/^Test Branch Gayaza /));
+    fireEvent.click(await head(/^2026 /));
+    fireEvent.click(await head(/^October 2026 /));
+    fireEvent.click(await head(/^Test Seller One /));
+    // Every open group offers it (there is no day); the first in the page is the deepest, the salesperson's.
+    const offers = await screen.findAllByRole('button', { name: 'Show the sales here' });
+    expect(offers).toHaveLength(4);
+    fireEvent.click(offers[0] as HTMLElement);
+    await screen.findByText('Test Buyer One');
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeTruthy();
+    expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ branchId: 'b1', sellerId: 'u1', from: '2026-10-01' }));
+  });
+
+  it('offers the sales on the level above a last Item, and an Item row opens its sales, saying they are whole sales', async () => {
+    writeChain(chainUser(me), 'all', ['year', 'day', 'category', 'item']);
+    show(<AllSales />);
+    fireEvent.click(await head(/^2026 /));
+    fireEvent.click(await head(/^[A-Z][a-z]+ 19 October 2026 /));
+    fireEvent.click(await head(/^Test Category Cables /));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the sales here' }));
+    await screen.findByText('Test Buyer One');
+    expect(screen.getByText('Whole sales that include this category.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the sales here' }));
+
+    fireEvent.click(await head(/^Test Product Cable 2m /));
+    await screen.findByText('Test Buyer One');
+    expect(screen.getByText('Whole sales that include this item.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Record payment' })).toBeTruthy();
+    expect(listSales).toHaveBeenLastCalledWith(expect.objectContaining({ productId: 'p1', categoryId: 'c1', from: '2026-10-19', to: '2026-10-19' }));
+  });
+
+  it('says whole sales under a category that is the last level', async () => {
+    writeChain(chainUser(me), 'all', ['category']);
+    show(<AllSales />);
+    fireEvent.click(await head(/^Test Category Cables /));
+    await screen.findByText('Test Buyer One');
+    expect(screen.getByText('Whole sales that include this category.')).toBeTruthy();
+  });
+});
+
+describe('what a person sees and what is stored', () => {
+  it('draws a row once when the server repeats it between pages, and says nothing about profit it did not send', async () => {
+    summary.mockImplementation(async (q) => {
+      const base = await answer(q);
+      const bare = (g: SalesSummaryGroup): SalesSummaryGroup => {
+        const { profit_minor: _hidden, ...rest } = g;
+        return rest;
+      };
+      if (q.level !== 'branch') return { ...base, items: base.items?.map(bare) };
+      return q.offset
+        ? { ...base, items: [bare(group('b1', 'Test Branch Gayaza')), bare(group('b3', 'Test Branch Third'))] }
+        : { ...base, has_more: true, next_offset: 50, items: base.items?.map(bare) };
+    });
+    show(<AllSales />);
+    await head(/^Test Branch Gayaza /);
+    fireEvent.click(screen.getByRole('button', { name: 'Show more shops' }));
+    expect(await head(/^Test Branch Third /)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /^Test Branch Gayaza / })).toHaveLength(1);
+    expect(document.body.textContent?.toLowerCase()).not.toContain('profit');
+  });
+
+  it('does not offer the salesperson level to someone who may not read profit, and never asks for it', async () => {
+    const cashier = mockMe('sales');
+    writeChain(chainUser(cashier), 'all', [...DEFAULT_CHAIN]);
+    show(<AllSales />, ALL_BRANCHES, cashier);
+    expect(await head(/^Test Branch Gayaza /)).toBeTruthy();
+    const control = screen.getByText('Group by').closest('details') as HTMLElement;
+    expect(control.textContent).not.toContain('Salesperson');
+    expect(summary).toHaveBeenCalledWith(expect.objectContaining({ level: 'branch', chain: ['branch', 'year', 'month', 'day', 'category', 'item'] }));
+    expect(summary.mock.calls.every(([q]) => !(q.chain ?? []).includes('seller'))).toBe(true);
+    fireEvent.click(within(control).getByRole('button', { name: 'Remove Item' }));
+    expect(within(control).queryByRole('button', { name: 'Add Salesperson' })).toBeNull();
+    expect(within(control).getByRole('button', { name: 'Add Item' })).toBeTruthy();
+  });
+
+  it('keeps the Group by under the user id and stores no email or phone number', async () => {
+    const ann: Me = { ...me, user_id: 'user-id-ann', email: 'ann@example.test', phone_e164: '+256700000001' };
+    show(<AllSales />, ALL_BRANCHES, ann);
+    await head(/^Test Branch Gayaza /);
+    const control = screen.getByText('Group by').closest('details') as HTMLElement;
+    fireEvent.click(within(control).getByRole('button', { name: 'Remove Item' }));
+    const stored = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? '');
+    expect(stored.some((k) => k.includes('user-id-ann'))).toBe(true);
+    const everything = stored.join('|') + stored.map((k) => localStorage.getItem(k)).join('|');
+    expect(everything).not.toContain('ann@example.test');
+    expect(everything).not.toContain('+256700000001');
+    expect(chainUser({})).toBe('staff');
   });
 });
 

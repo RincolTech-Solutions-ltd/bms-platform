@@ -8,14 +8,14 @@ import { receiptNote } from './price-state';
 import { enteredPriceMinor, enteredQty } from './units-state';
 import { useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
-import { SALE_RETURN, canUse, holdsAt } from './permissions';
+import { SALE_RETURN, canSeeProfit, canUse, holdsAt } from './permissions';
 import { settledWords } from './returns-state';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { SaleDocuments } from './documents-ui';
 import { useRootFigures } from './sales-grouped';
 import { SalesChain, useChainView } from './sales-chain';
-import { chainUser, effectiveChain, type Selection } from './sales-chain-state';
+import { chainUser, effectiveChain, usableChain, usableLevels, type Selection } from './sales-chain-state';
 import { GroupBy } from './sales-group-by';
 import { PaySaleAction, VoidSaleAction } from './sale-actions';
 
@@ -269,7 +269,9 @@ export function CreditSales() {
   const today = businessToday();
   const { me } = useStaff();
   const view = useChainView(chainUser(me), 'credit');
-  const chain = effectiveChain(view.chain, !all);
+  const levels = usableLevels(canSeeProfit(me));
+  const shown = usableChain(view.chain, canSeeProfit(me));
+  const chain = effectiveChain(shown, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit' as const, owing: owing === 'all' ? undefined : owing };
   // Debts still owing or overdue are listed together, oldest groups included: only the current month is open in a grouped list.
   const flat = owing === 'owing' || owing === 'overdue';
@@ -290,7 +292,7 @@ export function CreditSales() {
             <DaySales filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} action={(s) => <PaySaleAction compact sale={s} today={today} />} />
           ) : (
           <>
-            <GroupBy chain={view.chain} onChange={view.setChain} />
+            <GroupBy chain={shown} levels={levels} onChange={view.setChain} />
             <SalesChain
               rootLabel="Credit sales" credit filter={filter} range={{}} chain={chain} view={view} enabled={all || branchId !== null}
               empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : undefined}
@@ -308,7 +310,7 @@ export function AllSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
-  // Empty to start with: every year shows, grouped, and the current month opens by day (issue #328).
+  // Empty to start with: every year shows, grouped by the chain the person chose, with nothing open (issues #328, #341).
   const [from, setFrom] = useState('');
   const [to, setTo] = useState(today);
   const search = useLiveSearch();
@@ -321,7 +323,9 @@ export function AllSales() {
   const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
   const { me } = useStaff();
   const view = useChainView(chainUser(me), 'all');
-  const chain = effectiveChain(view.chain, !all);
+  const levels = usableLevels(canSeeProfit(me));
+  const shown = usableChain(view.chain, canSeeProfit(me));
+  const chain = effectiveChain(shown, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
   const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
   return (
@@ -352,7 +356,7 @@ export function AllSales() {
               </select>
             </>
           )}
-          <GroupBy chain={view.chain} onChange={view.setChain} />
+          <GroupBy chain={shown} levels={levels} onChange={view.setChain} />
           <SalesChain
             rootLabel="All sales" filter={filter} range={{ from: from || undefined, to }} credit={false} chain={chain} view={view} enabled={(all || branchId !== null) && from <= to}
             empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="sales" /> : undefined}
