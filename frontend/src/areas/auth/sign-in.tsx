@@ -1,4 +1,4 @@
-import { createLazyRoute, useNavigate } from '@tanstack/react-router';
+import { Link, createLazyRoute, useNavigate } from '@tanstack/react-router';
 import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { normaliseSecondFactor, plainProblem } from '../../auth/codes';
@@ -129,6 +129,9 @@ function SignIn() {
             </div>
             <button className="btn-primary btn-lg" disabled={busy}>{busy ? 'Signing in' : 'Sign in'}</button>
           </form>
+          <p>
+            <Link to="/forgot-password">Forgot password?</Link>
+          </p>
         </>
       )}
 
