@@ -53,6 +53,15 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 - **Recovery codes** (FR-IAM-11): enrolment issues ten single-use codes, shown once. A code is
   accepted in place of a TOTP code; the user can replace all of them with a current TOTP code.
   Failed codes count toward the lockout.
+- **Step-up by a signed-in session** (issue #233, #309): a sensitive action (saving the payment account, replacing the
+  recovery codes) asks again for a current TOTP code. Wrong codes here count on their own counter and lock
+  (`step_up_failed_count`, `step_up_locked_until`, migration V58), never on the password's `failed_login_count`. The fifth
+  wrong code locks step-up for 15 minutes and ends every session of the user, so a stolen session cannot keep guessing. The
+  two counters never feed each other: a wrong password is unauthenticated (anyone who knows a login name can send one), so it
+  locks the sign-in but neither counts toward the step-up lock nor ends a session; and a step-up slip never counts toward the
+  password lock. Four wrong codes plus one wrong password, or four wrong passwords plus one wrong code, therefore end nothing
+  (tested by `MerchantAccountStepUpIT`). A correct code clears the step-up count; a step-up is also refused while the
+  password lock holds.
 - **Lost second factor** (FR-IAM-12): another tenant admin resets it (`POST
   /users/{user_id}/mfa/reset`, `core.users.manage`); a tenant admin cannot reset their own. For a
   tenant whose only admin is locked out, a platform operator resets that admin through the
