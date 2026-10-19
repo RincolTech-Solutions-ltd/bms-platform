@@ -661,7 +661,7 @@ pages in the browser.
   opens it and the way back finds the same groups open (what is open is kept by the screen, `useOpenGroups`).
 - **Breadcrumbs.** An open day shows where it sits, All sales (or Credit sales), the year, the month, the day. Tapping a place
   shuts what is inside it and shows that place again. The staff bar crumbs for the sale itself are unchanged.
-- **The choices still work.** All sales keeps From and To (the last 30 days to start with), the buyer search, Paid by and the
+- **The choices still work.** All sales keeps From and To (From is empty to start with, so every year shows, and To is today; the old 30 day start would have cut the year and month figures short), the buyer search, Paid by and the
   item search; Credit sales keeps the buyer search and Show (all, still owing, overdue, paid) and covers every date. Each
   level is asked with the same filters, so a group and the sales under it agree. A period of more than the server's bound (20
   years, 12 months, 31 days) ends with Show earlier years, months or days, which asks again from the server's `next_to`.

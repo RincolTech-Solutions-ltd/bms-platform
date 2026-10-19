@@ -3,7 +3,7 @@ import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { Highlight, NoResults, SearchBox } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
-import { businessToday, daysBefore, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
+import { businessToday, retail, type Sale, type SalePayment, type SalesQuery } from '../../../api/retail';
 import { receiptNote } from './price-state';
 import { enteredPriceMinor, enteredQty } from './units-state';
 import { useCrumbTail } from '../../../components/breadcrumbs';
@@ -273,7 +273,8 @@ export function AllSales() {
   const { all, branchId, branchName } = useBranchView();
   const nameOf = useBranchName();
   const today = businessToday();
-  const [from, setFrom] = useState(() => daysBefore(today, 29));
+  // Empty to start with: every year shows, grouped, and the current month opens by day (issue #328).
+  const [from, setFrom] = useState('');
   const [to, setTo] = useState(today);
   const search = useLiveSearch();
   const [method, setMethod] = useState<SalePayment | ''>('');
