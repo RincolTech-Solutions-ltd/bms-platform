@@ -177,6 +177,26 @@ export const adminWelcome: Tour = {
       body: 'Record sales, check stock and restock from here. One big button for each job.',
     },
     {
+      id: 'credit-payments',
+      route: '/staff/retail',
+      target: 'retail-creditSales',
+      module: 'retail',
+      needs: ['retail.sale.read', SELL],
+      optional: true,
+      title: 'When a buyer pays what they owe',
+      body: 'Open Credit sales, find the buyer, and tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
+    },
+    {
+      id: 'void-sale',
+      route: '/staff/retail',
+      target: 'retail-salesHistory',
+      module: 'retail',
+      needs: ['retail.sale.read', 'retail.sale.void'],
+      optional: true,
+      title: 'Fix a sale made by mistake',
+      body: 'Open All sales, open the sale and tap Void this sale. Give the reason. The items go back into stock and the sale stops counting.',
+    },
+    {
       id: 'catalogue',
       route: '/staff/retail',
       target: 'retail-catalogue',
@@ -211,7 +231,8 @@ export const adminWelcome: Tour = {
 
 export const retailSales: Tour = {
   id: 'retail-sales',
-  version: 2,
+  // Version 3 adds the credit payment step (issue #326), so whoever finished version 2 sees it once.
+  version: 3,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -256,6 +277,16 @@ export const retailSales: Tour = {
       optional: true,
       title: 'Save the sale',
       body: 'Check the total, then tap Save sale. You get a receipt to show the customer.',
+    },
+    {
+      id: 'credit-payments',
+      route: '/staff/retail',
+      target: 'retail-creditSales',
+      module: 'retail',
+      needs: ['retail.sale.read'],
+      optional: true,
+      title: 'When a buyer pays what they owe',
+      body: 'Open Credit sales, find the buyer, and tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
     },
     {
       id: 'stock',
