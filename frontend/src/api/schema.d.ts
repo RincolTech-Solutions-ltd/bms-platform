@@ -10809,9 +10809,10 @@ export interface components {
             sales_minor?: number;
         };
         RetailSalesSummary: {
+            /** @description The tenant's currency; a retail tenant keeps its books in one currency */
             currency?: string;
             group_by?: string;
-            /** @description True when older periods remain: ask again with to = nextTo */
+            /** @description True when older periods remain: ask again with to = next_to */
             has_more?: boolean;
             items?: components["schemas"]["RetailSalesSummaryGroup"][];
             /**
@@ -10824,7 +10825,7 @@ export interface components {
             by_method?: components["schemas"]["RetailSalesSummaryMethods"];
             /**
              * Format: date
-             * @description First day of the period
+             * @description First calendar day of the period; not narrowed by the from filter of the request
              */
             from?: string;
             /** @description 2026, 2026-10 or 2026-10-19, by group_by */
@@ -10841,7 +10842,7 @@ export interface components {
             sales_count?: number;
             /**
              * Format: date
-             * @description Last day of the period
+             * @description Last calendar day of the period; not narrowed by the to filter of the request
              */
             to?: string;
             /**

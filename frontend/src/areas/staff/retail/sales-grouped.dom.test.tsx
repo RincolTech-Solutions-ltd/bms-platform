@@ -10,6 +10,7 @@ import type { SalesSummary, SalesSummaryGroup, SalesSummaryQuery } from '../../.
 
 // Three levels load one after the other; a busy machine needs more than the default second.
 configure({ asyncUtilTimeout: 5000 });
+vi.setConfig({ testTimeout: 15_000 });
 
 const summary = vi.fn<(q: SalesSummaryQuery) => Promise<SalesSummary>>();
 vi.mock('../../../api/retail', async (original) => {

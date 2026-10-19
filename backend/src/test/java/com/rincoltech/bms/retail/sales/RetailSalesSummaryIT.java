@@ -300,7 +300,7 @@ class RetailSalesSummaryIT extends IntegrationTest {
         api.stockUp(t.headOffice(), other, "50");
         sale(api, t.headOffice(), "cash", "2026-10-17", "2", other);
         UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Credit Buyer 03"), ADMIN));
-        creditSale("2026-10-16", null, buyer, "2020-01-01");
+        creditSale("2026-10-16", null, buyer, "2026-10-17");
         UUID paid = RetailTestSupport.id(creditSale("2026-10-15", "Test Debtor Zed", null, null));
         ResponseEntity<JsonNode> payment = api.postKeyed(
                 "/sales/" + paid + "/payments",
