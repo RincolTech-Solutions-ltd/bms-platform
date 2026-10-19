@@ -51,10 +51,12 @@ SELECT bms_grant_app('user_password_resets', 'SELECT, INSERT, UPDATE');
 
 -- The nightly retention of the table (the job core.identity.password-reset-purge): a link is useless an hour after it was made,
 -- the row stays 30 days for the audit trail's sake. A definer function, like ai_calls_housekeeping: a job has no tenant bound,
--- so a plain DELETE by the application role would see no row under the tenant policy, and the role has no DELETE grant.
+-- so a plain DELETE by the application role would see no row under the tenant policy, and the role has no DELETE grant. The
+-- function is callable by the application role and deletes across every tenant, so it cannot be told to delete anything younger
+-- than 30 days, whatever cutoff it is given (even 'infinity').
 CREATE FUNCTION user_password_resets_purge(p_before timestamptz) RETURNS integer
 LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    WITH d AS (DELETE FROM user_password_resets WHERE created_at < p_before RETURNING 1)
+    WITH d AS (DELETE FROM user_password_resets WHERE created_at < least(p_before, now() - interval '30 days') RETURNING 1)
     SELECT count(*)::integer FROM d
 $$;
 REVOKE ALL ON FUNCTION user_password_resets_purge(timestamptz) FROM PUBLIC;

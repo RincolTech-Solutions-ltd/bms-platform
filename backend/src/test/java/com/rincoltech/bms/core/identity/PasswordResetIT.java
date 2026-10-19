@@ -657,21 +657,33 @@ class PasswordResetIT extends IntegrationTest {
                 .update();
         UUID headOfficeUser = user(Api.email("hq"));
         UUID everywhere = user(Api.email("everywhere"), "tenant_admin");
+        UUID noRole = user(Api.email("norole"));
+        TestDatabase.owner()
+                .sql("UPDATE user_role_assignments SET revoked_at = now() WHERE user_id = ?")
+                .param(noRole)
+                .update();
+        // The caller is the real admin, so the authenticator code is theirs; the scope is narrowed by the header.
         Map<String, String> scoped = Map.of(
-                "X-Dev-User-Id", UUID.randomUUID().toString(),
+                "X-Dev-User-Id", admin.toString(),
                 "X-Dev-Permissions", "core.users.manage",
                 "X-Dev-Branch-Ids", t.secondBranch().toString());
 
-        assertThat(api.call(HttpMethod.POST, "/api/v1/users/" + inBranch + "/reset-sign-in", null, null, scoped)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.OK);
-        assertThat(api.call(HttpMethod.POST, "/api/v1/users/" + headOfficeUser + "/reset-sign-in", null, null, scoped)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(api.call(HttpMethod.POST, "/api/v1/users/" + everywhere + "/reset-sign-in", null, null, scoped)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(openLinks(headOfficeUser) + openLinks(everywhere)).isZero();
+        assertThat(scopedIssue(scoped, inBranch).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(scopedIssue(scoped, headOfficeUser).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(scopedIssue(scoped, everywhere).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(scopedIssue(scoped, noRole).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(openLinks(headOfficeUser) + openLinks(everywhere) + openLinks(noRole))
+                .isZero();
+    }
+
+    ResponseEntity<JsonNode> scopedIssue(Map<String, String> headers, UUID userId) {
+        Api.allowTotpReuse(admin);
+        return api.call(
+                HttpMethod.POST,
+                "/api/v1/users/" + userId + "/reset-sign-in",
+                Map.of("totp_code", Api.totp(adminSession.totpSecret(), Instant.now())),
+                null,
+                headers);
     }
 
     /** MAJOR 1 of the review of #322: an admin never resets themselves or another tenant admin through the tenant route. */
@@ -720,18 +732,55 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(replay.getBody().get("code").asString()).isEqualTo("invalid_mfa_code");
     }
 
-    /** MAJOR 1, accepted risk (ADR-042 decision 9): an admin who has no second factor enrolled is not asked for a code. */
+    /** Round 2, m1: the route fails closed. A caller with no authenticator enrolled (here: no staff user at all) is refused. */
     @Test
-    void anAdminWithNoSecondFactorEnrolledIsNotAskedForACode() {
+    void anAdminWithNoSecondFactorEnrolledIsRefusedNotWaved() {
         UUID userId = user(Api.email("cashier"));
         Map<String, String> noFactor = Map.of(
                 "X-Dev-User-Id", UUID.randomUUID().toString(),
                 "X-Dev-Permissions", "core.users.manage",
                 "X-Dev-Branch-Ids", "*");
-        ResponseEntity<JsonNode> response =
-                api.call(HttpMethod.POST, "/api/v1/users/" + userId + "/reset-sign-in", null, null, noFactor);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(openLinks(userId)).isEqualTo(1);
+        String path = "/api/v1/users/" + userId + "/reset-sign-in";
+
+        ResponseEntity<JsonNode> without = api.call(HttpMethod.POST, path, null, null, noFactor);
+        ResponseEntity<JsonNode> withCode =
+                api.call(HttpMethod.POST, path, Map.of("totp_code", "123456"), null, noFactor);
+
+        for (ResponseEntity<JsonNode> response : List.of(without, withCode)) {
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(response.getBody().get("code").asString()).isEqualTo("mfa_not_enrolled");
+        }
+        assertThat(openLinks(userId)).isZero();
+        assertThat(emails("identity.password_reset_issued", userEmail(userId))).isZero();
+    }
+
+    String userEmail(UUID userId) {
+        return TestDatabase.owner()
+                .sql("SELECT email FROM users WHERE id = ?")
+                .param(userId)
+                .query(String.class)
+                .single();
+    }
+
+    /** Round 2, m7: a refused target does not spend the admin's code. */
+    @Test
+    void aRefusedTargetDoesNotSpendTheCode() {
+        UUID userId = user(Api.email("cashier"));
+        Api.allowTotpReuse(admin);
+        String code = Api.totp(adminSession.totpSecret(), Instant.now());
+        Map<String, String> body = Map.of("totp_code", code);
+
+        ResponseEntity<JsonNode> own =
+                api.post("/api/v1/users/" + admin + "/reset-sign-in", body, adminSession.accessToken());
+        assertThat(own.getBody().get("code").asString()).isEqualTo("cannot_reset_own_sign_in");
+        ResponseEntity<JsonNode> missing =
+                api.post("/api/v1/users/" + UUID.randomUUID() + "/reset-sign-in", body, adminSession.accessToken());
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        // The same code still works for a valid target.
+        ResponseEntity<JsonNode> ok =
+                api.post("/api/v1/users/" + userId + "/reset-sign-in", body, adminSession.accessToken());
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     /** MAJOR 1 (d): the user is told, without the link, when a reset is issued for them. */
@@ -753,6 +802,7 @@ class PasswordResetIT extends IntegrationTest {
                 .doesNotContain(token)
                 .doesNotContain("reset-password")
                 .doesNotContain("http");
+        assertThat(params).contains("\"who\": \"An administrator\"");
         // The link itself is never emailed on this path.
         assertThat(emails("identity.password_reset", email)).isZero();
     }
@@ -797,6 +847,11 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
+    String operatorCode(Session operator) {
+        Api.allowTotpReuse(operator.userId());
+        return Api.totp(operator.totpSecret(), Instant.now());
+    }
+
     /** The platform operator's path for a tenant admin: link once, no store, audited both sides, enrolment still forced. */
     @Test
     void thePlatformOperatorIssuesALinkForATenantAdminWhoStillMustEnrol() {
@@ -808,7 +863,8 @@ class PasswordResetIT extends IntegrationTest {
         UUID locked = user(adminEmail, "tenant_admin");
         String path = "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + locked + "/reset-sign-in";
 
-        ResponseEntity<JsonNode> issued = platform.post(path, null, operator.accessToken());
+        ResponseEntity<JsonNode> issued =
+                platform.post(path, Map.of("totp_code", operatorCode(operator)), operator.accessToken());
 
         assertThat(issued.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(issued.getHeaders().getFirst("Cache-Control")).isEqualTo("no-store");
@@ -830,6 +886,14 @@ class PasswordResetIT extends IntegrationTest {
                         .single())
                 .isEqualTo(1);
         assertThat(emails("identity.password_reset_issued", adminEmail)).isEqualTo(1);
+        // Round 2, m6: the notice names who issued it, and here that is the platform, not "an administrator".
+        String who = TestDatabase.owner()
+                .sql(
+                        "SELECT params->>'who' FROM notification_outbox WHERE template_key = 'identity.password_reset_issued' AND recipient = ?")
+                .param(adminEmail)
+                .query(String.class)
+                .single();
+        assertThat(who).isEqualTo("The platform operator");
         assertThat(auditsMentioning(tokenOf(url))).isZero();
 
         // The role requires a second factor and the admin has none yet: after the reset the enrolment is forced, no
@@ -840,19 +904,75 @@ class PasswordResetIT extends IntegrationTest {
         assertThat(done.getBody().get("mfa_token").asString()).isNotBlank();
         assertThat(done.getHeaders().getFirst("Set-Cookie")).isNull();
 
-        // Only a tenant admin, only an active one, only with platform authority.
+        // Only a tenant admin, only an active one, only with platform authority; and a refusal does not spend the code.
         UUID cashier = user(Api.email("cashier"));
+        String code = operatorCode(operator);
         ResponseEntity<JsonNode> notAdmin = platform.post(
                 "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + cashier + "/reset-sign-in",
-                null,
+                Map.of("totp_code", code),
                 operator.accessToken());
         assertThat(notAdmin.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(notAdmin.getBody().get("code").asString()).isEqualTo("not_a_tenant_admin");
-        assertThat(platform.post(path, null, adminSession.accessToken())
+        UUID second = user(Api.email("lockedout2"), "tenant_admin");
+        assertThat(platform.post(
+                                "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + second + "/reset-sign-in",
+                                Map.of("totp_code", code),
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        Map<String, String> tenantToken = Map.of("totp_code", "123456");
+        assertThat(platform.post(path, tenantToken, adminSession.accessToken())
                         .getStatusCode()
                         .is2xxSuccessful())
                 .isFalse();
-        assertThat(platform.post(path, null, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(platform.post(path, tenantToken, null).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    /** Round 2, M2: a stolen operator token alone cannot reset an admin's second factor or sign-in: a fresh code is needed. */
+    @Test
+    void bothPlatformResetRoutesNeedTheOperatorsOwnFreshCode() {
+        Api platform = Api.platform(http);
+        String operatorEmail = Api.email("operator");
+        UUID operatorId = Api.platformUser(operatorEmail);
+        Session operator = platform.signIn(operatorId, operatorEmail, Api.PASSWORD, null);
+        UUID target = user(Api.email("lockedout"), "tenant_admin");
+        String base = "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + target;
+
+        for (String route : List.of(base + "/reset-sign-in", base + "/mfa/reset")) {
+            // No code, a blank one, a wrong one: refused, nothing done.
+            assertThat(platform.post(route, null, operator.accessToken())
+                            .getStatusCode()
+                            .is4xxClientError())
+                    .as(route)
+                    .isTrue();
+            assertThat(platform.post(route, Map.of("totp_code", " "), operator.accessToken())
+                            .getStatusCode())
+                    .as(route)
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            ResponseEntity<JsonNode> wrong =
+                    platform.post(route, Map.of("totp_code", "000000"), operator.accessToken());
+            assertThat(wrong.getStatusCode()).as(route).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(wrong.getBody().get("code").asString()).as(route).isEqualTo("invalid_mfa_code");
+        }
+        assertThat(openLinks(target)).isZero();
+        assertThat(emails("identity.password_reset_issued", userEmail(target))).isZero();
+
+        // A right code works once; the same code a second time is refused (single use, as on the tenant route).
+        String code = operatorCode(operator);
+        assertThat(platform.post(base + "/reset-sign-in", Map.of("totp_code", code), operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> replay =
+                platform.post(base + "/mfa/reset", Map.of("totp_code", code), operator.accessToken());
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(replay.getBody().get("code").asString()).isEqualTo("invalid_mfa_code");
+        // With a fresh code the second route works too.
+        assertThat(platform.post(
+                                base + "/mfa/reset",
+                                Map.of("totp_code", operatorCode(operator)),
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
     }
 
     /** MAJOR 1 review item 9: the check on the status inside complete() is what stops a deactivated user, not the revocation. */
@@ -967,6 +1087,29 @@ class PasswordResetIT extends IntegrationTest {
                 .single();
 
         assertThat(deleted).isGreaterThanOrEqualTo(1);
+        assertThat(owner.sql("SELECT count(*) FROM user_password_resets WHERE user_id = ?")
+                        .param(userId)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    /** Round 2, m2: whatever cutoff the function is given, a row younger than 30 days survives. */
+    @Test
+    void thePurgeCannotBeToldToDeleteRecentRows() {
+        UUID userId = user(Api.email("cashier"));
+        var owner = TestDatabase.owner();
+        owner.sql(
+                        "INSERT INTO user_password_resets (id, tenant_id, created_at, user_id, token_hash, expires_at, origin)"
+                                + " VALUES (?, ?, now() - interval '2 days', ?, ?, now() - interval '2 days' + interval '1 hour', 'self')")
+                .params(UUID.randomUUID(), t.tenantId(), userId, sha256Random())
+                .update();
+        var app = org.springframework.jdbc.core.simple.JdbcClient.create(TestDatabase.appDataSource());
+
+        app.sql("SELECT user_password_resets_purge('infinity'::timestamptz)")
+                .query(Integer.class)
+                .single();
+
         assertThat(owner.sql("SELECT count(*) FROM user_password_resets WHERE user_id = ?")
                         .param(userId)
                         .query(Long.class)

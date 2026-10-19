@@ -123,11 +123,11 @@ class OutboxTemplates {
             new Template("A password reset was issued for your BMS sign-in", """
                     Hello,
 
-                    An administrator issued a password reset for your BMS sign-in at {tenant_name} on {when}.
-                    Nothing has changed yet: your password stays as it is until the reset link, which the
-                    administrator gives you, is used.
+                    {who} issued a password reset for your BMS sign-in at {tenant_name} on {when}.
+                    Nothing has changed yet: your password stays as it is until the reset link, which you are
+                    given in person or by message, is used.
 
-                    If you did not expect this, tell another administrator at once.
+                    If you did not expect this, tell your business's administrators, or Rincoltech support, at once.
 
                     Rincoltech
                     """),

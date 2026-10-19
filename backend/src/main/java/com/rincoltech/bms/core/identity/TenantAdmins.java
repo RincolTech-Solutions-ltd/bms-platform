@@ -30,6 +30,12 @@ public interface TenantAdmins {
      */
     ResetLink resetAdminSignIn(UUID userId, UUID platformUserId);
 
+    /**
+     * Everything {@link #resetAdminSignIn} would refuse (not found, not a tenant admin, not active), read-only and without a
+     * lock, so the platform operator's authenticator code is not spent on a call that cannot succeed.
+     */
+    void requireResettableAdmin(UUID userId);
+
     record Invitation(UUID userId, String url, Instant expiresAt) {}
 
     record ResetLink(String url, Instant expiresAt) {}

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #320; requirement FR-IAM-15). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
+Proposed (issue #320; requirement FR-IAM-15; the Users screen action is #339). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
 codes, revocable server-side sessions, invitations), ADR-025 (accepting an invitation signs the user in under the
 sign-in rules), ADR-003 (row-level security) and ADR-017 (per-permission branch scope). Does not supersede any of
 them. The contract is in chapter 7 section 7.11.2 and 7.11.4, the threat model in chapter 8 section 8.2a.
@@ -77,7 +77,7 @@ inbox.
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
-   is the placeholder `V99__staff_password_reset.sql`, renumbered at merge (`placeholder-migration-guard` fails a pull request that still holds a `V99` file, because a `V99` on main would make every later migration a number below an applied one); it also widens the `auth_sessions`
+   is the placeholder `V99__staff_password_reset.sql`, renumbered at merge (`placeholder-migration-guard` fails a pull request that still holds a `V99` file, with no override, and the first job of `deploy.yml` refuses to build one, because a `V99` on main would make every later migration a number below an applied one); it also widens the `auth_sessions`
    `revoked_reason` check (added `NOT VALID`, last, behind a five second `lock_timeout`).
 9. **The admin and operator resets return the link once, are not emailed, and are narrow.** Same shape as the
    invitation link (`{url, expires_at}`), no store (`Cache-Control: no-store`), audited as
@@ -92,19 +92,27 @@ inbox.
    platform: a tenant admin who is locked out is recovered by the platform operator
    (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`, `platform.tenants.manage`, a tenant admin
    target only, audited in both audit logs, the link shown once to the operator);
-   (c) **a fresh authenticator code from the acting admin** when the acting admin has two-step sign-in
-   (`AdminSecurity.requireTotp` before the transaction, as the payment account does: 422 `totp_required` without
-   one, 422 `invalid_mfa_code` for a wrong or used one), so a stolen session alone is not enough. **Accepted risk:**
-   an admin with **no second factor enrolled** (a tenant whose admin role does not require one and who has not set one up) is
-   not asked; a stolen session of such an admin can issue links for ordinary users, which is no more than the same session
-   can already do by changing a user's contact details and inviting again. It still cannot reach itself or another tenant
-   admin, and the user is emailed that a link was issued;
+   (c) **a fresh authenticator code from the acting admin, and the route fails closed** (`AdminSecurity.requireTotp`
+   before the transaction, as the payment account does: 422 `totp_required` without one, 422 `invalid_mfa_code` for a
+   wrong or used one), so a stolen session alone is not enough. An acting admin with **no authenticator enrolled is
+   refused** (409 `mfa_not_enrolled`), not waved through: the permission `core.users.manage` belongs to the tenant admin
+   role alone and that role requires two-step sign-in, so the case does not arise for a real admin, and an earlier
+   draft that skipped the code for such a caller failed open for any principal without a staff user row. The target is
+   checked first (read-only), then the code, then the link: a call that would be refused does not spend a code;
+   (b2) **the operator routes need the operator's own fresh code too.** Both `POST /platform/tenants/{tenant_id}/users/
+   {user_id}/reset-sign-in` and the existing `.../mfa/reset` take `{totp_code}` and check it with the operator's own
+   enrolment before anything else (`OperatorSecurity.requireTotp`: the same single-use step, the same step-up counter and
+   lock, five wrong codes end the operator's sessions). Without it a stolen operator token could reset the second factor
+   of any tenant's admin and then issue a link for the same admin, which is the chain decision 9(a) to (c) closes for a
+   tenant;
    (d) the user is told by email when a link is **issued**, not only when it is used.
    An invited or deactivated user is refused (409). A branch scoped admin reaches only a user whose every role lies
    inside the admin's branches (404 otherwise, also for a user with no role). It is not a maker-checker action, for
    the reason ADR-014 gives for the MFA reset.
-10. **Logging and audit.** No token, password, link or email address reaches a log, an audit row or an error body.
-    The rows of the public routes (`requested`, `refused`, `used`, and `unknown_login` for a login that matched
+10. **Logging and audit.** No token, password or link reaches a log, an audit row or an error body, and no email address is
+    logged or put in an error. The one exception is the login typed on the form for an account that matched nobody
+    (`core.password_reset.unknown_login`): it is stored as `login`, which the audit writer masks to its last four
+    characters, exactly as `core.auth.sign_in_failed` does. The rows of the public routes (`requested`, `refused`, `used`, and `unknown_login` for a login that matched
     nobody, like `core.auth.sign_in_failed`) have **no actor** (the caller is not signed in; the user is the entity) and
     carry the client address in `data.ip` (the audit search shows `data`, not the `ip` column). The admin and operator
     rows name the admin or operator as the actor. The rows carry the origin, the expiry and counts.
@@ -115,8 +123,11 @@ inbox.
     it failed. The window is therefore the hour plus at most 5 minutes, or until the email is sent. The recording
     notifier keeps raw links in memory outside tests (#324, the staff invitation path); this path does not use it.
 12. **Retention.** `user_password_resets` rows are deleted 30 days after they were made by a nightly job
-    (`core.identity.password-reset-purge`) through a definer function; the application role has no DELETE grant
-    on the table and, with no tenant bound in a job, could not see the rows anyway.
+    (`core.identity.password-reset-purge`) through a definer function, `user_password_resets_purge(cutoff)`: a job has no
+    tenant bound, so a plain DELETE by the application role would see no row under the tenant policy. The application role
+    may execute the function and it deletes across every tenant, so **the function protects itself**: it deletes rows
+    older than the earlier of the cutoff it is given and 30 days, so no cutoff, not even `infinity`, removes a younger row
+    (tested). The missing DELETE grant on the table is not the protection.
 
 ## Threat model
 
@@ -132,7 +143,8 @@ inbox.
 | A reset for someone who should not get back in | Decision 5: active users only; deactivation revokes links |
 | Crossing tenants | Decision 8; the lookup runs inside the tenant of the host; `PasswordResetIT` proves a link, a login and an admin do not cross |
 | An admin reaching users outside their branches | Decision 9 scope rule; the route needs `core.users.manage` |
-| A hijacked tenant admin session taking an account over by chaining the MFA reset and the sign-in reset | Decision 9: never a tenant admin, never oneself, a fresh authenticator code from the acting admin, an email to the user when a link is issued; the operator path for a locked-out admin. Accepted risk: an acting admin with no second factor enrolled is not asked |
+| A hijacked tenant admin session taking an account over by chaining the MFA reset and the sign-in reset | Decision 9: never a tenant admin, never oneself, a fresh authenticator code from the acting admin, and the route fails closed for an admin with none enrolled (409); an email to the user when a link is issued; the operator path for a locked-out admin |
+| A stolen platform operator token resetting a tenant admin's second factor and then issuing a link for the same admin, on any tenant | Decision 9(b2): both operator routes need the operator's own fresh, single-use authenticator code and fail closed without one; five wrong codes lock the step-up and end the operator's sessions; both audit logs record the act. The blast radius of a stolen token plus a stolen authenticator is every tenant's admin, which is what the operator role is; the detective control is the email to the admin that a reset was issued, sent when it is issued and before it is used (the link is handed over out of band, so the admin hears of an unexpected one) |
 | Deadlock or a double use under parallel requests | The user's row is locked before the link's in every path; the link row is locked and re-read before it is used, so of two parallel uses one wins |
 
 ## Consequences
@@ -154,8 +166,9 @@ inbox.
   link by email (decision 7); every other account is exactly as safe as its email.
 - A tenant admin who has not set up two-step sign-in, or who is locked out, cannot recover alone: the operator issues
   the link (decision 9). A tenant with one admin therefore needs the operator in that case.
-- The acting admin's own second factor is asked for on the tenant route, but not when the admin has none enrolled
-  (accepted risk, decision 9).
+- The tenant route and both operator routes need the caller's own authenticator and fail closed without one; an admin who
+  has lost their phone cannot issue links until their second factor is reset (by another admin, or the operator).
+- The operator routes changed shape: `.../mfa/reset` now takes `{totp_code}` (an existing caller must send one).
 - The 400 ms floor holds a request thread for up to that long per request; the address limit (20 an hour) bounds the
   cost.
 - The address buckets are per instance and lost on restart (the account bound, in the database, is not). Behind more

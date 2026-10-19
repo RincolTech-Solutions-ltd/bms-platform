@@ -173,13 +173,45 @@ class PasswordResets {
     }
 
     /**
+     * Everything the tenant route refuses, read without a lock and before the caller's authenticator code is spent: an unknown
+     * user or one outside the admin's branches (404), the admin's own account, a tenant admin, a user not active (409).
+     */
+    @Transactional(readOnly = true)
+    void precheckForAdmin(UUID userId) {
+        adminTarget(CurrentPrincipal.require(), userId, false);
+    }
+
+    /**
      * A tenant admin issues a link for an active user who is not a tenant admin and not themselves; it is returned once and
      * never emailed, but the user is told by email that one was issued (without the link) (FR-IAM-15).
      */
     @Transactional
     SignInResetLink issueForAdmin(UUID userId) {
         Principal admin = CurrentPrincipal.require();
-        Target user = lock(userId);
+        Target user = adminTarget(admin, userId, true);
+        Instant now = clock.now();
+        Issued issued = issue(userId, "admin", admin.userId(), now);
+        audit.record(new AuditLog.Entry(
+                "core.password_reset.requested",
+                "core.user",
+                userId,
+                null,
+                Map.of(),
+                data("origin", "admin", "expires_at", issued.expiresAt().toString())));
+        // The token never reaches the audit log: the row records that the link was shown.
+        audit.record(new AuditLog.Entry(
+                "core.password_reset.link_revealed",
+                "core.user",
+                userId,
+                null,
+                Map.of(),
+                data("expires_at", issued.expiresAt().toString())));
+        notifyIssued(user, issued, now, "An administrator");
+        return new SignInResetLink(issued.url(), issued.expiresAt());
+    }
+
+    private Target adminTarget(Principal admin, UUID userId, boolean lock) {
+        Target user = find(userId, lock);
         if (user == null) {
             throw ApiException.notFound();
         }
@@ -199,31 +231,17 @@ class PasswordResets {
                     "Not allowed",
                     "An administrator's sign-in is reset by the platform operator. Ask them.");
         }
-        Instant now = clock.now();
-        Issued issued = issue(userId, "admin", admin.userId(), now);
-        audit.record(new AuditLog.Entry(
-                "core.password_reset.requested",
-                "core.user",
-                userId,
-                null,
-                Map.of(),
-                data("origin", "admin", "expires_at", issued.expiresAt().toString())));
-        // The token never reaches the audit log: the row records that the link was shown.
-        audit.record(new AuditLog.Entry(
-                "core.password_reset.link_revealed",
-                "core.user",
-                userId,
-                null,
-                Map.of(),
-                data("expires_at", issued.expiresAt().toString())));
-        notifyIssued(user, issued, now);
-        return new SignInResetLink(issued.url(), issued.expiresAt());
+        return user;
     }
 
-    /** The platform operator issues a link for a tenant admin whom nobody in the tenant may reset (ADR-042 decision 9). */
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
-    ResetLink issueForOperator(UUID userId, UUID operatorId) {
-        Target user = lock(userId);
+    /** What the operator route refuses, read without a lock and before the operator's authenticator code is spent. */
+    @Transactional(readOnly = true)
+    void precheckForOperator(UUID userId) {
+        operatorTarget(userId, false);
+    }
+
+    private Target operatorTarget(UUID userId, boolean lock) {
+        Target user = find(userId, lock);
         if (user == null) {
             throw ApiException.notFound();
         }
@@ -231,6 +249,13 @@ class PasswordResets {
             throw ApiException.rule("not_a_tenant_admin", "The platform resets the sign-in of tenant admins only.");
         }
         requireActive(user);
+        return user;
+    }
+
+    /** The platform operator issues a link for a tenant admin whom nobody in the tenant may reset (ADR-042 decision 9). */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    ResetLink issueForOperator(UUID userId, UUID operatorId) {
+        Target user = operatorTarget(userId, true);
         Instant now = clock.now();
         Issued issued = issue(userId, "operator", operatorId, now);
         audit.record(
@@ -257,7 +282,7 @@ class PasswordResets {
                         data("expires_at", issued.expiresAt().toString())),
                 operatorId,
                 "platform");
-        notifyIssued(user, issued, now);
+        notifyIssued(user, issued, now, "The platform operator");
         return new ResetLink(issued.url(), issued.expiresAt());
     }
 
@@ -375,7 +400,7 @@ class PasswordResets {
     }
 
     /** The user is told that a reset was issued, without the link: the admin or operator hands it over. */
-    private void notifyIssued(Target user, Issued issued, Instant now) {
+    private void notifyIssued(Target user, Issued issued, Instant now, String who) {
         if (user.email() == null) {
             return;
         }
@@ -383,7 +408,7 @@ class PasswordResets {
                 Outbox.EMAIL,
                 user.email(),
                 ISSUED_TEMPLATE,
-                Map.of("tenant_name", tenant.profile().name(), "when", stamp(now)),
+                Map.of("tenant_name", tenant.profile().name(), "when", stamp(now), "who", who),
                 ISSUED_TEMPLATE + ":" + issued.id(),
                 "password-reset:" + user.id(),
                 now.plus(Duration.ofDays(1))));
@@ -441,7 +466,12 @@ class PasswordResets {
     }
 
     private Target lock(UUID userId) {
-        return jdbc.sql("SELECT id, email, phone_e164, status FROM users WHERE id = ? AND kind = 'staff' FOR UPDATE")
+        return find(userId, true);
+    }
+
+    private Target find(UUID userId, boolean lock) {
+        return jdbc.sql("SELECT id, email, phone_e164, status FROM users WHERE id = ? AND kind = 'staff'"
+                        + (lock ? " FOR UPDATE" : ""))
                 .param(userId)
                 .query((rs, n) -> new Target(
                         rs.getObject("id", UUID.class),

@@ -314,6 +314,17 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** Read-only: what {@link #resetAdminSignIn} would refuse, checked before the operator's authenticator code is spent. */
+    void requireResettableAdmin(UUID tenantId, UUID userId) {
+        transactions.execute(status -> tenant(tenantId));
+        TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    tenantAdmins.requireResettableAdmin(userId);
+                    return null;
+                }));
+    }
+
     /** FR-IAM-15, platform path: a tenant admin who forgot the password; nobody in the tenant may reset an admin. */
     TenantAdmins.ResetLink resetAdminSignIn(UUID tenantId, UUID userId) {
         UUID operator = CurrentPrincipal.require().userId();

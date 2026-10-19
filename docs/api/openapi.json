@@ -5471,6 +5471,17 @@
           }
         }
       },
+      "PlatformStepUpRequest" : {
+        "properties" : {
+          "totp_code" : {
+            "description" : "A current 6 digit code from the operator's own authenticator app",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "totp_code" ]
+      },
       "PlatformTenant" : {
         "properties" : {
           "created_at" : {
@@ -23820,12 +23831,22 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformStepUpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "description" : "OK"
           }
         },
-        "summary" : "Reset the lost second factor of a tenant admin (FR-IAM-12)",
+        "summary" : "Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12)",
         "tags" : [ "platform" ]
       }
     },
@@ -23849,6 +23870,16 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformStepUpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -23861,7 +23892,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15)",
+        "summary" : "Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
         "tags" : [ "platform" ]
       }
     },
@@ -31698,7 +31729,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15)",
+        "summary" : "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15)",
         "tags" : [ "users" ]
       }
     },

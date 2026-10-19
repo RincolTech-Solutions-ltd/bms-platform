@@ -214,6 +214,12 @@ class UserService implements TenantAdmins {
         return resets.issueForOperator(userId, platformUserId);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public void requireResettableAdmin(UUID userId) {
+        resets.precheckForOperator(userId);
+    }
+
     // ---- Reads ----------------------------------------------------------------------------
 
     @Transactional(readOnly = true)

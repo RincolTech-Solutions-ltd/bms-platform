@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.platform.internal;
 
+import com.rincoltech.bms.core.identity.OperatorSecurity;
 import com.rincoltech.bms.core.identity.TenantAdmins;
 import com.rincoltech.bms.kernel.NoStore;
 import com.rincoltech.bms.kernel.RequiresPermission;
@@ -35,9 +36,11 @@ import org.springframework.web.bind.annotation.RestController;
 class PlatformController {
 
     private final PlatformService service;
+    private final OperatorSecurity security;
 
-    PlatformController(PlatformService service) {
+    PlatformController(PlatformService service, OperatorSecurity security) {
         this.service = service;
+        this.security = security;
     }
 
     @Schema(name = "Plan", description = "Limits only; prices are not stored in this repository")
@@ -99,6 +102,13 @@ class PlatformController {
             List<@Pattern(regexp = "^[a-z]{2,30}$") String> modules,
             @NotNull @Valid HeadOfficeRequest headOffice,
             @NotNull @Valid FirstAdminRequest admin) {}
+
+    @Schema(name = "PlatformStepUpRequest")
+    record StepUpRequest(
+            @NotBlank
+            @Size(max = 20)
+            @Schema(description = "A current 6 digit code from the operator's own authenticator app")
+            String totpCode) {}
 
     @Schema(
             name = "PlatformSignInResetLink",
@@ -184,16 +194,25 @@ class PlatformController {
         return service.setSubscription(tenantId, "active", null);
     }
 
+    /**
+     * Both reset routes below ask the signed-in operator for a current code from their own authenticator, used once, before
+     * anything is done (ADR-042): a stolen operator token alone cannot take a tenant's admin over. The check of the target
+     * comes first on the sign-in route, so a code is not spent on a call that would be refused.
+     */
     @PostMapping("/tenants/{tenant_id}/users/{user_id}/reset-sign-in")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
-            summary = "Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15)",
+            summary =
+                    "Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
             operationId = "platformResetAdminSignIn")
     SignInResetLink resetAdminSignIn(
             @PathVariable("tenant_id") UUID tenantId,
             @PathVariable("user_id") UUID userId,
+            @Valid @RequestBody StepUpRequest request,
             HttpServletResponse response) {
         NoStore.apply(response);
+        service.requireResettableAdmin(tenantId, userId);
+        security.requireTotp(request.totpCode());
         TenantAdmins.ResetLink link = service.resetAdminSignIn(tenantId, userId);
         return new SignInResetLink(link.url(), link.expiresAt());
     }
@@ -201,9 +220,14 @@ class PlatformController {
     @PostMapping("/tenants/{tenant_id}/users/{user_id}/mfa/reset")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
-            summary = "Reset the lost second factor of a tenant admin (FR-IAM-12)",
+            summary =
+                    "Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12)",
             operationId = "platformResetAdminMfa")
-    ResponseEntity<Void> resetAdminMfa(@PathVariable("tenant_id") UUID tenantId, @PathVariable("user_id") UUID userId) {
+    ResponseEntity<Void> resetAdminMfa(
+            @PathVariable("tenant_id") UUID tenantId,
+            @PathVariable("user_id") UUID userId,
+            @Valid @RequestBody StepUpRequest request) {
+        security.requireTotp(request.totpCode());
         service.resetAdminMfa(tenantId, userId);
         return ResponseEntity.noContent().build();
     }

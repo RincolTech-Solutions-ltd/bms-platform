@@ -468,7 +468,7 @@ who issued an `admin` link or the platform operator who issued an `operator` lin
 `revoked_at timestamptz` (a newer link, or a deactivation, replaced it; a CHECK keeps used and revoked apart). Index
 `(tenant_id, user_id, created_at DESC)`. Grants `SELECT, INSERT, UPDATE`; `created_at` is written by the application's clock. Rows are deleted 30
 days after they were made by `user_password_resets_purge(timestamptz)` (a definer function the nightly job `core.identity.password-reset-purge` calls; there is no
-DELETE grant). The token itself is never stored.
+DELETE grant, and the function itself never deletes a row younger than 30 days, whatever cutoff it is given). `origin` `operator` rows are the platform operator's. The token itself is never stored.
 
 ### `auth_sessions` (RLS)
 

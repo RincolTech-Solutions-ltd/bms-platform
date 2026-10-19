@@ -74,8 +74,8 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 - **Forgotten password** (FR-IAM-15, ADR-042): on the sign-in page the user types an email or phone and, if an active account has
   an email on file, gets a link there through the outbox (`identity.password_reset`; SMS stays off). A tenant admin can instead
   issue a link for an active user who is not a tenant admin and not themselves (`POST /users/{user_id}/reset-sign-in`,
-  `core.users.manage`; a fresh authenticator code in the body when the acting admin has two-step sign-in), and the
-  platform operator one for a tenant admin (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`): shown once,
+  `core.users.manage`; a fresh authenticator code in the body, and an admin with none enrolled is refused), and the
+  platform operator one for a tenant admin (`POST /platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in`, with the operator's own fresh authenticator code, as the platform's `mfa/reset` now also needs): shown once,
   never emailed, no-store. The token is 256 random bits in the link's fragment, stored as a SHA-256 hash only and found by that hash
   (no comparison of secrets in application code), single use, valid one hour; a newer link revokes the older ones. The link's
   host is built from the tenant's slug under `BMS_TENANT_HOST_PATTERN` (`PlatformHost.tenantOrigin`), never from a request
@@ -128,7 +128,8 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 | A reset for an account that should not get back in | Only active users; a deactivated user's open links are revoked and refused; an invited user keeps the invitation path |
 | One tenant's link or admin reaching another's user | The table has forced row-level security with the tenant policy; the lookup runs inside the tenant of the host, so a link of tenant A used on tenant B's host is not found, and an admin of B cannot issue a link for A's user (`PasswordResetIT`, `RlsIsolationIT`) |
 | An admin resetting users outside their branches | The route needs `core.users.manage`; an admin whose scope is not every branch reaches only users whose every role is inside it |
-| A hijacked tenant admin session chaining the MFA reset and the sign-in reset to take an account over | The tenant route refuses oneself and any tenant admin (a locked-out admin is recovered by the platform operator), asks the acting admin for a fresh authenticator code when they have one, and emails the user when a link is issued. Accepted risk: an acting admin with no second factor enrolled is not asked for a code (ADR-042 decision 9) |
+| A hijacked tenant admin session chaining the MFA reset and the sign-in reset to take an account over | The tenant route refuses oneself and any tenant admin (a locked-out admin is recovered by the platform operator), checks the target first, then asks the acting admin for a fresh authenticator code and refuses (409 `mfa_not_enrolled`) an admin with none enrolled (it fails closed), and emails the user when a link is issued (ADR-042 decision 9) |
+| A stolen platform operator token resetting an admin's second factor and then issuing a link for the same admin, on any tenant | Both platform reset routes need the operator's own fresh, single-use authenticator code and fail closed without one; five wrong codes lock the step-up and end the operator's sessions; both audit logs record the act; the admin is emailed when a link is issued, before it is used, which is the detective control (ADR-042 decision 9(b2)) |
 | A link in the admin's hand used by the admin | Possible by design for an ordinary user (an admin who can reset a sign-in could also deactivate and invite): the issue and the reveal are audited with the admin's identity, the user is emailed when it is issued and again when the password changes |
 
 ## 8.3 Role-based access control

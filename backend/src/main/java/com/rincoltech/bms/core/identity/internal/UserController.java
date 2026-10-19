@@ -21,6 +21,7 @@ import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -127,28 +128,36 @@ class UserController {
     }
 
     /**
-     * The acting admin proves they are still the person who enrolled their authenticator before the link is made (a hijacked
-     * session cannot take an account over); an admin with no second factor enrolled is not asked (ADR-042, accepted risk).
-     * The step-up runs before the transaction of the action, as {@link AdminSecurity#requireTotp} requires.
+     * The order matters: the target is checked first (read-only), then the acting admin proves they are still the person who
+     * enrolled their authenticator (so a stolen session alone cannot take an account over, and a code is not spent on a call
+     * that would be refused), then the link is made, which checks the target again under a lock. An admin with no authenticator
+     * enrolled is refused (409 {@code mfa_not_enrolled}): the route fails closed (ADR-042). The step-up runs before the
+     * transaction of the action, as {@link AdminSecurity#requireTotp} requires.
      */
     @PostMapping("/{user_id}/reset-sign-in")
     @RequiresPermission("core.users.manage")
     @Operation(
             summary =
-                    "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15)",
+                    "Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15)",
             operationId = "resetUserSignIn")
     SignInResetLink resetSignIn(
             @PathVariable("user_id") UUID userId,
             @Valid @RequestBody(required = false) ResetSignInRequest request,
             HttpServletResponse response) {
         NoStore.apply(response);
-        if (resets.actorHasSecondFactor()) {
-            String code = request == null ? null : request.totpCode();
-            if (code == null || code.isBlank()) {
-                throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
-            }
-            security.requireTotp(code);
+        resets.precheckForAdmin(userId);
+        if (!resets.actorHasSecondFactor()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "mfa_not_enrolled",
+                    "MFA not enrolled",
+                    "Turn on two-step sign-in for your own account first: this change asks for a code from your authenticator app.");
         }
+        String code = request == null ? null : request.totpCode();
+        if (code == null || code.isBlank()) {
+            throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
+        }
+        security.requireTotp(code);
         return resets.issueForAdmin(userId);
     }
 }

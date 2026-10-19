@@ -2697,7 +2697,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reset the lost second factor of a tenant admin (FR-IAM-12) */
+        /** Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12) */
         post: operations["platformResetAdminMfa"];
         delete?: never;
         options?: never;
@@ -2714,7 +2714,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time password reset link for a tenant admin; shown once, valid one hour (FR-IAM-15) */
+        /** Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15) */
         post: operations["platformResetAdminSignIn"];
         delete?: never;
         options?: never;
@@ -5239,7 +5239,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code when the admin has two-step sign-in (FR-IAM-15) */
+        /** Issue a one-time link to set a new password for an active user who is not a tenant admin; shown once, valid for one hour; needs a current code from the admin's own authenticator (FR-IAM-15) */
         post: operations["resetUserSignIn"];
         delete?: never;
         options?: never;
@@ -7524,6 +7524,10 @@ export interface components {
             /** Format: date-time */
             expires_at?: string;
             url?: string;
+        };
+        PlatformStepUpRequest: {
+            /** @description A current 6 digit code from the operator's own authenticator app */
+            totp_code: string;
         };
         PlatformTenant: {
             /** Format: date-time */
@@ -17909,7 +17913,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformStepUpRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -17930,7 +17938,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformStepUpRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
