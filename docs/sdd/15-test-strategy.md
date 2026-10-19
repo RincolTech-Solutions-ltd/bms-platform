@@ -93,7 +93,7 @@ because no production action exists before increment 2 (ADR-015).
 
 ### 15.4.2 Retail (ADR-020)
 
-Credit sale recognition (ADR-043, issue #340): `RetailCreditRecognitionIT` runs the profit report, the dashboard and the savings suggestion with the tenant setting untouched (golden figures of `on_sale`) and with `on_payment` (an unpaid sale, a part payment, payments over several days, a payment in a later month, a void, returns, an imported sale, another tenant, permissions), and `CreditRecognitionTest` works the arithmetic by hand, including rounding on the cumulative amount.
+Credit sale recognition (ADR-043, issue #340): `RetailCreditRecognitionIT` runs the profit report, the dashboard and the savings suggestion with the tenant setting untouched (golden figures of `on_sale`) and with `on_payment` (an unpaid sale, a part payment, payments over several days, a payment in a later month, a void, returns, an imported sale, another tenant, permissions), and `CreditRecognitionTest` works the arithmetic by hand, including rounding on the cumulative amount. `RetailSaleWriteOffIT` writes a debt off under both settings (the posted legs, the books balancing, the debt cleared, the loss on its date in the profit report and the savings suggestion), refuses the wrong sales, takes no payment, void or return afterwards, needs `retail.credit.manage`, is invisible to another tenant and waits for a second administrator above the threshold.
 
 Every retail table gets its factory row in `RlsIsolationIT`, so the catalogue, cross-tenant read,
 write and unbound-session tests cover it without a separate suite.

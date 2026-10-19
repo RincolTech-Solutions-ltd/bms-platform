@@ -481,8 +481,9 @@ CHECK constraint as well as the service.
 | `retail_sale_return` | `retail.sale.return` | `retail.sale.return` | Yes, counted over the returns of the sale, and no checker at all while no threshold is set |
 | `retail_sale_return_void` | `retail.sale.return` | `retail.sale.return` | Reads the threshold of `retail_sale_return`: needed for a return that was approved or is worth it alone; none while no threshold is set |
 | `retail_purchase_order` | `retail.purchase.create` | `retail.purchase.approve` | Yes, on the order's total, and no checker at all while no threshold is set; it is the send of a draft order |
+| `retail_sale_write_off` | `retail.credit.manage` | `retail.credit.manage` | Yes, on the unpaid amount written off, and no checker at all while no threshold is set (ADR-043, issue #340) |
 
-Registered so far: `collateral_release` (#13); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
+Registered so far: `collateral_release` (#13); `retail_sale_write_off` (#340, `retail.sales`, ADR-043: writing off the unpaid part of a credit sale, with the same open default as returns); `retail_purchase_order` (#198, `retail.purchasing`, ADR-033: sending a purchase order, with the same open default as returns); `retail_sale_return` and `retail_sale_return_void` (#201, `retail.sales`, ADR-033: unlike the lending actions an unset threshold means no checker, so the
 action pends only at or above a threshold the tenant sets); `loan_disbursement`, `repayment_reversal` and
 `loan_write_off` (#108, `lending.loans`, ADR-026); `investment_funding`, `investment_early_withdrawal`
 and `investment_reversal` (#152, `lending.investments`, ADR-031). Increment 10 adds two checker

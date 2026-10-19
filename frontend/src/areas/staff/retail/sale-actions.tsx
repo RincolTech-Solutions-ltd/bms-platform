@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { RetailError, retail, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { SALE_VOID, holdsAt } from './permissions';
+import { CREDIT_MANAGE, SALE_VOID, holdsAt } from './permissions';
 import {
   IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, paidWords, payFailureWords, payProblem,
   saleMovedOn, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
+  canWriteOff, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffWarning, writeOffWords,
 } from './sale-actions-state';
 import { Problem, Success, money } from './ui';
 
@@ -211,4 +212,83 @@ export function VoidSaleAction({ sale, branchName }: { sale: Sale; branchName?: 
     sending.current = true;
     send.mutate(reason);
   }} onCancel={() => setOpen(false)} />;
+}
+
+/** The write-off form: a reason of at least five characters, what will happen in plain words, and one clear button. */
+export function WriteOffFormView({ owed, reason, busy, error, onReason, onWriteOff, onCancel }: {
+  owed: number;
+  reason: string;
+  busy?: boolean;
+  error?: unknown;
+  onReason: (reason: string) => void;
+  onWriteOff: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const ready = writeOffReasonOf(reason);
+  return (
+    <form
+      className="stack"
+      aria-label="Write off this debt"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !busy) onWriteOff(ready);
+      }}
+    >
+      <label htmlFor="write-off-reason">Why will this buyer not pay? (at least {MIN_REASON} characters)</label>
+      <input id="write-off-reason" value={reason} maxLength={300} onChange={(e) => onReason(e.target.value)} />
+      <p className="hint" data-testid="write-off-warning">{writeOffWarning(owed)}</p>
+      <Problem error={error} />
+      <p className="cluster">
+        <button type="submit" disabled={ready === null || busy}>{busy ? 'Writing off' : 'Write off'}</button>
+        <button type="button" className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the debt</button>
+      </p>
+    </form>
+  );
+}
+
+/**
+ * Write off the unpaid part of a credit sale that the buyer will never pay (retail.credit.manage at the sale's branch). Offered only on a
+ * live credit sale made on the system that still owes; nothing shows for anyone else. Above the business's approval limit the write-off
+ * waits for a second administrator, and the screen says so. The sale is never deleted.
+ */
+export function WriteOffSaleAction({ sale }: { sale: Sale }) {
+  const { me } = useStaff();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const saleId = sale.id ?? '';
+  const { key, draft, setDraft, discard } = usePersistedDraft<{ reason: string }>(`sale-write-off:${me.user_id ?? ''}:${saleId}`, { reason: '' });
+  const sending = useRef(false);
+  const send = useMutation({
+    mutationFn: (reason: string) => retail.writeOffSale(saleId, reason, key),
+    onSuccess: (outcome) => {
+      discard();
+      setOpen(false);
+      setMessage(writeOffWords(outcome));
+      void queryClient.invalidateQueries({ queryKey: ['retail'] });
+    },
+    onError: (error) => {
+      if (writeOffMovedOn(error)) void queryClient.invalidateQueries({ queryKey: ['retail'] });
+    },
+    onSettled: () => { sending.current = false; },
+  });
+  if (!holdsAt(me, CREDIT_MANAGE, sale.branch_id)) return null;
+  if (message) return <Success>{message}</Success>;
+  if (!canWriteOff(sale)) return null;
+  if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Write off</button></p>;
+  return (
+    <WriteOffFormView
+      owed={owedMinor(sale)}
+      reason={draft.reason}
+      busy={send.isPending}
+      error={writeOffFailureWords(send.error)}
+      onReason={(reason) => setDraft({ reason })}
+      onWriteOff={(reason) => {
+        if (sending.current) return;
+        sending.current = true;
+        send.mutate(reason);
+      }}
+      onCancel={() => { discard(); setOpen(false); }}
+    />
+  );
 }

@@ -1,4 +1,4 @@
-import { RETAIL_CURRENCY, RetailError, type Sale, type SalePaymentRequest } from '../../../api/retail';
+import { RETAIL_CURRENCY, RetailError, type Sale, type SalePaymentRequest, type WriteOffOutcome } from '../../../api/retail';
 import { formatMinor, parseMinor } from '../../../components/money';
 import { MIN_REASON, reasonOf } from './account-state';
 
@@ -97,5 +97,35 @@ export function payFailureWords(error: unknown, full: boolean): unknown {
   if (keyReused(error)) return new Error('This payment was changed after it was first sent, so the form has been reset. Check the balance, then enter it again.');
   if (codeOf(error) === 'payment_exceeds_balance' && full) return new Error('The balance has changed; check the new amount.');
   if (codeOf(error) === 'sale_not_payable' || codeOf(error) === 'sale_voided') return new Error('This sale can no longer take a payment. It has been reloaded; check its state.');
+  return error;
+}
+
+// Writing off a debt (issue #340, ADR-043): the unpaid part of a credit sale that the buyer will not pay becomes a loss. It never
+// deletes: the sale stays and reads Written off, and the debt leaves the owing and overdue lists. The server checks every rule again.
+
+/** True for a live credit sale made on the system that still owes money and has not been written off. */
+export const canWriteOff = (sale: Pick<Sale, 'payment_method' | 'status' | 'balance_minor' | 'historical' | 'write_off'>): boolean =>
+  sale.payment_method === 'credit' && sale.status === 'completed' && owedMinor(sale) > 0 && sale.historical !== true && sale.write_off === undefined;
+
+/** The reason to send, or null while it is too short. */
+export const writeOffReasonOf = (text: string): string | null => reasonOf(text);
+
+/** What the person is told before they confirm: the amount, that it is a loss, that nothing is deleted and that it cannot be undone. */
+export const writeOffWarning = (owed: number): string =>
+  `${formatMinor(owed, RETAIL_CURRENCY)} will be treated as lost. The sale stays on record and reads Written off, the buyer no longer owes it, and it leaves the owing and overdue lists. This cannot be undone.`;
+
+/** A sentence for the result of a write-off: done, or waiting for a second administrator. */
+export const writeOffWords = (outcome: Pick<WriteOffOutcome, 'executed' | 'write_off'>): string =>
+  outcome.executed === true
+    ? `Written off ${formatMinor(outcome.write_off?.unpaid_minor ?? 0, RETAIL_CURRENCY)} as a loss. The sale stays on record.`
+    : 'Sent to a second administrator to approve. Nothing changes until they do.';
+
+/** Refusals that mean the sale moved on since the screen read it. */
+export const writeOffMovedOn = (error: unknown): boolean => ['already_written_off', 'nothing_owing', 'sale_voided'].includes(codeOf(error) ?? '');
+
+/** What to tell the person about a failed write-off, when the plain refusal alone would leave them stuck. */
+export function writeOffFailureWords(error: unknown): unknown {
+  if (keyReused(error)) return new Error('This write-off was changed after it was first sent, so the form has been reset. Check the sale, then try again.');
+  if (writeOffMovedOn(error)) return new Error('This sale changed while you were looking at it. It has been reloaded; check what it owes.');
   return error;
 }

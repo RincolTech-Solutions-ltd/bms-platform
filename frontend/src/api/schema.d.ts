@@ -4348,6 +4348,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sales/{sale_id}/write-off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write off the unpaid part of a credit sale as a loss: clears the debt, never deletes (issue #340); M. 201 when done, 202 when it waits for a second administrator */
+        post: operations["writeOffRetailSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/savings": {
         parameters: {
             query?: never;
@@ -8501,6 +8518,11 @@ export interface components {
             name?: string;
         };
         RetailDailyProfit: {
+            /**
+             * Format: int64
+             * @description The loss of credit sales written off on the day (ADR-043); included in profit_minor as a minus. With on_payment the unpaid share of the cost of goods, with on_sale the whole unpaid amount
+             */
+            bad_debt_minor?: number;
             /** Format: int64 */
             cost_of_sales_minor?: number;
             /**
@@ -8537,6 +8559,11 @@ export interface components {
             usage_cost_minor?: number;
         };
         RetailDailyProfitRow: {
+            /**
+             * Format: int64
+             * @description The loss of credit sales written off on the day (ADR-043); included in profit_minor as a minus. With on_payment the unpaid share of the cost of goods, with on_sale the whole unpaid amount
+             */
+            bad_debt_minor?: number;
             /** Format: uuid */
             branch_id?: string;
             /** Format: int64 */
@@ -10594,6 +10621,7 @@ export interface components {
             voided_at?: string;
             /** Format: uuid */
             voided_by?: string;
+            write_off?: components["schemas"]["RetailSaleWriteOffInfo"];
         };
         RetailSaleLine: {
             code?: string;
@@ -10772,6 +10800,14 @@ export interface components {
             voided_by?: string;
             /** Format: date */
             voided_on?: string;
+        };
+        /** @description A credit sale whose unpaid part was written off as a loss */
+        RetailSaleWriteOffInfo: {
+            reason?: string;
+            /** Format: int64 */
+            unpaid_minor?: number;
+            /** Format: date */
+            written_off_on?: string;
         };
         RetailSalesAnalysis: {
             by_branch?: components["schemas"]["RetailSalesAnalysisRow"][];
@@ -12219,6 +12255,48 @@ export interface components {
             purpose?: string;
             /** Format: date-time */
             withdrawn_at?: string;
+        };
+        RetailWriteOff: {
+            /** Format: uuid */
+            approval_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            /** @enum {string} */
+            credit_sale_recognition?: "on_sale" | "on_payment";
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in the sale's branch: the loss the profit report shows on this day. With on_payment the unpaid share of the cost of goods; with on_sale the whole unpaid amount
+             */
+            loss_minor?: number;
+            reason?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            /**
+             * Format: int64
+             * @description What the buyer still owed, now cleared from trade debtors
+             */
+            unpaid_minor?: number;
+            /** Format: date */
+            written_off_on?: string;
+        };
+        /** @description 201 with the write-off when it was done; 202 with approval_id when it waits for a second administrator (the unpaid amount reached the tenant's approval threshold for retail_sale_write_off) */
+        RetailWriteOffOutcome: {
+            /** Format: uuid */
+            approval_id?: string;
+            executed?: boolean;
+            write_off?: components["schemas"]["RetailWriteOff"];
+        };
+        RetailWriteOffRequest: {
+            /** @description Why the debt is written off; at least 5 characters, kept with the write-off and in the audit */
+            reason: string;
         };
         Role: {
             key?: string;
@@ -21014,6 +21092,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailSale"];
+                };
+            };
+        };
+    };
+    writeOffRetailSale: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailWriteOffRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailWriteOffOutcome"];
                 };
             };
         };

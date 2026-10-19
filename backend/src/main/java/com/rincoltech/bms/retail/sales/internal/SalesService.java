@@ -228,7 +228,8 @@ class SalesService {
                 null,
                 null,
                 null,
-                1);
+                1,
+                null);
         repo.insert(header);
         lines.forEach(l -> repo.insertLine(id, l));
         stock.record(
@@ -1021,7 +1022,8 @@ class SalesService {
                 s.voidedAt(),
                 s.voidedBy(),
                 s.voidReason(),
-                s.version());
+                s.version(),
+                s.writeOff());
     }
 
     static String blankToNull(String s) {

@@ -1,0 +1,420 @@
+package com.rincoltech.bms.retail.sales;
+
+import static com.rincoltech.bms.retail.RetailTestSupport.ADMIN;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.rincoltech.bms.IntegrationTest;
+import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.retail.RetailTestSupport;
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * The write-off of a credit sale whose buyer never pays (ADR-043, issue #340, slice 2). One product costs 600 and sells at
+ * 1,000, so a sale of three pieces is 3,000 with a cost of 1,800. Everything is fabricated. Under {@code on_payment} the loss is the
+ * unpaid share of the cost; under the default {@code on_sale} it is the whole unpaid amount; the entry always balances and clears
+ * the buyer's trade debtors.
+ */
+class RetailSaleWriteOffIT extends IntegrationTest {
+
+    static final String SETTINGS = "core.settings.manage";
+    static final String MANAGER = ADMIN
+            + ",retail.credit.manage,retail.sale.return,core.approvals.read,retail.savings.record,retail.cashbook.read";
+
+    @Autowired
+    TestRestTemplate http;
+
+    TestDatabase.Fixture t;
+    RetailTestSupport api;
+    UUID hq;
+    UUID product;
+
+    static LocalDate today() {
+        return LocalDate.now(BusinessClock.DEFAULT_ZONE);
+    }
+
+    @BeforeEach
+    void setUp() {
+        t = TestDatabase.tenant("retail-wo", false, true);
+        api = new RetailTestSupport(http, t);
+        hq = t.headOffice();
+        product = api.product("WO-1", 600, 1_000);
+        api.stockUp(hq, product, "1000");
+        setting(Map.of("returns", true));
+    }
+
+    // ---- helpers ---------------------------------------------------------------------------
+
+    void setting(Map<String, Object> body) {
+        String etag = api.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                body,
+                SETTINGS,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    UUID creditSale(int qty, int daysAgo) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", today().minusDays(daysAgo).toString());
+        body.put("payment_method", "credit");
+        body.put("buyer_name", "Test Buyer 01");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", String.valueOf(qty))));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    void pay(UUID sale, long amount, int daysAgo) {
+        Map<String, Object> body = Map.of(
+                "amount_minor",
+                amount,
+                "method",
+                "cash",
+                "paid_on",
+                today().minusDays(daysAgo).toString());
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/payments",
+                body,
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
+    }
+
+    ResponseEntity<JsonNode> writeOff(UUID sale, String reason, String perms) {
+        return api.postKeyed(
+                "/sales/" + sale + "/write-off",
+                Map.of("reason", reason),
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+    }
+
+    JsonNode writeOffOk(UUID sale) {
+        ResponseEntity<JsonNode> r = writeOff(sale, "Buyer left town", MANAGER);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(r.getBody().get("executed").asBoolean()).isTrue();
+        return r.getBody().get("write_off");
+    }
+
+    JsonNode profit() {
+        return api.get("/reports/profit/daily?from=" + today().minusDays(5) + "&to=" + today(), ADMIN)
+                .getBody();
+    }
+
+    JsonNode sale(UUID id) {
+        return api.get("/sales/" + id, ADMIN).getBody();
+    }
+
+    /** Debit and credit of the entries of one write-off, by account system key. */
+    Map<String, long[]> posted(UUID writeOff) {
+        Map<String, long[]> out = new java.util.TreeMap<>();
+        TestDatabase.owner()
+                .sql("""
+                        SELECT a.system_key, sum(l.debit) AS debit, sum(l.credit) AS credit FROM journal_lines l
+                          JOIN journal_entries e ON e.id = l.entry_id JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE e.tenant_id = ? AND e.source_type = 'retail.sale_writeoff' AND e.source_id = ?
+                         GROUP BY a.system_key
+                        """)
+                .params(t.tenantId(), writeOff)
+                .query((rs, n) -> {
+                    out.put(rs.getString("system_key"), new long[] {rs.getLong("debit"), rs.getLong("credit")});
+                    return 0;
+                })
+                .list();
+        return out;
+    }
+
+    long ledgerImbalance() {
+        return TestDatabase.owner()
+                .sql(
+                        "SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l JOIN journal_entries e ON e.id = l.entry_id"
+                                + " WHERE e.tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    long debtorsOf(UUID sale) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE l.tenant_id = ? AND a.system_key = 'trade_debtors' AND l.subledger_id = ?
+                        """)
+                .params(t.tenantId(), sale)
+                .query(Long.class)
+                .single();
+    }
+
+    // ---- on_payment: the loss is the unpaid share of the cost -----------------------------------
+
+    @Test
+    void underOnPaymentTheLossIsTheUnpaidShareOfTheCostAndTheBooksBalance() {
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        UUID s = creditSale(3, 3);
+        pay(s, 1_000, 2);
+        assertThat(debtorsOf(s)).isEqualTo(2_000);
+
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("unpaid_minor").asLong()).isEqualTo(2_000);
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(1_200);
+        assertThat(w.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(w.get("written_off_on").asString()).isEqualTo(today().toString());
+
+        Map<String, long[]> posted = posted(UUID.fromString(w.get("id").asString()));
+        assertThat(posted.get("bad_debt_loss")[0]).isEqualTo(1_200);
+        assertThat(posted.get("sales_revenue")[0])
+                .as("the profit that was never counted")
+                .isEqualTo(800);
+        assertThat(posted.get("trade_debtors")[1]).isEqualTo(2_000);
+        assertThat(debtorsOf(s)).as("the debt is cleared").isZero();
+        assertThat(ledgerImbalance()).as("the accounts still balance").isZero();
+
+        JsonNode after = sale(s);
+        assertThat(after.get("balance_minor").asLong()).isZero();
+        assertThat(after.get("status").asString()).isEqualTo("completed");
+        assertThat(after.get("write_off").get("reason").asString()).isEqualTo("Buyer left town");
+        assertThat(after.get("write_off").get("unpaid_minor").asLong()).isEqualTo(2_000);
+
+        JsonNode report = profit();
+        assertThat(report.get("on_credit_minor").asLong())
+                .as("leaves On credit")
+                .isZero();
+        assertThat(report.get("bad_debt_minor").asLong()).isEqualTo(1_200);
+        JsonNode todayRow = null;
+        for (JsonNode r : report.get("rows")) {
+            if (r.get("date").asString().equals(today().toString())) {
+                todayRow = r;
+            }
+        }
+        assertThat(todayRow.get("bad_debt_minor").asLong()).isEqualTo(1_200);
+        assertThat(todayRow.get("profit_minor").asLong()).isEqualTo(-1_200);
+        assertThat(report.get("profit_minor").asLong())
+                .as("1,000 received less the 1,800 cost of the goods")
+                .isEqualTo(-800);
+        assertThat(api.get("/savings/suggestion?branch_id=" + hq + "&date=" + today(), MANAGER)
+                        .getBody()
+                        .get("suggested_minor")
+                        .asLong())
+                .as("a loss day suggests nothing")
+                .isZero();
+    }
+
+    @Test
+    void theSaleLeavesTheOwingAndOverdueLists() {
+        UUID s = creditSale(2, 3);
+        assertThat(api.get("/sales?owing=owing", ADMIN).getBody().get("items")).hasSize(1);
+        writeOffOk(s);
+        assertThat(api.get("/sales?owing=owing", ADMIN).getBody().get("items")).isEmpty();
+        assertThat(api.get("/sales?owing=overdue", ADMIN).getBody().get("items"))
+                .isEmpty();
+    }
+
+    // ---- on_sale: the whole unpaid amount ---------------------------------------------------------
+
+    @Test
+    void underTheDefaultTheLossIsTheWholeUnpaidAmountAndRevenueIsLeftAlone() {
+        UUID s = creditSale(3, 3);
+        pay(s, 1_000, 2);
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(2_000);
+        assertThat(w.get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+        Map<String, long[]> posted = posted(UUID.fromString(w.get("id").asString()));
+        assertThat(posted.get("bad_debt_loss")[0]).isEqualTo(2_000);
+        assertThat(posted).doesNotContainKey("sales_revenue");
+        assertThat(ledgerImbalance()).isZero();
+        JsonNode report = profit();
+        assertThat(report.get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+        assertThat(report.get("bad_debt_minor").asLong()).isEqualTo(2_000);
+        assertThat(report.get("profit_minor").asLong())
+                .as("1,200 counted at the sale less the 2,000 lost")
+                .isEqualTo(-800);
+    }
+
+    // ---- rules and permissions ----------------------------------------------------------------------
+
+    @Test
+    void itNeverDeletesAndRefusesTheWrongSales() {
+        UUID s = creditSale(2, 1);
+        assertThat(writeOff(s, "abc", MANAGER).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        writeOffOk(s);
+        ResponseEntity<JsonNode> again = writeOff(s, "Buyer left town", MANAGER);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(again.getBody().get("code").asString()).isEqualTo("already_written_off");
+        assertThat(api.get("/sales/" + s, ADMIN).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> cash = api.postKeyed(
+                "/sales",
+                Map.of(
+                        "branch_id",
+                        hq,
+                        "payment_method",
+                        "cash",
+                        "lines",
+                        List.of(Map.of("product_id", product, "qty", "1"))),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        ResponseEntity<JsonNode> notCredit = writeOff(RetailTestSupport.id(cash), "Buyer left town", MANAGER);
+        assertThat(notCredit.getBody().get("code").asString()).isEqualTo("sale_not_credit");
+
+        UUID paid = creditSale(1, 1);
+        pay(paid, 1_000, 0);
+        assertThat(writeOff(paid, "Buyer left town", MANAGER)
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("nothing_owing");
+
+        UUID voided = creditSale(1, 1);
+        assertThat(api.post("/sales/" + voided + "/void", Map.of("reason", "Test void"), ADMIN)
+                        .getStatusCode()
+                        .is2xxSuccessful())
+                .isTrue();
+        assertThat(writeOff(voided, "Buyer left town", MANAGER)
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("sale_voided");
+    }
+
+    @Test
+    void afterAWriteOffTheSaleTakesNoPaymentNoVoidAndNoReturn() {
+        UUID s = creditSale(2, 1);
+        writeOffOk(s);
+        Map<String, Object> pay = Map.of("amount_minor", 100, "method", "cash");
+        ResponseEntity<JsonNode> payment = api.postKeyed(
+                "/sales/" + s + "/payments", pay, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(payment.getStatusCode().is2xxSuccessful()).isFalse();
+        assertThat(api.post("/sales/" + s + "/void", Map.of("reason", "Test void"), ADMIN)
+                        .getStatusCode()
+                        .is2xxSuccessful())
+                .isFalse();
+        UUID line = UUID.fromString(sale(s).get("lines").get(0).get("id").asString());
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("sale_line_id", line);
+        l.put("qty", "1");
+        l.put("reason", "defective");
+        l.put("disposition", "restock");
+        ResponseEntity<JsonNode> ret = api.postKeyed(
+                "/sales/" + s + "/returns",
+                Map.of("lines", List.of(l), "refund_method", "cash"),
+                MANAGER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(ret.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ret.getBody().get("code").asString()).isEqualTo("sale_written_off");
+    }
+
+    @Test
+    void itNeedsRetailCreditManage() {
+        UUID s = creditSale(2, 1);
+        assertThat(writeOff(s, "Buyer left town", RetailTestSupport.SALES).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(writeOff(s, "Buyer left town", ADMIN).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(sale(s).has("write_off")).isFalse();
+    }
+
+    @Test
+    void anImportedSaleCannotBeWrittenOff() {
+        UUID id = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO retail_sales (id, tenant_id, branch_id, sale_no, sale_date, payment_method, buyer_name,
+                            currency, total_minor, cost_total_minor, paid_minor, status, historical, created_by)
+                        VALUES (?, ?, ?, 'IMP-0009', ?, 'credit', 'Test Buyer 02',
+                            (SELECT currency FROM tenants WHERE id = ?), 5000, 3000, 0, 'completed', true, ?)
+                        """)
+                .params(id, t.tenantId(), hq, java.sql.Date.valueOf(today().minusDays(9)), t.tenantId(), api.userId())
+                .update();
+        ResponseEntity<JsonNode> r = writeOff(id, "Buyer left town", MANAGER);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("sale_historical");
+    }
+
+    @Test
+    void anotherTenantCannotSeeOrTouchIt() {
+        UUID s = creditSale(2, 1);
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-wo2", false, true);
+        RetailTestSupport otherApi = new RetailTestSupport(http, other);
+        ResponseEntity<JsonNode> r = otherApi.postKeyed(
+                "/sales/" + s + "/write-off",
+                Map.of("reason", "Buyer left town"),
+                MANAGER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    // ---- maker-checker above a threshold -------------------------------------------------------------
+
+    void threshold(long amount) {
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = settings || CAST(? AS jsonb) WHERE tenant_id = ?")
+                .params("{\"approval_thresholds_minor\": {\"retail_sale_write_off\": " + amount + "}}", t.tenantId())
+                .update();
+    }
+
+    ResponseEntity<JsonNode> decide(String approval, RetailTestSupport who) {
+        return http.exchange(
+                "/api/v1/approvals/" + approval + "/approve",
+                HttpMethod.POST,
+                new HttpEntity<>(Map.of("note", "Checked the debt"), who.headers(MANAGER, "*", Map.of())),
+                JsonNode.class);
+    }
+
+    @Test
+    void aWriteOffAtOrAboveTheThresholdWaitsForASecondAdministrator() {
+        threshold(1_500);
+        UUID small = creditSale(1, 2);
+        JsonNode done = writeOffOk(small);
+        assertThat(done.get("unpaid_minor").asLong()).isEqualTo(1_000);
+
+        UUID big = creditSale(2, 2);
+        ResponseEntity<JsonNode> asked = writeOff(big, "Buyer left town", MANAGER);
+        assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(asked.getBody().get("executed").asBoolean()).isFalse();
+        String approval = asked.getBody().get("approval_id").asString();
+        assertThat(sale(big).has("write_off"))
+                .as("nothing moves until the checker decides")
+                .isFalse();
+        assertThat(sale(big).get("balance_minor").asLong()).isEqualTo(2_000);
+
+        assertThat(decide(approval, api).getStatusCode().is2xxSuccessful())
+                .as("the maker cannot decide")
+                .isFalse();
+        RetailTestSupport checker = new RetailTestSupport(http, t);
+        ResponseEntity<JsonNode> decided = decide(approval, checker);
+        assertThat(decided.getStatusCode()).as("%s", decided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(sale(big).get("write_off").get("unpaid_minor").asLong()).isEqualTo(2_000);
+        assertThat(sale(big).get("balance_minor").asLong()).isZero();
+        assertThat(ledgerImbalance()).isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT created_by = ? AND approved_by = ? AND approval_id IS NOT NULL FROM retail_sale_writeoffs WHERE sale_id = ?")
+                        .params(api.userId(), checker.userId(), big)
+                        .query(Boolean.class)
+                        .single())
+                .isTrue();
+    }
+}

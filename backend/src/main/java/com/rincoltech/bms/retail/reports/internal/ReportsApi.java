@@ -16,6 +16,10 @@ final class ReportsApi {
     static final String DIFFERENCE =
             "Committed stock-take differences at cost: negative for a loss, positive for a gain; included in profit_minor";
 
+    static final String BAD_DEBT =
+            "The loss of credit sales written off on the day (ADR-043); included in profit_minor as a minus. With on_payment the"
+                    + " unpaid share of the cost of goods, with on_sale the whole unpaid amount";
+
     private ReportsApi() {}
 
     @Schema(name = "RetailValuationRow")
@@ -121,6 +125,8 @@ final class ReportsApi {
             long costOfSalesMinor,
             long grossProfitMinor,
             long usageCostMinor,
+
+            @Schema(description = BAD_DEBT) long badDebtMinor,
             @Schema(description = DIFFERENCE) long stocktakeDifferenceMinor,
             long profitMinor,
 
@@ -141,6 +147,7 @@ final class ReportsApi {
             long salesMinor,
             long costOfSalesMinor,
             long usageCostMinor,
+            @Schema(description = BAD_DEBT) long badDebtMinor,
             @Schema(description = DIFFERENCE) long stocktakeDifferenceMinor,
             long profitMinor,
 

@@ -86,6 +86,38 @@ class CreditRecognitionRepository {
     }
 
     /**
+     * The loss of credit sales written off in the window, by the sale's branch and the day of the write-off (ADR-043), as
+     * report figures with only the bad debt set. A written-off sale stays out of On credit because its paid amount holds the
+     * debt that was cleared.
+     */
+    List<ReportsRepository.DayFigures> badDebt(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("from", Date.valueOf(from));
+        params.put("to", Date.valueOf(to));
+        String branch = "";
+        if (branchIds != null) {
+            params.put("branchIds", branchIds);
+            branch = " AND w.branch_id IN (:branchIds)";
+        }
+        return jdbc.sql("SELECT w.branch_id, w.written_off_on AS day, sum(w.loss_minor) AS loss"
+                        + "  FROM retail_sale_writeoffs w"
+                        + " WHERE w.written_off_on BETWEEN :from AND :to" + branch
+                        + " GROUP BY w.branch_id, w.written_off_on")
+                .params(params)
+                .query((rs, n) -> new ReportsRepository.DayFigures(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getDate("day").toLocalDate(),
+                        0,
+                        0,
+                        0,
+                        rs.getLong("loss")))
+                .list();
+    }
+
+    /**
      * What buyers still owe on credit sales made on the system (completed, not imported): total less paid, where the paid
      * amount already holds the credit given on returns. Returns {amount, number of sales}. Imported sales are left out,
      * the owner having settled them outside the system.

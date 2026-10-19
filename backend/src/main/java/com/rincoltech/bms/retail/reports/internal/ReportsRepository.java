@@ -81,7 +81,13 @@ class ReportsRepository {
                 .list();
     }
 
-    record DayFigures(UUID branchId, LocalDate date, long sales, long costOfSales, long usageCost) {}
+    /** {@code badDebt} is the loss of credit sales written off on the day (ADR-043); the other figures are as ever. */
+    record DayFigures(UUID branchId, LocalDate date, long sales, long costOfSales, long usageCost, long badDebt) {
+
+        DayFigures(UUID branchId, LocalDate date, long sales, long costOfSales, long usageCost) {
+            this(branchId, date, sales, costOfSales, usageCost, 0);
+        }
+    }
 
     /**
      * FR-RET-10 per branch and day: the append-only lines of completed (not voided) sales, their

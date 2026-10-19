@@ -34,12 +34,25 @@ class ProfitFigures {
         return capabilities.recognisesOnPayment();
     }
 
-    /** Per branch and day: sales, cost of sales and usage, under the tenant's setting. */
+    /**
+     * Per branch and day: sales, cost of sales, usage and the loss of debts written off, under the tenant's setting. A
+     * write-off is a dated loss in both: the sale it clears was counted or not by the setting, and the loss it carries says so.
+     */
     List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        if (!onPayment()) {
-            return repo.daily(branchIds, from, to);
+        List<DayFigures> base = onPayment() ? received(branchIds, from, to) : repo.daily(branchIds, from, to);
+        return withBadDebt(base, branchIds, from, to);
+    }
+
+    private List<DayFigures> withBadDebt(List<DayFigures> base, List<UUID> branchIds, LocalDate from, LocalDate to) {
+        List<DayFigures> losses = credit.badDebt(branchIds, from, to);
+        if (losses.isEmpty()) {
+            return base;
         }
-        return received(branchIds, from, to);
+        Map<String, long[]> merged = new LinkedHashMap<>();
+        Map<String, DayFigures> keys = new LinkedHashMap<>();
+        base.forEach(d -> add(merged, keys, d));
+        losses.forEach(d -> add(merged, keys, d));
+        return rows(merged, keys);
     }
 
     /** The money-received figures whatever the setting is, for the sold and received comparison. */
@@ -52,10 +65,14 @@ class ProfitFigures {
         for (DayFigures d : CreditRecognition.deltas(credit.events(branchIds, from, to), from, to)) {
             add(merged, keys, d);
         }
+        return rows(merged, keys);
+    }
+
+    private static List<DayFigures> rows(Map<String, long[]> merged, Map<String, DayFigures> keys) {
         List<DayFigures> out = new ArrayList<>();
         merged.forEach((key, f) -> {
             DayFigures k = keys.get(key);
-            out.add(new DayFigures(k.branchId(), k.date(), f[0], f[1], f[2]));
+            out.add(new DayFigures(k.branchId(), k.date(), f[0], f[1], f[2], f[3]));
         });
         out.sort(java.util.Comparator.comparing(DayFigures::date).thenComparing(DayFigures::branchId));
         return out;
@@ -64,9 +81,10 @@ class ProfitFigures {
     private static void add(Map<String, long[]> merged, Map<String, DayFigures> keys, DayFigures d) {
         String key = d.date() + "|" + d.branchId();
         keys.putIfAbsent(key, d);
-        long[] f = merged.computeIfAbsent(key, k -> new long[3]);
+        long[] f = merged.computeIfAbsent(key, k -> new long[4]);
         f[0] = Math.addExact(f[0], d.sales());
         f[1] = Math.addExact(f[1], d.costOfSales());
         f[2] = Math.addExact(f[2], d.usageCost());
+        f[3] = Math.addExact(f[3], d.badDebt());
     }
 }

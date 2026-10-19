@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.sales.internal.SalesApi.OpenSale;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Payment;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Sale;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.SaleLine;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.WriteOffInfo;
 import com.rincoltech.bms.retail.stock.Quantities;
 import java.math.BigDecimal;
 import java.sql.Date;
@@ -33,7 +34,10 @@ class SalesRepository {
             SELECT id, sale_no, branch_id, sale_date, payment_method, customer_id, buyer_name, buyer_contact,
                    due_date, status, currency, total_minor, paid_minor, cost_total_minor, historical, created_at,
                    created_by, voided_at, voided_by, void_reason, version, sale_entry_id, cost_entry_id, price_list_id,
-                   (SELECT l.name FROM retail_price_lists l WHERE l.id = retail_sales.price_list_id) AS price_list
+                   (SELECT l.name FROM retail_price_lists l WHERE l.id = retail_sales.price_list_id) AS price_list,
+                   (SELECT w.written_off_on FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_on,
+                   (SELECT w.unpaid_minor FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_unpaid_minor,
+                   (SELECT w.reason FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_reason
               FROM retail_sales
             """;
 
@@ -346,7 +350,8 @@ class SalesRepository {
                 s.voidedAt(),
                 s.voidedBy(),
                 s.voidReason(),
-                s.version());
+                s.version(),
+                s.writeOff());
     }
 
     private static Sale header(ResultSet rs) throws SQLException {
@@ -381,7 +386,13 @@ class SalesRepository {
                 instant(rs, "voided_at"),
                 rs.getObject("voided_by", UUID.class),
                 rs.getString("void_reason"),
-                rs.getInt("version"));
+                rs.getInt("version"),
+                rs.getDate("written_off_on") == null
+                        ? null
+                        : new WriteOffInfo(
+                                rs.getDate("written_off_on").toLocalDate(),
+                                rs.getLong("written_off_unpaid_minor"),
+                                rs.getString("written_off_reason")));
     }
 
     // ---- Payments --------------------------------------------------------------------------

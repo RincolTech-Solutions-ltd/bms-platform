@@ -185,7 +185,14 @@ final class SalesApi {
             Instant voidedAt,
             UUID voidedBy,
             String voidReason,
-            int version) {}
+            int version,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Present when the unpaid part of this credit sale was written off (ADR-043)")
+            WriteOffInfo writeOff) {}
+
+    @Schema(name = "RetailSaleWriteOffInfo", description = "A credit sale whose unpaid part was written off as a loss")
+    record WriteOffInfo(LocalDate writtenOffOn, long unpaidMinor, String reason) {}
 
     @Schema(name = "RetailSalePage")
     record SalePage(List<Sale> items, String nextCursor) {}

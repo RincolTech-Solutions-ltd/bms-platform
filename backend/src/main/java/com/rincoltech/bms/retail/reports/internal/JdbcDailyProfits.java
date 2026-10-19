@@ -31,7 +31,7 @@ class JdbcDailyProfits implements DailyProfits {
     public Map<LocalDate, Long> profitByDay(UUID branchId, LocalDate from, LocalDate to) {
         Map<LocalDate, Long> out = new TreeMap<>();
         for (DayFigures f : figures.daily(List.of(branchId), from, to)) {
-            out.merge(f.date(), f.sales() - f.costOfSales() - f.usageCost(), Long::sum);
+            out.merge(f.date(), f.sales() - f.costOfSales() - f.usageCost() - f.badDebt(), Long::sum);
         }
         return out;
     }

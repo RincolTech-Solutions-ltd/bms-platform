@@ -233,6 +233,7 @@ class ReportsService {
             f[0] = d.sales();
             f[1] = d.costOfSales();
             f[2] = d.usageCost();
+            f[4] = d.badDebt();
         }
         if (onPayment) {
             for (DayFigures d : repo.daily(filter, start, end)) {
@@ -250,6 +251,7 @@ class ReportsService {
         long costOfSales = 0;
         long usage = 0;
         long difference = 0;
+        long badDebt = 0;
         long soldTotal = 0;
         for (Map.Entry<String, long[]> e : days.entrySet()) {
             long[] f = e.getValue();
@@ -261,14 +263,16 @@ class ReportsService {
                     f[1],
                     gross,
                     f[2],
+                    f[4],
                     f[3],
-                    Math.addExact(Math.subtractExact(gross, f[2]), f[3]),
+                    Math.subtractExact(Math.addExact(Math.subtractExact(gross, f[2]), f[3]), f[4]),
                     onPayment ? sold.getOrDefault(e.getKey(), 0L) : null));
             soldTotal = Math.addExact(soldTotal, sold.getOrDefault(e.getKey(), 0L));
             sales = Math.addExact(sales, f[0]);
             costOfSales = Math.addExact(costOfSales, f[1]);
             usage = Math.addExact(usage, f[2]);
             difference = Math.addExact(difference, f[3]);
+            badDebt = Math.addExact(badDebt, f[4]);
         }
         return new DailyProfit(
                 start,
@@ -278,14 +282,17 @@ class ReportsService {
                 sales,
                 costOfSales,
                 usage,
+                badDebt,
                 difference,
-                Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference),
+                Math.subtractExact(
+                        Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference),
+                        badDebt),
                 onPayment ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
                 onPayment ? soldTotal : null,
                 onPayment ? credit.onCredit(filter)[0] : null);
     }
 
-    /** One row of sales, cost of sales, usage and stock-take difference per day then branch (hex order, as the database sorts uuids). */
+    /** One row of sales, cost of sales, usage, stock-take difference and bad debt per day then branch (hex order, as the database sorts uuids). */
     private static long[] figures(
             Map<String, long[]> days,
             Map<String, UUID> branchOf,
@@ -295,6 +302,6 @@ class ReportsService {
         String key = date + "|" + branch;
         branchOf.putIfAbsent(key, branch);
         dateOf.putIfAbsent(key, date);
-        return days.computeIfAbsent(key, k -> new long[4]);
+        return days.computeIfAbsent(key, k -> new long[5]);
     }
 }

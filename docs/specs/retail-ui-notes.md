@@ -732,6 +732,12 @@ again under the sale's lock; the screens only save a round trip and say each ref
   `VITE_RETAIL_MOCK` and the tests. Tests: `sale-actions-state.test.ts` (the rules), `sale-actions.dom.test.tsx` (who sees what, validation, double submit,
   retry with the same key, error words, a moved-on balance, key reuse), `sales-wiring.dom.test.tsx` (the lists and the opened sale on the mock show the buttons and a payment refreshes the list), `screens.test.tsx` and `analytics.test.tsx` (Price and Cost order and words).
 
+## Write off a debt (#340, ADR-043)
+
+- **Write off** on an opened credit sale that still owes (`retail.credit.manage` at the sale's branch; not on an imported, voided, paid or already written off sale). The form asks why the buyer will not pay (at least five characters), says in plain words that the amount is treated as lost, that the sale stays on record and reads Written off, that it leaves the owing and overdue lists and that it cannot be undone, and has one button, Write off, and one way back, Keep the debt. Above the business's approval limit the answer is "Sent to a second administrator to approve". The Idempotency-Key is kept with the draft like the payment form's.
+- The opened sale reads Written off with the day, the amount and the reason; a written off sale offers no payment, void or return. The customer statement lists the write-off as a credit. Daily profit shows a Debts written off column once there is one.
+- Tests: `write-off.dom.test.tsx`, `sale-actions-state` helpers; the mock answers with the server's rules.
+
 ## Left to do
 
 - Analytics: export to PDF and Excel and the daily WhatsApp summary (#149 items 8), and the cash view per shop per day (item 5), which need the cash book.

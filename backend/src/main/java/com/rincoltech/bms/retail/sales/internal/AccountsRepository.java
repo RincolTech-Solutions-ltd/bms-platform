@@ -375,7 +375,13 @@ class AccountsRepository {
                        CAST(NULL AS text), r.account_credit_minor, CAST(0 AS bigint)
                   FROM retail_sale_returns r JOIN retail_sales s ON s.id = r.sale_id
                  WHERE s.customer_id = :customer AND s.payment_method = 'credit' AND NOT s.historical
-                   AND r.status = 'voided' AND r.account_credit_minor > 0""" + sb + "\n";
+                   AND r.status = 'voided' AND r.account_credit_minor > 0""" + sb + """
+
+                UNION ALL
+                SELECT w.written_off_on, 7, w.created_at, w.id, 'write_off', s.sale_no, s.id, CAST(NULL AS uuid),
+                       CAST(NULL AS text), CAST(0 AS bigint), w.unpaid_minor
+                  FROM retail_sale_writeoffs w JOIN retail_sales s ON s.id = w.sale_id
+                 WHERE s.customer_id = :customer AND s.payment_method = 'credit' AND NOT s.historical""" + sb + "\n";
     }
 
     private static Map<String, Object> statementParams(UUID customerId, List<UUID> branchIds, String zone) {

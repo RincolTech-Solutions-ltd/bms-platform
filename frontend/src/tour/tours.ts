@@ -84,7 +84,8 @@ export const adminWelcome: Tour = {
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
   // Version 7 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
-  version: 7,
+  // Version 8 adds the step on writing off a debt that will never be paid (issue #340).
+  version: 8,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -198,6 +199,16 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'When a credit sale counts as profit',
       body: 'A credit sale can wait to count until the buyer pays. Then the home page shows Sold, Received and On credit apart. The daily savings use only the profit of money received. You choose this in Retail settings.',
+    },
+    {
+      id: 'write-off',
+      route: '/staff/retail',
+      target: 'retail-creditSales',
+      module: 'retail',
+      needs: ['retail.sale.read', 'retail.credit.manage'],
+      optional: true,
+      title: 'A buyer who will never pay',
+      body: 'Open the credit sale and tap Write off. Give the reason. The debt becomes a loss on that day. The sale stays on record and reads Written off.',
     },
     {
       id: 'void-sale',

@@ -176,14 +176,16 @@ function ValuationPage() {
   );
 }
 
-type Figures = { sold: number; sales: number; cost: number; usage: number; difference: number; profit: number };
+type Figures = { sold: number; sales: number; cost: number; usage: number; bad: number; difference: number; profit: number };
 const add = (to: Figures, r: DailyProfitRow): Figures => ({
   sold: to.sold + (r.sold_minor ?? 0),
-  sales: to.sales + (r.sales_minor ?? 0), cost: to.cost + (r.cost_of_sales_minor ?? 0), usage: to.usage + (r.usage_cost_minor ?? 0), difference: to.difference + (r.stocktake_difference_minor ?? 0), profit: to.profit + (r.profit_minor ?? 0),
+  sales: to.sales + (r.sales_minor ?? 0), cost: to.cost + (r.cost_of_sales_minor ?? 0), usage: to.usage + (r.usage_cost_minor ?? 0), bad: to.bad + (r.bad_debt_minor ?? 0), difference: to.difference + (r.stocktake_difference_minor ?? 0), profit: to.profit + (r.profit_minor ?? 0),
 });
-const none = (): Figures => ({ sold: 0, sales: 0, cost: 0, usage: 0, difference: 0, profit: 0 });
+const none = (): Figures => ({ sold: 0, sales: 0, cost: 0, usage: 0, bad: 0, difference: 0, profit: 0 });
 
 function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: string; name: string; f: Figures }[]; onPayment?: boolean }) {
+  // Debts written off (ADR-043) get a column only once there is one, so a shop that never writes a debt off sees no new column.
+  const withBad = rows.some((r) => r.f.bad !== 0);
   // On a phone the cost and usage go under the name, so Sales and Profit stay in view.
   const phone = useIsPhone();
   return (
@@ -195,6 +197,7 @@ function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: 
           <th className="num">{onPayment ? 'Received' : 'Sales'}</th>
           {!phone && <th className="num">Cost</th>}
           {!phone && <th className="num">Usage</th>}
+          {withBad && !phone && <th className="num">Debts<br />written off</th>}
           {!phone && <th className="num">Stock-take<br />difference</th>}
           <th className="num">Profit</th>
         </tr>
@@ -202,11 +205,12 @@ function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: 
       <tbody>
         {rows.map(({ key, name, f }) => (
           <tr key={key}>
-            <td>{name}{phone && <><br /><span className="hint">{onPayment && <>Sold {money(f.sold)}<br /></>}Cost {money(f.cost)}<br />Usage {money(f.usage)}<br />Stock-take difference {money(f.difference)}</span></>}</td>
+            <td>{name}{phone && <><br /><span className="hint">{onPayment && <>Sold {money(f.sold)}<br /></>}Cost {money(f.cost)}<br />Usage {money(f.usage)}<br />{withBad && <>Debts written off {money(f.bad)}<br /></>}Stock-take difference {money(f.difference)}</span></>}</td>
             {onPayment && !phone && <td className="num">{money(f.sold)}</td>}
             <td className="num">{money(f.sales)}</td>
             {!phone && <td className="num">{money(f.cost)}</td>}
             {!phone && <td className="num">{money(f.usage)}</td>}
+            {withBad && !phone && <td className="num">{money(f.bad)}</td>}
             {!phone && <td className="num">{money(f.difference)}</td>}
             <td className="num">{money(f.profit)}{f.profit < 0 ? ' (loss)' : ''}</td>
           </tr>
@@ -251,7 +255,7 @@ export function ProfitTable({ report, nameOf }: { report: DailyProfit; nameOf?: 
       )}
       <FiguresTable label="Day" onPayment={onPayment} rows={days} />
       {onPayment && <p className="hint">A credit sale counts on the day the buyer pays, with its share of the profit. A part payment gives part of the profit. Savings use this profit.</p>}
-      <p className="hint">Usage and damage reports count here. The stock-take difference is the value of what a count found missing (a minus) or extra (a plus), at cost, on the day the count was committed.</p>
+      <p className="hint">Usage and damage reports count here. A debt written off is a loss on the day it was written off. The stock-take difference is the value of what a count found missing (a minus) or extra (a plus), at cost, on the day the count was committed.</p>
     </>
   );
 }

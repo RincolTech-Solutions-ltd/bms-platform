@@ -1,0 +1,187 @@
+package com.rincoltech.bms.retail.sales.internal;
+
+import com.rincoltech.bms.core.audit.AuditLog;
+import com.rincoltech.bms.core.ledger.LedgerPosting.PostedEntry;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.retail.sales.internal.SalesApi.Sale;
+import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOff;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsRepository.Row;
+import com.rincoltech.bms.retail.stock.RetailBooks;
+import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
+import com.rincoltech.bms.retail.stock.RetailBooks.Posting;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+
+/**
+ * The write-off of the unpaid part of a credit sale whose buyer never pays (ADR-043, issue #340): the checks, the entry and
+ * the record, shared by the route and by the maker-checker action so that both do exactly the same thing. It never deletes
+ * anything. The entry clears trade debtors for the unpaid amount {@code U}. The loss the profit report shows is {@code L}:
+ * under {@code credit_sale_recognition} {@code on_payment} the unpaid share of the cost of goods (the profit of the unpaid part
+ * was never counted), under {@code on_sale} the whole {@code U} (the sale and its profit were counted when it was made). The
+ * entry debits bad debt loss for {@code L}, debits sales revenue for {@code U - L} (credits it for {@code L - U} when the sale
+ * was sold below cost) and credits trade debtors for {@code U}, so it balances and the accounts keep balancing. The sale's paid
+ * amount rises by {@code U}, the way the account credit of a return does, so every reader of total less paid sees a sale that
+ * owes nothing; the record says why. Locks the sale first.
+ */
+@Service
+class WriteOffsServicer {
+
+    static final String PERMISSION = "retail.credit.manage";
+    static final int MIN_REASON = 5;
+    private static final String SALE = "retail.sale";
+
+    private final SalesRepository sales;
+    private final WriteOffsRepository repo;
+    private final RetailBooks books;
+    private final RetailCapabilities capabilities;
+    private final CurrentTenant tenant;
+    private final BusinessClock clock;
+    private final AuditLog audit;
+
+    WriteOffsServicer(
+            SalesRepository sales,
+            WriteOffsRepository repo,
+            RetailBooks books,
+            RetailCapabilities capabilities,
+            CurrentTenant tenant,
+            BusinessClock clock,
+            AuditLog audit) {
+        this.sales = sales;
+        this.repo = repo;
+        this.books = books;
+        this.capabilities = capabilities;
+        this.tenant = tenant;
+        this.clock = clock;
+        this.audit = audit;
+    }
+
+    /** What a write-off would do to a sale as it is now. */
+    record Plan(Sale sale, long unpaidMinor, long lossMinor, String recognition) {}
+
+    Plan plan(UUID saleId) {
+        Principal principal = CurrentPrincipal.require();
+        Header h = sales.find(saleId, true)
+                .filter(x -> principal.may(PERMISSION, x.sale().branchId()))
+                .orElseThrow(ApiException::notFound);
+        Sale s = h.sale();
+        if (s.status().equals("voided")) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "sale_voided",
+                    "Sale voided",
+                    "This sale has been voided, so nothing is owed.");
+        }
+        if (!s.paymentMethod().equals("credit")) {
+            throw ApiException.rule("sale_not_credit", "Only a sale on credit can be written off.");
+        }
+        if (s.historical()) {
+            throw ApiException.rule(
+                    "sale_historical", "An imported sale was settled outside the system and cannot be written off.");
+        }
+        if (s.writeOff() != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "already_written_off",
+                    "Already written off",
+                    "The unpaid part of this sale has been written off already.");
+        }
+        long unpaid = Math.subtractExact(s.totalMinor(), s.paidMinor());
+        if (unpaid <= 0) {
+            throw ApiException.rule("nothing_owing", "This sale has nothing left to pay.");
+        }
+        String recognition = capabilities.creditRecognition();
+        long loss = recognition.equals(RetailCapabilities.ON_PAYMENT)
+                ? BigDecimal.valueOf(s.costTotalMinor())
+                        .multiply(BigDecimal.valueOf(unpaid))
+                        .divide(BigDecimal.valueOf(s.totalMinor()), 0, RoundingMode.HALF_UP)
+                        .longValueExact()
+                : unpaid;
+        return new Plan(s, unpaid, loss, recognition);
+    }
+
+    /** Posts the entry, records the write-off and clears the debt on the sale. */
+    WriteOff record(Plan plan, String reason, UUID makerId, UUID approvalId, UUID checkerId) {
+        Sale s = plan.sale();
+        UUID id = UUID.randomUUID();
+        LocalDate today = clock.today(tenant.profile().timezone());
+        long unpaid = plan.unpaidMinor();
+        long loss = plan.lossMinor();
+        List<Leg> legs = new ArrayList<>();
+        legs.add(Leg.debit("bad_debt_loss", loss));
+        if (unpaid > loss) {
+            legs.add(Leg.debit("sales_revenue", unpaid - loss));
+        } else if (loss > unpaid) {
+            legs.add(Leg.credit("sales_revenue", loss - unpaid));
+        }
+        legs.add(Leg.credit("trade_debtors", unpaid).withSubledger(SALE, s.id()));
+        PostedEntry entry = books.post(new Posting(
+                        s.branchId(),
+                        today,
+                        s.saleNo(),
+                        "Write-off of " + s.saleNo(),
+                        "retail.sale_writeoff",
+                        id,
+                        "retail.sale_writeoff:" + id,
+                        legs))
+                .orElseThrow();
+        Row row = new Row(
+                id,
+                s.id(),
+                s.saleNo(),
+                s.branchId(),
+                today,
+                s.currency(),
+                unpaid,
+                loss,
+                plan.recognition(),
+                reason.trim(),
+                entry.entryId(),
+                approvalId,
+                checkerId,
+                makerId,
+                clock.now());
+        repo.insert(row);
+        sales.addPaid(s.id(), unpaid);
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("write_off_id", id);
+        after.put("unpaid_minor", unpaid);
+        after.put("reason", row.reason());
+        after.put("approved", approvalId != null);
+        audit.record(new AuditLog.Entry(
+                "retail.sale.written_off", SALE, s.id(), s.branchId(), Map.of("paid_minor", s.paidMinor()), after));
+        return view(row);
+    }
+
+    /** The loss figure is cost derived, so it travels only with profit read in the sale's branch (ADR-017). */
+    static WriteOff view(Row w) {
+        boolean cost = CurrentPrincipal.require().may("retail.profit.read", w.branchId());
+        return new WriteOff(
+                w.id(),
+                w.saleId(),
+                w.saleNo(),
+                w.branchId(),
+                w.writtenOffOn(),
+                w.currency(),
+                w.unpaidMinor(),
+                cost ? w.lossMinor() : null,
+                w.recognition(),
+                w.reason(),
+                w.createdAt(),
+                w.createdBy(),
+                w.approvalId());
+    }
+}
