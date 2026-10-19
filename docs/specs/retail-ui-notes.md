@@ -14,8 +14,8 @@ draft: names are snake_case and the client is typed by the generated `src/api/sc
 | `/staff/retail/sale` | Record a sale, then the receipt summary | `retail.sale.create` |
 | `/staff/retail/restock` | Restock: supplier, lines, per-branch quantities | `retail.purchase.create` |
 | `/staff/retail/usage` | Usage and damage | `retail.usage.report` |
-| `/staff/retail/credit-sales` | Credit sales, grouped by year, month and day (issue #328): buyer, date, amount, due date, state; open a sale | `retail.sale.read` |
-| `/staff/retail/sales` | All sales, grouped by year, month and day (issue #328): filters by dates, buyer, paid by and item; open a sale | `retail.sale.read` |
+| `/staff/retail/credit-sales` | Credit sales, grouped by a chain of levels the user chooses (issues #328, #341): buyer, date, amount, due date, state; open a sale | `retail.sale.read` |
+| `/staff/retail/sales` | All sales, grouped by a chain of levels the user chooses (issues #328, #341): filters by dates, buyer, paid by and item; open a sale | `retail.sale.read` |
 | `/staff/retail/stock` | Stock per branch or All branches, search, category filter, Out of stock and Low stock tabs, negative flag | `retail.stock.read` |
 | `/staff/retail/stocktake` | Count, review variance, commit | `retail.stocktake.commit` and `retail.stock.read` |
 | `/staff/retail/transfer` | Move stock: to which branch, items with the source's stock, date and note | `retail.stock.transfer` and `retail.stock.read` |
@@ -646,6 +646,9 @@ there is no new permission. The tiles Landed costs and Supplier credit notes sit
 
 ## Sales lists grouped by year, month and day (issue #328)
 
+Issue #341 (the next section) replaced the fixed year, month and day levels with a chain the user chooses, and nothing is open to
+start with; the header, the filters, the payment buttons and the plain words below still hold for the groups it shows.
+
 All sales and Credit sales are no longer one flat newest-first list. Each is a set of collapsible groups, year then month then
 day, and every header is a figure the server summed (`GET /retail/sales/summary`, chapter 7 section 7.11.20), never a sum of
 pages in the browser.
@@ -732,3 +735,42 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - The component tests render static markup (no DOM in the test setup); the browser run above covers behaviour.
 - Offline use, barcode scanning and receipts to SMS are out of the first release.
 - The tenant's timezone and a transfer number are not in the API; when they are, use them (#112).
+
+## Sales grouped by a chain of levels (issue #341)
+
+The grouped lists of issue #328 open from the shop down to the items, the way the old spreadsheet app did: shop, year, month,
+salesperson, day, product category, item, with a summary on every line. The user chooses the order and the levels.
+
+- **Group by.** A control above the groups on All sales and Credit sales (a `details` that shows the chosen order in one line:
+  "Group by: Shop, Year, Month, Salesperson, Day, Product category, Item"). Opened, it lists the levels with Up, Down and Remove
+  buttons (buttons, not dragging, so it works with a thumb and a keyboard), the levels not used as buttons to add, and Use the usual
+  order. The last level cannot be removed. The choice is kept per user and per list (All sales and Credit sales each have their own)
+  in `localStorage` (`bms.salesChain.<list>.<user>`, read and written in try/catch; blocked or garbled storage gives the usual
+  order). Changing it closes every open group. When one shop is chosen at the top of the page the shop level is left out (it
+  would be one line).
+- **A line** is the same header as in issue #328 (name, total, number of sales, profit when the server sent it, voided note,
+  payment methods on All sales), now for any level: a shop or a person or a category by name, a period in words. At the item level it
+  adds the quantity sold ("4 sold, 3 sales"). Under a category the figures are that category's own lines, not whole sales.
+  An item at the end of the chain is the bottom: its row shows product, quantity, amount and profit (only when sent) and does not open.
+- **Opening** a line asks the next level with what was opened above it as filters (shop, dates, person, category, item), so a
+  figure never changes when a child opens. Nothing is open to start with (little at first, expand at will). What is open is kept by
+  the screen (`useChainView`, keyed by the path, so the same day under two people is two groups), so coming back from an opened sale finds
+  the same groups open.
+- **Where the sales are.** The last level of the chain opens onto the sales themselves, in the same cards as before, 50 at a time,
+  with the filters of the whole path (including `seller_id` and `category_id` on the list). A day that is not last also offers "Show the
+  sales of this day" under its categories or items, so with the usual order a sale can still be reached and the Record payment and
+  Mark as fully paid buttons (the `action` of `DaySales`, issue #326) still sit under each sale.
+- **Breadcrumb.** The way to the group opened last shows above the list (All sales, the shop, the year, ...). A place in it shuts
+  what is inside it and shows that place again.
+- **Bounds.** A level shows at most 20 years, 12 months, 31 days, 100 shops, or 50 people, categories or items; the button under it
+  reads Show earlier years (or months or days) for a period, and Show more shops (or salespeople, categories, items) otherwise.
+- **Plain words.** Loading; a failed level shows the message and Try again; an empty list says "No sales found." (or "No credit sales
+  found."), and an empty group "No sales here."
+- **Mobile first.** One column on a 360px phone; the header, the figures and the Group by buttons wrap and need no sideways scroll; each
+  button is at least a tap high. Not yet checked on a device or in a browser.
+- **Files.** `sales-chain-state.ts` (pure rules: the levels and their words, move, drop, add, the remembered chain, what a group selects,
+  the open paths and the breadcrumb), `sales-chain.tsx` (the levels and `useChainView`), `sales-group-by.tsx` (the control), the
+  mock `api/retail-chain-mock.ts`, and tests `sales-chain-state.test.ts`, `sales-chain.dom.test.tsx` and `retail-chain-mock.test.ts`.
+  `sales-grouped.tsx` keeps `useRootFigures` (the search box count); its year, month and day components are no longer used by the screens.
+- **Tours.** `retail-sales` (version 5) and `admin-welcome` (version 7) get a Group by step on the retail home; the Help pages
+  `page-sales` and `page-credit-sales` (version 2) get a Group by step and a line about the breadcrumb.
