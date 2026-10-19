@@ -83,7 +83,8 @@ export const adminWelcome: Tour = {
   id: 'admin-welcome',
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
-  version: 6,
+  // Version 7 adds the Branches step (issue #329): closing a branch and keeping its history.
+  version: 7,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -130,6 +131,15 @@ export const adminWelcome: Tour = {
       needs: ['core.users.manage'],
       title: 'Add your staff',
       body: 'Tap Invite someone. Type the name and the phone, pick a role like Sales person or Cashier, and send them the link. They only see what their role allows.',
+    },
+    {
+      id: 'branches',
+      route: '/staff/setup/branches',
+      target: 'branches-list',
+      needs: ['core.branches.read'],
+      optional: true,
+      title: 'Your branches',
+      body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it any time.',
     },
     {
       id: 'modules',
