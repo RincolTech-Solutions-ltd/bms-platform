@@ -57,17 +57,30 @@ afterEach(() => {
 describe('the grouped list', () => {
   it('opens this month by day, each header with its sales, total, profit and payment methods', async () => {
     show();
-    const month = await screen.findByRole('button', { name: /^October 2026, 4 sales, UGX 15,000/ });
+    const month = await screen.findByRole('button', { name: /^October 2026 UGX 15,000 4 sales/ });
     expect(month.getAttribute('aria-expanded')).toBe('true');
     expect(month.textContent).toContain('4 sales, profit UGX 4,500');
-    const year = screen.getByRole('button', { name: /^2026, 5 sales/ });
+    const year = screen.getByRole('button', { name: /^2026 UGX 20,000 5 sales/ });
     expect(year.getAttribute('aria-expanded')).toBe('true');
     expect(year.textContent).toContain('profit UGX 6,000');
-    const day = await screen.findByRole('button', { name: /^Monday 19 October 2026, 3 sales, UGX 9,000/ });
+    const day = await screen.findByRole('button', { name: /^Monday 19 October 2026 UGX 9,000 3 sales/ });
     expect(day.getAttribute('aria-expanded')).toBe('false');
     expect(day.textContent).toContain('Cash 2, UGX 6,000. Mobile money 1, UGX 3,000');
     expect(day.textContent).toContain('1 voided (not counted)');
     expect(screen.getByRole('button', { name: /^September 2026/ }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('names a header by everything it shows, and points an open one at its contents', async () => {
+    show();
+    const day = await screen.findByRole('button', { name: /^Monday 19 October/ });
+    expect(day.getAttribute('aria-label')).toBeNull();
+    expect(day.getAttribute('aria-controls')).toBeNull();
+    expect(day.getAttribute('name')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Monday 19 October 2026 UGX 9,000 3 sales, profit UGX 2,500, 1 voided \(not counted\) Cash 2, UGX 6,000/ })).toBeTruthy();
+    const month = screen.getByRole('button', { name: /^October 2026/ });
+    const controlled = month.getAttribute('aria-controls') ?? '';
+    expect(controlled).not.toBe('');
+    expect(document.getElementById(controlled)?.textContent).toContain('Monday 19 October 2026');
   });
 
   it('asks each level for its own days, inside the range the screen shows, with the list\'s filters', async () => {
@@ -87,8 +100,8 @@ describe('the grouped list', () => {
     expect(screen.getByText('Sales of 2026-10-19')).toBeTruthy();
     expect(renderDay).toHaveBeenCalledTimes(1);
     expect(renderDay).toHaveBeenCalledWith('2026-10-19');
-    expect(screen.getByRole('button', { name: /^October 2026, 4 sales, UGX 15,000/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^2026, 5 sales, UGX 20,000/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^October 2026 UGX 15,000 4 sales/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^2026 UGX 20,000 5 sales/ })).toBeTruthy();
   });
 
   it('shows where an open day sits and goes back up from the trail', async () => {
@@ -147,7 +160,7 @@ describe('the grouped list', () => {
       : q.level === 'year' ? { group_by: 'year', has_more: false, items: [group('2025', '2025-01-01', '2025-12-31', { sales_count: 2, total_minor: 4000 })] } : answer(q.level)));
     show();
     fireEvent.click(await screen.findByRole('button', { name: 'Show earlier years' }));
-    expect(await screen.findByRole('button', { name: /^2025, 2 sales, UGX 4,000/ })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /^2025 UGX 4,000 2 sales/ })).toBeTruthy();
     expect(summary.mock.calls.some(([q]) => q.level === 'year' && q.to === '2025-12-31')).toBe(true);
   });
 });

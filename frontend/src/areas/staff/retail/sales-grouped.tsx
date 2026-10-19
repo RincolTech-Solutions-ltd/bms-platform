@@ -42,8 +42,8 @@ export function SalesGrouped({ filter, range, credit, enabled, groups, renderDay
   );
 }
 
-function GroupList({ level, range, trail, empty, ...shared }: Shared & { level: Level; range: DayRange; trail: Ancestor[]; empty?: ReactNode }) {
-  const { filter, credit, enabled } = shared;
+/** The groups of one level in a range, newest first, older ones on request. Callers with the same arguments share one request. */
+function useGroupLevel(level: Level, filter: GroupedFilter, range: DayRange, enabled: boolean) {
   const query = useInfiniteQuery({
     queryKey: ['retail', 'sales', 'summary', level, filter, range],
     queryFn: ({ pageParam, signal }) => retail.salesSummary({ ...filter, level, from: range.from, to: pageParam ?? range.to, signal }),
@@ -52,7 +52,22 @@ function GroupList({ level, range, trail, empty, ...shared }: Shared & { level: 
     enabled,
     placeholderData: keepPreviousData,
   });
-  const items = (query.data?.pages ?? []).flatMap((p) => p.items ?? []);
+  return { query, items: (query.data?.pages ?? []).flatMap((p) => p.items ?? []) };
+}
+
+/** What the search box above the groups shows: whether the top level is on its way, and how many sales it holds. */
+export function useRootFigures(filter: GroupedFilter, range: DayRange, enabled: boolean) {
+  const { query, items } = useGroupLevel('year', filter, range, enabled);
+  return {
+    fetching: query.isPlaceholderData || (query.isFetching && !query.isFetchingNextPage && query.fetchStatus !== 'idle'),
+    count: query.data ? items.reduce((n, g) => n + (g.sales_count ?? 0), 0) : undefined,
+    more: query.hasNextPage,
+  };
+}
+
+function GroupList({ level, range, trail, empty, ...shared }: Shared & { level: Level; range: DayRange; trail: Ancestor[]; empty?: ReactNode }) {
+  const { filter, credit, enabled } = shared;
+  const { query, items } = useGroupLevel(level, filter, range, enabled);
   if (query.isPending && query.fetchStatus !== 'idle') return <p className="loading">Loading</p>;
   if (query.error) {
     return (
@@ -83,6 +98,7 @@ function GroupRow({ level, group, range, trail, ...shared }: Shared & { level: L
   const { credit, groups } = shared;
   const period = group.period ?? '';
   const key = groupKey(level, period);
+  const bodyId = `group-${key.replace(':', '-')}`;
   const isOpen = groups.open.has(key);
   const title = periodTitle(level, period);
   const here = [...trail, { label: title, key }];
@@ -90,14 +106,15 @@ function GroupRow({ level, group, range, trail, ...shared }: Shared & { level: L
   const count = group.sales_count ?? 0;
   return (
     <li className="rt-group">
-      <button type="button" className="rt-group-head" aria-expanded={isOpen} aria-label={`${title}, ${salesWord(count)}, ${money(group.total_minor ?? 0)}`} onClick={() => groups.toggle(key)}>
-        <span className="rt-group-title">{title}</span>
-        <span className="rt-group-total">{money(group.total_minor ?? 0)}</span>
+      {/* No aria-label: the visible words are the name, so the profit, the voided note and the methods are read too. */}
+      <button type="button" className="rt-group-head" aria-expanded={isOpen} aria-controls={isOpen ? bodyId : undefined} onClick={() => groups.toggle(key)}>
+        <span className="rt-group-title">{title}</span>{' '}
+        <span className="rt-group-total">{money(group.total_minor ?? 0)}</span>{' '}
         <span className="rt-group-meta">
           {salesWord(count)}
           {group.profit_minor !== undefined && <>, profit {money(group.profit_minor)}</>}
           {!credit && (group.voided_count ?? 0) > 0 && <>, {group.voided_count} voided (not counted)</>}
-        </span>
+        </span>{' '}
         {lines.length > 0 && (
           <span className="rt-group-methods">
             {lines.map((m) => `${m.label} ${m.count}, ${money(m.totalMinor)}`).join('. ')}
@@ -105,7 +122,7 @@ function GroupRow({ level, group, range, trail, ...shared }: Shared & { level: L
         )}
       </button>
       {isOpen && (
-        <div className="rt-group-body">
+        <div className="rt-group-body" id={bodyId}>
           {level === 'day' ? (
             <>
               <DayTrail items={here} onShut={groups.shut} />

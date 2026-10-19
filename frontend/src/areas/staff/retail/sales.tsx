@@ -13,7 +13,7 @@ import { settledWords } from './returns-state';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
 import { SaleDocuments } from './documents-ui';
-import { SalesGrouped, useOpenGroups } from './sales-grouped';
+import { SalesGrouped, useOpenGroups, useRootFigures } from './sales-grouped';
 
 // Credit sales and All sales (#145): the lists the pilot's app has, 'Credit sales' and the sales
 // history, read from the sales list API in the branch chosen at the top of the page (every branch the
@@ -200,7 +200,8 @@ function More({ query }: { query: ReturnType<typeof useSales>['query'] }) {
 // JUSTIFICATION-A3: DaySales is the one small component that loads a day's sales with the screen's own useSales, SaleList and More (issue #328).
 /** The sales of one opened day (issue #328): loaded only now, with the list's own filters and cards. */
 function DaySales({ day, filter, today, credit, onOpen, branchOf, term }: {
-  day: string;
+  /** Absent: no day range, the whole filtered list (Credit sales still owing, where grouping would hide the debts). */
+  day?: string;
   filter: Omit<SalesQuery, 'cursor' | 'signal' | 'from' | 'to'>;
   today: string;
   credit?: boolean;
@@ -213,6 +214,7 @@ function DaySales({ day, filter, today, credit, onOpen, branchOf, term }: {
     <>
       {query.isPending && <p className="loading">Loading</p>}
       <Problem error={query.error} />
+      {query.error && <button type="button" onClick={() => void query.refetch()}>Try again</button>}
       {query.data && <SaleList items={items} today={today} credit={credit} onOpen={onOpen} branchOf={branchOf} term={term} />}
       <More query={query} />
     </>
@@ -246,6 +248,9 @@ export function CreditSales() {
   const today = businessToday();
   const groups = useOpenGroups(today);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit' as const, owing: owing === 'all' ? undefined : owing };
+  // Debts still owing or overdue are listed together, oldest groups included: only the current month is open in a grouped list.
+  const flat = owing === 'owing' || owing === 'overdue';
+  const figures = useRootFigures(filter, {}, (all || branchId !== null) && !flat);
   return (
     <Gate screen="creditSales" title="Credit sales">
       {open ? (
@@ -253,16 +258,20 @@ export function CreditSales() {
       ) : (
         <>
           <p className="branch-line">Branch: <strong>{all ? 'All branches' : branchName}</strong></p>
-          <SearchBox id="credit-buyer" label="Buyer, phone or sale number" search={search} fetching={false} count={undefined} />
+          <SearchBox id="credit-buyer" label="Buyer, phone or sale number" search={search} {...figures} />
           <label htmlFor="credit-owing">Show</label>
           <select id="credit-owing" data-tour="credit-owing" value={owing} onChange={(e) => setOwing(e.target.value as Owing)}>
             {OWING.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          {flat ? (
+            <DaySales filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />
+          ) : (
           <SalesGrouped
             rootLabel="Credit sales" credit filter={filter} range={{}} enabled={all || branchId !== null} groups={groups}
             empty={search.term ? <NoResults term={search.term} onClear={search.clear} noun="credit sales" /> : undefined}
             renderDay={(day) => <DaySales day={day} filter={{ ...filter, status: 'completed' }} today={today} credit onOpen={setOpen} branchOf={all ? nameOf : undefined} term={search.term} />}
           />
+          )}
         </>
       )}
     </Gate>
@@ -286,6 +295,7 @@ export function AllSales() {
   const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
   const groups = useOpenGroups(today);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
+  const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
   return (
     <Gate screen="salesHistory" title="All sales">
       {open ? (
@@ -298,7 +308,7 @@ export function AllSales() {
             <div><label htmlFor="sales-to">To</label><input id="sales-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
           </div>
           {from > to && <p role="alert" className="rt-flag">The start date must not be after the end date.</p>}
-          <SearchBox id="sales-buyer" label="Buyer, phone or sale number" search={search} fetching={false} count={undefined} />
+          <SearchBox id="sales-buyer" label="Buyer, phone or sale number" search={search} {...figures} />
           <label htmlFor="sales-method">Paid by</label>
           <select id="sales-method" value={method} onChange={(e) => setMethod(e.target.value as SalePayment | '')}>
             <option value="">Any way</option>
