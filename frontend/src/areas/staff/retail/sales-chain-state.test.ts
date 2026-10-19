@@ -65,7 +65,9 @@ describe('where the sales can be reached', () => {
     expect(offersSales(DEFAULT_CHAIN, 5)).toBe(true);
     expect(offersSales(chain('branch', 'year', 'month', 'seller', 'category', 'item'), 0)).toBe(true);
     expect(offersSales(chain('year', 'day', 'category'), 0)).toBe(false);
-    expect(offersSales(chain('year', 'day', 'item', 'category'), 1)).toBe(true);
+    expect(offersSales(chain('year', 'category', 'item'), 1)).toBe(true);
+    expect(offersSales(chain('year', 'category', 'item'), 0)).toBe(true);
+    expect(offersSales(chain('year', 'day', 'category', 'item'), 0)).toBe(false);
   });
 
   it('knows when figures are summed over lines and what to say about the sales under them', () => {

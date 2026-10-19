@@ -71,9 +71,11 @@ class SalesSummaryService {
     @Transactional(readOnly = true)
     Summary summary(Query q) {
         Principal principal = CurrentPrincipal.require();
-        // A ranking of colleagues is management information: the salesperson level needs profit read somewhere in
-        // scope.
-        boolean sellers = principal.scopeOf("retail.profit.read").isPresent();
+        List<UUID> filter = principal.branchFilter("retail.sale.read", q.branchIds());
+        // A ranking of colleagues is management information: the salesperson level needs profit read in every branch
+        // the
+        // figures cover, the rule of profit_minor.
+        boolean sellers = profitVisible(principal, filter);
         List<String> available = sellers
                 ? SalesSummaryRepository.LEVELS
                 : SalesSummaryRepository.LEVELS.stream()
@@ -85,7 +87,7 @@ class SalesSummaryService {
                     HttpStatus.FORBIDDEN,
                     "permission_denied",
                     "Permission denied",
-                    "The salesperson level is for people who may read profit.");
+                    "The salesperson level is for people who may read profit in every branch shown.");
         }
         String level = q.level() == null ? chain.getFirst() : q.level();
         if (!chain.contains(level)) {
@@ -105,7 +107,6 @@ class SalesSummaryService {
         if (q.offset() != null && q.offset() < 0) {
             throw ApiException.validation(List.of(new FieldProblem("offset", "invalid", "offset is zero or more.")));
         }
-        List<UUID> filter = principal.branchFilter("retail.sale.read", q.branchIds());
         String currency = tenant.profile().currency();
         int at = chain.indexOf(level);
         String next = at + 1 < chain.size() ? chain.get(at + 1) : null;
@@ -170,7 +171,7 @@ class SalesSummaryService {
      * Profit is a sum over the sales shown, so it is offered only when the caller holds {@code retail.profit.read}
      * in every branch the figures cover (ADR-017); a partly covered sum would read as the whole.
      */
-    private static boolean profitVisible(Principal principal, List<UUID> filter) {
+    static boolean profitVisible(Principal principal, List<UUID> filter) {
         if (filter == null) {
             return principal
                     .scopeOf("retail.profit.read")

@@ -658,10 +658,9 @@ pages in the browser.
   of voided sales that are not counted (All sales only), and on All sales the payment methods used with their counts and
   amounts (cash, mobile money, bank, credit). The header is the whole button, at least a tap high, with `aria-expanded`.
 - **Opening a group** lists the level below it, asked for with the group's own days inside the range the screen is showing, so
-  the figures above never change when a month or a day is opened. The current month is open by default, so the days of this
-  month are listed; the year is open too. A day loads its sales only when it is opened, from the existing list endpoint with a
+  the figures above never change when a month or a day is opened. (Superseded by issue #341 below: nothing is open to start with.) A day loads its sales only when it is opened, from the existing list endpoint with a
   single-day range and the screen's filters, 50 at a time with Show more, in the same sale cards as before; tapping a sale
-  opens it and the way back finds the same groups open (what is open is kept by the screen, `useOpenGroups`).
+  opens it and the way back finds the same groups open (what is open is kept by the screen; in issue #341 that is `useChainView`).
 - **Breadcrumbs.** An open day shows where it sits, All sales (or Credit sales), the year, the month, the day. Tapping a place
   shuts what is inside it and shows that place again. The staff bar crumbs for the sale itself are unchanged.
 - **The choices still work.** All sales keeps From and To (From is empty to start with, so every year shows, and To is today; the old 30 day start would have cut the year and month figures short), the buyer search, Paid by and the
@@ -748,7 +747,7 @@ salesperson, day, product category, item, with a summary on every line. The user
   in `localStorage` (`bms.salesChain.<list>.<user>`, read and written in try/catch; blocked or garbled storage gives the usual
   order). The key holds the user's id from `/me` (never an email or a phone number). Changing it closes every open group. When one shop is chosen
   at the top of the page the shop level is left out (it would be one line). The salesperson level is shown only to someone who may read profit
-  (a cashier sees no ranking of colleagues): it is left out of Group by, of the usual order and of any stored chain.
+  (a cashier sees no ranking of colleagues): it is left out of Group by, of the usual order and of any stored chain, and it is shown only where profit read covers every branch in view (one shop chosen, or all of them).
 - **A line** is the same header as in issue #328 (name, total, number of sales, profit when the server sent it, voided note,
   payment methods on All sales), now for any level: a shop or a person or a category by name, a period in words. At the item level it
   adds the quantity sold ("4 sold, in 3 sales"). Under a category or an item the figures are its own lines, not whole sales, and the count reads

@@ -262,6 +262,20 @@ describe('what a person sees and what is stored', () => {
     expect(within(control).getByRole('button', { name: 'Add Item' })).toBeTruthy();
   });
 
+  it('offers the salesperson level only where profit read covers every branch in view', async () => {
+    const first = me.branches?.[0]?.id ?? '';
+    const partial: Me = { ...me, permission_scopes: { ...me.permission_scopes, 'retail.profit.read': { all_branches: false, branch_ids: [first] } } };
+    writeChain(chainUser(partial), 'all', [...DEFAULT_CHAIN]);
+    show(<AllSales />, ALL_BRANCHES, partial);
+    await head(/^Test Branch Gayaza /);
+    expect((screen.getByText('Group by').closest('details') as HTMLElement).textContent).not.toContain('Salesperson');
+    expect(summary.mock.calls.every(([q]) => !(q.chain ?? []).includes('seller'))).toBe(true);
+    cleanup();
+    show(<AllSales />, first, partial);
+    await head(/^2026 /);
+    expect((screen.getByText('Group by').closest('details') as HTMLElement).textContent).toContain('Salesperson');
+  });
+
   it('keeps the Group by under the user id and stores no email or phone number', async () => {
     const ann: Me = { ...me, user_id: 'user-id-ann', email: 'ann@example.test', phone_e164: '+256700000001' };
     show(<AllSales />, ALL_BRANCHES, ann);

@@ -336,16 +336,101 @@ class RetailSalesGroupingChainIT extends IntegrationTest {
         assertThat(manager.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(manager.getBody().get("available_levels").toString()).contains("seller");
 
+        // Profit read at one branch only: the salesperson level is that branch's alone, never a ranking across
+        // branches.
         Map<String, String> oneBranch = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.secondBranch());
         assertThat(call(one, "group_by=seller", ADMIN, oneBranch).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(one, "group_by=seller&branch_id=" + t.headOffice(), ADMIN, oneBranch)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(
+                                one,
+                                "group_by=seller&branch_id=" + t.headOffice() + "&branch_id=" + t.secondBranch(),
+                                ADMIN,
+                                oneBranch)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(call(one, "group_by=seller&branch_id=" + t.secondBranch(), ADMIN, oneBranch)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
+        assertThat(call(
+                                one,
+                                "group_by=day&seller_id=" + one.userId() + "&branch_id=" + t.headOffice(),
+                                ADMIN,
+                                oneBranch)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /** The sales list is no way round the rule: no seller filter for a cashier, and nobody else's id on a row. */
+    @Test
+    void theSalesListGivesACashierNoTakingsPerPerson() {
+        RetailTestSupport cashier = new RetailTestSupport(http, t);
+        assertThat(cashier.get("/sales?seller_id=" + two.userId(), SALES).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(cashier.get("/sales?seller_id=" + two.userId() + "&from=2026-10-19&to=2026-10-19", SALES)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        // Profit read at one branch is not enough for a list that covers the other.
+        Map<String, String> oneBranch = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
+        assertThat(one.call(HttpMethod.GET, "/sales?seller_id=" + two.userId(), null, ADMIN, "*", oneBranch)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(one.call(
+                                HttpMethod.GET,
+                                "/sales?seller_id=" + two.userId() + "&branch_id=" + t.headOffice(),
+                                null,
+                                ADMIN,
+                                "*",
+                                oneBranch)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(one.get("/sales?seller_id=" + two.userId(), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> list = cashier.get("/sales?limit=100", SALES);
+        assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(list.getBody().get("items")).hasSize(5);
+        for (JsonNode row : list.getBody().get("items")) {
+            for (String who : List.of("created_by", "voided_by")) {
+                JsonNode v = row.get(who);
+                assertThat(v == null || v.isNull())
+                        .as("%s of a cashier's row for sale %s", who, row.get("sale_no"))
+                        .isTrue();
+            }
+        }
+        // The detail of a sale somebody else made says no more than the list.
+        JsonNode theirs = null;
+        for (JsonNode row : one.get("/sales?limit=100", ADMIN).getBody().get("items")) {
+            if (row.get("created_by").asString().equals(two.userId().toString())) {
+                theirs = row;
+            }
+        }
+        assertThat(theirs).isNotNull();
+        ResponseEntity<JsonNode> detail =
+                cashier.get("/sales/" + theirs.get("id").asString(), SALES);
+        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(detail.getBody().get("created_by") == null
+                        || detail.getBody().get("created_by").isNull())
+                .isTrue();
+        // A person still sees their own sales as theirs, and a manager sees everybody's.
+        ResponseEntity<JsonNode> mine = two.get("/sales/" + theirs.get("id").asString(), SALES);
+        assertThat(mine.getBody().get("created_by").asString())
+                .isEqualTo(two.userId().toString());
+        assertThat(one.get("/sales/" + theirs.get("id").asString(), ADMIN)
+                        .getBody()
+                        .get("created_by")
+                        .asString())
+                .isEqualTo(two.userId().toString());
     }
 
     @Test
     void profitReadAtOneBranchOnlyShowsProfitOnlyWhereThatBranchIsAllThatIsCovered() {
         Map<String, String> scoped = Map.of("X-Dev-Scopes", "retail.profit.read=" + t.headOffice());
-        for (String lvl : List.of("branch", "year", "month", "seller", "day", "category", "item")) {
-            String all = "group_by=" + CHAIN + "&level=" + lvl;
+        // The salesperson level is refused wherever profit read does not cover every branch shown (next test).
+        for (String lvl : List.of("branch", "year", "month", "day", "category", "item")) {
+            String all = "group_by=branch,year,month,day,category,item&level=" + lvl;
             JsonNode everywhere = call(one, all, ADMIN, scoped).getBody();
             for (JsonNode g : everywhere.get("items")) {
                 assertThat(g.has("profit_minor")).as("all branches at %s", lvl).isFalse();

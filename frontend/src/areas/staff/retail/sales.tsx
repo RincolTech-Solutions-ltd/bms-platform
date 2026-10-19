@@ -8,7 +8,7 @@ import { receiptNote } from './price-state';
 import { enteredPriceMinor, enteredQty } from './units-state';
 import { useCrumbTail } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
-import { SALE_RETURN, canSeeProfit, canUse, holdsAt } from './permissions';
+import { SALE_RETURN, canRankSellers, canUse, holdsAt } from './permissions';
 import { settledWords } from './returns-state';
 import { showDate } from './transfers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone, useProfitAccess } from './ui';
@@ -269,11 +269,11 @@ export function CreditSales() {
   const today = businessToday();
   const { me } = useStaff();
   const view = useChainView(chainUser(me), 'credit');
-  const levels = usableLevels(canSeeProfit(me));
-  const shown = usableChain(view.chain, canSeeProfit(me));
+  const levels = usableLevels(canRankSellers(me, all ? null : branchId));
+  const shown = usableChain(view.chain, canRankSellers(me, all ? null : branchId));
   const chain = effectiveChain(shown, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: 'credit' as const, owing: owing === 'all' ? undefined : owing };
-  // Debts still owing or overdue are listed together, oldest groups included: only the current month is open in a grouped list.
+  // Debts still owing or overdue are listed together, oldest groups included: nothing is open to start with, so a debt in an old month would otherwise be hidden.
   const flat = owing === 'owing' || owing === 'overdue';
   const figures = useRootFigures(filter, {}, (all || branchId !== null) && !flat);
   return (
@@ -323,8 +323,8 @@ export function AllSales() {
   const products = useQuery({ queryKey: ['retail', 'products', 'all', itemSearch], queryFn: ({ signal }) => retail.listProducts({ query: itemSearch, signal }), enabled: itemSearch !== '', placeholderData: keepPreviousData });
   const { me } = useStaff();
   const view = useChainView(chainUser(me), 'all');
-  const levels = usableLevels(canSeeProfit(me));
-  const shown = usableChain(view.chain, canSeeProfit(me));
+  const levels = usableLevels(canRankSellers(me, all ? null : branchId));
+  const shown = usableChain(view.chain, canRankSellers(me, all ? null : branchId));
   const chain = effectiveChain(shown, !all);
   const filter = { branchId: all ? undefined : (branchId ?? undefined), buyer: search.term, paymentMethod: method || undefined, productId };
   const figures = useRootFigures(filter, { from, to }, (all || branchId !== null) && from <= to);
