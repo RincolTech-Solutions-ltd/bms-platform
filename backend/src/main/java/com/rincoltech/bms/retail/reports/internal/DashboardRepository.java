@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.reports.internal;
 
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -29,6 +30,15 @@ class DashboardRepository {
     record Position(UUID branchId, long atPrice, long atCost, int out, int low) {}
 
     List<DaySales> sales(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        return sales(branchIds, from, to, CreditPeriods.NONE);
+    }
+
+    /**
+     * As above; a credit sale that is not an imported one and counts from the start day of {@code periods} on (the later of its date
+     * and the day it was entered; counted when the
+     * buyer pays, ADR-043) is left out, with the lines its returns took back, since it reaches the figures through the payments.
+     */
+    List<DaySales> sales(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -45,6 +55,10 @@ class DashboardRepository {
                         + " count(DISTINCT s.id) AS sale_count"
                         + "  FROM " + SalesAnalysisRepository.NET_LINES
                         + " WHERE s.status = 'completed' AND s.sale_date BETWEEN :from AND :to" + branch
+                        + (periods.isEmpty()
+                                ? ""
+                                : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
+                                        + periods.sql("s.origin_date", "s.origin_created_at", params, "crpD") + ")")
                         + " GROUP BY s.branch_id, s.sale_date, (s.payment_method = 'credit')")
                 .params(params)
                 .query((rs, n) -> new DaySales(
@@ -59,8 +73,8 @@ class DashboardRepository {
 
     /**
      * Stock value above zero per branch (active items) and, per branch, the items out of stock or low by
-     * the stock list's rule: every active item (and any inactive one still holding a quantity) judged on
-     * its balance in that branch, an item with no balance row counting as zero.
+     * the stock list's rule: every active item judged on its balance in that branch (an inactive item, issue
+     * #342, is left out like the list leaves it out), an item with no balance row counting as zero.
      */
     List<Position> positions(List<UUID> branchIds, BigDecimal lowThreshold) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -82,7 +96,7 @@ class DashboardRepository {
                         + "  CROSS JOIN retail_products p"
                         + "  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
                         + "   AND b.branch_id = br.id"
-                        + " WHERE (p.active OR coalesce(b.qty, 0) <> 0)"
+                        + " WHERE p.active"
                         + "   AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h"
                         + "        WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))" + branch
                         + " GROUP BY br.id")
@@ -118,8 +132,8 @@ class DashboardRepository {
                         + "          FROM retail_products p"
                         + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
                         + branch
-                        + "         GROUP BY p.id, p.active"
-                        + "        HAVING p.active OR count(*) FILTER (WHERE b.qty <> 0) > 0) t")
+                        + "         WHERE p.active"
+                        + "         GROUP BY p.id) t")
                 .params(params)
                 .query((rs, n) -> new int[] {rs.getInt("out_of_stock"), rs.getInt("low_stock")})
                 .single();

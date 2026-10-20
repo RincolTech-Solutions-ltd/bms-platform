@@ -40,7 +40,7 @@ sell)", that works for every business without switching a capability on.
   sales for it, because there are none.
 - **Marking an existing branch as a Store is refused (422 `branch_has_open_credit_sales`) while a credit sale made there still has a balance owing**, since
   the payments on it are taken at the till that stops selling. Imported (historical) credit sales are not counted: nothing can be paid on them (#360), so they
-  never block a branch becoming a Store. Written-off credit sales will be left out too once the write-offs of #349 are on `main` (a TODO names the issue). The retail module reports it through the core port `core.tenancy.BranchSellingCheck`, so the
+  never block a branch becoming a Store. Credit sales that were written off (#349, ADR-043) are left out too: the debt is gone. The retail module reports it through the core port `core.tenancy.BranchSellingCheck`, so the
   core names no vertical. A day's cash is never "closed" in this product (the cash book is read by date and not locked), so no cash-day check exists.
 - **`/me` reports `sells_goods` per branch.** The sale form, the default branch the staff area starts on and the till skip a Store; restock, goods
   receipt, transfer and stock-take forms include it. A Store is still listed, and the user's last choice is honoured, so stock work is never blocked.
