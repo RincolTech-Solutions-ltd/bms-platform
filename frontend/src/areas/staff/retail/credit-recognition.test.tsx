@@ -4,7 +4,7 @@ import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Dashboard } from '../../../api/retail-analytics';
 import type { DailyProfit } from '../../../api/retail';
-import { CreditRecognitionSetting, RECOGNITION_CHOICES, recognitionOf, recognitionSentences } from './credit-recognition';
+import { CreditRecognitionSetting, RECOGNITION_CHOICES, recognitionOf, recognitionSentences, startDay } from './credit-recognition';
 import { DashboardView } from './dashboard';
 import { ProfitTable } from './profit';
 
@@ -51,12 +51,13 @@ describe('the setting', () => {
     expect(recognitionSentences('on_sale', 'on_sale')).toEqual([]);
     const toPayment = recognitionSentences('on_sale', 'on_payment', '2026-10-20').join(' ');
     expect(toPayment).toContain('On credit');
-    expect(toPayment).toContain('From 2026-10-20 on');
+    expect(toPayment).toContain('From 2026-10-20 (tomorrow) on');
+    expect(toPayment).toContain('A payment is then dated today');
     expect(toPayment).toContain('Credit sales dated before 2026-10-20 keep counting the way they did');
     expect(toPayment).toContain('Stock still goes down');
     expect(toPayment).toContain('Savings already saved are not changed');
     const back = recognitionSentences('on_payment', 'on_sale', '2026-10-25').join(' ');
-    expect(back).toContain('From 2026-10-25 on');
+    expect(back).toContain('From 2026-10-25 (tomorrow) on');
     expect(back).toContain('still count as the money comes in');
     expect(`${toPayment} ${RECOGNITION_CHOICES.map((c) => c.hint).join(' ')}`).not.toMatch(/[\u2013\u2014]/);
   });
@@ -75,6 +76,11 @@ describe('the setting', () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review change/);
   });
 
+  it('starts the day after today', () => {
+    expect(startDay('2026-10-20')).toBe('2026-10-21');
+    expect(startDay('2026-12-31')).toBe('2027-01-01');
+  });
+
   it('says since when the saved rule stands', () => {
     const html = renderToString(
       <QueryClientProvider client={new QueryClient()}>
@@ -82,6 +88,12 @@ describe('the setting', () => {
       </QueryClientProvider>,
     );
     expect(html).toContain('This rule has stood since 2026-10-20');
+    const future = renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
+      </QueryClientProvider>,
+    );
+    expect(future).toContain('This rule will stand from 2999-01-01');
   });
 
   it('starts on the buyer pays choice when that is saved', () => {

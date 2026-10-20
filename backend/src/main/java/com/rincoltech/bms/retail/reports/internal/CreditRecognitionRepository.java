@@ -34,8 +34,10 @@ class CreditRecognitionRepository {
      * <p>A payment sits on the day it was RECORDED (the tenant's day of its creation), not on the date written on it, so a
      * payment dated last Monday and entered on Wednesday is Wednesday's money and no day already reported is ever rewritten. It
      * belongs to the branch that took it: the receiving branch of a payment on account, else the sale's. A reversal sits on the
-     * day it was reversed, at the receiving branch; a return on its own day, at the sale's branch; a voided return drops out.
-     * The sales to read are picked first, from the events inside the window, so the work follows the window and not the history.
+     * day it was reversed, at the receiving branch; a return on its own day, at the branch the refund left from when money was
+     * paid out (that till lost the cash, so it takes back the profit), else at the sale's branch; a voided return drops out.
+     * The sales to read are picked first, from the payments of the window (a range of moments on an indexed column) and the
+     * reversals and returns of its days, then only their events up to the end of the window are read.
      */
     List<CreditRecognition.Event> events(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
         if ((branchIds != null && branchIds.isEmpty()) || periods.isEmpty()) {
@@ -44,11 +46,16 @@ class CreditRecognitionRepository {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("from", Date.valueOf(from));
         params.put("to", Date.valueOf(to));
-        params.put("zone", tenant.profile().timezone().getId());
+        java.time.ZoneId zone = tenant.profile().timezone();
+        params.put("zone", zone.getId());
+        params.put("fromTs", java.sql.Timestamp.from(from.atStartOfDay(zone).toInstant()));
+        params.put(
+                "toTs",
+                java.sql.Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()));
         String inPeriod = periods.sql("s.sale_date", params, "crpE");
         String paidDay = "CAST((p.created_at AT TIME ZONE :zone) AS date)";
         return jdbc.sql("WITH active AS ("
-                        + " SELECT p.sale_id FROM retail_sale_payments p WHERE " + paidDay + " BETWEEN :from AND :to"
+                        + " SELECT p.sale_id FROM retail_sale_payments p WHERE p.created_at >= :fromTs AND p.created_at < :toTs"
                         + " UNION SELECT al.sale_id FROM retail_account_payments ap"
                         + " JOIN retail_account_payment_allocations al ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id"
                         + " WHERE ap.status = 'reversed' AND ap.reversed_on BETWEEN :from AND :to"
@@ -61,7 +68,7 @@ class CreditRecognitionRepository {
                         + " JOIN retail_sales s1 ON s1.tenant_id = p.tenant_id AND s1.id = p.sale_id"
                         + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
                         + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
-                        + " WHERE p.sale_id IN (SELECT sale_id FROM active) AND " + paidDay + " <= :to"
+                        + " WHERE p.sale_id IN (SELECT sale_id FROM active) AND p.created_at < :toTs"
                         + " UNION ALL"
                         + " SELECT al.sale_id, ap.reversed_on, ap.branch_id, -al.amount_minor, CAST(0 AS bigint), CAST(0 AS bigint),"
                         + " CAST(0 AS bigint)"
@@ -69,7 +76,8 @@ class CreditRecognitionRepository {
                         + " JOIN retail_account_payment_allocations al ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id"
                         + " WHERE ap.status = 'reversed' AND al.sale_id IN (SELECT sale_id FROM active) AND ap.reversed_on <= :to"
                         + " UNION ALL"
-                        + " SELECT r.sale_id, r.returned_on, r.branch_id, CAST(0 AS bigint), r.total_minor, r.cost_minor, r.refund_minor"
+                        + " SELECT r.sale_id, r.returned_on, CASE WHEN r.refund_minor > 0 THEN r.refund_branch_id ELSE r.branch_id END,"
+                        + " CAST(0 AS bigint), r.total_minor, r.cost_minor, r.refund_minor"
                         + " FROM retail_sale_returns r"
                         + " WHERE r.status = 'completed' AND r.sale_id IN (SELECT sale_id FROM active) AND r.returned_on <= :to"
                         + ")"

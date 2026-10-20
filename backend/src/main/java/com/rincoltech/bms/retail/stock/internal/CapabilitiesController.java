@@ -128,11 +128,13 @@ class CapabilitiesController {
         put(proposed, "returns", r.returns());
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
         if (r.creditSaleRecognition() != null && !r.creditSaleRecognition().equals(capabilities.creditRecognition())) {
-            // A change of the rule counts from today: credit sales dated earlier keep counting the way they did
-            // (ADR-043).
+            // A change of the rule counts from the NEXT business day: the sales and savings of today are already made,
+            // and credit
+            // sales dated earlier keep counting the way they did (ADR-043). Asked for again the same day, it replaces
+            // the pending one.
             proposed.put(
                     "credit_recognition_effective_from",
-                    clock.today(tenant.profile().timezone()).toString());
+                    clock.today(tenant.profile().timezone()).plusDays(1).toString());
         }
         transfers.guardSwitchOff(proposed);
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));

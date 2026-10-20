@@ -23,7 +23,7 @@ vi.mock('../../../api/retail', async (original) => {
 const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { WriteOffFormView, WriteOffSaleAction } = await import('./sale-actions');
-const { canWriteOff, writeOffWarning, writeOffWords } = await import('./sale-actions-state');
+const { WRITE_OFF_CHECKER, canWriteOff, writeOffWarning, writeOffWords } = await import('./sale-actions-state');
 const { saleState, SaleDetail } = await import('./sales');
 
 afterEach(() => {
@@ -152,6 +152,7 @@ describe('the words', () => {
     expect(writeOffWarning(2500)).toContain('UGX 2,500');
     expect(writeOffWarning(2500)).toMatch(/not deleted|stays on record/);
     expect(writeOffWarning(2500)).toContain('the day it is approved');
+    expect(WRITE_OFF_CHECKER).toContain('only active administrator');
     expect(`${writeOffWarning(1)} ${writeOffWords({ executed: false })}`).not.toMatch(/[\u2013\u2014]/);
   });
 

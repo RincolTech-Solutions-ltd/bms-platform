@@ -709,6 +709,9 @@ class SalesService {
             throw new ApiException(
                     HttpStatus.CONFLICT, "sale_voided", "Sale voided", "This sale has been voided already.");
         }
+        if (s.writeOff() != null) {
+            throw writtenOff("The unpaid part of this sale was written off, so it cannot be voided.");
+        }
         if (s.paymentMethod().equals("credit") && s.paidMinor() > 0) {
             throw ApiException.rule("sale_has_payments", "A credit sale with payments against it cannot be voided.");
         }
@@ -778,6 +781,9 @@ class SalesService {
                 .map(Header::sale)
                 .filter(x -> principal.may("retail.sale.create", x.branchId()))
                 .orElseThrow(ApiException::notFound);
+        if (s.writeOff() != null) {
+            throw writtenOff("The unpaid part of this sale was written off, so it takes no payment.");
+        }
         if (!s.paymentMethod().equals("credit") || !s.status().equals("completed")) {
             throw ApiException.rule("sale_not_payable", "Only a completed credit sale takes payments.");
         }
@@ -791,6 +797,16 @@ class SalesService {
         if (paidOn.isAfter(today) || paidOn.isBefore(s.saleDate())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("paid_on", "invalid", "A payment is dated between the sale and today.")));
+        }
+        // Under the rule "when the buyer pays" a payment counts on the day it is entered, so it carries that day
+        // (ADR-043).
+        if (capabilities.recognisesOnPayment() && !paidOn.equals(today)) {
+            throw ApiException.validation(
+                    List.of(
+                            new FieldProblem(
+                                    "paid_on",
+                                    "backdated_payment",
+                                    "Under the 'when the buyer pays' rule a payment is dated today. If you took the money earlier, ask your administrator.")));
         }
         UUID id = UUID.randomUUID();
         PostedEntry entry = books.post(new Posting(
@@ -1024,6 +1040,11 @@ class SalesService {
                 s.voidReason(),
                 s.version(),
                 s.writeOff());
+    }
+
+    /** 409 {@code sale_written_off}: what a sale whose unpaid part was written off refuses (ADR-043). */
+    static ApiException writtenOff(String words) {
+        return new ApiException(HttpStatus.CONFLICT, "sale_written_off", "Sale written off", words);
     }
 
     static String blankToNull(String s) {

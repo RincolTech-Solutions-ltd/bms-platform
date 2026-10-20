@@ -21,9 +21,10 @@ Do not switch the pilot tenant to "When the buyer pays" until the sales summary 
 the one after it): until then they show the profit of sales made, labelled so, beside the profit of money received that the home page,
 Daily profit and the savings use.
 
-The change counts from the day you make it. Credit sales dated before that day keep counting the way they did, so nothing is counted
-twice and no savings already set aside move. A payment counts on the day it is entered (not the date written on it), at the branch that
-took the money.
+The change starts the next business day, not today. Credit sales dated before that day keep counting the way they did, so nothing is
+counted twice and no savings already set aside move, and the sales you made today are not re-labelled. Choosing again today replaces the
+pending change. Under "When the buyer pays" a payment is dated today (a backdated payment is refused: ask your administrator), counts on
+the day it is entered, and goes to the branch that took the money; a return takes the profit back from the branch that paid the refund.
 
 ## Switch it on
 
@@ -45,7 +46,7 @@ took the money.
 ## Write off a buyer who never pays
 
 1. Open the credit sale (Credit sales, then the sale) as an administrator (`retail.credit.write_off`).
-2. Tap Write off, give the reason and tap Write off again. Above the business's approval limit for `retail_sale_write_off`, a second administrator approves it in the approvals inbox first; with no limit set there is no second person.
+2. Tap Write off, give the reason and tap Write off again. Unless you set a limit for `retail_sale_write_off`, a second administrator approves it in the approvals inbox first (when the business has two or more active administrators); a single active administrator can write off alone and the audit trail marks it. With a limit set, only a debt at or above it needs a second person.
 3. The sale stays and reads Written off. The unpaid amount leaves On credit and the owing and overdue lists. Daily profit shows the loss on that day (with "When the buyer pays" the unpaid share of the cost of goods, with the default the whole unpaid amount), which also lowers that day's savings suggestion.
 4. The accounts: trade debtors for the sale are cleared against bad debt loss (account 5140) and, with "When the buyer pays", sales revenue for the rest. Nothing is deleted and a write-off cannot be undone in this release; ask the maintainers if one was made by mistake.
 

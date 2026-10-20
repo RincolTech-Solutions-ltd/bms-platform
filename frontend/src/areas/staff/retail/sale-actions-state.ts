@@ -120,6 +120,9 @@ export const writeOffWords = (outcome: Pick<WriteOffOutcome, 'executed' | 'write
     ? `Cleared ${formatMinor(outcome.write_off?.unpaid_minor ?? 0, RETAIL_CURRENCY)} owed as a bad debt. The sale stays on record.`
     : 'Sent to a second administrator to approve. Nothing changes until they do.';
 
+/** Why a write-off may wait for someone else, said before it is sent. */
+export const WRITE_OFF_CHECKER = 'Unless your business sets a limit, a write-off needs a second administrator to approve it. If you are the only active administrator, it goes through at once and is marked so in the audit trail.';
+
 /** What is shown in place of the button while a write-off of the sale waits for a second administrator. */
 export const WRITE_OFF_PENDING = 'A write-off of this debt is waiting for a second administrator to approve it. Nothing changes until they do.';
 

@@ -379,6 +379,16 @@ class AccountsService {
             throw ApiException.validation(
                     List.of(new FieldProblem("paid_on", "invalid", "A payment cannot be dated in the future.")));
         }
+        // Under the rule "when the buyer pays" a payment counts on the day it is entered, so it carries that day
+        // (ADR-043).
+        if (capabilities.recognisesOnPayment() && !paidOn.equals(today)) {
+            throw ApiException.validation(
+                    List.of(
+                            new FieldProblem(
+                                    "paid_on",
+                                    "backdated_payment",
+                                    "Under the 'when the buyer pays' rule a payment is dated today. If you took the money earlier, ask your administrator.")));
+        }
         long amount = r.amountMinor();
         boolean manual = r.allocations() != null && !r.allocations().isEmpty();
         Map<UUID, Long> split = manual

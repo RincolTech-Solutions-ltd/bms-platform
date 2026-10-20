@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * {@code retail_sale_write_off} (chapter 8 section 8.4; issue #340, ADR-043): writing off the unpaid part of a credit sale at
- * or above the tenant's approval threshold for this action. Requested and decided with {@code retail.credit.manage}, by two
- * different people. An unset threshold means no checker at all, so {@link WriteOffsService} calls
- * {@link com.rincoltech.bms.core.approvals.Approvals} only at or above a threshold. The subject is the sale, whose version
+ * or above the tenant's approval threshold for this action, or by default (no positive threshold) when the tenant has two or
+ * more active administrators. Requested and decided with {@code retail.credit.write_off}, by two different people.
+ * {@link WriteOffsService} decides when to call {@link com.rincoltech.bms.core.approvals.Approvals}. The subject is the sale, whose version
  * moves with every payment and return, so a request goes stale when anything else happened to the sale meanwhile (FR-APR-08).
  * Everything is checked again at execution against the sale as it is then, and the write-off is dated the day it executes.
  */
@@ -61,6 +61,6 @@ class SaleWriteOffAction implements ApprovalAction {
     @Override
     public void execute(Execution e) {
         Plan plan = servicer.plan(e.subjectId());
-        servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId());
+        servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), false);
     }
 }

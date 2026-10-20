@@ -400,8 +400,8 @@ class SalesRepository {
     void insertPayment(Payment p) {
         jdbc.sql("""
                         INSERT INTO retail_sale_payments (id, tenant_id, sale_id, amount_minor, currency, method, paid_on,
-                            journal_entry_id, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?)
+                            journal_entry_id, created_by, created_at)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
                 .params(
                         p.id(),
@@ -411,7 +411,8 @@ class SalesRepository {
                         p.method(),
                         Date.valueOf(p.paidOn()),
                         p.journalEntryId(),
-                        p.createdBy())
+                        p.createdBy(),
+                        Timestamp.from(p.createdAt()))
                 .update();
     }
 

@@ -85,13 +85,7 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     void pay(UUID sale, long amount, int daysAgo) {
-        Map<String, Object> body = Map.of(
-                "amount_minor",
-                amount,
-                "method",
-                "cash",
-                "paid_on",
-                today().minusDays(daysAgo).toString());
+        Map<String, Object> body = Map.of("amount_minor", amount, "method", "cash", "paid_on", today().toString());
         ResponseEntity<JsonNode> r = api.postKeyed(
                 "/sales/" + sale + "/payments",
                 body,
@@ -101,10 +95,13 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
         if (daysAgo > 0) {
             String id = r.getBody().get("payment").get("id").asString();
+            LocalDate day = today().minusDays(daysAgo);
             TestDatabase.owner()
                     .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
-                            + " UPDATE retail_sale_payments SET created_at = (TIMESTAMP '" + today().minusDays(daysAgo)
-                            + " 12:00:00') AT TIME ZONE 'Africa/Kampala' WHERE id = '" + id + "'; END $$")
+                            + " UPDATE retail_sale_payments SET created_at = (TIMESTAMP '" + day
+                            + " 12:00:00') AT TIME ZONE 'Africa/Kampala', paid_on = DATE '" + day + "' WHERE id = '"
+                            + id
+                            + "'; END $$")
                     .update();
         }
     }
@@ -353,8 +350,25 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     @Test
-    void aSaleCountedWhenTheBuyerPaysIsWrittenOffAtTheCostNeverCarriedIntoTheProfit() {
+    void aSaleMadeBeforeTheSwitchOnTheSameDayIsWrittenOffAsItWasCountedAndStaysSoAfterSwitchingBack() {
+        UUID s = creditSale(3, 0);
         setting(Map.of("credit_sale_recognition", "on_payment"));
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("credit_sale_recognition").asString())
+                .as("the switch starts tomorrow")
+                .isEqualTo("on_sale");
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(3_000);
+        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(3_000);
+        setting(Map.of("credit_sale_recognition", "on_sale"));
+        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(3_000);
+        assertThat(profit().get("profit_minor").asLong())
+                .as("1,200 at the sale less the 3,000 lost")
+                .isEqualTo(-1_800);
+    }
+
+    @Test
+    void aSaleCountedWhenTheBuyerPaysIsWrittenOffAtTheCostNeverCarriedIntoTheProfit() {
+        fromTheStart();
         UUID s = creditSale(3, 0);
         pay(s, 1_000, 0);
         JsonNode w = writeOffOk(s);
@@ -452,11 +466,11 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         Map<String, Object> pay = Map.of("amount_minor", 100, "method", "cash");
         ResponseEntity<JsonNode> payment = api.postKeyed(
                 "/sales/" + s + "/payments", pay, ADMIN, "*", UUID.randomUUID().toString());
-        assertThat(payment.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(payment.getBody().get("code").asString()).isEqualTo("payment_exceeds_balance");
+        assertThat(payment.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(payment.getBody().get("code").asString()).isEqualTo("sale_written_off");
         ResponseEntity<JsonNode> voided = api.post("/sales/" + s + "/void", Map.of("reason", "Test void"), ADMIN);
-        assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(voided.getBody().get("code").asString()).isEqualTo("sale_has_payments");
+        assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(voided.getBody().get("code").asString()).isEqualTo("sale_written_off");
         UUID line = UUID.fromString(sale(s).get("lines").get(0).get("id").asString());
         Map<String, Object> l = new LinkedHashMap<>();
         l.put("sale_line_id", line);
@@ -525,11 +539,77 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     ResponseEntity<JsonNode> decide(String approval, RetailTestSupport who) {
+        return decide(approval, who, MANAGER);
+    }
+
+    ResponseEntity<JsonNode> decide(String approval, RetailTestSupport who, String perms) {
         return http.exchange(
                 "/api/v1/approvals/" + approval + "/approve",
                 HttpMethod.POST,
-                new HttpEntity<>(Map.of("note", "Checked the debt"), who.headers(MANAGER, "*", Map.of())),
+                new HttpEntity<>(Map.of("note", "Checked the debt"), who.headers(perms, "*", Map.of())),
                 JsonNode.class);
+    }
+
+    void activeAdmins(int n) {
+        for (int i = 0; i < n; i++) {
+            UUID user = UUID.randomUUID();
+            TestDatabase.owner()
+                    .sql("INSERT INTO users (id, tenant_id, kind, full_name, phone_e164, status)"
+                            + " VALUES (?, ?, 'staff', ?, ?, 'active')")
+                    .params(user, t.tenantId(), "Test Admin 0" + i, "+25670000010" + i)
+                    .update();
+            TestDatabase.owner()
+                    .sql("INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, granted_by)"
+                            + " VALUES (?, ?, ?, 'tenant_admin', ?)")
+                    .params(UUID.randomUUID(), t.tenantId(), user, user)
+                    .update();
+        }
+    }
+
+    @Test
+    void withTwoActiveAdministratorsEveryWriteOffNeedsASecondOneByDefault() {
+        activeAdmins(2);
+        UUID s = creditSale(1, 1);
+        ResponseEntity<JsonNode> asked = writeOff(s, "Buyer left town", MANAGER);
+        assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        String approval = asked.getBody().get("approval_id").asString();
+        assertThat(sale(s).has("write_off")).isFalse();
+        assertThat(decide(approval, api).getStatusCode().is2xxSuccessful())
+                .as("the maker cannot decide")
+                .isFalse();
+        String manageOnly = ADMIN + ",retail.credit.manage,core.approvals.read";
+        ResponseEntity<JsonNode> notAllowed = decide(approval, new RetailTestSupport(http, t), manageOnly);
+        assertThat(notAllowed.getStatusCode())
+                .as("retail.credit.manage alone cannot decide it")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(decide(approval, new RetailTestSupport(http, t)).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(sale(s).get("write_off").get("unpaid_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void withASingleActiveAdministratorTheWriteOffIsAllowedAloneAndTheAuditRowSaysSo() {
+        activeAdmins(1);
+        UUID s = creditSale(1, 1);
+        writeOffOk(s);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.sale.written_off'"
+                                + " AND data::text LIKE '%only_one_active_administrator%'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aPositiveThresholdReplacesTheDefault() {
+        activeAdmins(2);
+        threshold(5_000);
+        UUID s = creditSale(1, 1);
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("unpaid_minor").asLong())
+                .as("below the limit: no second person")
+                .isEqualTo(1_000);
     }
 
     @Test

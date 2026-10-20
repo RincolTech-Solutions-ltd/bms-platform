@@ -153,10 +153,7 @@ class ReturnsServicer {
                     "This sale has been voided, which already took everything back.");
         }
         if (s.writeOff() != null) {
-            throw new ApiException(
-                    HttpStatus.CONFLICT,
-                    "sale_written_off",
-                    "Sale written off",
+            throw SalesService.writtenOff(
                     "The unpaid part of this sale was written off, so goods cannot be taken back against it.");
         }
         LocalDate on = clock.today(tenant.profile().timezone());

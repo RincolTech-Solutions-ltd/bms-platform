@@ -9,13 +9,16 @@
 -- the account now; it stays at zero until a write-off is made. No ALTER touches retail_sales, retail_sale_lines or
 -- retail_sale_payments (the large tables): a write-off raises paid_minor by the unpaid amount through the existing path (the way
 -- the account credit of a return does), so every reader of total less paid already treats the sale as no longer owing, and its
--- own row says why. No permission is added (retail.credit.manage, V44), no tenant is switched on or changed, and a tenant that
--- never writes a debt off never writes a row.
+-- own row says why. One permission is added, retail.credit.write_off, administrators only (see below), and one plain index on
+-- retail_sale_payments (tenant_id, created_at) for the credit reports, which read payments by the moment they were entered. No
+-- tenant is switched on or changed, and a tenant that never writes a debt off never writes a row.
 --
 -- Locks, said plainly. Flyway runs this file in one transaction, so the locks are held to the commit. CREATE TABLE with foreign
 -- keys takes SHARE ROW EXCLUSIVE on each referenced table (tenants, branches, retail_sales, journal_entries) until the commit,
 -- which blocks writes to those tables, but not reads, while the file runs; the new table is empty, so the cost is the lock wait
--- and not a scan. The chart seed comes first and touches only gl_accounts.
+-- and not a scan. CREATE INDEX (not CONCURRENTLY, which Flyway cannot run inside this transaction) takes a SHARE lock on
+-- retail_sale_payments while it builds: reads go on, payments wait for the build, which on a table of this size is short. The chart
+-- seed comes first and touches only gl_accounts.
 
 CREATE OR REPLACE FUNCTION bms_seed_retail_chart(p_tenant_id uuid) RETURNS integer
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
@@ -77,11 +80,17 @@ REVOKE ALL ON FUNCTION bms_seed_retail_chart(uuid) FROM PUBLIC;
 
 SELECT bms_seed_retail_chart(tenant_id) FROM tenant_modules WHERE module_key = 'retail';
 
+-- The credit reports read the payments entered inside a window of moments; without this they would read every payment of the
+-- tenant on each call.
+CREATE INDEX retail_sale_payments_by_entry ON retail_sale_payments (tenant_id, created_at);
+
 -- ---------------------------------------------------------------------------------------------
 -- Permission (chapter 8 section 8.3.2; PermissionMatrixIT compares these rows with the matrix). retail.credit.write_off is its own
 -- permission, kept apart from retail.credit.manage (the credit limit and terms) because a write-off cannot be taken back in this
--- release. Administrators only, for every tenant (role_permissions is by role). Above the tenant's approval threshold for the
--- action retail_sale_write_off a second holder must approve it (maker-checker, ADR-015); with no threshold set there is no checker.
+-- release. Administrators only, for every tenant (role_permissions is by role). A write-off is a maker-checker action
+-- (retail_sale_write_off, ADR-015): by default (no threshold set) it needs a second administrator when the tenant has two or more
+-- active ones, and is allowed alone, flagged in the audit row, when it has one; a positive threshold in the settings replaces the
+-- default (only a debt at or above it needs a second person). The default awaits Hillary's confirmation (ADR-043).
 -- ---------------------------------------------------------------------------------------------
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
@@ -93,11 +102,10 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
 -- ---------------------------------------------------------------------------------------------
 -- retail_sale_writeoffs: one write-off per credit sale. unpaid_minor is what the buyer still owed, the amount the entry clears
 -- from trade debtors. cost_share_minor is the cost of the goods that no payment had carried into the profit (the unpaid share of
--- the cost of goods, after returns): the loss the profit report shows on written_off_on under credit_sale_recognition on_payment,
--- since the profit of the unpaid part was never counted. Under on_sale the report shows the whole unpaid_minor (the sale and its
--- profit were counted when it was made), so the report follows the tenant's setting of the day it is read and a later switch of the
--- setting can never leave the wrong figure. loss_minor is the loss the entry booked, under the setting of the day of the write-off,
--- and recognition records which; the books are not rewritten by a switch. The entry
+-- the cost of goods, after returns). loss_minor is the loss the entry booked and the daily profit report shows on written_off_on:
+-- cost_share_minor for a sale counted when the buyer pays (the profit of the unpaid part was never counted), unpaid_minor for a sale
+-- counted at the sale (its profit was counted then). recognition records which, decided by the sale's own date against the stretches
+-- of the credit rule (ADR-043), so a later switch of the rule never changes a loss already booked. The entry
 -- debits bad debt loss for loss_minor, debits sales revenue for the rest (credits it when the sale was sold below cost) and
 -- credits trade debtors for unpaid_minor with the sale as subledger. approval_id and approved_by are set when a second
 -- administrator approved it (maker-checker above the tenant's threshold for retail_sale_write_off).

@@ -101,7 +101,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         if (proposed.get(CREDIT_RECOGNITION) instanceof String next && !next.equals(mode)) {
             String from = proposed.get(EFFECTIVE_FROM) instanceof String f ? f : BEGINNING;
             if (!changes.isEmpty() && changes.getLast().get("from").equals(from)) {
-                // Changed twice on one day: the last word wins, and a change back to what stood before leaves no trace.
+                // Asked for again before it takes effect (the same day, since a change starts the next business day):
+                // the last
+                // word replaces the pending one, and going back to what stood before leaves no trace.
                 changes.removeLast();
             }
             String before = changes.isEmpty() ? "on_sale" : changes.getLast().get("mode");

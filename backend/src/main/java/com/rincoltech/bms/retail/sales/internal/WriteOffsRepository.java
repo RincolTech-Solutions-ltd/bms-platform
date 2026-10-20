@@ -93,6 +93,14 @@ class WriteOffsRepository {
                 .single();
     }
 
+    /** Active tenant administrators of the tenant (row-level security supplies the tenant). */
+    long activeAdmins() {
+        return jdbc.sql("""
+                        SELECT count(DISTINCT a.user_id) FROM user_role_assignments a JOIN users u ON u.id = a.user_id
+                         WHERE a.role_key = 'tenant_admin' AND a.revoked_at IS NULL AND u.status = 'active'
+                        """).query(Long.class).single();
+    }
+
     Optional<Row> forSale(UUID saleId) {
         return jdbc.sql("""
                         SELECT w.id, w.sale_id, s.sale_no, w.branch_id, w.written_off_on, w.currency, w.unpaid_minor,

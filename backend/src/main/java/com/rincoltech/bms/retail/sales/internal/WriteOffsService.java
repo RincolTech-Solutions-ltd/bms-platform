@@ -18,10 +18,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The route of a write-off (ADR-043, issue #340): done at once, unless the tenant set an approval threshold for
- * {@code retail_sale_write_off} and the unpaid amount reaches it; then it waits for a second holder of
- * {@code retail.credit.manage} (maker-checker, ADR-015). With no threshold set there is no checker, like every optional
- * threshold of ADR-033: the code may not invent a currency amount.
+ * The route of a write-off (ADR-043, issue #340). A positive tenant threshold for {@code retail_sale_write_off} decides: a debt at or
+ * above it waits for a second holder of {@code retail.credit.write_off} (maker-checker, ADR-015), a smaller one is done at once. With no
+ * positive threshold the default rule applies, awaiting Hillary's confirmation: a second administrator is needed when the tenant has
+ * two or more active ones, and a single active administrator may write off alone, which the audit row records.
  */
 @Service
 class WriteOffsService {
@@ -32,9 +32,15 @@ class WriteOffsService {
     private final Idempotency idempotency;
     private final Approvals approvals;
     private final TenantSettings settings;
+    private final WriteOffsRepository repo;
 
     WriteOffsService(
-            WriteOffsServicer servicer, Idempotency idempotency, Approvals approvals, TenantSettings settings) {
+            WriteOffsServicer servicer,
+            Idempotency idempotency,
+            Approvals approvals,
+            TenantSettings settings,
+            WriteOffsRepository repo) {
+        this.repo = repo;
         this.servicer = servicer;
         this.idempotency = idempotency;
         this.approvals = approvals;
@@ -56,7 +62,23 @@ class WriteOffsService {
         }
         Plan plan = servicer.plan(saleId);
         long threshold = settings.approvalThresholdMinor(SaleWriteOffAction.TYPE);
-        if (threshold > 0 && plan.unpaidMinor() >= threshold) {
+        // The default rule (awaiting Hillary's confirmation): with no threshold set a write-off needs a second
+        // administrator when the
+        // tenant has two or more active ones; with a single active administrator it is allowed alone and the audit row
+        // says so. A
+        // positive threshold, set in the business settings, replaces the default: only a debt at or above it needs a
+        // second person.
+        boolean onlyAdministrator = false;
+        boolean ask;
+        if (threshold > 0) {
+            ask = plan.unpaidMinor() >= threshold;
+        } else if (repo.activeAdmins() >= 2) {
+            ask = true;
+        } else {
+            ask = false;
+            onlyAdministrator = true;
+        }
+        if (ask) {
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     SaleWriteOffAction.TYPE,
                     plan.sale().branchId(),
@@ -70,6 +92,6 @@ class WriteOffsService {
         return new WriteOffOutcome(
                 true,
                 null,
-                servicer.record(plan, r.reason(), CurrentPrincipal.require().userId(), null, null));
+                servicer.record(plan, r.reason(), CurrentPrincipal.require().userId(), null, null, onlyAdministrator));
     }
 }
