@@ -30,6 +30,9 @@ export type PriceChange = S['RetailPriceChange'];
 export type NewProduct = S['CreateRetailProductRequest'];
 export type ProductChange = S['UpdateRetailProductRequest'];
 export type PriceEdit = S['RetailPriceEditRequest'];
+/** A product with this name or a close one (issue #352): `exact` is the same name in the same unit, which a save refuses. */
+export type SimilarProducts = S['RetailSimilarProducts'];
+export type SimilarProduct = S['RetailSimilarProduct'];
 export type ImportResult = S['RetailProductImportResult'];
 export type ImportRow = S['RetailProductImportRow'];
 export type Customer = S['RetailCustomer'];
@@ -295,6 +298,8 @@ export interface RetailApi {
   /** Catalogue management (#146): one page of products, with the filters of the Products screen. */
   listCatalogue(q: { query?: string; categoryId?: string; active?: boolean; cursor?: string; signal?: AbortSignal }): Promise<ProductPage>;
   getProduct(id: string): Promise<Product>;
+  /** Before saving a new or renamed item: the products with this name or a close one (issue #352). */
+  similarProducts(q: { description: string; unitId?: string; excludeId?: string }): Promise<SimilarProducts>;
   createProduct(body: NewProduct): Promise<Product>;
   /** Non-price fields, under If-Match with the version read. */
   updateProduct(id: string, version: number, body: ProductChange): Promise<Product>;
@@ -577,6 +582,12 @@ const realRetail: RetailApi = {
 
   async getProduct(id) {
     return unwrap(await api.GET('/api/v1/retail/products/{product_id}', { params: { path: { product_id: id } } }));
+  },
+
+  async similarProducts({ description, unitId, excludeId }) {
+    return unwrap(
+      await api.GET('/api/v1/retail/products/similar', { params: { query: { description, ...(unitId ? { unit_id: unitId } : {}), ...(excludeId ? { exclude_id: excludeId } : {}) } } }),
+    );
   },
 
   async createProduct(body) {

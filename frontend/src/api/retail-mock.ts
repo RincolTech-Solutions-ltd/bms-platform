@@ -1,5 +1,5 @@
 import type {
-  AllBranchesRow, Category, CapabilitiesRead, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, Stocktake, StockByLocation, StockRow,
+  AllBranchesRow, Category, CapabilitiesRead, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, SimilarProduct, Stocktake, StockByLocation, StockRow,
   Supplier, Transfer, Unit, Usage, Valuation, ValuationRow,
 } from './retail';
 import type { SalesQuery } from './retail';
@@ -124,8 +124,24 @@ const run = <T>(fn: () => T): Promise<T> => {
 };
 
 /** A refusal in the server's problem shape, so the screens show the same message as with the real API. */
-const refuse = (status: number, code: string, detail: string): never => {
-  throw new RetailError(retailMessage({ code, detail }, status), status, code);
+const refuse = (status: number, code: string, detail: string, extra?: Record<string, unknown>): never => {
+  throw new RetailError(retailMessage({ code, detail }, status), status, code, extra ? { code, detail, ...extra } : undefined);
+};
+
+/** The server's name key (issue #352): lower case, every run of spaces and punctuation one space. */
+const nameKey = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/** Letters added, removed or changed to turn one text into the other. */
+const editDistance = (a: string, b: string): number => {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min((previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1), (previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1);
+    }
+    previous = current;
+  }
+  return previous[b.length] ?? 0;
 };
 
 const MOCK_FLAGS = ['branch_roles', 'units', 'price_lists', 'customer_accounts', 'documents', 'purchasing', 'transfer_receipt', 'returns'] as const;
@@ -163,6 +179,15 @@ export function createMockRetail(): RetailApi {
   };
   const stale = (p: MockProduct, version: number) => {
     if ((p.version ?? 1) !== version) refuse(412, 'version_conflict', 'This item was changed by someone else. Reload and try again.');
+  };
+  /** Issue #352: a name is kept once per unit; a reason from an administrator adds it anyway (the mock user is one). */
+  const sameNameCheck = (description: string, unit: string, selfId: string | undefined, reason: string | undefined) => {
+    const same = [...products.values()].find((x) => x.id !== selfId && x.unit === unit && nameKey(x.description) === nameKey(description));
+    if (!same) return;
+    if ((reason ?? '').trim() === '') {
+      refuse(422, 'duplicate_product_name', `This product already exists: ${same.description} (${same.code}).`, { existing_id: same.id, existing_code: same.code, existing_name: same.description, may_add_anyway: true });
+    }
+    if ((reason ?? '').trim().length < 5) refuse(422, 'validation_failed', 'Give a reason of at least 5 characters.');
   };
   const customers: Customer[] = [{ id: 'c0000000-0000-4000-8000-000000000001', name: 'Test Buyer 01', contact: '+256700000001', version: 1 }];
   // The second supplier row is a forwarder, who is owed the landed cost of imported goods (issue #199).
@@ -321,6 +346,24 @@ export function createMockRetail(): RetailApi {
 
     getProduct: (id) => run(() => asProduct(find(id))),
 
+    similarProducts: ({ description, unitId, excludeId }) =>
+      run(() => {
+        const key = nameKey(description);
+        const unit = unitRows.find((u) => u.id === unitId)?.name;
+        const exact: SimilarProduct[] = [];
+        const similar: SimilarProduct[] = [];
+        for (const p of products.values()) {
+          if (p.id === excludeId || key === '') continue;
+          const other = nameKey(p.description);
+          const distance = other === key ? 0 : editDistance(key, other);
+          const allowed = Math.max(key.length, other.length) < 5 ? 0 : Math.max(key.length, other.length) < 10 ? 1 : Math.max(key.length, other.length) < 20 ? 2 : 3;
+          if (distance > allowed) continue;
+          const row: SimilarProduct = { id: p.id, code: p.code, description: p.description, unit: p.unit, active: p.active !== false, distance, same_unit: distance === 0 && p.unit === unit };
+          (row.same_unit ? exact : similar).push(row);
+        }
+        return { exact, similar: similar.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0)) };
+      }),
+
     createProduct: (body) =>
       run(() => {
         const code = (body.code ?? '').trim();
@@ -329,6 +372,7 @@ export function createMockRetail(): RetailApi {
         const unit = unitRows.find((u) => u.id === body.unit_id);
         if (!category || !unit) return refuse(422, 'validation_failed', 'Choose a category and a unit.');
         if (!category.active || !unit.active) refuse(422, 'inactive_category', 'This category or unit is switched off. Choose another one.');
+        sameNameCheck(body.description ?? '', unit.name, undefined, body.duplicate_reason);
         const p: MockProduct = { id: nextId('b'), code, description: (body.description ?? '').trim(), category: category.name, unit: unit.name, costMinor: body.cost_minor ?? 0, sellMinor: body.sell_minor ?? 0, active: true, version: 1 };
         products.set(p.id, p);
         history.set(p.id, [{ id: nextId('h'), at: new Date().toISOString(), source: 'initial', new_sell_minor: p.sellMinor, currency: 'UGX', ...(profitAccess ? { new_cost_minor: p.costMinor } : {}) }]);
@@ -344,6 +388,7 @@ export function createMockRetail(): RetailApi {
         const category = body.category_id ? cats.find((c) => c.id === body.category_id) : undefined;
         const unit = body.unit_id ? unitRows.find((u) => u.id === body.unit_id) : undefined;
         if (category && !category.active && category.name !== p.category) refuse(422, 'inactive_category', 'This category is switched off. Choose another one.');
+        if (body.description !== undefined || unit) sameNameCheck(body.description ?? p.description, unit?.name ?? p.unit, id, body.duplicate_reason);
         Object.assign(p, {
           code, description: body.description === undefined ? p.description : body.description.trim(),
           category: category?.name ?? p.category, unit: unit?.name ?? p.unit, active: body.active ?? p.active, version: (p.version ?? 1) + 1,

@@ -3623,6 +3623,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/products/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Products with this name or a close one, before saving a new or renamed item (issue #352) */
+        get: operations["findSimilarRetailProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/products/{product_id}": {
         parameters: {
             query?: never;
@@ -5788,6 +5805,8 @@ export interface components {
             /** Format: int64 */
             cost_minor: number;
             description: string;
+            /** @description Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name. */
+            duplicate_reason?: string;
             /** Format: int64 */
             sell_minor: number;
             /** Format: uuid */
@@ -11084,6 +11103,26 @@ export interface components {
             /** Format: int32 */
             used_reports?: number;
         };
+        RetailSimilarProduct: {
+            active?: boolean;
+            code?: string;
+            description?: string;
+            /**
+             * Format: int32
+             * @description Letters changed, added or removed to turn one name into the other (0 is the same name in another unit)
+             */
+            distance?: number;
+            /** Format: uuid */
+            id?: string;
+            /** @description True when the unit is the one asked about, so the same name is a duplicate */
+            same_unit?: boolean;
+            unit?: string;
+        };
+        /** @description Issue #352: products whose name is the same (exact, same unit: a save is refused) or close to the description (similar: a warning only) */
+        RetailSimilarProducts: {
+            exact?: components["schemas"]["RetailSimilarProduct"][];
+            similar?: components["schemas"]["RetailSimilarProduct"][];
+        };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
             sales?: components["schemas"]["RetailStatementHistoricalSale"][];
@@ -13118,6 +13157,8 @@ export interface components {
             category_id?: string;
             code?: string;
             description?: string;
+            /** @description Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name. */
+            duplicate_reason?: string;
             /** Format: uuid */
             unit_id?: string;
         };
@@ -19687,6 +19728,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailProductImportResult"];
+                };
+            };
+        };
+    };
+    findSimilarRetailProducts: {
+        parameters: {
+            query: {
+                description: string;
+                unit_id?: string;
+                exclude_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSimilarProducts"];
                 };
             };
         };

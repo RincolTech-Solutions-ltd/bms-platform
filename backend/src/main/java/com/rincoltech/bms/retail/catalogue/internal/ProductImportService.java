@@ -97,6 +97,9 @@ class ProductImportService {
         }
 
         Set<String> existing = repo.productCodes();
+        // Issue #352: a name is kept once per unit, like a code. The keys are the database's own (bms_name_key).
+        Map<String, String> existingNames = repo.productNames();
+        Map<String, Integer> namesInFile = new HashMap<>();
         Map<String, UUID> categories = repo.categoryIdsByName();
         Map<String, UUID> units = repo.unitIdsByName();
         Set<String> offCategories = repo.inactiveCategoryNames();
@@ -186,6 +189,33 @@ class ProductImportService {
             String categoryKey = category.toLowerCase(Locale.ROOT);
             String unitKey = unit.toLowerCase(Locale.ROOT);
             String packKey = packUnit.toLowerCase(Locale.ROOT);
+            // JUSTIFICATION-A3: the two duplicate-name skips of issue #352 sit beside the existing duplicate-code skips, in this loop.
+            String nameKey = repo.nameKey(description.strip()) + CatalogueRepository.NAME_SEP + unitKey;
+            String sameName = existingNames.get(nameKey);
+            if (sameName != null) {
+                seen.remove(key);
+                skipped++;
+                report.add(new ImportRow(
+                        line,
+                        code,
+                        description.strip(),
+                        "skipped",
+                        "An item with this name exists already (code " + sameName
+                                + "). Open it in Items, or give this one another name or unit."));
+                continue;
+            }
+            Integer sameLine = namesInFile.putIfAbsent(nameKey, line);
+            if (sameLine != null) {
+                seen.remove(key);
+                skipped++;
+                report.add(new ImportRow(
+                        line,
+                        code,
+                        description.strip(),
+                        "skipped",
+                        "This name is repeated in the file (same as line " + sameLine + "); the first row is used."));
+                continue;
+            }
             String off = offCategories.contains(categoryKey)
                     ? "category \"" + category + "\" is switched off. Switch it on or use another category."
                     : offUnits.contains(unitKey)
@@ -300,7 +330,7 @@ class ProductImportService {
                     1,
                     null,
                     null);
-            repo.insert(product, by);
+            repo.insert(product, by, null);
             repo.insertHistory(
                     new PriceChange(
                             UUID.randomUUID(),

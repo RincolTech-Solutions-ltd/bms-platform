@@ -1388,6 +1388,12 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "duplicate_reason" : {
+            "description" : "Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name.",
+            "maxLength" : 300,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "sell_minor" : {
             "format" : "int64",
             "maximum" : 10000000000000,
@@ -12471,6 +12477,52 @@
           }
         }
       },
+      "RetailSimilarProduct" : {
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "distance" : {
+            "description" : "Letters changed, added or removed to turn one name into the other (0 is the same name in another unit)",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "same_unit" : {
+            "description" : "True when the unit is the one asked about, so the same name is a duplicate",
+            "type" : "boolean"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailSimilarProducts" : {
+        "description" : "Issue #352: products whose name is the same (exact, same unit: a save is refused) or close to the description (similar: a warning only)",
+        "properties" : {
+          "exact" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSimilarProduct"
+            },
+            "type" : "array"
+          },
+          "similar" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSimilarProduct"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "RetailStatementBeforeSystemStart" : {
         "description" : "Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out",
         "properties" : {
@@ -16802,6 +16854,12 @@
           "description" : {
             "maxLength" : 300,
             "minLength" : 1,
+            "type" : "string"
+          },
+          "duplicate_reason" : {
+            "description" : "Issue #352: only an administrator (core.settings.manage) may add or rename a product to a name another product of the same unit has, and then with a reason of at least 5 characters, stored on the product. Without it that is refused with 422 duplicate_product_name.",
+            "maxLength" : 300,
+            "minLength" : 0,
             "type" : "string"
           },
           "unit_id" : {
@@ -26722,6 +26780,49 @@
           }
         },
         "summary" : "Import items from CSV for a new client: dry run first, then apply; administrators only (#146)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/products/similar" : {
+      "get" : {
+        "operationId" : "findSimilarRetailProducts",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "description",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "unit_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "exclude_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSimilarProducts"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Products with this name or a close one, before saving a new or renamed item (issue #352)",
         "tags" : [ "retail-catalogue" ]
       }
     },
