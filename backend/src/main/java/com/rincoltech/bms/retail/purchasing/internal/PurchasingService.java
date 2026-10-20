@@ -408,6 +408,7 @@ class PurchasingService {
         }
         List<Purchase> rows = repo.page(
                 filter,
+                listed,
                 from,
                 to,
                 supplierId,
