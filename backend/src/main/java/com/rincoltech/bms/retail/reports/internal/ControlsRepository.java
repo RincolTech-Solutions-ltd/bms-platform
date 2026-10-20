@@ -142,9 +142,9 @@ class ControlsRepository {
                                 "p.id",
                                 "p.purchase_no",
                                 "CAST(NULL AS text)",
-                                "(SELECT min(m.branch_id) FROM retail_stock_movements m WHERE m.tenant_id = p.tenant_id"
+                                "(SELECT m.branch_id FROM retail_stock_movements m WHERE m.tenant_id = p.tenant_id"
                                         + " AND m.source_type = 'retail.purchase' AND m.source_id = p.id"
-                                        + " AND m.kind = 'purchase')",
+                                        + " AND m.kind = 'purchase' ORDER BY m.branch_id LIMIT 1)",
                                 "p.created_by",
                                 "v.voided_on",
                                 "v.created_at",
