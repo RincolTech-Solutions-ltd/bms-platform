@@ -11562,7 +11562,6 @@ export interface components {
             sell_minor?: number;
             unit?: string;
         };
-        /** @description A product with stock on hand, summed over the reported branches */
         RetailStockSummary: {
             /** @description Every level group_by accepts: branch and category */
             available_levels?: string[];
@@ -11606,6 +11605,7 @@ export interface components {
              */
             value_minor?: number;
         };
+        /** @description A product with stock on hand, summed over the reported branches */
         RetailStockedItem: {
             code?: string;
             description?: string;
