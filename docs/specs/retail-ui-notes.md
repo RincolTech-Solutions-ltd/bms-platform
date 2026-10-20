@@ -746,6 +746,20 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - **Tests.** `branches/state.test.ts` (the rules), `branches/branches.dom.test.tsx` (hidden then shown closed branches, the badge and reason, confirm once, the warning
   and reason, refusals in plain words, reopen, the stocking switch, a reader sees no action), `retail/not-stocking.test.tsx`, `auth/branch.test.ts`, `tour/*`.
 
+## Stores: a branch that holds stock and does not sell (#366, ADR-048)
+
+- **Screen.** On the Branches screen an administrator sees, on each open branch that keeps goods, Mark as a store (does not sell). One tap only asks, in plain
+  words: the branch keeps its stock and still takes restocks and transfers, but nothing can be sold, paid for or refunded there; Yes, make it a store sends it.
+  A store carries the badge "Store (does not sell)" and the line "Store: holds stock, takes purchases and transfers in and out, but nothing is sold or paid
+  here." and offers Sells again (make it a shop), one tap. A refusal over a credit sale still owing, or a branch that keeps no goods, shows the server's words.
+- **Everywhere else.** The staff bar picker tags a store "(store)"; the staff area does not start on it while a shop exists. The sale screen on a store says "is a
+  store, and a store does not sell" with a button for each shop (the same note as a store by branch role, ADR-033). The sale and quotation forms, the account
+  payment's receiving branch and the return's "Pay the money out of the till of" list leave stores out (`sellingBranches`). The restock, purchase order, goods
+  receipt, move-stock and stock-take forms, the restock branch of a return and the stock lists include a store, since it keeps goods.
+- **Tours.** `page-branches` is version 2 with a Store step.
+- **Tests.** `branches/state.test.ts`, `branches/branches.dom.test.tsx` (confirm once, the refusal in plain words, the badge and the way back),
+  `retail/not-stocking.test.tsx`, `auth/branch.test.ts`.
+
 ## Correcting entry mistakes (#351, #352, ADR-044)
 
 The owner fixes a mistake where he sees it, with a trail the spreadsheet never had. Everything below is phone first, in plain words, and
