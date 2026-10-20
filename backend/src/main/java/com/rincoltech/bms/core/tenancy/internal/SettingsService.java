@@ -7,11 +7,15 @@ import com.rincoltech.bms.core.tenancy.ModuleSettings;
 import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.core.tenancy.TenantModules;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
+import com.rincoltech.bms.core.tenancy.TwoStepPolicy;
 import com.rincoltech.bms.core.tenancy.internal.SettingsController.SettingsResponse;
 import com.rincoltech.bms.core.tenancy.internal.SettingsController.UpdateSettingsRequest;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.Versions;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -50,6 +54,7 @@ class SettingsService implements TenantSettings, ModuleSettings {
     private final Documents documents;
     private final Map<String, ModuleSettingsGroup> groups = new TreeMap<>();
     private final TenantModules modules;
+    private final BusinessClock clock;
 
     SettingsService(
             JdbcClient jdbc,
@@ -58,7 +63,8 @@ class SettingsService implements TenantSettings, ModuleSettings {
             AuditLog audit,
             Documents documents,
             List<ModuleSettingsGroup> groupBeans,
-            TenantModules modules) {
+            TenantModules modules,
+            BusinessClock clock) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.tenant = tenant;
@@ -66,6 +72,7 @@ class SettingsService implements TenantSettings, ModuleSettings {
         this.documents = documents;
         groupBeans.forEach(g -> groups.put(g.moduleKey(), g));
         this.modules = modules;
+        this.clock = clock;
     }
 
     private record Stored(Map<String, Object> values, int version) {}
@@ -90,7 +97,54 @@ class SettingsService implements TenantSettings, ModuleSettings {
             // An empty string clears the colour: back to the platform look.
             changes.put("theme_primary", colour.isEmpty() ? null : colour.toUpperCase(Locale.ROOT));
         }
+        if (changes.containsKey("require_mfa_roles")) {
+            changes.put(
+                    "require_mfa_roles",
+                    request.requireMfaRoles().stream().distinct().sorted().toList());
+        }
+        placeTwoStepDeadline(stored, changes);
         return write(stored, changes);
+    }
+
+    /**
+     * ADR-046 decision 3: one deadline for the whole two-step policy. Turning the policy on, widening who it covers, or sending a
+     * grace period sets {@code mfa_enforce_from} to now plus the grace days (cleared when the grace is 0, which means at once);
+     * turning it off clears it; any other change leaves it alone. Widening never moves the deadline earlier for anyone.
+     */
+    private void placeTwoStepDeadline(Stored stored, Map<String, Object> changes) {
+        if (!changes.containsKey("require_mfa_all_staff")
+                && !changes.containsKey("require_mfa_roles")
+                && !changes.containsKey("mfa_grace_days")) {
+            return;
+        }
+        Map<String, Object> merged = new TreeMap<>(stored.values());
+        merged.putAll(changes);
+        TwoStepPolicy before = policyOf(stored.values());
+        TwoStepPolicy after = policyOf(merged);
+        if (after.off()) {
+            changes.put("mfa_enforce_from", null);
+            return;
+        }
+        boolean wider = after.everyone()
+                ? !before.everyone()
+                : !before.everyone() && !before.roles().containsAll(after.roles());
+        if (wider || changes.containsKey("mfa_grace_days")) {
+            int days = after.graceDays() == null ? 0 : after.graceDays();
+            changes.put(
+                    "mfa_enforce_from",
+                    days == 0 ? null : clock.now().plus(Duration.ofDays(days)).toString());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static TwoStepPolicy policyOf(Map<String, Object> s) {
+        Object grace = s.get("mfa_grace_days");
+        Object from = s.get("mfa_enforce_from");
+        return new TwoStepPolicy(
+                Boolean.TRUE.equals(s.get("require_mfa_all_staff")),
+                Set.copyOf((List<String>) s.getOrDefault("require_mfa_roles", List.of())),
+                grace == null ? null : ((Number) grace).intValue(),
+                from == null ? null : Instant.parse((String) from));
     }
 
     /** Stores a prepared logo as a core document of this tenant and makes it the current one (FR-TEN-08). */
@@ -170,8 +224,8 @@ class SettingsService implements TenantSettings, ModuleSettings {
 
     @Override
     @Transactional(readOnly = true)
-    public boolean requireMfaAllStaff() {
-        return current().requireMfaAllStaff();
+    public TwoStepPolicy twoStepPolicy() {
+        return policyOf(load(false).values());
     }
 
     @Override
@@ -332,6 +386,14 @@ class SettingsService implements TenantSettings, ModuleSettings {
                         "appraisal_weights", "invalid", "Give all four weights, each 0 or more, summing to 100."));
             }
         }
+        if (request.requireMfaRoles() != null
+                && !Set.copyOf(jdbc.sql("SELECT key FROM roles WHERE kind = 'staff'")
+                                .query(String.class)
+                                .list())
+                        .containsAll(request.requireMfaRoles())) {
+            problems.add(
+                    new FieldProblem("require_mfa_roles", "invalid", "Choose roles from the list of staff roles."));
+        }
         if (request.displayName() != null && request.displayName().isBlank()) {
             problems.add(new FieldProblem("display_name", "invalid", "Must not be blank."));
         }
@@ -373,6 +435,9 @@ class SettingsService implements TenantSettings, ModuleSettings {
                 s.containsKey("display_name"),
                 (Boolean) s.getOrDefault("setup_dismissed", false),
                 (Boolean) s.getOrDefault("reports_enabled", false),
+                List.copyOf((List<String>) s.getOrDefault("require_mfa_roles", List.of())),
+                s.get("mfa_grace_days") == null ? null : ((Number) s.get("mfa_grace_days")).intValue(),
+                s.get("mfa_enforce_from") == null ? null : Instant.parse((String) s.get("mfa_enforce_from")),
                 version);
     }
 }

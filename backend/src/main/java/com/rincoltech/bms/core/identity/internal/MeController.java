@@ -108,7 +108,9 @@ class MeController {
                 tours.of(user.id()),
                 modules.enabledKeys(),
                 moduleSettings.enabledCapabilities(),
-                settings.reportsEnabled());
+                settings.reportsEnabled(),
+                accounts.mfaDueBy(user.id(), user.mfaEnabled()).orElse(null),
+                settings.twoStepPolicy().mode());
     }
 
     /**
