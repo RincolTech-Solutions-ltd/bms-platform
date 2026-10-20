@@ -286,4 +286,23 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(done.getBody().get("added").asInt()).isEqualTo(2);
         assertThat(done.getBody().get("skipped").asInt()).isEqualTo(2);
     }
+
+    @Test
+    void aUnitIsNeverConvertedOnceTheItemHasStock() {
+        UUID item = RetailTestSupport.id(create("NM-9", "Test Cable Roll", metres, null, ADMIN));
+        // No stock yet: the label can still be put right.
+        assertThat(rename(item, Map.of("unit_id", rolls), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        api.importedBalance(t.headOffice(), item, "5");
+        ResponseEntity<JsonNode> refused = rename(item, Map.of("unit_id", metres), ADMIN);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("unit_in_use_by_stock");
+        assertThat(refused.getBody().get("detail").asString())
+                .contains("relabelled, not converted")
+                .contains("Add a new item with the right unit");
+        assertThat(api.get("/products/" + item, ADMIN).getBody().get("unit_id").asString())
+                .isEqualTo(rolls.toString());
+        // Other changes to an item with stock still go through.
+        assertThat(rename(item, Map.of("active", false), ADMIN).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
 }

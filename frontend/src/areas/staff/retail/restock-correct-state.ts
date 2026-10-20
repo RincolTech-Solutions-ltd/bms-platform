@@ -27,9 +27,9 @@ export function chosenUnitHint(enteredUnit: string | undefined, usualUnit: strin
 
 /**
  * The restock form's draft for entering a voided restock again: its supplier, date, payment and lines, with the quantities as
- * they were, to be corrected before saving. A line whose item can no longer be found is left out.
+ * they were and the date set to today, to be corrected before saving. A line whose item can no longer be found is left out.
  */
-export function redraftOf(purchase: Purchase, products: Product[]): RestockDraft {
+export function redraftOf(purchase: Purchase, products: Product[], today: string): RestockDraft {
   const byId = new Map(products.map((p) => [p.id, p]));
   const lines: RestockLine[] = [];
   for (const l of purchase.lines ?? []) {
@@ -47,7 +47,8 @@ export function redraftOf(purchase: Purchase, products: Product[]): RestockDraft
   return {
     supplierId: purchase.supplier_id ?? '',
     newSupplier: '',
-    purchasedOn: purchase.purchased_on ?? '',
+    // Today, not the old date: the old day may be banked in the cash book already (ADR-044).
+    purchasedOn: today,
     method: (purchase.payment_method ?? 'cash') as PurchasePayment,
     lines,
   };

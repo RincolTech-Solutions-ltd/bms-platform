@@ -462,6 +462,8 @@ class PurchasingService {
                             + " touched can void it.");
         }
         repo.lockPurchase(id);
+        // A closed branch, or one that keeps no goods, takes no stock movement and no entry (issue #329, ADR-041).
+        touched.forEach(b -> branches.requireStocks(b, "branch_id"));
         if (seen.supplierId() != null) {
             repo.lockSupplier(seen.supplierId());
         }
@@ -521,7 +523,8 @@ class PurchasingService {
         }
         for (UUID productId :
                 moved.stream().map(Recorded::productId).distinct().sorted().toList()) {
-            catalogue.revertPurchasePrices(productId, id, "Restock " + seen.purchaseNo() + " voided");
+            catalogue.revertPurchasePrices(
+                    productId, id, "Restock " + seen.purchaseNo() + " voided", repo.laterPurchase(productId, id));
         }
         repo.insertVoid(id, today, reason, principal.userId());
         audit.record(new AuditLog.Entry(

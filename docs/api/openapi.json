@@ -10487,6 +10487,10 @@
           "note" : {
             "type" : "string"
           },
+          "partial" : {
+            "description" : "True when the caller's branch scope hid other branches this restock added stock to",
+            "type" : "boolean"
+          },
           "payment_method" : {
             "type" : "string"
           },
@@ -12805,6 +12809,11 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "expected_qty" : {
+            "description" : "The quantity the form showed when it was opened; 409 stock_moved when it has changed since",
+            "example" : "12.5",
+            "type" : "string"
+          },
           "new_qty" : {
             "description" : "The quantity there should be, not the difference",
             "example" : "12.5",
@@ -12825,7 +12834,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "branch_id", "new_qty", "product_id", "reason_code" ]
+        "required" : [ "branch_id", "expected_qty", "new_qty", "product_id", "reason_code" ]
       },
       "RetailStockHealth" : {
         "properties" : {

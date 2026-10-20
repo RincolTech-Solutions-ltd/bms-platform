@@ -239,7 +239,7 @@ export const adminWelcome: Tour = {
       needs: STOCKTAKE,
       optional: true,
       title: 'Fix a wrong quantity',
-      body: 'On Stock, tap Correct on an item. Give the right quantity and the reason: an entry mistake or a miscount. The old figure stays in its history and does not count as shrinkage. You can fix the category there too.',
+      body: 'On Stock, tap Correct on an item. Give the right quantity and the reason: an entry mistake or a miscount. The old figure stays in its history and does not count as shrinkage. If you may change items, you can fix the category there too.',
     },
     {
       id: 'void-restock',
@@ -393,7 +393,7 @@ export const retailSales: Tour = {
       needs: STOCKTAKE,
       optional: true,
       title: 'Fix a mistake',
-      body: 'Typed a wrong quantity? Tap Correct on the item. Give the right quantity and the reason. The old figure stays in its history. You can fix the category there too.',
+      body: 'Typed a wrong quantity? Tap Correct on the item. Give the right quantity and the reason. The old figure stays in its history.',
     },
     {
       id: 'restock',
@@ -513,7 +513,7 @@ export const restocksPage: Tour = {
   page: '/staff/retail/restocks',
   steps: [
     { id: 'restocks-filters', target: 'restocks-filters', module: 'retail', title: 'Find the restock', body: 'Choose the first and last day, or show only the voided ones. Every restock is kept, even a voided one.' },
-    { id: 'restocks-list', target: 'restocks-list', module: 'retail', title: 'Correct this restock', body: 'Tap Correct this restock, give the reason, then enter it again with the right quantity or unit. If some of its stock was already sold, use Correct on the Stock page instead.' },
+    { id: 'restocks-list', target: 'restocks-list', module: 'retail', title: 'Correct this restock', body: 'Tap Correct this restock, give the reason, then enter it again with the right quantity or unit. If less than its quantity is left, use Correct on the Stock page instead.' },
   ],
 };
 

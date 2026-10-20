@@ -522,6 +522,14 @@ class CatalogueRepository {
                 .single();
     }
 
+    /** Any stock movement of the product, or a balance that is not zero: its quantities are counted in its unit (issue #351). */
+    boolean productHasStock(UUID productId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)
+                            OR EXISTS (SELECT 1 FROM retail_stock_balances WHERE product_id = ? AND qty <> 0)
+                        """).params(productId, productId).query(Boolean.class).single();
+    }
+
     boolean unitHasPacks(UUID unitId) {
         return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_product_units WHERE unit_id = ? AND active)")
                 .param(unitId)

@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -92,6 +93,26 @@ class StockCorrectionService {
                         List.of(new FieldProblem("product_id", "unknown_product", "No such product."))));
         // Under the balance row's lock, so the difference is measured from the quantity the shelf list shows now.
         BigDecimal old = ledger.lock(branch, product.id());
+        if (old.compareTo(r.expectedQty()) != 0) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stock_moved",
+                    "Stock moved",
+                    "The quantity changed while you were typing: it is " + plain(old) + " " + product.unit()
+                            + " now, not " + plain(r.expectedQty())
+                            + ". Look at the list again and type the right quantity.");
+        }
+        // A stock-take that is not committed yet measures its variance from the shelf as it stood when it was made, so
+        // a
+        // correction now would be counted a second time when it is committed.
+        if (repo.draftStocktakeCovers(branch, product.id())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "stocktake_in_progress",
+                    "Stock-take in progress",
+                    "A stock-take of this branch that counts " + product.description()
+                            + " is not finished. Finish it first (commit it), then correct the quantity.");
+        }
         BigDecimal difference = r.newQty().subtract(old);
         if (difference.signum() == 0) {
             throw ApiException.rule(

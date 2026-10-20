@@ -769,7 +769,7 @@ shows an action only to someone who may take it; the server decides again.
   and the `Idempotency-Key` are kept per restock in the tab (`usePersistedDraft`), so a lost answer and a retry send the same key; one request
   however often a button is pressed. A refusal shows the server's words (stock sold or moved, paid, imported). Void and enter it again goes to
   `/staff/retail/restock?again=<id>`: the restock form opens with the same supplier, date, payment and lines (quantities in the unit they were
-  entered in) in a draft of its own, so a restock in progress is never overwritten, under "You are entering restock RP... again, which you
+  entered in) dated today (the old date may be banked in the cash book; a plain warning shows if it is moved back), in a draft of its own, so a restock in progress is never overwritten, under "You are entering restock RP... again, which you
   voided. Check each quantity, unit and price, then save." On the restock form a line whose chosen pack unit is not the item's usual unit shows the same
   hint.
 - **Correct on a stock row.** On the stock list of one branch (not All branches) each row has Correct, for someone who holds
@@ -777,7 +777,7 @@ shows an action only to someone who may take it; the server decides again.
   (In stock now, the right quantity, "That takes away 4 roll.", a reason: Entry mistake or Miscount, an optional note, a hint that the old figure
   stays in the history and is not counted as shrinkage, Save the right quantity; one request, one key kept in the tab), *The category is wrong*
   (the right category; "<item> is now in <new>. It was in <old>."; audited with both), *The unit, name or price is wrong* (where to go:
-  Past restocks, Items, Stock-take) and *See its history* (the item at this branch, newest first: date, what it was, the quantity with its sign,
+  Past restocks for a restock entered in the wrong pack unit or at the wrong price, Items for a name or price; a unit in use is never converted, so the way out is a new item in the right unit, this one corrected to none, and a restock of the new one) and *See its history* (the item at this branch, newest first: date, what it was, the quantity with its sign,
   "Corrected from 10 to 6. Entry mistake.", the note, "By you" or "By a colleague"). Nothing is edited underneath.
 - **Tours.** `retail-sales` is version 7 and `admin-welcome` version 10 (a Correct step on the stock list for whoever may count stock, and for the
   welcome tour a Past restocks step); `page-stock` is version 2; `page-restocks` is new (version 1). Anchors: `stock-list`, `restock-past`,

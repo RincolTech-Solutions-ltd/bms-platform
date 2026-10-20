@@ -61,9 +61,9 @@ class CatalogueLookup implements RetailCatalogue {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public boolean revertPurchasePrices(UUID productId, UUID purchaseId, String reason) {
+    public boolean revertPurchasePrices(UUID productId, UUID purchaseId, String reason, boolean laterPurchase) {
         CatalogueApi.Product locked = repo.lock(productId).orElseThrow(ApiException::notFound);
-        return service.revertPurchasePrices(locked, purchaseId, reason);
+        return service.revertPurchasePrices(locked, purchaseId, reason, laterPurchase);
     }
 
     @Override

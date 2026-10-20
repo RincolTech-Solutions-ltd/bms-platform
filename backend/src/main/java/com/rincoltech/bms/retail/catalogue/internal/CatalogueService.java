@@ -366,6 +366,16 @@ class CatalogueService {
                     "unit_in_use_by_pack",
                     "The unit cannot change while the product has active pack sizes: they count base units. Switch them off first.");
         }
+        if (!before.unitId().equals(after.unitId()) && repo.productHasStock(id)) {
+            // Issue #351, ADR-044: a unit is never converted. Stock, sales and restocks were counted in the old unit,
+            // so
+            // changing the label would turn 10 rolls into 10 metres.
+            throw ApiException.rule(
+                    "unit_in_use_by_stock",
+                    "This item has stock or stock history counted in " + before.unit() + ", so its unit cannot change: "
+                            + "the numbers would only be relabelled, not converted. Add a new item with the right unit, "
+                            + "correct this one to none on the Stock page, and restock the new one.");
+        }
         if (!before.unitId().equals(after.unitId()) && repo.productHasPriceItems(id)) {
             throw ApiException.rule(
                     "unit_in_use_by_price_list",
@@ -666,7 +676,7 @@ class CatalogueService {
      * A voided restock (issue #351) gives back the prices it set while it is still the product's latest price event; see
      * {@link RetailCatalogue#revertPurchasePrices}. The product is already locked by the caller.
      */
-    boolean revertPurchasePrices(Product locked, UUID purchaseId, String reason) {
+    boolean revertPurchasePrices(Product locked, UUID purchaseId, String reason, boolean laterPurchase) {
         List<PriceChange> history = repo.history(locked.id());
         List<PriceChange> mine = history.stream()
                 .filter(h -> "purchase".equals(h.source())
@@ -679,9 +689,12 @@ class CatalogueService {
         if (mine.isEmpty()) {
             return false;
         }
-        if (!history.getLast().id().equals(mine.getLast().id())) {
+        if (laterPurchase || !history.getLast().id().equals(mine.getLast().id())) {
             noteCostUnchanged(
-                    locked, purchaseId, reason + ". The prices were left as they are: they changed after the restock.");
+                    locked,
+                    purchaseId,
+                    reason
+                            + ". The prices were left as they are: later stock came in or they changed after the restock.");
             return false;
         }
         PriceChange first = mine.getFirst();

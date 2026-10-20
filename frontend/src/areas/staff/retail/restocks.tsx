@@ -54,7 +54,7 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
     <form className="stack" aria-label="Correct this restock" onSubmit={(e) => { e.preventDefault(); press(true); }}>
       <p className="hint" data-testid="void-warning">
         Voiding takes the stock this restock added back out, reverses what it posted and puts the prices back if nothing has changed them since.
-        The restock stays in this list, marked Voided. If some of its stock has been sold or moved already it cannot be voided: use Correct the quantity on the Stock page instead.
+        The restock stays in this list, marked Voided. If fewer than its quantity are left at a branch it cannot be voided: use Correct the quantity on the Stock page instead.
       </p>
       <label htmlFor={`void-${id}`}>Why is it being corrected? (at least {MIN_VOID_REASON} characters)</label>
       <input id={`void-${id}`} value={draft.reason} maxLength={300} onChange={(e) => setDraft({ reason: e.target.value })} autoComplete="off" />
@@ -72,7 +72,8 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
   const { me } = useStaff();
   const [open, setOpen] = useState(false);
   const voided = purchase.status === 'voided';
-  const mayVoid = branchesOf(purchase).every((b) => holdsAt(me, PURCHASE_CREATE, b));
+  // A scoped caller's copy hides the other branches the restock touched (`partial`): the server would refuse the void with 403.
+  const mayVoid = purchase.partial !== true && branchesOf(purchase).every((b) => holdsAt(me, PURCHASE_CREATE, b));
   return (
     <li className="rt-card" data-testid="restock-card">
       <p>

@@ -75,6 +75,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
         body.put("branch_id", branch);
         body.put("product_id", product);
         body.put("new_qty", newQty);
+        // What the form showed: the shelf as it stands, unless a test says otherwise.
+        body.put("expected_qty", stockAt(branch).toPlainString());
         body.put("reason_code", reason);
         if (note != null) {
             body.put("note", note);
@@ -306,5 +308,54 @@ class RetailStockCorrectionIT extends IntegrationTest {
                         .get("items"))
                 .isEmpty();
         assertThat(stockAt(hq)).isEqualByComparingTo("3");
+    }
+
+    @Test
+    void aQuantityThatMovedSinceTheFormWasOpenedIsNeverOverwritten() {
+        restock(hq, "10");
+        // The form showed 10; a cashier sells 2 before it is saved.
+        assertThat(api.sell(hq, "cash", product, "2").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> stale = request(hq, "6", "entry_mistake", null);
+        stale.put("expected_qty", "10");
+        ResponseEntity<JsonNode> refused = correct(stale, ADMIN, "*", key());
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(refused)).isEqualTo("stock_moved");
+        assertThat(refused.getBody().get("detail").asString())
+                .contains("changed while you were typing")
+                .contains("8");
+        assertThat(stockAt(hq)).isEqualByComparingTo("8");
+        assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+
+        // Typed against the shelf as it is now, it goes through; a request without the expected quantity is refused.
+        Map<String, Object> fresh = request(hq, "6", "entry_mistake", null);
+        fresh.put("expected_qty", "8");
+        assertThat(correct(fresh, ADMIN, "*", key()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(stockAt(hq)).isEqualByComparingTo("6");
+        Map<String, Object> missing = request(hq, "5", "miscount", null);
+        missing.remove("expected_qty");
+        assertThat(correct(missing, ADMIN, "*", key()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void aStockTakeThatIsNotCommittedBlocksACorrectionOfAnItemItCounts() {
+        restock(hq, "10");
+        UUID take = RetailTestSupport.id(api.post(
+                "/stocktakes",
+                Map.of("branch_id", hq, "lines", List.of(Map.of("product_id", product, "counted_qty", "9"))),
+                ADMIN));
+        ResponseEntity<JsonNode> refused = correct(hq, "6", "entry_mistake", null);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(refused)).isEqualTo("stocktake_in_progress");
+        assertThat(refused.getBody().get("detail").asString()).contains("Finish it first");
+        assertThat(stockAt(hq)).isEqualByComparingTo("10");
+
+        // Another branch is not covered by it, and once it is committed the correction is allowed again.
+        assertThat(correct(br2, "1", "miscount", null).getStatusCode()).isNotEqualTo(HttpStatus.CONFLICT);
+        assertThat(api.post("/stocktakes/" + take + "/commit", Map.of(), ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(stockAt(hq)).isEqualByComparingTo("9");
+        assertThat(correct(hq, "6", "entry_mistake", null).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(stockAt(hq)).isEqualByComparingTo("6");
     }
 }

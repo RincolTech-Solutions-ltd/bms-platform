@@ -1,7 +1,6 @@
--- V94: catalogue corrections (issues #351 and #352; ADR-044; docs/specs/retail-ui-notes.md).
+-- V63: catalogue corrections (issues #351 and #352; ADR-044; docs/specs/retail-ui-notes.md).
 --
--- The number V94 is a placeholder: the coordinator renumbers at merge to the next free number above the highest on main
--- (AGENTS.md: Flyway runs with outOfOrder off).
+-- V63 is the first free number after V62 on main (AGENTS.md: Flyway runs with outOfOrder off).
 --
 -- Expand only. Nothing here changes a row that exists, and the previous release runs unchanged on this schema:
 --   1. A product name key, so a second product with the same name is refused (#352): one immutable function, a

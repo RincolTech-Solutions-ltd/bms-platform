@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useRef, useState } from 'react';
-import { retail, type StockRow } from '../../../api/retail';
+import { useEffect, useRef, useState } from 'react';
+import { RetailError, retail, type StockRow } from '../../../api/retail';
 import { useStaff } from '../context';
 import { showWhen } from './catalogue-products';
 import { usePersistedDraft } from './idempotency';
@@ -25,20 +25,33 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const current = row.qty ?? '0';
-  const { key, draft, setDraft, discard } = usePersistedDraft<{ qty: string; reason: ReasonCode | ''; note: string }>(
+  // The draft carries the quantity the form showed when it was opened: that is what the server compares with the shelf.
+  const { key, draft, setDraft, discard } = usePersistedDraft<{ qty: string; reason: ReasonCode | ''; note: string; expected: string }>(
     `stock-correct:${me.user_id ?? ''}:${branchId}:${row.product_id ?? ''}`,
-    { qty: showQty(current), reason: '', note: '' },
+    { qty: showQty(current), reason: '', note: '', expected: current },
   );
+  // A draft kept from an earlier opening was typed against another quantity: start again from the one on the list now.
+  useEffect(() => {
+    if (draft.expected !== current) discard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const problem = quantityProblem(draft.qty, current);
   const ready = problem === null && draft.reason !== '';
   // A second press before the first request has started must not send another one: the ref answers at once.
   const sending = useRef(false);
   const send = useMutation({
-    mutationFn: () => retail.correctStock(correctionRequest(branchId, row.product_id ?? '', draft.qty, draft.reason as ReasonCode, draft.note), key),
+    mutationFn: () => retail.correctStock(correctionRequest(branchId, row.product_id ?? '', draft.qty, draft.reason as ReasonCode, draft.note, draft.expected), key),
     onSuccess: (done) => {
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
       onDone(`${row.description} is now ${showQty(done.new_qty ?? '0')} ${row.unit ?? ''} (it was ${showQty(done.old_qty ?? '0')}). The correction is in its history. It does not count as shrinkage.`);
+    },
+    onError: (error) => {
+      // The shelf moved while the form was open: read the list again, and type against the new quantity with a new key.
+      if (error instanceof RetailError && ['stock_moved', 'stocktake_in_progress'].includes(error.code ?? '')) {
+        void queryClient.invalidateQueries({ queryKey: ['retail'] });
+        if (error.code === 'stock_moved') discard();
+      }
     },
     onSettled: () => { sending.current = false; },
   });
@@ -178,10 +191,13 @@ export function CorrectItem({ row, branchId, onClose }: { row: StockRow; branchI
       {choice === 'other' && (
         <div className="stack" data-testid="correct-other">
           <p>
-            <strong>A restock was entered in the wrong unit, or at the wrong price:</strong> open <Link to="/staff/retail/restocks">Past restocks</Link>, choose Correct this restock, and enter it again.
+            <strong>A restock was entered in the wrong pack unit, or at the wrong price:</strong> open <Link to="/staff/retail/restocks">Past restocks</Link>, choose Correct this restock, and enter it again.
           </p>
           <p>
-            <strong>The name, unit or price of the item itself is wrong:</strong> change it in <Link to="/staff/retail/catalogue/products">Items</Link>.
+            <strong>The name or the price of the item itself is wrong:</strong> change it in <Link to="/staff/retail/catalogue/products">Items</Link>.
+          </p>
+          <p>
+            <strong>The item is kept in the wrong unit:</strong> a unit is never converted once the item has stock, because 10 rolls would become 10 metres. Add a new item with the right unit, correct this one to none here, and restock the new one.
           </p>
           <p>
             <strong>The shelf holds a different number than the list:</strong> choose The quantity is wrong above, or count it in <Link to="/staff/retail/stocktake">Stock-take</Link>.

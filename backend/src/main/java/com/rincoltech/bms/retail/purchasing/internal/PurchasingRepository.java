@@ -209,6 +209,30 @@ class PurchasingRepository {
                         """).param(purchaseId).query(Boolean.class).single();
     }
 
+    /**
+     * True when a restock or goods receipt other than this one put stock of the product in after this restock and still
+     * stands (not voided): a later cost event, so the voided restock's prices are not the product's to give back. The
+     * product's price history may hold no row for it (a later restock at the same prices writes none).
+     */
+    boolean laterPurchase(UUID productId, UUID purchaseId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                                 SELECT 1 FROM retail_stock_movements m
+                                  WHERE m.product_id = :product AND m.kind = 'purchase' AND NOT m.historical
+                                    AND NOT (m.source_type = 'retail.purchase' AND m.source_id = :purchase)
+                                    AND NOT EXISTS (SELECT 1 FROM retail_stock_movements v
+                                                     WHERE v.tenant_id = m.tenant_id AND v.reverses_movement_id = m.id)
+                                    AND (m.created_at, m.id) > (SELECT o.created_at, o.id FROM retail_stock_movements o
+                                                                 WHERE o.product_id = :product AND o.source_type = 'retail.purchase'
+                                                                   AND o.source_id = :purchase
+                                                                 ORDER BY o.created_at DESC, o.id DESC LIMIT 1))
+                        """)
+                .param("product", productId)
+                .param("purchase", purchaseId)
+                .query(Boolean.class)
+                .single();
+    }
+
     /** The journal entries the restock posted, one per branch (the reversals the ledger wrote carry the same source). */
     List<UUID> entriesOf(UUID purchaseId) {
         return jdbc.sql("""
@@ -355,7 +379,12 @@ class PurchasingRepository {
         long total = branchIds == null
                 ? p.totalMinor()
                 : lines.stream().mapToLong(PurchaseLine::lineTotalMinor).reduce(0, Math::addExact);
-        return p.withLinesAndTotal(lines, total);
+        // A scoped caller sees only their branches' quantities; the screen must not offer a void the server will
+        // refuse.
+        boolean hidden = branchIds != null
+                && all.stream()
+                        .anyMatch(l -> l.qtyByBranch().stream().anyMatch(b -> !branchIds.contains(b.branchId())));
+        return p.withLinesAndTotal(lines, total, hidden);
     }
 
     private static String decimal(BigDecimal d) {
@@ -429,6 +458,7 @@ class PurchasingRepository {
                 voided == null ? null : voided.toInstant(),
                 rs.getObject("voided_by", UUID.class),
                 rs.getDate("voided_on") == null ? null : rs.getDate("voided_on").toLocalDate(),
-                rs.getString("void_reason"));
+                rs.getString("void_reason"),
+                null);
     }
 }

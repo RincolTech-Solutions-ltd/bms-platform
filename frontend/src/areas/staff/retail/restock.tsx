@@ -8,7 +8,7 @@ import { branchLabel } from '../../../auth/branch';
 import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { lineTotalMinor, parseQty, qtyString, showQty } from './maths';
+import { lineTotalMinor, parseQty, qtyString, showDate, showQty } from './maths';
 import { chosenUnitHint, redraftOf } from './restock-correct-state';
 import { CategoryLabel, Gate, Note, Problem, money, useProfitAccess } from './ui';
 import { UNITS, capabilityOn } from './permissions';
@@ -103,7 +103,7 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved, draftName, initial }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft }) {
+export function RestockForm({ onSaved, draftName, initial, again = false }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft; again?: boolean }) {
   const { me, branch } = useStaff();
   const canProfit = useProfitAccess();
   const queryClient = useQueryClient();
@@ -183,6 +183,11 @@ export function RestockForm({ onSaved, draftName, initial }: { onSaved?: (p: Pur
       )}
       <label htmlFor="bought-on">Bought on</label>
       <input id="bought-on" type="date" value={purchasedOn} onChange={(e) => setPurchasedOn(e.target.value)} />
+      {again && purchasedOn < businessToday() && (
+        <p role="note" className="alert alert-warning" data-testid="date-warning">
+          This restock is dated {showDate(purchasedOn)}. The cash book of that day may be banked already, and saving will change its figures. Use today's date unless the goods really arrived then.
+        </p>
+      )}
 
       <SearchBox id="restock-search" label="Find an item by name, code or category" search={search} fetching={finding} count={products.data ? Math.min(products.data.length, 20) : undefined} more={(products.data?.length ?? 0) > 20} />
       {products.data && products.data.length === 0 && search.term && <NoResults term={search.term} onClear={search.clear} noun="items" />}
@@ -322,7 +327,7 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
     queryFn: async () => {
       const purchase = await retail.getPurchase(purchaseId);
       const products = await Promise.all((purchase.lines ?? []).map((l) => retail.getProduct(l.product_id ?? '')));
-      return { purchase, draft: redraftOf(purchase, products) };
+      return { purchase, draft: redraftOf(purchase, products, businessToday()) };
     },
     gcTime: 0,
   });
@@ -333,7 +338,7 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
       <Note>
         You are entering restock {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
       </Note>
-      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} />
+      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} again />
     </>
   );
 }

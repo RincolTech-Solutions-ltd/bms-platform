@@ -272,6 +272,12 @@ class RetailPurchaseVoidIT extends IntegrationTest {
                 .asString());
         ResponseEntity<JsonNode> blind = voidIt(other, "Typed the wrong number", ADMIN, br2.toString(), key());
         assertThat(blind.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // A copy scoped to the head office says it hides other branches, so a screen offers no void the server refuses;
+        // the whole business sees no such field.
+        JsonNode narrow = api.call(HttpMethod.GET, "/purchases/" + id, null, ADMIN, hq.toString(), Map.of())
+                .getBody();
+        assertThat(narrow.get("partial").asBoolean()).isTrue();
+        assertThat(api.get("/purchases/" + id, ADMIN).getBody().has("partial")).isFalse();
         // Scoped to both it works.
         assertThat(voidIt(id, "Typed the wrong number", ADMIN, hq + "," + br2, key())
                         .getStatusCode())
@@ -449,6 +455,43 @@ class RetailPurchaseVoidIT extends IntegrationTest {
                 "/purchases/" + id + "/void", Map.of("reason", "Typed the wrong number"), ADMIN, "*", key());
         assertThat(blind.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(theirs.get("/purchases", ADMIN).getBody().get("items")).isEmpty();
+        assertThat(stockAt(hq)).isEqualByComparingTo("3");
+    }
+
+    @Test
+    void aLaterRestockAtTheSamePricesKeepsThemWhenTheFirstIsVoided() {
+        // The item costs 1,000 and sells at 1,500. R1 sets 1,200 and 1,800; R2 pays the same prices, so it writes no
+        // price-history row, but it is a later restock that stands: voiding R1 must not roll the prices back to 1,000.
+        UUID first = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "10"))
+                .get("id")
+                .asString());
+        buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "5"));
+        assertThat(voidIt(first, "Entered ten, there were only six").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        JsonNode p = product();
+        assertThat(p.get("cost_minor").asLong()).isEqualTo(1_200);
+        assertThat(p.get("sell_minor").asLong()).isEqualTo(1_800);
+        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN)
+                .getBody()
+                .get("items");
+        JsonNode last = history.get(history.size() - 1);
+        assertThat(last.get("new_cost_minor").asLong()).isEqualTo(1_200);
+        assertThat(last.get("reason").asString()).contains("voided").contains("left as they are");
+        assertThat(stockAt(hq)).isEqualByComparingTo("5");
+    }
+
+    @Test
+    void aBranchThatKeepsNoGoodsAnymoreRefusesTheVoidInPlainWords() {
+        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3"))
+                .get("id")
+                .asString());
+        TestDatabase.owner()
+                .sql("UPDATE branches SET stocks_goods = false WHERE id = ?")
+                .param(hq)
+                .update();
+        ResponseEntity<JsonNode> refused = voidIt(id, "Typed the wrong number");
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("branch_not_stocking");
         assertThat(stockAt(hq)).isEqualByComparingTo("3");
     }
 }

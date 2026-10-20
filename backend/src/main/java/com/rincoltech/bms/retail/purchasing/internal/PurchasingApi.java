@@ -169,7 +169,11 @@ final class PurchasingApi {
             @Schema(description = "The business date of the void, the day the cash book gives the cash back")
             LocalDate voidedOn,
 
-            @JsonInclude(JsonInclude.Include.NON_NULL) String voidReason) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) String voidReason,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "True when the caller's branch scope hid other branches this restock added stock to")
+            Boolean partial) {
 
         // JUSTIFICATION-A3: a restock gained the void fields of issue #351; the short constructor keeps the three
         // existing callers as they are.
@@ -202,10 +206,11 @@ final class PurchasingApi {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
 
-        Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal) {
+        Purchase withLinesAndTotal(List<PurchaseLine> newLines, long newTotal, boolean hidden) {
             return new Purchase(
                     id,
                     purchaseNo,
@@ -222,7 +227,8 @@ final class PurchasingApi {
                     voidedAt,
                     voidedBy,
                     voidedOn,
-                    voidReason);
+                    voidReason,
+                    hidden ? Boolean.TRUE : null);
         }
     }
 

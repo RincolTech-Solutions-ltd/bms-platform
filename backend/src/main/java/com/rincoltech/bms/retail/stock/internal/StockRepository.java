@@ -334,6 +334,15 @@ class StockRepository {
 
     // ---- Quantity corrections (issue #351, ADR-044) -----------------------------------------
 
+    /** True when a stock-take of the branch that is not committed yet counts the product (its variance is measured from the shelf now). */
+    boolean draftStocktakeCovers(UUID branchId, UUID productId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_stocktakes s
+                                         JOIN retail_stocktake_lines l ON l.tenant_id = s.tenant_id AND l.stocktake_id = s.id
+                                        WHERE s.branch_id = ? AND s.status = 'draft' AND l.product_id = ?)
+                        """).params(branchId, productId).query(Boolean.class).single();
+    }
+
     void insertCorrection(
             UUID id,
             UUID branchId,

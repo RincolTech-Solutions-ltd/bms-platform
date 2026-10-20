@@ -132,7 +132,7 @@ describe('the right quantity', () => {
     fireEvent.submit(screen.getByRole('form', { name: 'Correct the quantity' }));
     fireEvent.submit(screen.getByRole('form', { name: 'Correct the quantity' }));
     await waitFor(() => expect(correctStock).toHaveBeenCalledTimes(1));
-    expect(correctStock.mock.calls[0]?.[0]).toEqual({ branch_id: branch, product_id: 'p1', new_qty: '6.000', reason_code: 'entry_mistake', note: 'Typed ten, really six' });
+    expect(correctStock.mock.calls[0]?.[0]).toEqual({ branch_id: branch, product_id: 'p1', new_qty: '6.000', expected_qty: '10.000', reason_code: 'entry_mistake', note: 'Typed ten, really six' });
     expect(typeof correctStock.mock.calls[0]?.[1]).toBe('string');
     finish({ id: 'c1', old_qty: '10.000', new_qty: '6.000', reason_code: 'entry_mistake' });
     const done = await screen.findByRole('status');
@@ -152,6 +152,47 @@ describe('the right quantity', () => {
     fireEvent.click(save());
     await waitFor(() => expect(correctStock).toHaveBeenCalledTimes(2));
     expect(correctStock.mock.calls[1]?.[1]).toBe(correctStock.mock.calls[0]?.[1]);
+  });
+});
+
+describe('a quantity that moved meanwhile', () => {
+  it('starts again from the list when a draft kept from an earlier opening was typed against another quantity', () => {
+    sessionStorage.setItem(`retail-draft:stock-correct:${admin.user_id}:${branch}:p1`, JSON.stringify({ key: 'old-key', draft: { qty: '6', reason: 'miscount', note: '', expected: '12.000' } }));
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The quantity is wrong');
+    expect(qty().value).toBe('10');
+    expect(reason().value).toBe('');
+  });
+
+  it('keeps a draft typed against the quantity on the list now', () => {
+    sessionStorage.setItem(`retail-draft:stock-correct:${admin.user_id}:${branch}:p1`, JSON.stringify({ key: 'old-key', draft: { qty: '6', reason: 'miscount', note: '', expected: '10.000' } }));
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The quantity is wrong');
+    expect(qty().value).toBe('6');
+    expect(reason().value).toBe('miscount');
+  });
+
+  it('says so in plain words when the shelf moved, and the next try uses the new quantity and a new key', async () => {
+    correctStock.mockRejectedValueOnce(refusal('stock_moved', 'The quantity changed while you were typing: it is 8 roll now, not 10. Look at the list again and type the right quantity.'));
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'entry_mistake' } });
+    fireEvent.click(save());
+    expect((await screen.findByRole('alert')).textContent).toContain('The quantity changed while you were typing');
+    await waitFor(() => expect(qty().value).toBe('10'));
+    expect(reason().value).toBe('');
+  });
+});
+
+describe('a unit in use', () => {
+  it('sends nobody to change it in Items: a unit is never converted', () => {
+    screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);
+    open('The unit, name or price is wrong');
+    const other = screen.getByTestId('correct-other').textContent ?? '';
+    expect(other).toContain('never converted');
+    expect(other).toContain('Add a new item with the right unit');
+    expect(other).not.toContain('change it in Items: unit');
   });
 });
 

@@ -23,12 +23,21 @@ vi.mock('@tanstack/react-router', async (original) => {
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
-  return { ...real, retail: { ...real.retail, voidPurchase: (...a: unknown[]) => voidPurchase(...a) } };
+  return {
+    ...real,
+    retail: {
+      ...real.retail,
+      voidPurchase: (...a: unknown[]) => voidPurchase(...a),
+      listProducts: () => Promise.resolve([]),
+      listSuppliers: () => Promise.resolve([]),
+    },
+  };
 });
 
 const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { CorrectPanel, RestockCard } = await import('./restocks');
+const { RestockForm } = await import('./restock');
 const { chosenUnitHint, redraftOf, unitHint, voidReasonOf } = await import('./restock-correct-state');
 
 afterEach(() => {
@@ -74,6 +83,12 @@ describe('the restock card', () => {
     cleanup();
     screenOf(seller, <ul><RestockCard purchase={restock} onDone={() => undefined} /></ul>);
     expect(screen.queryByRole('button', { name: /Correct restock/ })).toBeNull();
+  });
+
+  it('offers no button on a copy that hides other branches, since the server would refuse the void', () => {
+    screenOf(admin, <ul><RestockCard purchase={{ ...restock, partial: true }} onDone={() => undefined} /></ul>);
+    expect(screen.queryByRole('button', { name: /Correct restock/ })).toBeNull();
+    expect(screen.getByText(/Only someone who manages every branch/)).toBeTruthy();
   });
 
   it('shows a voided restock as voided with its reason and offers nothing', () => {
@@ -164,8 +179,9 @@ describe('entering a voided restock again', () => {
   const cable: Product = { id: 'p1', code: 'CB-25', description: 'Cable 2.5mm', unit: 'roll', unit_id: 'u1', sell_minor: 1500, cost_minor: 1000, active: true };
 
   it('fills the form with the same supplier, date, payment, items and quantities', () => {
-    const draft = redraftOf({ ...restock, supplier_id: 's1', payment_method: 'credit' }, [cable]);
-    expect(draft).toMatchObject({ supplierId: 's1', purchasedOn: '2026-10-05', method: 'credit' });
+    const draft = redraftOf({ ...restock, supplier_id: 's1', payment_method: 'credit' }, [cable], '2026-10-20');
+    // Dated today, not on the day of the voided restock, which may be banked in the cash book already.
+    expect(draft).toMatchObject({ supplierId: 's1', purchasedOn: '2026-10-20', method: 'credit' });
     expect(draft.lines).toHaveLength(1);
     expect(draft.lines[0]).toMatchObject({ cost: '1000', sell: '1500', qtyByBranch: { [branch]: '20' } });
     expect(draft.lines[0]?.unitId).toBeUndefined();
@@ -179,8 +195,23 @@ describe('entering a voided restock again', () => {
         { id: 'l2', line_no: 2, product_id: 'gone', description: 'Gone', cost_minor: 5, qty_by_branch: [] },
       ],
     };
-    const draft = redraftOf(inPack, [cable]);
+    const draft = redraftOf(inPack, [cable], '2026-10-20');
     expect(draft.lines).toHaveLength(1);
     expect(draft.lines[0]).toMatchObject({ unitId: 'u2', cost: '10', qtyByBranch: { [branch]: '200' } });
+  });
+});
+
+describe('the date of a restock entered again', () => {
+  const draft = { supplierId: '', newSupplier: '', purchasedOn: '2020-01-01', method: 'cash' as const, lines: [] };
+
+  it('warns in plain words when it is dated before today', () => {
+    screenOf(admin, <RestockForm draftName="restock-again:test:r1" initial={draft} again />);
+    expect(screen.getByTestId('date-warning').textContent).toMatch(/banked already/);
+    expect(screen.getByTestId('date-warning').textContent).toContain('Use today\'s date');
+  });
+
+  it('is quiet for a new restock and for today', () => {
+    screenOf(admin, <RestockForm draftName="restock-plain:test" initial={draft} />);
+    expect(screen.queryByTestId('date-warning')).toBeNull();
   });
 });

@@ -231,7 +231,7 @@ class RlsIsolationIT {
                         """)
                 .params(openingMovement, t.tenantId(), t.headOffice(), retailProduct)
                 .update();
-        // A quantity correction (migration V94, issue #351).
+        // A quantity correction (migration V63, issue #351).
         owner.sql("""
                         INSERT INTO retail_stock_corrections (id, tenant_id, branch_id, product_id, movement_id, old_qty, new_qty,
                                                               reason_code, unit_cost_minor, created_by)
@@ -290,7 +290,7 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), purchase, retailProduct)
                 .update();
-        // A restock voided (migration V94, issue #351).
+        // A restock voided (migration V63, issue #351).
         owner.sql("""
                         INSERT INTO retail_purchase_voids (id, tenant_id, purchase_id, voided_on, reason, voided_by)
                         VALUES (?, ?, ?, DATE '2026-01-16', 'Test void', ?)

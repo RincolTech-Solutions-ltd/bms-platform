@@ -29,11 +29,12 @@ export function differenceWords(typed: string, current: string, unit: string | u
 }
 
 /** The request body for the right quantity. */
-export function correctionRequest(branchId: string, productId: string, typed: string, reason: ReasonCode, note: string) {
+export function correctionRequest(branchId: string, productId: string, typed: string, reason: ReasonCode, note: string, expected: string) {
   return {
     branch_id: branchId,
     product_id: productId,
     new_qty: qtyString(parseCount(typed) ?? 0),
+    expected_qty: expected,
     reason_code: reason,
     ...(note.trim() ? { note: note.trim() } : {}),
   };

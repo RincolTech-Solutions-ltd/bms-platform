@@ -10150,6 +10150,8 @@ export interface components {
             id?: string;
             lines?: components["schemas"]["RetailPurchaseLine"][];
             note?: string;
+            /** @description True when the caller's branch scope hid other branches this restock added stock to */
+            partial?: boolean;
             payment_method?: string;
             purchase_no?: string;
             /** Format: date */
@@ -11362,6 +11364,11 @@ export interface components {
         RetailStockCorrectionRequest: {
             /** Format: uuid */
             branch_id: string;
+            /**
+             * @description The quantity the form showed when it was opened; 409 stock_moved when it has changed since
+             * @example 12.5
+             */
+            expected_qty: string;
             /**
              * @description The quantity there should be, not the difference
              * @example 12.5

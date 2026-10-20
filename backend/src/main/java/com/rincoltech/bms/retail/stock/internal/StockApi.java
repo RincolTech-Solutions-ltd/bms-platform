@@ -154,6 +154,16 @@ final class StockApi {
             BigDecimal newQty,
 
             @NotNull
+            @PositiveOrZero
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    example = "12.5",
+                    description =
+                            "The quantity the form showed when it was opened; 409 stock_moved when it has changed since")
+            BigDecimal expectedQty,
+
+            @NotNull
             @Pattern(regexp = "entry_mistake|miscount")
             @Schema(description = "entry_mistake (a restock or sale was entered wrongly) or miscount")
             String reasonCode,
