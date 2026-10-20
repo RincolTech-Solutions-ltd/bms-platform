@@ -47,7 +47,7 @@ class CustomerOrdersController {
 
     private final CustomerOrdersService service;
 
-    CustomerOrdersController(OrdersService service) {
+    CustomerOrdersController(CustomerOrdersService service) {
         this.service = service;
     }
 
