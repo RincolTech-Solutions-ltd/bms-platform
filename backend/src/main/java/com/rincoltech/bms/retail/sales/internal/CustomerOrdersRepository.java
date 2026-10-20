@@ -33,7 +33,7 @@ class CustomerOrdersRepository {
             .phones("retail_customer_orders.customer_phone");
 
     private static final String SELECT = """
-            SELECT retail_customer_orders.*, s.sale_no
+            SELECT retail_customer_orders.*, s.sale_no, s.status AS sale_status
               FROM retail_customer_orders
               LEFT JOIN retail_sales s ON s.id = retail_customer_orders.sale_id
             """;
@@ -73,6 +73,7 @@ class CustomerOrdersRepository {
             String cancelReason,
             LocalDate feePaidOn,
             String feePaidMethod,
+            String saleStatus,
             Instant createdAt,
             UUID createdBy,
             int version) {
@@ -93,7 +94,10 @@ class CustomerOrdersRepository {
             String unit,
             long unitPriceMinor,
             long lineTotalMinor,
-            BigDecimal baseQty) {
+            BigDecimal baseQty,
+            String priceSource,
+            String overrideReason,
+            UUID overriddenBy) {
 
         OrderLine view() {
             return new OrderLine(
@@ -159,13 +163,31 @@ class CustomerOrdersRepository {
             BigDecimal qty,
             BigDecimal baseQty,
             long unitPriceMinor,
-            long lineTotalMinor) {
+            long lineTotalMinor,
+            SalesRepository.LinePricing pricing,
+            UUID by) {
+        boolean override = pricing != null && "override".equals(pricing.source());
         jdbc.sql("""
                         INSERT INTO retail_customer_order_lines (id, tenant_id, order_id, line_no, product_id, unit_id, qty, base_qty,
-                            unit_price_minor, line_total_minor)
-                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?)
+                            unit_price_minor, line_total_minor, price_source, price_list_id, price_break_min_qty,
+                            resolved_unit_price_minor, price_override_reason, overridden_by)
+                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
-                .params(orderId, lineNo, productId, unitId, qty, baseQty, unitPriceMinor, lineTotalMinor)
+                .params(
+                        orderId,
+                        lineNo,
+                        productId,
+                        unitId,
+                        qty,
+                        baseQty,
+                        unitPriceMinor,
+                        lineTotalMinor,
+                        pricing == null ? null : pricing.source(),
+                        pricing == null ? null : pricing.priceListId(),
+                        pricing == null ? null : pricing.breakMinQty(),
+                        pricing == null ? null : pricing.resolvedUnitPriceMinor(),
+                        override ? pricing.overrideReason() : null,
+                        override ? by : null)
                 .update();
     }
 
@@ -187,7 +209,8 @@ class CustomerOrdersRepository {
     List<StoredLine> lines(UUID orderId) {
         return jdbc.sql("""
                         SELECT l.line_no, l.product_id, p.code, p.description, l.qty, l.unit_id, coalesce(u.name, bu.name) AS unit,
-                               l.unit_price_minor, l.line_total_minor, l.base_qty
+                               l.unit_price_minor, l.line_total_minor, l.base_qty, l.price_source, l.price_override_reason,
+                               l.overridden_by
                           FROM retail_customer_order_lines l
                           JOIN retail_products p ON p.id = l.product_id
                           JOIN retail_units bu ON bu.id = p.unit_id
@@ -206,7 +229,10 @@ class CustomerOrdersRepository {
                         rs.getString("unit"),
                         rs.getLong("unit_price_minor"),
                         rs.getLong("line_total_minor"),
-                        rs.getBigDecimal("base_qty")))
+                        rs.getBigDecimal("base_qty"),
+                        rs.getString("price_source"),
+                        rs.getString("price_override_reason"),
+                        rs.getObject("overridden_by", UUID.class)))
                 .list();
     }
 
@@ -441,7 +467,10 @@ class CustomerOrdersRepository {
                 .update();
     }
 
-    /** Delivered orders by day, source or rider in the window, in the branches of the filter. */
+    /**
+     * Delivered orders by day, source or rider in the window, in the branches of the filter. An order whose sale was voided is
+     * left out: its fee was reversed with the sale.
+     */
     List<ReportRow> fees(List<UUID> branchIds, LocalDate from, LocalDate to, String groupBy) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
@@ -463,6 +492,8 @@ class CustomerOrdersRepository {
                                coalesce(sum(delivery_fee_minor), 0) AS fees
                           FROM retail_customer_orders
                          WHERE status = 'delivered' AND delivered_on BETWEEN :from AND :to%2$s
+                           AND EXISTS (SELECT 1 FROM retail_sales s
+                                        WHERE s.id = retail_customer_orders.sale_id AND s.status = 'completed')
                          GROUP BY 1
                          ORDER BY 1
                         """.formatted(key, where))
@@ -565,6 +596,7 @@ class CustomerOrdersRepository {
                 rs.getString("cancel_reason"),
                 localDate(rs, "fee_paid_on"),
                 rs.getString("fee_paid_method"),
+                rs.getString("sale_status"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getObject("created_by", UUID.class),
                 rs.getInt("version"));

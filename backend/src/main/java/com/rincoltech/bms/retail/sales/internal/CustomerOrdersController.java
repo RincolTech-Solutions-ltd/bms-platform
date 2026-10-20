@@ -209,7 +209,7 @@ class CustomerOrdersController {
     }
 
     @PostMapping("/{order_id}/fee-payment")
-    @RequiresPermission(CustomerOrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.FEE_PAYMENT)
     @Operation(
             summary = "Take the payment of a delivery fee left on a credit buyer's account; M (issue #385)",
             operationId = "payRetailOrderFee")

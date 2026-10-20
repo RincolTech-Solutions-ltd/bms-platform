@@ -75,7 +75,28 @@ class SalesRepository {
             UUID priceListId,
             BigDecimal breakMinQty,
             long resolvedUnitPriceMinor,
-            String overrideReason) {}
+            String overrideReason,
+            UUID overriddenBy) {
+
+        /** How a line is priced at the till, where whoever makes the sale changes a price (no one else is named). */
+        LinePricing(
+                String source,
+                UUID priceListId,
+                BigDecimal breakMinQty,
+                long resolvedUnitPriceMinor,
+                String overrideReason) {
+            this(source, priceListId, breakMinQty, resolvedUnitPriceMinor, overrideReason, null);
+        }
+    }
+
+    /**
+     * Issue #385: the delivery fee of a customer order left on the buyer's account and not yet paid, for the sale aliased
+     * {@code sale} ({@code sale.id}), or 0. Every reader of what a buyer owes adds it to the sale's own balance.
+     */
+    static String feeOwed(String sale) {
+        return "coalesce((SELECT o.delivery_fee_minor FROM retail_customer_orders o WHERE o.sale_id = " + sale
+                + ".id AND o.fee_method = 'account' AND o.fee_paid_at IS NULL), 0)";
+    }
 
     /** The group and the own price list of a credit buyer. */
     record CustomerPricing(UUID customerGroupId, UUID priceListId) {}
@@ -253,8 +274,8 @@ class SalesRepository {
                         INSERT INTO retail_sale_lines (id, tenant_id, sale_id, line_no, product_id, qty, unit_price_minor,
                             unit_cost_minor, line_total_minor, line_cost_minor, sale_unit_id, sale_qty,
                             sale_unit_price_minor, unit_factor, price_source, price_list_id, price_break_min_qty,
-                            resolved_unit_price_minor, price_override_reason)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            resolved_unit_price_minor, price_override_reason, price_overridden_by)
+                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
                 .params(
                         l.id(),
@@ -274,7 +295,8 @@ class SalesRepository {
                         l.pricing() == null ? null : l.pricing().priceListId(),
                         l.pricing() == null ? null : l.pricing().breakMinQty(),
                         l.pricing() == null ? null : l.pricing().resolvedUnitPriceMinor(),
-                        l.pricing() == null ? null : l.pricing().overrideReason())
+                        l.pricing() == null ? null : l.pricing().overrideReason(),
+                        l.pricing() == null ? null : l.pricing().overriddenBy())
                 .update();
     }
 
@@ -524,11 +546,12 @@ class SalesRepository {
     }
 
     /** The customer order a sale was delivered from (issue #385): its delivery fee entry, if any, and whether a fee on account was paid. */
-    record OrderFee(UUID orderId, String orderNo, UUID feeEntryId, long feeMinor, boolean feePaidLater) {}
+    record OrderFee(
+            UUID orderId, String orderNo, UUID feeEntryId, long feeMinor, String feeMethod, boolean feePaidLater) {}
 
     Optional<OrderFee> orderFee(UUID saleId) {
         return jdbc.sql("""
-                        SELECT id, order_no, fee_entry_id, delivery_fee_minor, fee_paid_at IS NOT NULL AS paid
+                        SELECT id, order_no, fee_entry_id, delivery_fee_minor, fee_method, fee_paid_at IS NOT NULL AS paid
                           FROM retail_customer_orders WHERE sale_id = ? FOR UPDATE
                         """)
                 .param(saleId)
@@ -537,6 +560,7 @@ class SalesRepository {
                         rs.getString("order_no"),
                         rs.getObject("fee_entry_id", UUID.class),
                         rs.getLong("delivery_fee_minor"),
+                        rs.getString("fee_method"),
                         rs.getBoolean("paid")))
                 .optional();
     }
@@ -612,12 +636,11 @@ class SalesRepository {
         }
         Search.Match match = query == null ? null : query.match(CUSTOMER_SEARCH);
         Map<String, Object> params = new LinkedHashMap<>();
-        StringBuilder sql = new StringBuilder("""
-                SELECT c.id, c.name, c.contact, c.created_at, c.version, c.customer_group_id, c.price_list_id,
-                       c.credit_limit_minor, c.terms_days, lower(c.name) AS sort_key,
-                       (SELECT coalesce(sum(s.total_minor - s.paid_minor), 0) FROM retail_sales s
-                         WHERE s.customer_id = c.id AND s.payment_method = 'credit' AND s.status = 'completed'
-                           AND s.paid_minor < s.total_minor""");
+        StringBuilder sql = new StringBuilder("SELECT c.id, c.name, c.contact, c.created_at, c.version,"
+                + " c.customer_group_id, c.price_list_id, c.credit_limit_minor, c.terms_days, lower(c.name) AS sort_key,"
+                + " (SELECT coalesce(sum(s.total_minor - s.paid_minor + " + feeOwed("s") + "), 0) FROM retail_sales s"
+                + " WHERE s.customer_id = c.id AND s.payment_method = 'credit' AND s.status = 'completed'"
+                + " AND (s.paid_minor < s.total_minor OR " + feeOwed("s") + " > 0)");
         if (branchIds != null) {
             sql.append(" AND s.branch_id IN (:branchIds)");
             params.put("branchIds", branchIds);
@@ -688,11 +711,12 @@ class SalesRepository {
             branchFilter = " AND branch_id IN (:branchIds)";
             params.put("branchIds", branchIds);
         }
-        return jdbc.sql("""
-                        SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical, created_at
-                          FROM retail_sales
-                         WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'
-                           AND paid_minor < total_minor""" + branchFilter + " ORDER BY sale_date, created_at, id")
+        return jdbc.sql(
+                        "SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical, created_at, "
+                                + feeOwed("retail_sales") + " AS fee_owed FROM retail_sales"
+                                + " WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'"
+                                + " AND (paid_minor < total_minor OR " + feeOwed("retail_sales") + " > 0)"
+                                + branchFilter + " ORDER BY sale_date, created_at, id")
                 .params(params)
                 .query((rs, n) -> {
                     Date due = rs.getDate("due_date");
@@ -705,7 +729,7 @@ class SalesRepository {
                                     due == null ? null : due.toLocalDate(),
                                     rs.getLong("total_minor"),
                                     rs.getLong("paid_minor"),
-                                    rs.getLong("total_minor") - rs.getLong("paid_minor"),
+                                    rs.getLong("total_minor") - rs.getLong("paid_minor") + rs.getLong("fee_owed"),
                                     rs.getBoolean("historical") ? Boolean.TRUE : null,
                                     null),
                             rs.getTimestamp("created_at").toInstant());

@@ -73,6 +73,9 @@ import org.springframework.transaction.annotation.Transactional;
 class CustomerOrdersService {
 
     static final String MANAGE = "retail.order.manage";
+    /** A delivery fee left on the account is collected like a payment on a credit sale (issue #385). */
+    static final String FEE_PAYMENT = "retail.sale.create";
+
     static final String ORDER = "retail.customer_order";
     static final String PATH = "/api/v1/retail/orders";
     static final int DEFAULT_LIMIT = 50;
@@ -208,7 +211,9 @@ class CustomerOrdersService {
                     pack ? l.saleQty() : l.qty(),
                     l.qty(),
                     pack ? l.saleUnitPriceMinor() : l.unitPriceMinor(),
-                    l.lineTotalMinor());
+                    l.lineTotalMinor(),
+                    l.pricing(),
+                    principal.userId());
             holds.add(new Hold(branch, l.productId(), l.qty()));
         }
         // Under the balance rows' locks: two orders for the last unit queue here and the second is refused.
@@ -534,9 +539,14 @@ class CustomerOrdersService {
                 .map(l -> new Hold(h.branchId(), l.productId(), l.baseQty()))
                 .toList());
         boolean unitsOn = capabilities.enabled(RetailCapabilities.UNITS);
-        String agreed = "Price agreed on order " + h.orderNo();
         List<SaleLineRequest> saleLines = new ArrayList<>();
+        List<SalesService.Agreement> agreements = new ArrayList<>();
         for (StoredLine l : lines) {
+            // A price changed when the order was taken keeps its own reason; any other agreed price says where it came
+            // from.
+            String agreed =
+                    "override".equals(l.priceSource()) ? l.overrideReason() : "Price agreed on order " + h.orderNo();
+            agreements.add(new SalesService.Agreement(l.priceSource(), l.overriddenBy()));
             if (l.unitId() != null && !unitsOn) {
                 // Pack sizes were switched off since the order: the line is sold in base units at the same line total.
                 saleLines.add(new SaleLineRequest(
@@ -549,7 +559,9 @@ class CustomerOrdersService {
         // the rest
         // pays the items.
         long onSale = !credit ? 0 : feeOnAccount ? paidNow : paidNow - fee;
-        long onCredit = !credit ? 0 : items - onSale + (feeOnAccount ? fee : 0);
+        // Added to the sale's own total (which the sale computes from the lines, rounding included) to give what goes
+        // on credit.
+        long creditDelta = (feeOnAccount ? fee : 0) - onSale;
         // The ordinary sale path at the prices agreed on the order: stock, the two journal entries, credit and its
         // limit
         // (checked against what actually goes on credit), the receipt number and the audit row.
@@ -565,8 +577,21 @@ class CustomerOrdersService {
                         null,
                         r.creditOverrideReason(),
                         saleLines),
-                credit ? onCredit : null,
-                true);
+                credit ? creditDelta : null,
+                agreements);
+        // The sale's own total decides, not the order's stored sum: a line converted to base units may round
+        // differently.
+        if (credit && paidNow >= Math.addExact(sale.totalMinor(), fee)) {
+            throw ApiException.rule(
+                    "paid_in_full",
+                    "The customer paid everything, so nothing goes on credit. Choose cash, mobile money or bank.");
+        }
+        if (feeOnAccount && paidNow > sale.totalMinor()) {
+            throw ApiException.rule(
+                    "paid_now_exceeds_items",
+                    "With the delivery fee on the account, the money taken now pays the items, so it cannot be more than "
+                            + sale.totalMinor() + ".");
+        }
         if (onSale > 0) {
             sales.recordPayment(sale.id(), new PaymentRequest(onSale, r.paidNowMethod(), null));
         }
@@ -626,7 +651,10 @@ class CustomerOrdersService {
 
     private Order doPayFee(UUID id, FeePaymentRequest r) {
         Principal principal = CurrentPrincipal.require();
-        Header h = visible(id, true);
+        // Taking the money is the credit payment permission's (retail.sale.create at the branch), as on a credit sale.
+        Header h = repo.find(id, true)
+                .filter(x -> principal.may(FEE_PAYMENT, x.branchId()))
+                .orElseThrow(ApiException::notFound);
         if (!h.status().equals("delivered") || !"account".equals(h.feeMethod())) {
             throw ApiException.rule("fee_not_on_account", "This order has no delivery fee left on the account.");
         }
@@ -636,13 +664,6 @@ class CustomerOrdersService {
                     "fee_already_paid",
                     "Fee already paid",
                     "The delivery fee of order " + h.orderNo() + " was paid on " + h.feePaidOn() + ".");
-        }
-        if (!principal.may("retail.sale.create", h.branchId())) {
-            throw new ApiException(
-                    HttpStatus.FORBIDDEN,
-                    "permission_denied",
-                    "Permission denied",
-                    "Taking a payment needs permission to record sales at this branch.");
         }
         branches.requireSells(h.branchId(), "branch_id");
         if (salesRepo
@@ -821,6 +842,7 @@ class CustomerOrdersService {
                 h.cancelReason(),
                 h.feePaidOn(),
                 h.feePaidMethod(),
+                "voided".equals(h.saleStatus()) ? Boolean.TRUE : null,
                 h.createdAt(),
                 h.createdBy(),
                 h.version(),

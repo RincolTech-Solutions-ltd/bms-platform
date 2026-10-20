@@ -157,10 +157,13 @@ class CreditRecognitionRepository {
             params.put("branchIds", branchIds);
             branch = " AND s.branch_id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT coalesce(sum(s.total_minor - s.paid_minor), 0) AS owed, count(*) AS n"
+        // Issue #385: a delivery fee left on the buyer's account and not yet paid is owed with the sale.
+        String fee = "coalesce((SELECT o.delivery_fee_minor FROM retail_customer_orders o WHERE o.sale_id = s.id"
+                + " AND o.fee_method = 'account' AND o.fee_paid_at IS NULL), 0)";
+        return jdbc.sql("SELECT coalesce(sum(s.total_minor - s.paid_minor + " + fee + "), 0) AS owed, count(*) AS n"
                         + "  FROM retail_sales s"
                         + " WHERE s.payment_method = 'credit' AND s.status = 'completed' AND NOT s.historical"
-                        + "   AND s.total_minor > s.paid_minor AND "
+                        + "   AND (s.total_minor > s.paid_minor OR " + fee + " > 0) AND "
                         + periods.sql("s.sale_date", "s.created_at", params, "crpO") + branch)
                 .params(params)
                 .query((rs, n) -> new long[] {rs.getLong("owed"), rs.getLong("n")})

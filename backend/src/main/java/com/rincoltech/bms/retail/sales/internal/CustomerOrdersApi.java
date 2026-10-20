@@ -221,6 +221,13 @@ final class CustomerOrdersApi {
             LocalDate feePaidOn,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) String feePaidMethod,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "True when the sale this order became was voided (its delivery fee was reversed with it)")
+            Boolean saleVoided,
+
             Instant createdAt,
             UUID createdBy,
             int version,

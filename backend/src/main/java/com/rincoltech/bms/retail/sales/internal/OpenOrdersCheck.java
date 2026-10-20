@@ -9,7 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The customer orders still open at a branch, for the tenancy module's close, not-stocking and Store checks (issue #385,
- * ADR-052): orders taken and not yet delivered or cancelled, or stock still kept aside on its balance rows. Their value is the
+ * ADR-052): orders taken and not yet delivered or cancelled, delivered orders whose delivery fee is still owed on a buyer's
+ * account, or stock still kept aside on its balance rows. Their value is the
  * items at the prices agreed. Read only.
  */
 @Component
@@ -24,10 +25,17 @@ class OpenOrdersCheck implements BranchClosingCheck {
     @Override
     @Transactional(readOnly = true)
     public List<Finding> findings(UUID branchId) {
+        // Open orders, and delivered orders whose delivery fee is still owed on a buyer's account (paid at this
+        // branch).
         Finding open = jdbc.sql("""
-                        SELECT count(*) AS n, coalesce(sum(items_total_minor), 0)::bigint AS value
-                          FROM retail_customer_orders
-                         WHERE branch_id = ? AND status IN ('ordered', 'packed', 'out_for_delivery')
+                        SELECT count(*) AS n,
+                               coalesce(sum(CASE WHEN o.status = 'delivered' THEN o.delivery_fee_minor ELSE o.items_total_minor END),
+                                        0)::bigint AS value
+                          FROM retail_customer_orders o
+                         WHERE o.branch_id = ?
+                           AND (o.status IN ('ordered', 'packed', 'out_for_delivery')
+                                OR (o.status = 'delivered' AND o.fee_method = 'account' AND o.fee_paid_at IS NULL
+                                    AND EXISTS (SELECT 1 FROM retail_sales s WHERE s.id = o.sale_id AND s.status = 'completed')))
                         """)
                 .param(branchId)
                 .query((rs, n) -> new Finding("open_orders", rs.getInt("n"), rs.getLong("value")))

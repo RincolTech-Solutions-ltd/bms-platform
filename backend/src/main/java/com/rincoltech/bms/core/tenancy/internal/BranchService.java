@@ -323,7 +323,9 @@ class BranchService implements BranchProvisioning {
 
     /**
      * A branch with open customer orders, or stock kept aside for them, is not closed or made a Store: the orders are delivered
-     * and sold there (issue #385, ADR-052). A module reports them as the finding {@code open_orders}; no reason overrides it.
+     * and sold there (issue #385, ADR-052). A module reports them as the finding {@code open_orders}; no reason overrides it. The
+     * branch row is held FOR UPDATE by the close and the flag change, and taking or delivering an order or collecting its fee reads
+     * it FOR SHARE, so no order slips in between the check and the change.
      */
     private void refuseWhileOrdersOpen(BranchResponse branch, String what) {
         refuseWhileOrdersOpen(branch, findings(branch.id()), what);
@@ -343,8 +345,8 @@ class BranchService implements BranchProvisioning {
                 "This branch still has customer orders",
                 branch.name() + " has " + orders.count()
                         + (orders.count() == 1 ? " customer order" : " customer orders")
-                        + " not yet delivered, with their items kept aside. Deliver or cancel them before it is " + what
-                        + ".",
+                        + " not finished: to deliver, with the items kept aside, or with a delivery fee still owed on a"
+                        + " buyer's account. Deliver, cancel or collect them before it is " + what + ".",
                 List.of(),
                 Map.of("open_orders", orders.count()));
     }
@@ -385,7 +387,7 @@ class BranchService implements BranchProvisioning {
                 words.append("has ")
                         .append(f.count())
                         .append(f.count() == 1 ? " customer order" : " customer orders")
-                        .append(" not yet delivered");
+                        .append(" not finished");
             } else if (f.kind().equals("open_stocktakes")) {
                 words.append("has ")
                         .append(f.count())

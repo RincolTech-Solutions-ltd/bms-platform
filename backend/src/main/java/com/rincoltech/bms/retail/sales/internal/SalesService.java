@@ -156,17 +156,27 @@ class SalesService {
 
     /** FR-RET-04, FR-RET-05, FR-RET-11. */
     Sale record(SaleRequest r) {
-        return record(r, null, false);
+        return record(r, null, null);
     }
 
     /**
-     * As {@link #record(SaleRequest)}, for the delivery of a customer order (issue #385, ADR-052): {@code creditAmount}, when not
-     * null, is what actually goes on the buyer's credit (the items less the part paid at the door, plus a delivery fee left on
-     * the account), the amount the credit limit is checked against; {@code agreed} means the lines carry the prices agreed when
-     * the order was taken, already checked then, so the price floor, the price override permission and the inactive product are
-     * not checked again (the stock is). Every other rule of a sale holds.
+     * How a line of a customer order was priced when the order was taken (issue #385): {@code source} is the order line's price
+     * source (null without price lists), {@code overriddenBy} who changed the price then (the person who took the order), when
+     * the source is override.
      */
-    Sale record(SaleRequest r, Long creditAmount, boolean agreed) {
+    record Agreement(String source, UUID overriddenBy) {}
+
+    /**
+     * As {@link #record(SaleRequest)}, for the delivery of a customer order (issue #385, ADR-052): {@code creditDelta}, when not
+     * null, is added to the sale's total to give what actually goes on the buyer's credit (less the part paid at the door, plus a
+     * delivery fee left on the account), the amount the credit limit is checked against; {@code agreements}, one per line, means
+     * the lines carry the prices agreed when the order was taken, already checked then, so the price floor, the price override
+     * permission and the inactive product are not checked again (the stock is). A price changed when the order was taken stays an
+     * override, for the person who changed it; an agreed price that today's price list would price otherwise is order_agreed,
+     * which the Controls page does not count again. Every other rule of a sale holds.
+     */
+    Sale record(SaleRequest r, Long creditDelta, List<Agreement> agreements) {
+        boolean agreed = agreements != null;
         UUID branch = branches.resolveStocking("retail.sale.create", r.branchId());
         // ADR-033: a store never sells; with branch_roles off every branch acts as both.
         roles.requireMaySell(branch);
@@ -209,7 +219,7 @@ class SalesService {
         LocalDate dueDate = r.dueDate() != null || account == null ? r.dueDate() : account.dueDate(saleDate);
         String currency = tenant.profile().currency();
         Principal principal = CurrentPrincipal.require();
-        Priced priced = priceLines(branch, saleDate, buyer, r.priceListId(), r.lines(), problems, agreed);
+        Priced priced = priceLines(branch, saleDate, buyer, r.priceListId(), r.lines(), problems, agreements);
         Chosen list = priced.list();
         List<NewLine> lines = priced.lines();
         long total = lines.stream().mapToLong(NewLine::lineTotalMinor).reduce(0, Math::addExact);
@@ -219,7 +229,7 @@ class SalesService {
                 : accounts.enforceLimit(
                         buyer.id(),
                         account,
-                        creditAmount == null ? total : creditAmount,
+                        creditDelta == null ? total : Math.addExact(total, creditDelta),
                         branch,
                         r.creditOverrideReason());
         UUID id = UUID.randomUUID();
@@ -351,10 +361,10 @@ class SalesService {
             UUID priceListId,
             List<SaleLineRequest> requests,
             List<FieldProblem> problems) {
-        return priceLines(branch, saleDate, buyer, priceListId, requests, problems, false);
+        return priceLines(branch, saleDate, buyer, priceListId, requests, problems, null);
     }
 
-    /** As above; {@code agreed} prices lines a customer order agreed on (issue #385): see {@link #record(SaleRequest, Long, boolean)}. */
+    /** As above; {@code agreements} prices lines a customer order agreed on (issue #385): see {@link #record(SaleRequest, Long, List)}. */
     Priced priceLines(
             UUID branch,
             LocalDate saleDate,
@@ -362,7 +372,8 @@ class SalesService {
             UUID priceListId,
             List<SaleLineRequest> requests,
             List<FieldProblem> problems,
-            boolean agreed) {
+            List<Agreement> agreements) {
+        boolean agreed = agreements != null;
         String currency = tenant.profile().currency();
         Principal principal = CurrentPrincipal.require();
         boolean priced = pricing.on();
@@ -416,10 +427,19 @@ class SalesService {
                 price = d.priceMinor();
                 String source = d.source();
                 String reason = null;
-                if (l.unitPriceMinor() != null && l.unitPriceMinor() != d.priceMinor() && agreed) {
-                    // The price agreed on a customer order was checked when the order was taken (issue #385).
+                Agreement agreement = agreed ? agreements.get(i) : null;
+                UUID overriddenBy = null;
+                if (agreement != null && "override".equals(agreement.source()) && l.unitPriceMinor() != null) {
+                    // A price changed when the customer order was taken (issue #385): an override once, for whoever
+                    // changed it.
                     price = l.unitPriceMinor();
                     source = "override";
+                    reason = blankToNull(l.priceOverrideReason());
+                    overriddenBy = agreement.overriddenBy();
+                } else if (agreed && l.unitPriceMinor() != null && l.unitPriceMinor() != d.priceMinor()) {
+                    // The price agreed on the order, which today's list would price otherwise: kept, not a new change.
+                    price = l.unitPriceMinor();
+                    source = "order_agreed";
                     reason = blankToNull(l.priceOverrideReason());
                 } else if (l.unitPriceMinor() != null && l.unitPriceMinor() != d.priceMinor()) {
                     if (!principal.may(SalesPricing.OVERRIDE, branch)) {
@@ -439,7 +459,8 @@ class SalesService {
                     price = l.unitPriceMinor();
                     source = "override";
                 }
-                linePricing = new LinePricing(source, d.listId(), d.breakMinQty(), d.priceMinor(), reason);
+                linePricing =
+                        new LinePricing(source, d.listId(), d.breakMinQty(), d.priceMinor(), reason, overriddenBy);
             }
             if (pack != null) {
                 BigDecimal baseQty = unit.baseQty();

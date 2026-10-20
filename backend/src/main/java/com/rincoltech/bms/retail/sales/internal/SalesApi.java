@@ -92,9 +92,9 @@ final class SalesApi {
                     "How the price of a line was chosen; absent on a line made without the price_lists capability")
     record LinePrice(
             @Schema(
-                    description =
-                            "retail (the product's sell price), list (a price list item) or override (the seller's"
-                                    + " price instead of the resolved one)")
+                    description = "retail (the product's sell price), list (a price list item), override (the seller's"
+                            + " price instead of the resolved one) or order_agreed (the price agreed on a customer"
+                            + " order that today's list would price otherwise, issue #385)")
             String source,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) UUID priceListId,

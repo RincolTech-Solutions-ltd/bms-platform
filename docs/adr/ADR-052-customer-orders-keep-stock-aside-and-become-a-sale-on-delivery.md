@@ -48,7 +48,11 @@ Controls page all read `retail_sales`.
    (`SalesService.record(request, creditAmount, agreed)`): the price override permission, the price floor and the inactive product (or
    pack) are not checked again, since they were checked when the order was taken and the goods are already promised; the stock, the
    branch, the credit limit and every other rule of a sale are. So a price list change, a cost that rose above the agreed price, an item
-   switched off since, or a deliverer who may not change prices never blocks a delivery.
+   switched off since, or a deliverer who may not change prices never blocks a delivery. The order line keeps how its price was chosen
+   (source, list, break, resolved price, and for a price changed then the reason and who changed it). On the sale line a price changed
+   when the order was taken stays `override` with `price_overridden_by` naming that person, so the Controls page counts it once, for
+   them; any other agreed price that today's list prices otherwise is `order_agreed`, which the Controls page does not count. The delivery
+   fees report leaves out an order whose sale was voided.
 4. **Delivery is one transaction through the ordinary sale path.** It locks the order row, then the credit buyer's row when customer accounts
    are on and the sale is on credit (the sale path's own order), releases what the order kept, calls `SalesService.record` (stock, the
    revenue and cost entries, credit and its limit, the receipt number, the audit), records the part paid now on a credit sale with
@@ -62,8 +66,9 @@ Controls page all read `retail_sales`.
    items and the fee by that method; part payment and all later (credit) take at least the fee now (422 `delivery_fee_unpaid`), the fee
    first and the rest as a payment on the credit sale; paying everything with credit chosen is refused (422 `paid_in_full`). A credit
    buyer on the list (a wholesale or account customer) may have it put on the account instead (`fee_on_account`, credit only): the entry
-   debits trade debtors with the sale as subledger, the fee counts in the buyer's exposure for the credit limit until it is paid, and it is
-   paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
+   debits trade debtors with the sale as subledger, and until it is paid the fee is owed with that sale wherever a buyer's debt is read
+   (the credit limit exposure, the buyer list and balance, the account statement as its own lines, credit control, the customer ageing,
+   the credit counted when the buyer pays, and the check that refuses to make the shop a Store or to close it); it is paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
    sale of a delivered order reverses its fee entry in the same transaction and writes `sale_voided` in the history; a sale whose fee on
    account was already paid is not voided here (422 `order_fee_paid`). The cash book counts a cash fee as takings on the day of delivery
    (or of its later payment) and, when the sale is voided, among the voids of the day of the void, as it does a voided cash sale, so a past
@@ -89,7 +94,7 @@ when, where the orders come from and why they were cancelled.
 
 **Worse:** a balance column that every guarded movement now reads; a stock-take can leave a balance below what orders keep, which the order
 then shows when it is delivered and refused; a fee on account is owed in the ledger and on the order, but not in the customer statement or
-the ageing, which read sales only (a follow-up); writing off a credit sale leaves its fee on account owed; the order's lines are fixed
+the ageing; it is paid through its own route, not by a payment on account; writing off a credit sale leaves its fee on account owed; the order's lines are fixed
 (editing them is a follow-up issue); item photos in the order picker come with item variants (#384).
 
 **Watch for:** `reserved_qty` must always equal the base quantities of the open orders of that branch and product; a test proves it after

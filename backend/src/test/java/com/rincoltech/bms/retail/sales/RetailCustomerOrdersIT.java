@@ -168,6 +168,18 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
     }
 
+    /** Every debit (or every credit) posted to an account of the tenant. */
+    long side(String systemKey, boolean debit) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT coalesce(sum(%s), 0) FROM journal_lines l JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE l.tenant_id = ? AND a.system_key = ?
+                        """.formatted(debit ? "l.debit" : "l.credit"))
+                .params(t.tenantId(), systemKey)
+                .query(Long.class)
+                .single();
+    }
+
     static String code(ResponseEntity<JsonNode> r) {
         return r.getBody().get("code").asString();
     }
@@ -685,6 +697,12 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(day.get("cash_sale_voids_minor").asLong()).isEqualTo(13_000);
         JsonNode history = api.get("/orders/" + id, ORDERS).getBody().get("history");
         assertThat(history.get(history.size() - 1).get("step").asString()).isEqualTo("sale_voided");
+        assertThat(api.get("/orders/" + id, ORDERS).getBody().get("sale_voided").asBoolean())
+                .isTrue();
+        // The delivery fee report leaves the order out: its fee was reversed with the sale.
+        JsonNode fees = api.get("/orders/reports/delivery-fees", ORDERS).getBody();
+        assertThat(fees.get("orders").asLong()).isZero();
+        assertThat(fees.get("fees_minor").asLong()).isZero();
     }
 
     /**
@@ -704,7 +722,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                 .get("lines")
                 .get(0);
         assertThat(line.get("unit_price_minor").asLong()).isEqualTo(10_000);
-        assertThat(line.get("price").get("source").asString()).isEqualTo("override");
+        // Kept as the agreed price, not a new change of price (the Controls page does not count it).
+        assertThat(line.get("price").get("source").asString()).isEqualTo("order_agreed");
         assertThat(line.get("price").get("override_reason").asString()).startsWith("Price agreed on order OR");
         // The till still refuses that price to a seller who may not change it.
         Map<String, Object> till = new LinkedHashMap<>();
@@ -952,5 +971,201 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(api.post("/orders/" + id + "/cancel", Map.of("reason", "Test changed mind"), ORDERS)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
+    }
+
+    // ---- delta review: a fee on account is owed everywhere, prices agreed on the order and the Controls page -----
+
+    UUID creditBuyer(String name) {
+        capability("customer_accounts");
+        return RetailTestSupport.id(api.post("/customers", Map.of("name", name), ADMIN));
+    }
+
+    ResponseEntity<JsonNode> payFee(UUID order, String key, String perms) {
+        return api.postKeyed("/orders/" + order + "/fee-payment", Map.of("method", "cash"), perms, "*", key);
+    }
+
+    /**
+     * FR-RET-53: items paid in full at the door and the fee on the account: the buyer owes the fee on the buyer list, the account,
+     * the customer ageing and the statement; the shop cannot be made a store while it is owed; paid later in cash, it counts in the
+     * cash book on the day it is paid; a replay of the payment with the same key pays once; a holder of the sale permission alone
+     * collects it.
+     */
+    @Test
+    void aFeeOnTheAccountIsOwedEverywhereUntilItIsPaid() {
+        api.stockUp(hq, product, "5");
+        UUID buyer = creditBuyer("Test Buyer 06");
+        Map<String, Object> b = body(hq, "whatsapp", 2_000, List.of(line(product, "1")));
+        b.put("customer_id", buyer);
+        UUID id = RetailTestSupport.id(order(b));
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("fee_on_account", true);
+        pay.put("paid_now_minor", 10_000);
+        pay.put("paid_now_method", "cash");
+        ResponseEntity<JsonNode> done = deliver(id, pay);
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("owed_minor").asLong()).isEqualTo(2_000);
+
+        // The buyer list, the account and the ageing say the buyer owes the fee.
+        JsonNode listed = null;
+        for (JsonNode c : api.get("/customers", ADMIN).getBody().get("items")) {
+            if (c.get("id").asString().equals(buyer.toString())) {
+                listed = c;
+            }
+        }
+        assertThat(listed).isNotNull();
+        assertThat(listed.get("balance_minor").asLong()).isEqualTo(2_000);
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
+                        .getBody()
+                        .get("balance_minor")
+                        .asLong())
+                .isEqualTo(2_000);
+        String ageing = api.get("/reports/customer-ageing", ADMIN + ",retail.credit.manage")
+                .getBody()
+                .toString();
+        assertThat(ageing).contains("\"owed_minor\":2000");
+        JsonNode statement =
+                api.get("/customers/" + buyer + "/statement", ADMIN).getBody();
+        List<String> kinds = new ArrayList<>();
+        statement.get("lines").forEach(l -> kinds.add(l.get("kind").asString()));
+        assertThat(kinds).contains("delivery_fee");
+        assertThat(statement.get("closing_minor").asLong()).isEqualTo(2_000);
+
+        // The shop is not made a store while the fee is owed there.
+        String perms = "core.branches.manage,core.branches.read";
+        String etag = http.exchange(
+                        "/api/v1/branches/" + hq,
+                        HttpMethod.GET,
+                        new org.springframework.http.HttpEntity<>(api.headers(perms, "*", Map.of())),
+                        JsonNode.class)
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> store = http.exchange(
+                "/api/v1/branches/" + hq,
+                HttpMethod.PATCH,
+                new org.springframework.http.HttpEntity<>(
+                        Map.of("sells_goods", false), api.headers(perms, "*", Map.of("If-Match", etag))),
+                JsonNode.class);
+        assertThat(store.getStatusCode()).as("%s", store.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(store)).isEqualTo("branch_has_open_credit_sales");
+
+        // Paid later in cash, by someone who may take payments but not manage orders; a replay with the same key pays
+        // once.
+        String key = UUID.randomUUID().toString();
+        String seller = "retail.sale.create,retail.sale.read";
+        ResponseEntity<JsonNode> paid = payFee(id, key, seller);
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> replay = payFee(id, key, seller);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
+        // Paid once: the sale and the fee are both settled in trade debtors.
+        assertThat(account("trade_debtors", true)).isZero();
+        assertThat(side("trade_debtors", false)).isEqualTo(12_000);
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
+                        .getBody()
+                        .get("balance_minor")
+                        .asLong())
+                .isZero();
+        JsonNode day = api.get(
+                        "/reports/cash/daily?branch_id=" + hq + "&from=" + today() + "&to=" + today(),
+                        "retail.cashbook.read")
+                .getBody()
+                .get("items")
+                .get(0);
+        assertThat(day.get("cash_takings_minor").asLong()).isEqualTo(12_000);
+    }
+
+    /** FR-RET-53: voiding the sale of an order whose fee is still on the account reverses the fee: Dr 4120, Cr trade debtors. */
+    @Test
+    void voidingASaleWithAnUnpaidFeeOnTheAccountReversesTheFee() {
+        api.stockUp(hq, product, "5");
+        UUID buyer = creditBuyer("Test Buyer 08");
+        Map<String, Object> b = body(hq, "phone", 2_000, List.of(line(product, "1")));
+        b.put("customer_id", buyer);
+        UUID id = RetailTestSupport.id(order(b));
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("fee_on_account", true);
+        String sale = deliver(id, pay).getBody().get("sale_id").asString();
+        assertThat(account("trade_debtors", true)).isEqualTo(12_000);
+        ResponseEntity<JsonNode> voided =
+                api.post("/sales/" + sale + "/void", Map.of("reason", "Test void reason"), ADMIN);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(account("trade_debtors", true)).isZero();
+        assertThat(account("delivery_income", false)).isZero();
+        // The fee's reversal is the only debit of delivery fees and the only credit of trade debtors besides the sale's
+        // void.
+        assertThat(side("delivery_income", true)).isEqualTo(2_000);
+        assertThat(side("trade_debtors", false)).isEqualTo(12_000);
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
+                        .getBody()
+                        .get("balance_minor")
+                        .asLong())
+                .isZero();
+        assertThat(payFee(id, UUID.randomUUID().toString(), ORDERS).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    /**
+     * FR-RET-51, FR-RET-53: a price changed when the order was taken is one changed price on the Controls page, for the person
+     * who took the order and not for the one who delivered it; a price agreed on the order that today's list prices otherwise is
+     * not counted at all.
+     */
+    @Test
+    void aPriceChangedOnTheOrderCountsOnceForWhoeverChangedIt() {
+        api.stockUp(hq, product, "5");
+        capability("price_lists");
+        Map<String, Object> changed = line(product, "1");
+        changed.put("unit_price_minor", 9_000);
+        changed.put("price_override_reason", "Test regular customer price");
+        UUID a = RetailTestSupport.id(api.postKeyed(
+                "/orders",
+                body(hq, "whatsapp", 0, List.of(changed)),
+                ORDERS + ",retail.price.override",
+                "*",
+                UUID.randomUUID().toString()));
+        UUID b = placed("1", 0);
+        api.editPrices(product, Map.of("cost_minor", 6_000, "sell_minor", 12_000, "reason", "Test new price"), ADMIN);
+        RetailTestSupport deliverer = new RetailTestSupport(http, t);
+        String saleA = deliverer
+                .postKeyed(
+                        "/orders/" + a + "/deliver",
+                        Map.of("payment_method", "cash"),
+                        ORDERS,
+                        "*",
+                        UUID.randomUUID().toString())
+                .getBody()
+                .get("sale_id")
+                .asString();
+        String saleB = deliverer
+                .postKeyed(
+                        "/orders/" + b + "/deliver",
+                        Map.of("payment_method", "cash"),
+                        ORDERS,
+                        "*",
+                        UUID.randomUUID().toString())
+                .getBody()
+                .get("sale_id")
+                .asString();
+        JsonNode lineA =
+                api.get("/sales/" + saleA, ADMIN).getBody().get("lines").get(0).get("price");
+        assertThat(lineA.get("source").asString()).isEqualTo("override");
+        assertThat(lineA.get("override_reason").asString()).isEqualTo("Test regular customer price");
+        JsonNode lineB =
+                api.get("/sales/" + saleB, ADMIN).getBody().get("lines").get(0).get("price");
+        assertThat(lineB.get("source").asString()).isEqualTo("order_agreed");
+        String controls = ADMIN + ",retail.controls.read";
+        assertThat(api.get("/controls/records?metric=price_overrides&user_id=" + api.userId(), controls)
+                        .getBody()
+                        .get("items"))
+                .hasSize(1);
+        assertThat(api.get("/controls/records?metric=price_overrides&user_id=" + deliverer.userId(), controls)
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
+        assertThat(api.get("/controls/records?metric=price_overrides", controls)
+                        .getBody()
+                        .get("items"))
+                .hasSize(1);
     }
 }

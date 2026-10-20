@@ -5,8 +5,9 @@
 -- Numbered V70: main is at V67, the installable app (#380) takes V68 and item variants (#384) is expected to take V69. Flyway runs
 -- with outOfOrder off, so the file is renamed at merge to the next free number in merge order.
 --
--- Expand only, safe on a populated database. Three new tables, one new column on retail_stock_balances, one chart account and one
--- permission. No existing row changes and a tenant that never takes an order writes nothing.
+-- Expand only, safe on a populated database. Three new tables, one new column on retail_stock_balances, one nullable column and a
+-- wider price check on retail_sale_lines, one chart account and one permission. No existing row changes and a tenant that never takes
+-- an order writes nothing.
 --
 -- Locks, said plainly. Flyway runs this file in one transaction, so the locks are held to the commit. ADD COLUMN with a constant
 -- default is a catalogue change in PostgreSQL 16 (no table rewrite), but it takes ACCESS EXCLUSIVE on retail_stock_balances for the
@@ -15,6 +16,9 @@
 -- ROW EXCLUSIVE on each referenced table (tenants, branches, retail_customers, retail_products, retail_units, retail_sales,
 -- journal_entries) until the commit, which blocks writes to them, not reads; the new tables are empty. The chart seed touches only
 -- gl_accounts.
+--
+-- retail_sale_lines (a large table): ADD COLUMN without a default is a catalogue change; the price check is dropped and added again
+-- NOT VALID under the same short ACCESS EXCLUSIVE lock (no scan), then validated with SHARE UPDATE EXCLUSIVE, which lets sales go on.
 --
 -- The first statement sets lock_timeout to five seconds (as V26, V48, V49, V59 and V64 do): if a lock cannot be had the migration
 -- fails and is retried, rather than every writer on the table queueing behind it. SET LOCAL lasts to the commit.
@@ -238,8 +242,10 @@ CREATE TRIGGER retail_customer_orders_guard_update BEFORE UPDATE ON retail_custo
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_customer_order_lines: what was ordered, in the unit it was ordered in (unit_id, a pack of the units capability, or null
--- for the base unit), at the price agreed per that unit; base_qty is what the order keeps aside in base units. Fixed once written:
--- a change of items is a cancelled order and a new one.
+-- for the base unit), at the price agreed per that unit; base_qty is what the order keeps aside in base units. While price lists are
+-- on, how the price was chosen is kept as on a sale line (price_source, the list, the break, the resolved price) and a price the
+-- seller changed when taking the order is an override with its reason and who made it (overridden_by); on delivery that override is
+-- carried to the sale line once, for that person. Fixed once written: a change of items is a cancelled order and a new one.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_customer_order_lines (
@@ -253,7 +259,17 @@ CREATE TABLE retail_customer_order_lines (
     base_qty         numeric(14,3) NOT NULL CHECK (base_qty > 0),
     unit_price_minor bigint        NOT NULL CHECK (unit_price_minor >= 0 AND unit_price_minor <= 10000000000000),
     line_total_minor bigint        NOT NULL CHECK (line_total_minor >= 0 AND line_total_minor <= 10000000000000),
+    price_source              text CHECK (price_source IN ('retail', 'list', 'override')),
+    price_list_id             uuid,
+    price_break_min_qty       numeric(14,3),
+    resolved_unit_price_minor bigint CHECK (resolved_unit_price_minor >= 0),
+    price_override_reason     varchar(300),
+    overridden_by             uuid,
     UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, price_list_id) REFERENCES retail_price_lists (tenant_id, id),
+    CHECK ((price_source = 'override') = (price_override_reason IS NOT NULL AND btrim(price_override_reason) <> ''
+                                          AND overridden_by IS NOT NULL)),
+    CHECK ((price_source IS NULL) = (resolved_unit_price_minor IS NULL)),
     UNIQUE (tenant_id, order_id, line_no),
     FOREIGN KEY (tenant_id, order_id) REFERENCES retail_customer_orders (tenant_id, id),
     FOREIGN KEY (tenant_id, product_id) REFERENCES retail_products (tenant_id, id),
@@ -289,3 +305,29 @@ SELECT bms_make_append_only('retail_customer_order_events');
 -- The quick entry also finds a credit buyer by the last nine digits of the contact. CREATE INDEX takes a SHARE lock on
 -- retail_customers while it builds (reads go on, a new buyer waits); the table is small.
 CREATE INDEX retail_customers_phone ON retail_customers (tenant_id, right(bms_digits(contact), 9)) WHERE contact IS NOT NULL;
+
+-- ---------------------------------------------------------------------------------------------
+-- retail_sale_lines: the sale line of a delivered order. price_source order_agreed is a price agreed on the order that today's price
+-- list would have priced differently: kept with the resolved price and the reason ("Price agreed on order ..."), and not counted by
+-- the Controls page as a changed price. A price changed when the order was taken stays override, and price_overridden_by names who
+-- changed it (the person who took the order), so the Controls page counts it once, for that person, and never for whoever delivered.
+-- ---------------------------------------------------------------------------------------------
+
+ALTER TABLE retail_sale_lines ADD COLUMN price_overridden_by uuid;
+ALTER TABLE retail_sale_lines DROP CONSTRAINT retail_sale_lines_price_chk;
+ALTER TABLE retail_sale_lines
+    ADD CONSTRAINT retail_sale_lines_price_chk CHECK (
+        (price_source IS NULL AND price_list_id IS NULL AND price_break_min_qty IS NULL
+            AND resolved_unit_price_minor IS NULL AND price_override_reason IS NULL)
+        OR (price_source = 'retail' AND price_list_id IS NULL AND price_break_min_qty IS NULL
+            AND resolved_unit_price_minor IS NOT NULL AND resolved_unit_price_minor >= 0
+            AND price_override_reason IS NULL)
+        OR (price_source = 'list' AND price_list_id IS NOT NULL AND price_break_min_qty IS NOT NULL
+            AND price_break_min_qty >= 0 AND resolved_unit_price_minor IS NOT NULL
+            AND resolved_unit_price_minor >= 0 AND price_override_reason IS NULL)
+        OR (price_source IN ('override', 'order_agreed') AND resolved_unit_price_minor IS NOT NULL
+            AND resolved_unit_price_minor >= 0
+            AND price_override_reason IS NOT NULL AND btrim(price_override_reason) <> ''
+            AND char_length(price_override_reason) <= 300
+            AND (price_list_id IS NULL) = (price_break_min_qty IS NULL))) NOT VALID;
+ALTER TABLE retail_sale_lines VALIDATE CONSTRAINT retail_sale_lines_price_chk;

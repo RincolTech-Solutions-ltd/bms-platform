@@ -174,7 +174,8 @@ export function OrderSummary({ order, branchName }: { order: Order; branchName?:
       <p className="hint">Items {money(order.items_total_minor ?? 0)}, delivery {money(order.delivery_fee_minor ?? 0)}, <strong>total {money(order.total_minor ?? 0)}</strong></p>
       {order.notes && <p className="hint">{order.notes}</p>}
       {order.status === 'delivered' && <p className="hint">Delivered {showDate(order.delivered_on)}, sale {order.sale_no}</p>}
-      {order.fee_method === 'account' && <p className="hint">{order.fee_paid_on ? `Delivery fee paid on ${showDate(order.fee_paid_on)}` : 'Delivery fee on the customer account, not paid yet'}</p>}
+      {order.sale_voided && <p className="hint">The sale was voided, and its delivery fee with it.</p>}
+      {order.fee_method === 'account' && !order.sale_voided && <p className="hint">{order.fee_paid_on ? `Delivery fee paid on ${showDate(order.fee_paid_on)}` : 'Delivery fee on the customer account, not paid yet'}</p>}
       {order.status === 'cancelled' && <p className="hint">Cancelled because: {order.cancel_reason}</p>}
     </>
   );

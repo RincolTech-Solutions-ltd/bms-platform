@@ -124,7 +124,7 @@ export function OrderPage({ orderId }: { orderId: string }) {
         {o && isOpen(o) && <OrderActions order={o} />}
       </section>
       {o && isOpen(o) && <ChangeDetails key={o.version} order={o} />}
-      {o && o.status === 'delivered' && o.fee_method === 'account' && !o.fee_paid_on && holdsAt(me, 'retail.sale.create', o.branch_id) && <PayFee order={o} />}
+      {o && o.status === 'delivered' && o.fee_method === 'account' && !o.fee_paid_on && !o.sale_voided && holdsAt(me, 'retail.sale.create', o.branch_id) && <PayFee order={o} />}
       {o?.sale_id && !saleOpen && (
         <p><button type="button" className="btn-sm" onClick={() => setSaleOpen(true)}>Open sale {o.sale_no}</button></p>
       )}
