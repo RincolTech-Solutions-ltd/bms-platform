@@ -694,16 +694,18 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     void aReturnCreditedToTheBalanceIsSpreadOverTheTillsThatTookTheMoney() {
         capability(Map.of("customer_accounts", true));
         onPaymentFromTheStart();
+        UUID cheap = api.product("CRD-3", 200, 1_000);
+        api.importedBalance(hq, cheap, "1000");
         UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 12"), ADMIN));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("branch_id", hq);
         body.put("sale_date", ago(1).toString());
         body.put("payment_method", "credit");
         body.put("customer_id", buyer);
-        body.put("lines", List.of(Map.of("product_id", product, "qty", "4")));
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "2"), Map.of("product_id", cheap, "qty", "2")));
         UUID sale = RetailTestSupport.id(
                 api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
-        for (Object[] take : new Object[][] {{br2, 1_500}, {hq, 2_000}}) {
+        for (Object[] take : new Object[][] {{br2, 1_500}, {hq, 500}}) {
             ResponseEntity<JsonNode> receipt = api.postKeyed(
                     "/customers/" + buyer + "/payments",
                     Map.of("branch_id", take[0], "amount_minor", take[1], "method", "cash"),
@@ -712,15 +714,21 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                     UUID.randomUUID().toString());
             assertThat(receipt.getStatusCode()).as("%s", receipt.getBody()).isEqualTo(HttpStatus.CREATED);
         }
-        giveBack(sale, "1", "account");
+        JsonNode before = profit(ago(1), today());
+        // 2,000 paid of 4,000 (cost 1,600): revenue 2,000, cost 800, profit 1,200, split 900 and 300 by what each till
+        // took.
+        assertThat(before.get("profit_minor").asLong()).isEqualTo(1_200);
+        assertThat(field(row(before, br2, today()), "profit_minor")).isEqualTo(900);
+        assertThat(field(row(before, hq, today()), "profit_minor")).isEqualTo(300);
 
+        // The two dear pieces (value 2,000, cost 1,200) go back for credit: nothing is paid out, so the cost no longer
+        // carried is
+        // taken back from both tills in proportion to the money they took, 3 to 1.
+        giveBack(sale, "2", "account");
         JsonNode report = profit(ago(1), today());
-        // 3,500 paid of 4,000; one of four pieces went back for credit, so the sale is worth 3,000 and its profit
-        // 1,200. The
-        // 500 of sales and 300 of cost taken back are shared 2,000 : 1,500, the larger share taking the odd unit.
-        assertThat(report.get("profit_minor").asLong()).isEqualTo(1_200);
-        assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(686);
-        assertThat(field(row(report, br2, today()), "profit_minor")).isEqualTo(514);
+        assertThat(report.get("profit_minor").asLong()).isEqualTo(1_600);
+        assertThat(field(row(report, br2, today()), "profit_minor")).isEqualTo(1_200);
+        assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(400);
     }
 
     @Test
@@ -749,6 +757,15 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         capability(Map.of("customer_accounts", true));
         onPaymentFromTheStart();
         UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 10"), ADMIN));
+        Map<String, Object> sale = new LinkedHashMap<>();
+        sale.put("branch_id", hq);
+        sale.put("sale_date", ago(5).toString());
+        sale.put("payment_method", "credit");
+        sale.put("customer_id", buyer);
+        sale.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        assertThat(api.postKeyed("/sales", sale, ADMIN, "*", UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
         ResponseEntity<JsonNode> refused = api.postKeyed(
                 "/customers/" + buyer + "/payments",
                 Map.of("branch_id", hq, "amount_minor", 500, "method", "cash", "paid_on", ago(2).toString()),
@@ -757,6 +774,30 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(refused.getBody().toString()).contains("backdated_payment");
+    }
+
+    @Test
+    void aPaymentOnAccountForOnlyOlderSalesKeepsItsFreedom() {
+        capability(Map.of("customer_accounts", true));
+        onPayment();
+        settle(ago(2).toString());
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 13"), ADMIN));
+        Map<String, Object> sale = new LinkedHashMap<>();
+        sale.put("branch_id", hq);
+        sale.put("sale_date", ago(5).toString());
+        sale.put("payment_method", "credit");
+        sale.put("customer_id", buyer);
+        sale.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        assertThat(api.postKeyed("/sales", sale, ADMIN, "*", UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> accepted = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 500, "method", "cash", "paid_on", ago(3).toString()),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(accepted.getStatusCode()).as("%s", accepted.getBody()).isEqualTo(HttpStatus.CREATED);
     }
 
     @Test
