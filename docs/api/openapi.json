@@ -4614,6 +4614,11 @@
           "kind" : {
             "type" : "string"
           },
+          "mfa_due_by" : {
+            "description" : "When the tenant's two-step policy will require this user to set up a second factor: only for a user it covers who has none yet and whose grace period is still running, otherwise null (ADR-046)",
+            "format" : "date-time",
+            "type" : "string"
+          },
           "mfa_enabled" : {
             "type" : "boolean"
           },
@@ -4672,6 +4677,10 @@
             },
             "description" : "Guided tours the user finished or dismissed, by tour id (issue #19)",
             "type" : "object"
+          },
+          "two_step_policy" : {
+            "description" : "The tenant's two-step sign-in policy: off, roles or everyone; the PWA recommends turning it on to administrators while it is off (ADR-046)",
+            "type" : "string"
           },
           "unused_recovery_codes" : {
             "format" : "int32",
@@ -16465,6 +16474,16 @@
             "format" : "int32",
             "type" : "integer"
           },
+          "mfa_enforce_from" : {
+            "description" : "When a covered user without a second factor must set one up; null means at once or no requirement (ADR-046)",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "mfa_grace_days" : {
+            "description" : "The grace period in days last chosen for the two-step requirement, or null",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "receipt_footer" : {
             "type" : "string"
           },
@@ -16473,7 +16492,16 @@
             "type" : "boolean"
           },
           "require_mfa_all_staff" : {
+            "description" : "Two-step sign-in is required of every staff user (FR-IAM-06, ADR-046)",
             "type" : "boolean"
+          },
+          "require_mfa_roles" : {
+            "description" : "Staff role keys whose holders must use two-step sign-in (ADR-046); empty when none is chosen",
+            "items" : {
+              "description" : "Staff role keys whose holders must use two-step sign-in (ADR-046); empty when none is chosen",
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "setup_dismissed" : {
             "description" : "True once the business set-up checklist has been dismissed",
@@ -16999,6 +17027,13 @@
             "minimum" : 1,
             "type" : "integer"
           },
+          "mfa_grace_days" : {
+            "description" : "Days a covered user without a second factor may keep signing in before it is required; 0 means at once. Sending it moves the deadline to now plus these days (ADR-046)",
+            "format" : "int32",
+            "maximum" : 90,
+            "minimum" : 0,
+            "type" : "integer"
+          },
           "receipt_footer" : {
             "maxLength" : 500,
             "minLength" : 0,
@@ -17008,7 +17043,17 @@
             "type" : "boolean"
           },
           "require_mfa_all_staff" : {
+            "description" : "Require two-step sign-in of every staff user; the grace period applies (ADR-046)",
             "type" : "boolean"
+          },
+          "require_mfa_roles" : {
+            "description" : "Staff role keys whose holders must use two-step sign-in; an empty list clears the choice (ADR-046)",
+            "items" : {
+              "description" : "Staff role keys whose holders must use two-step sign-in; an empty list clears the choice (ADR-046)",
+              "pattern" : "^[a-z_]{2,40}$",
+              "type" : "string"
+            },
+            "type" : "array"
           },
           "setup_dismissed" : {
             "type" : "boolean"
