@@ -213,7 +213,7 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(near.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
         ResponseEntity<JsonNode> asked = api.get(
-                "/products/similar?description=Double%20Socket%2013A%20Whit&unit_id=" + metres, ADMIN);
+                "/products/similar?description=Double Socket 13A Whit&unit_id=" + metres, ADMIN);
         assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(asked.getBody().get("exact")).isEmpty();
         JsonNode similar = asked.getBody().get("similar");
@@ -222,19 +222,19 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(similar.toString()).contains(first.toString()).doesNotContain("Hammer");
 
         ResponseEntity<JsonNode> exact = api.get(
-                "/products/similar?description=double%20socket%2C%2013a%20white&unit_id=" + metres, ADMIN);
+                "/products/similar?description=double socket, 13a white&unit_id=" + metres, ADMIN);
         assertThat(exact.getBody().get("exact")).hasSize(1);
         assertThat(exact.getBody().get("exact").get(0).get("code").asString()).isEqualTo("NM-1");
 
         // The same name in another unit is not an exact match: it is shown as close, with distance 0.
         ResponseEntity<JsonNode> otherUnit = api.get(
-                "/products/similar?description=double%20socket%2013a%20white&unit_id=" + rolls, ADMIN);
+                "/products/similar?description=double socket 13a white&unit_id=" + rolls, ADMIN);
         assertThat(otherUnit.getBody().get("exact")).isEmpty();
         assertThat(otherUnit.getBody().get("similar").get(0).get("distance").asInt()).isZero();
 
         // An item being edited never matches itself.
         ResponseEntity<JsonNode> self = api.get(
-                "/products/similar?description=Double%20Socket%2013A%20White&unit_id=" + metres + "&exclude_id=" + first,
+                "/products/similar?description=Double Socket 13A White&unit_id=" + metres + "&exclude_id=" + first,
                 ADMIN);
         assertThat(self.getBody().get("exact")).isEmpty();
 
