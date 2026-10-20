@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** {@code /api/v1/retail/controls} (chapter 7 section 7.11.20; issue #357, ADR-045): read only, one permission. */
+/** {@code /api/v1/retail/controls} (chapter 7 section 7.11.20; issue #357, ADR-047): read only, one permission. */
 @RestController
 @RequestMapping(path = "/api/v1/retail/controls", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "retail-controls")

@@ -39,7 +39,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The Controls page (issue #357, group 1; ADR-045): cards with the trend against the period before, grouped tables with
+ * The Controls page (issue #357, group 1; ADR-047): cards with the trend against the period before, grouped tables with
  * a rate per 100 sales, the individual records behind a group, and the repeat patterns (a person or an item whose rate
  * is more than twice the shop's own). Everything is read-only and under the caller's {@code retail.controls.read}
  * branch scope; the one figure judged against cost needs {@code retail.profit.read} in every branch covered.
@@ -63,8 +63,14 @@ class ControlsService {
     static final BigDecimal TWICE = BigDecimal.valueOf(2);
 
     /** The cards that need no cost, in the order the page draws them. */
-    private static final List<String> CARDS =
-            List.of("voided_sales", "quick_cancels", "returns", "price_overrides", "discounts");
+    private static final List<String> CARDS = List.of(
+            "voided_sales",
+            "quick_cancels",
+            "returns",
+            "price_overrides",
+            "discounts",
+            "restock_voids",
+            "quantity_corrections");
 
     private final ControlsRepository repo;
     private final CurrentTenant tenant;
@@ -117,8 +123,8 @@ class ControlsService {
                     a.valueMinor(),
                     b.count(),
                     b.valueMinor(),
-                    rate(a.salesAffected(), salesNow.count()),
-                    rate(b.salesAffected(), salesBefore.count()),
+                    stock(metric) ? null : rate(a.salesAffected(), salesNow.count()),
+                    stock(metric) ? null : rate(b.salesAffected(), salesBefore.count()),
                     shareBp(a.valueMinor(), salesNow.totalMinor())));
         }
         return new Summary(
@@ -388,6 +394,11 @@ class ControlsService {
         return bp.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0 ? Integer.MAX_VALUE : bp.intValue();
     }
 
+    /** A restock voided or a quantity corrected: not about sales, so counted without a rate. */
+    private static boolean stock(String metric) {
+        return ControlsRepository.STOCK_METRICS.contains(metric);
+    }
+
     /** Whether the capability a card depends on is on; the cards of the sales themselves always are. */
     private boolean tracked(String metric) {
         return switch (metric) {
@@ -423,7 +434,8 @@ class ControlsService {
             throw ApiException.validation(List.of(new FieldProblem(
                     "metric",
                     "invalid",
-                    "metric is voided_sales, quick_cancels, returns, price_overrides, discounts or below_cost.")));
+                    "metric is voided_sales, quick_cancels, returns, price_overrides, discounts,"
+                            + " below_cost, restock_voids or quantity_corrections.")));
         }
         if (metric.equals("below_cost") && !AnalyticsSupport.profitVisible(principal, filter)) {
             throw new ApiException(

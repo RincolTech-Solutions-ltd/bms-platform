@@ -1,4 +1,4 @@
--- V93: the Controls page (issue #357, group 1; ADR-045). The number is a placeholder: the coordinator renames the file to the
+-- V93: the Controls page (issue #357, group 1; ADR-047). The number is a placeholder: the coordinator renames the file to the
 -- next free number when it merges, since Flyway runs with outOfOrder off.
 --
 -- `retail.controls.read`: read the Controls page, which counts voids, returns, changed prices, discounts, sales below cost

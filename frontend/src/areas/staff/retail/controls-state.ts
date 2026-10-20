@@ -4,7 +4,7 @@ import { clockTime } from './cash-state';
 import { showPercent } from './maths';
 import { parseChain } from './sales-chain-state';
 
-// The Controls page (issue #357, group 1; ADR-045): the pure rules behind the screen. The words are plain on purpose:
+// The Controls page (issue #357, group 1; ADR-047): the pure rules behind the screen. The words are plain on purpose:
 // "Sales cancelled", "Goods taken back", "per 100 sales". The page lists what happened and compares it with the period
 // before; it does not judge anyone, so there is no ranking and no colour for "bad".
 
@@ -25,9 +25,13 @@ export const LEVEL_PLURALS: Record<ControlsLevel, string> = { branch: 'shops', u
 const LINE_METRICS: readonly string[] = ['price_overrides', 'discounts', 'below_cost'];
 export const isLineMetric = (metric: string): boolean => LINE_METRICS.includes(metric);
 
+/** A restock voided or a quantity corrected: about the stock, not about sales, so counted with no rate and no sale to open. */
+const STOCK_METRICS: readonly string[] = ['restock_voids', 'quantity_corrections'];
+export const isStockMetric = (metric: string): boolean => STOCK_METRICS.includes(metric);
+
 /** The chain as it is asked of the server for a kind of thing: no Approver level for the lines of a sale; never empty. */
 export function chainFor(metric: string, chain: readonly ControlsLevel[]): ControlsLevel[] {
-  const kept = isLineMetric(metric) ? chain.filter((l) => l !== 'approver') : [...chain];
+  const kept = isLineMetric(metric) || metric === 'quantity_corrections' ? chain.filter((l) => l !== 'approver') : [...chain];
   return kept.length > 0 ? kept : ['branch'];
 }
 
@@ -82,6 +86,8 @@ export const METRICS: MetricWords[] = [
   { metric: 'returns', title: 'Goods taken back', noun: 'returns', what: () => 'Customer returns, each with a credit note.' },
   { metric: 'price_overrides', title: 'Prices changed', noun: 'lines', what: () => 'Sale lines where the price typed was not the price the system chose. A reason is always given.' },
   { metric: 'discounts', title: 'Discounts given', noun: 'lines', what: () => 'Sale lines sold for less than the price the system chose. The money is what was given up.' },
+  { metric: 'restock_voids', title: 'Restocks cancelled', noun: 'restocks', what: () => 'Restocks entered wrongly and voided. The stock, the books and the prices went back. The value is the restock total. No rate: it is not about sales.' },
+  { metric: 'quantity_corrections', title: 'Quantities corrected', noun: 'corrections', what: () => 'Stock quantities changed on the stock list as an entry mistake or a miscount. The value is the change at the selling price now. No rate: it is not about sales.' },
   { metric: 'below_cost', title: 'Sold below cost', noun: 'lines', what: () => 'Sale lines priced under what the item cost. Shown only to people who may read profit.' },
 ];
 
@@ -161,6 +167,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function groupLine(g: ControlsGroup, metric: string, level: ControlsLevel, money: (minor: number) => string): string {
   const count = g.count ?? 0;
   const sales = g.sales_affected ?? 0;
+  if (isStockMetric(metric)) return `${metric === 'restock_voids' ? plural(count, 'restock', 'restocks') : plural(count, 'correction', 'corrections')}, ${money(g.value_minor ?? 0)}`;
   const head = isLineMetric(metric)
     ? `${plural(count, 'line', 'lines')} in ${plural(sales, 'sale', 'sales')}`
     : metric === 'returns' ? plural(count, 'return', 'returns') : plural(count, 'sale', 'sales');
@@ -182,11 +189,11 @@ export const whoWords = (r: Pick<ControlsRecord, 'user_name' | 'user_status'>): 
   return r.user_status === 'deactivated' ? `${name} (deactivated)` : name;
 };
 
-/** "Cancelled by Test Admin One" or "Taken back by ..."; empty for a price or a cost, which have no approver. */
+/** "Cancelled by Test Admin One", "Taken back by ..." or "Voided by ..."; empty for a price, a cost or a correction, which have no approver. */
 export function approverWords(r: Pick<ControlsRecord, 'approver_id' | 'approver_name' | 'approver_status'>, metric: string): string {
   if (!r.approver_id) return '';
   const name = r.approver_name ?? UNKNOWN_PERSON;
-  return `${metric === 'returns' ? 'Taken back' : 'Cancelled'} by ${r.approver_status === 'deactivated' ? `${name} (deactivated)` : name}`;
+  return `${metric === 'returns' ? 'Taken back' : metric === 'restock_voids' ? 'Voided' : 'Cancelled'} by ${r.approver_status === 'deactivated' ? `${name} (deactivated)` : name}`;
 }
 
 const SALE_ENDING: Record<string, string> = {

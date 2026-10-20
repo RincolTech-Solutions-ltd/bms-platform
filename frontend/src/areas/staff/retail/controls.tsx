@@ -7,7 +7,7 @@ import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import { DateRange, Choice, Empty, Section, rangeProblem } from './analytics-ui';
 import {
-  CONTROLS_LEVELS, LEVEL_NAMES, LEVEL_PLURALS, PERIODS, WITHIN_CHOICES, approverWords, canOpen, chainFor, csvOf, daysIn, dayWords, groupLine, groupTitle, groupsCsv, isLineMetric, orderedCards,
+  CONTROLS_LEVELS, LEVEL_NAMES, LEVEL_PLURALS, PERIODS, WITHIN_CHOICES, approverWords, canOpen, chainFor, csvOf, daysIn, dayWords, groupLine, groupTitle, groupsCsv, isLineMetric, isStockMetric, orderedCards,
   patternSentence, periodRange, previousWords, rateWords, readControlsChain, recordsCsv, selectGroup, shareWords, trendWords, whenWords, whoWords, wordsOf, writeControlsChain,
   type ControlsLevel, type Narrow, type PeriodKind,
 } from './controls-state';
@@ -18,7 +18,7 @@ import { GroupBy } from './sales-group-by';
 import { OpenSale } from './sales';
 import { Gate, Problem, money, useBranchView } from './ui';
 
-// The Controls page (issue #357, group 1; ADR-045): what deserves a second look, metrics first. Cards for the chosen
+// The Controls page (issue #357, group 1; ADR-047): what deserves a second look, metrics first. Cards for the chosen
 // days with the trend against the days before, then the same numbers by shop, person, day and reason (the "Group by"
 // pattern of the sales lists), each group opening onto the individual records, and the people or items that stand
 // out. Read only: nothing here changes a record. Values are sale prices; the below-cost card exists only when the
@@ -61,7 +61,7 @@ function Card({ card, selected, onPick, before, within }: { card: ControlsCard; 
         ) : (
           <>
             <span className="hint">{count === 0 ? 'Nothing in these days' : lines ? `${count} ${count === 1 ? 'line' : 'lines'} in ${sales} ${sales === 1 ? 'sale' : 'sales'}, lines worth ${money(card.value_minor ?? 0)}` : `Worth ${money(card.value_minor ?? 0)}`}</span>
-            <span className="hint">{rateWords(card.rate_per_100)}</span>
+            {!isStockMetric(card.metric ?? '') && <span className="hint">{rateWords(card.rate_per_100)}</span>}
             <span className="hint">{trendWords(count, card.previous_count ?? 0, before)}</span>
             {shareWords(card.share_of_sales_bp) && count > 0 && <span className="hint">{shareWords(card.share_of_sales_bp)}</span>}
           </>
@@ -134,12 +134,12 @@ function RecordRow({ record: r, metric, onOpenSale }: { record: ControlsRecord; 
   return (
     <li className="rt-group ctl-record">
       <div className="ctl-record-line">
-        <span className="rt-group-title">{r.sale_no}{r.reference ? `, credit note ${r.reference}` : ''}</span>
+        <span className="rt-group-title">{r.sale_no ?? (metric === 'quantity_corrections' ? 'Stock correction' : '')}{r.reference ? `, credit note ${r.reference}` : ''}</span>
         <span className="rt-group-total">{money(r.value_minor ?? 0)}</span>
       </div>
-      <span className="rt-group-meta">{whenWords(r.at)}. Sale by {whoWords(r)}{r.branch_name ? ` at ${r.branch_name}` : ''}.{approverWords(r, metric) ? ` ${approverWords(r, metric)}.` : ''}</span>
+      <span className="rt-group-meta">{whenWords(r.at)}. {metric === 'restock_voids' ? 'Restock entered by' : metric === 'quantity_corrections' ? 'Corrected by' : 'Sale by'} {whoWords(r)}{r.branch_name ? ` at ${r.branch_name}` : ''}.{approverWords(r, metric) ? ` ${approverWords(r, metric)}.` : ''}</span>
       <span className="rt-group-meta">{r.reason ? `Reason: ${r.reason}` : 'No reason recorded'}{r.item ? `. Item: ${r.item}` : ''}</span>
-      {onOpenSale && r.sale_id && <button type="button" className="btn-sm" onClick={() => onOpenSale(r.sale_id as string)}>Open sale {r.sale_no}</button>}
+      {onOpenSale && r.sale_id && !isStockMetric(metric) && <button type="button" className="btn-sm" onClick={() => onOpenSale(r.sale_id as string)}>Open sale {r.sale_no}</button>}
     </li>
   );
 }

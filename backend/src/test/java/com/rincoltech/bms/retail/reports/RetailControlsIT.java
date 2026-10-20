@@ -26,7 +26,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The Controls page (issue #357, group 1; ADR-045). Fabricated shop, product B costs 100 and sells for 300. Head office has
+ * The Controls page (issue #357, group 1; ADR-047). Fabricated shop, product B costs 100 and sells for 300. Head office has
  * two sellers: Test Seller One enters 10 sales there, Test Seller Abel (deactivated) enters 30. Branch two has 5 sales by
  * Seller One, and Seller One also sells 3 lines below cost at head office (price 80 against a cost of 100) with the
  * permission that allows it. The administrator, Test Admin One, voids 5 of Seller One's sales (3 "Test wrong item", 2 "Test

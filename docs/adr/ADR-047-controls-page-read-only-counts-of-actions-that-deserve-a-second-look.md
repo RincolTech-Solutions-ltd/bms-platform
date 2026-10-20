@@ -1,4 +1,4 @@
-# ADR-045: The Controls page: read-only counts of the actions that deserve a second look, by shop, person, day, reason and approver
+# ADR-047: The Controls page: read-only counts of the actions that deserve a second look, by shop, person, day, reason and approver
 
 ## Status
 
@@ -37,8 +37,14 @@ discipline, the delivery side for the dev team) are separate decisions and pull 
   by ...", "Taken back by ..."), and never part of the patterns. An approver entered no sales of their own to set a rate
   against, so the Approver level shows counts and values and no rate. The lines of a sale (changed prices, discounts, below
   cost) have no approver, so the level is not offered for them.
-- **Left out until their data is on `main`.** Credit write-offs (#349), restocks voided and quantity corrections (#356).
-  Each becomes one more metric in `ControlsRepository.events` and one more card when its table lands; no other code changes.
+- **Two stock metrics from #356 (ADR-044), with no rate.** `restock_voids` (a restock voided by reversal: the person is who entered
+  the restock, the approver who voided it, the branch the first one it stocked, the value the restock's total, the day the day it
+  was voided, the reason typed) and `quantity_corrections` (a quantity corrected on the stock list: the person who corrected it,
+  the reason code and note, the value the change at the item's selling price now, never a cost). They are not about sales, so
+  there are no sales of a person or a shop to set them against: they have counts and values, no rate and no pattern, and a
+  correction has no approver.
+- **Left out until their data is on `main`.** Credit write-offs (#349). It becomes one more metric in `ControlsRepository.events`
+  and one more card when its table lands; no other code changes.
 - **A rate per 100 sales, never only a count, and in the same units.** A rate is the **sales with such an event** over the
   sales entered by the same shop, person or day in the same days (any status, imported history left out), one decimal, half up.
   A sale with two changed lines counts once ("sales with a changed price per 100 sales"); the line count and the value of the

@@ -19,7 +19,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The Controls page, the metrics that need a capability (issue #357, group 1; ADR-045): prices changed, discounts and
+ * The Controls page, the metrics that need a capability (issue #357, group 1; ADR-047): prices changed, discounts and
  * goods taken back, with their values, and the rate counted over sales and not over lines. Product L1 costs 100 and sells
  * for 300, L2 costs 100 and sells for 500. Sale A has two lines whose price was changed (L1 x 2 at 250, L2 x 1 at 400: a
  * discount of 100 on each), sale B is plain, sale C changes one price upwards (L1 x 2 at 350). So three sales were entered;

@@ -415,7 +415,16 @@ Notes:
   `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
-- `retail.controls.read` (issue #357, ADR-045, migration V93) opens the read-only Controls page: voids, returns, changed prices,
+- Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
+  restock (`POST /retail/purchases/{id}/void`) and reading one restock need `retail.purchase.create`; the void needs it at **every** branch the
+  restock added stock to (403 `permission_denied` when one is outside the caller's scope), because it takes stock out of all of them. Correcting a
+  quantity (`POST /retail/stock/corrections`) needs `retail.stocktake.commit` at the branch, the permission that already adjusts quantities; the
+  issue called it `retail.stock.manage`, which does not exist. Adding a product whose name another product of the same unit has needs
+  `core.settings.manage` (administrators) and a reason, kept on the product and in the audit entry; `GET /retail/products/similar` needs
+  `retail.catalogue.manage`. All three of those permissions are administrator-only today. No maker-checker action is registered for the void or
+  the correction (ADR-044 decision 5): a tenant approval threshold for them is a follow-up, so section 8.4 is unchanged. The audit entries
+  `retail.purchase.voided`, `retail.stock.corrected` and `retail.product.updated` (with the old and new category) carry the reason.
+- `retail.controls.read` (issue #357, ADR-047, migration V93) opens the read-only Controls page: voids, returns, changed prices,
   discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and compares
   them by a rate (a cancelled sale is credited to the person whose sale it was, the approver is shown apart and never ranked), so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
   role. It is a read (not money-moving), scoped by branch like every retail permission: a holder sees only the shops of its scope,

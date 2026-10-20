@@ -23,8 +23,21 @@ import org.springframework.stereotype.Repository;
 @Repository
 class ControlsRepository {
 
-    static final List<String> METRICS =
-            List.of("voided_sales", "quick_cancels", "returns", "price_overrides", "discounts", "below_cost");
+    static final List<String> METRICS = List.of(
+            "voided_sales",
+            "quick_cancels",
+            "returns",
+            "price_overrides",
+            "discounts",
+            "below_cost",
+            "restock_voids",
+            "quantity_corrections");
+
+    /**
+     * The metrics that are not about sales: a restock voided and a quantity corrected. There are no sales of a person or a
+     * shop to set them against, so they have counts and values and no rate, and no pattern.
+     */
+    static final List<String> STOCK_METRICS = List.of("restock_voids", "quantity_corrections");
 
     /** The levels of the grouping chain. */
     static final List<String> LEVELS = List.of("branch", "user", "day", "reason", "approver");
@@ -120,6 +133,48 @@ class ControlsRepository {
             case "below_cost" ->
                 "SELECT 'below_cost'" + lineColumns("CAST(NULL AS text)", "l.line_total_minor") + lines
                         + " AND l.line_total_minor < l.line_cost_minor";
+            // A restock voided (ADR-044): the person is who entered the restock, the approver who voided it, the branch
+            // the first
+            // one it stocked; sale_id and sale_no carry the restock's id and number. The value is the restock's total.
+            case "restock_voids" ->
+                "SELECT 'restock_voids'"
+                        + COLUMNS.formatted(
+                                "p.id",
+                                "p.purchase_no",
+                                "CAST(NULL AS text)",
+                                "(SELECT min(m.branch_id) FROM retail_stock_movements m WHERE m.tenant_id = p.tenant_id"
+                                        + " AND m.source_type = 'retail.purchase' AND m.source_id = p.id"
+                                        + " AND m.kind = 'purchase')",
+                                "p.created_by",
+                                "v.voided_on",
+                                "v.created_at",
+                                "v.reason",
+                                "p.total_minor",
+                                "CAST(NULL AS text)",
+                                "v.voided_by")
+                        + " FROM retail_purchase_voids v JOIN retail_purchases p ON p.tenant_id = v.tenant_id"
+                        + " AND p.id = v.purchase_id WHERE v.voided_on >= :from AND v.voided_on <= :to";
+            // A quantity corrected on the stock list (ADR-044): the person is who corrected it, the reason the code and
+            // the
+            // note, the value the change at the item's selling price now (never a cost), the day the day it was made.
+            case "quantity_corrections" ->
+                "SELECT 'quantity_corrections'"
+                        + COLUMNS.formatted(
+                                "CAST(NULL AS uuid)",
+                                "CAST(NULL AS text)",
+                                "CAST(NULL AS text)",
+                                "c.branch_id",
+                                "c.created_by",
+                                "(c.created_at AT TIME ZONE :tz)::date",
+                                "c.created_at",
+                                "CASE c.reason_code WHEN 'entry_mistake' THEN 'Entry mistake' ELSE 'Miscount' END"
+                                        + " || coalesce(': ' || c.note, '')",
+                                "round(abs(c.new_qty - c.old_qty) * p.sell_minor)::bigint",
+                                "p.description || ' (' || trim_scale(c.old_qty)::text || ' to ' ||"
+                                        + " trim_scale(c.new_qty)::text || ')'",
+                                "CAST(NULL AS uuid)")
+                        + " FROM retail_stock_corrections c JOIN retail_products p ON p.tenant_id = c.tenant_id"
+                        + " AND p.id = c.product_id WHERE c.created_at >= :fromAt AND c.created_at < :toAt";
             default -> throw new IllegalArgumentException("metric " + metric);
         };
     }
@@ -238,11 +293,13 @@ class ControlsRepository {
             default -> "'all'";
         };
         // An approver entered no sales of their own to set a rate against: the join below finds nothing.
-        String salesJoin = switch (level) {
-            case "reason" -> "'all'";
-            case "approver" -> "'-'";
-            default -> "g.k";
-        };
+        String salesJoin = STOCK_METRICS.contains(metric)
+                ? "'-'"
+                : switch (level) {
+                    case "reason" -> "'all'";
+                    case "approver" -> "'-'";
+                    default -> "g.k";
+                };
         // The sales behind a rate answer to the shop and the person above, never to the reason.
         Map<String, Object> salesParams = new LinkedHashMap<>();
         StringBuilder sales = new StringBuilder("SELECT " + salesKey + " AS k, count(*) AS n FROM retail_sales s"

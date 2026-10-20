@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-/** The arithmetic of the Controls page (issue #357; ADR-045): rates, shares and the "more than twice the shop" rule. */
+/** The arithmetic of the Controls page (issue #357; ADR-047): rates, shares and the "more than twice the shop" rule. */
 class ControlsServiceTest {
 
     @Test

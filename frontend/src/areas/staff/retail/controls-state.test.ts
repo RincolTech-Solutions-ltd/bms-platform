@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ControlsGroup, ControlsPattern } from '../../../api/retail-controls';
 import {
-  CONTROLS_LEVELS, approverWords, canOpen, chainFor, csvField, csvOf, dayWords, daysIn, groupLine, groupTitle, groupsCsv, orderedCards, patternSentence, periodRange, previousWords, rateWords,
+  CONTROLS_LEVELS, approverWords, canOpen, chainFor, csvField, isStockMetric, csvOf, dayWords, daysIn, groupLine, groupTitle, groupsCsv, orderedCards, patternSentence, periodRange, previousWords, rateWords,
   readControlsChain, recordsCsv, selectGroup, shareWords, trendWords, whoWords, writeControlsChain,
 } from './controls-state';
 
@@ -91,6 +91,17 @@ describe('a group of a table', () => {
     expect(chainFor('voided_sales', ['branch', 'approver'])).toEqual(['branch', 'approver']);
     expect(chainFor('price_overrides', ['branch', 'approver'])).toEqual(['branch']);
     expect(chainFor('below_cost', ['approver'])).toEqual(['branch']);
+  });
+
+  it('counts a restock cancelled and a quantity corrected with no rate, and a correction has no approver', () => {
+    const money = (m: number) => `UGX ${m}`;
+    expect(isStockMetric('restock_voids')).toBe(true);
+    expect(isStockMetric('voided_sales')).toBe(false);
+    expect(groupLine(user({ count: 2, rate_per_100: undefined }), 'restock_voids', 'user', money)).toBe('2 restocks, UGX 1500');
+    expect(groupLine(user({ count: 1, rate_per_100: undefined }), 'quantity_corrections', 'user', money)).toBe('1 correction, UGX 1500');
+    expect(chainFor('quantity_corrections', ['branch', 'approver'])).toEqual(['branch']);
+    expect(chainFor('restock_voids', ['branch', 'approver'])).toEqual(['branch', 'approver']);
+    expect(approverWords({ approver_id: 'u9', approver_name: 'Test Admin One' }, 'restock_voids')).toBe('Voided by Test Admin One');
   });
 
   it('names who cancelled or took the goods back, and nobody for a price', () => {
