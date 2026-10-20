@@ -470,7 +470,16 @@ old one. Double taps send one request. Refusals are shown in plain words: `plan_
 caps staff users; people still invited count), `last_tenant_admin`, `cannot_deactivate_self` (the screen
 offers no Deactivate on one's own card), `duplicate_email`, `duplicate_phone`, `invalid_phone`.
 Deactivating asks first and ends every session of the person (FR-IAM-08), and closes a link box that was
-made for that person. A call that gets no answer (a dropped connection, a lost response) is worded as
+made for that person. **Reset sign-in (issue #339, FR-IAM-15, ADR-042)** is a button on the card of an
+**active** person who is not a tenant admin and not the signed-in administrator (the server refuses the others with
+409 `admin_reset_by_operator`, `cannot_reset_own_sign_in` and `invalid_status_transition`, so the screen does not offer
+it); it needs `core.users.manage`. It opens a small form on the card that asks the administrator to prove it is still them, the
+way the merchant account screen does: the 6 digits of their own authenticator app when `/me` says `mfa_enabled`,
+otherwise their own password (two-step sign-in is optional, so an administrator without it is not locked out). It calls
+`POST /users/{user_id}/reset-sign-in` through `resetUserSignIn`, clears what was typed as soon as it is sent, shows a
+refusal (`invalid_mfa_code`, `invalid_password`, `account_locked`, the 409s) in plain words on the card, and shows the returned
+link once in the same box as the invitation link (Copy, Send on WhatsApp with a message about choosing a new password,
+closed with "I have sent it"), held only in the screen's state. The platform operator's route for a tenant admin still has no screen. A call that gets no answer (a dropped connection, a lost response) is worded as
 "the answer did not reach your phone, open the staff list: if the person is there, tap Send a new link", and
 a repeated phone or email on the invite screen points at the same list, because the first call may have
 succeeded. The server's field problems (`unknown_branch`, `unknown_role`, `invalid`, `required`) are
