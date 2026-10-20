@@ -261,6 +261,21 @@ class StoreBranchIT extends IntegrationTest {
                 UUID.randomUUID().toString());
         assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(asked)).isEqualTo("refund_branch_required");
+        // With no shop at all in scope the answer says so, in plain words.
+        TestDatabase.owner()
+                .sql("UPDATE branches SET sells_goods = false WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> none = retail.postKeyed(
+                "/sales/" + sale + "/returns",
+                body,
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(none.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(none)).isEqualTo("refund_branch_required");
+        assertThat(none.getBody().get("detail").asString())
+                .isEqualTo("No shop you work at can pay this out; credit the account or ask a shop.");
     }
 
     // ---------------------------------------------------------------------------------------- marking a branch

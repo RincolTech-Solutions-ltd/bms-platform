@@ -753,8 +753,8 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - **Screen.** On the Branches screen an administrator sees, on each open branch that keeps goods, Mark as a store (does not sell). One tap only asks, in plain
   words: the branch keeps its stock and still takes restocks and transfers, but nothing can be sold, paid for or refunded there; Yes, make it a store sends it.
   A store carries the badge "Store (does not sell)" (and the ADR-033 role beside it as "Branch role: store" when roles are on) and the line "Store: holds stock and
-  takes restocks and transfers in and out. Nothing is sold here; only expenses can be paid from it." and offers Sells again (make it a shop), one tap; the Mark as keeping
-  no goods button is not offered on a store. The confirmation says only expenses can be paid from it. A refusal over a credit sale still owing, or a branch that keeps no goods, shows the server's words.
+  takes restocks and transfers in and out. Nothing is sold here. No takings, savings, banking or repayments here; expenses can still be paid." and offers Sells again (make it a shop), one tap; the Mark as keeping
+  no goods button is not offered on a store. The confirmation says there are no takings, savings, banking or repayments there and that expenses can still be paid. A refusal over a credit sale still owing, or a branch that keeps no goods, shows the server's words.
 - **Everywhere else.** The staff bar picker tags a store "(store)"; the staff area does not start on it while a shop exists. The sale screen on a store says "is a
   store, and a store does not sell" with a button for each shop (the same note as a store by branch role, ADR-033). The sale and quotation forms, the account
   payment's receiving branch and the return's "Pay the money out of the till of" list leave stores out (`sellingBranches`). The restock, purchase order, goods

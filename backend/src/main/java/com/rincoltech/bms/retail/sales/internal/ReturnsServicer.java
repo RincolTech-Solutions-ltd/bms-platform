@@ -373,6 +373,14 @@ class ReturnsServicer {
         if (shops.size() == 1) {
             return shops.get(0);
         }
+        if (shops.isEmpty()) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "refund_branch_required",
+                    "No shop can pay this out",
+                    "No shop you work at can pay this out; credit the account or ask a shop.",
+                    List.of());
+        }
         throw new ApiException(
                 HttpStatus.UNPROCESSABLE_CONTENT,
                 "refund_branch_required",

@@ -1,4 +1,4 @@
--- V67 (the merge order is #349 V64, #361 V65, #359 V66, then this one; Flyway runs with outOfOrder off): a branch that
+-- V65 (the merge order is #349 V64, this one V65, #359 V66, #361 V67; Flyway runs with outOfOrder off): a branch that
 -- holds stock but does not sell, called a Store (issue #366, ADR-048).
 --
 -- Expand only, safe on a populated database. One defaulted column and one check on `branches`:

@@ -10799,7 +10799,7 @@ export interface components {
             note?: string;
             /**
              * Format: uuid
-             * @description The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the caller's own branch when their scope is one branch, else the sale's branch. Not used when nothing is paid out in money
+             * @description The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the caller's own branch when their scope is one branch, else the sale's branch. When that branch is a store (it has no till) the one shop the caller may sell at pays, else 422 refund_branch_required (several shops to choose from, or none). Not used when nothing is paid out in money
              */
             refund_branch_id?: string;
             /** @description cash, mobile_money or bank pay the customer back out of the sale's branch. account takes the value off what the customer owes on this credit sale, never below zero; any rest is refunded in money_method */

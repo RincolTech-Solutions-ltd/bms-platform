@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-20, issue #366; the product owner decided the behaviour on 20 October 2026, the ADR is not yet accepted). Builds on ADR-041 and ADR-033. The migration is `V67` (merge order: #349 `V64`, #361 `V65`, #359 `V66`, then this one).
+Proposed (2026-10-20, issue #366; the product owner decided the behaviour on 20 October 2026, the ADR is not yet accepted). Builds on ADR-041 and ADR-033. The migration is `V67` (merge order: #349 `V64`, this one `V65`, #359 `V66`, #361 `V67`).
 
 ## Context
 
@@ -15,7 +15,7 @@ sell)", that works for every business without switching a capability on.
 
 ## Decision
 
-- **A Store is a branch flag, `branches.sells_goods boolean NOT NULL DEFAULT true` (migration V67).** A branch with `sells_goods = false` holds
+- **A Store is a branch flag, `branches.sells_goods boolean NOT NULL DEFAULT true` (migration V65).** A branch with `sells_goods = false` holds
   stock, receives purchases (restocks and goods receipts) and takes transfers in and out, and does not sell. Every existing branch keeps the default,
   so nothing changes until an administrator marks one. The flag sits beside `stocks_goods` (ADR-041) and is changed in the same call
   (`PATCH /branches/{id}`, `sells_goods`, also accepted when a branch is created).
@@ -32,7 +32,7 @@ sell)", that works for every business without switching a capability on.
   refuses with 422 `refund_branch_required` asking the caller to choose a shop. The screen preselects and sends the only shop and drops "The usual branch".
 - **The cash book at a Store.** A Store keeps no cash takings: savings, bankings, withdrawals and advance repayments (any money in) are refused with
   `branch_does_not_sell`. **Expenses are allowed**, because a store may pay transport or casual labour; an advance paid out is money out and stays allowed too.
-  Voids of anything already recorded stay allowed. The Branches screen says so: "Nothing is sold here; only expenses can be paid from it."
+  Voids of anything already recorded stay allowed. The Branches screen says so: "Nothing is sold here. No takings, savings, banking or repayments here; expenses can still be paid." The importer still brings historical sales made at a branch that is now a Store: they are history, not a till being used.
 - **What a Store does.** Restock, goods receipt, purchase order, transfer in and out, stock-take, usage and damage work as for any branch with
   `stocks_goods` true. Shop to store, store to shop and store to store transfers need no new code: transfers were always branch to branch (V22), and
   integration tests now prove each direction.

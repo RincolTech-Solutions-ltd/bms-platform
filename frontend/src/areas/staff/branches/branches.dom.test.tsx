@@ -173,7 +173,7 @@ describe('the store switch (#366)', () => {
     await screen.findByText('Test Shop Two (KLA)');
     fireEvent.click(screen.getAllByRole('button', { name: 'Mark as a store (does not sell)' })[1] as HTMLElement);
     // One tap only asks: nothing is sent until the person confirms.
-    expect(screen.getByText(/Only expenses can be paid\s+from it/)).toBeTruthy();
+    expect(screen.getByText(/No takings, savings, banking or repayments here/)).toBeTruthy();
     expect(api.setSelling).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Yes, make it a store' }));
     expect(await screen.findByText(/2 credit sales that still owe money/)).toBeTruthy();

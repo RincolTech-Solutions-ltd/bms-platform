@@ -423,7 +423,7 @@ stock adjustments there), `closed_at timestamptz`, `closed_reason text` (set by 
 issue #329),
 `sells_goods boolean NOT NULL DEFAULT true` (false: a Store, a branch that holds stock but does not sell; retail refuses a sale, a payment taken and a
 refund paid there with `branch_does_not_sell`), `CHECK (sells_goods OR stocks_goods)` named `branches_store_stocks` (a Store must keep goods; migration
-V67, issue #366, ADR-048).
+V65, issue #366, ADR-048).
 `UNIQUE (tenant_id, code)`; partial unique index
 `ON branches (tenant_id) WHERE is_head_office` (exactly one head office). FR-BR-01.
 

@@ -219,8 +219,8 @@ export function BranchesScreen() {
                       <div className="alert alert-warning stack" role="group" aria-label={`Mark ${branchLabel(b)} as a store`}>
                         <p>
                           Mark <strong>{branchLabel(b)}</strong> as a store? It keeps its stock and still takes purchases, restocks and transfers in and out, but
-                          nothing can be sold there afterwards, and no takings, savings, banking or repayments can be recorded there. Only expenses can be paid
-                          from it. It leaves the sale screen and the till. You can make it a shop again at any time.
+                          nothing can be sold there afterwards. No takings, savings, banking or repayments here; expenses can still be paid from it. It
+                          leaves the sale screen and the till. You can make it a shop again at any time.
                         </p>
                         <p className="cluster">
                           <button type="button" className="rt-primary" disabled={busyId !== null} onClick={() => void selling(b, false)}>
