@@ -66,7 +66,7 @@ factor to them too with no change here.
 
 ## Amendment (2026-10-20, issue #329)
 
-The Branches page (`/staff/setup/branches`, under Business set-up in the breadcrumbs) is built. The welcome tour gains a "Your branches" step for whoever holds `core.branches.read` and is version 7; the page has its own page tour, `page-branches`, started from Help. No new ADR: nothing about how tours work changed.
+The Branches page (`/staff/setup/branches`, under Business set-up in the breadcrumbs) is built. The welcome tour gains a "Your branches" step for whoever holds `core.branches.read` and is version 8 (after the Group by step of version 7); the page has its own page tour, `page-branches`, started from Help. No new ADR: nothing about how tours work changed.
 
 ## Amendment (2026-10-19, issue #319)
 
