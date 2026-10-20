@@ -251,6 +251,8 @@ class PurchasingRepository {
             LocalDate from,
             LocalDate to,
             UUID supplierId,
+            UUID categoryId,
+            UUID productId,
             String status,
             boolean newestFirst,
             Instant afterCreated,
@@ -274,9 +276,18 @@ class PurchasingRepository {
             sql.append(" AND p.purchased_on <= :to");
             params.put("to", Date.valueOf(to));
         }
-        if (supplierId != null) {
-            sql.append(" AND p.supplier_id = :supplierId");
-            params.put("supplierId", supplierId);
+        PurchasesSummaryRepository.appendSupplier(sql, params, supplierId);
+        // A category or an item chosen in the grouped view (issue #350): the restocks that have a line in it.
+        if (categoryId != null) {
+            sql.append(
+                    " AND EXISTS (SELECT 1 FROM retail_purchase_lines cl JOIN retail_products cp ON cp.id = cl.product_id"
+                            + " WHERE cl.purchase_id = p.id AND cp.category_id = :categoryId)");
+            params.put("categoryId", categoryId);
+        }
+        if (productId != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM retail_purchase_lines il WHERE il.purchase_id = p.id"
+                    + " AND il.product_id = :productId)");
+            params.put("productId", productId);
         }
         if ("voided".equals(status)) {
             sql.append(" AND v.id IS NOT NULL");
