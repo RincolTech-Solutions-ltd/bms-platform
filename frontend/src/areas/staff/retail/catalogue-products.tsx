@@ -10,7 +10,7 @@ import { useStaff } from '../context';
 import { BackToCatalogue } from './catalogue';
 import { ExistsPanel, SimilarPanel, existingOf, type ExistingItem } from './catalogue-names';
 import { PackEditor } from './catalogue-packs';
-import { MakeFamilyPanel, SIZES_NEW, VariantNote } from './catalogue-variants';
+import { MakeFamilyPanel, SIZES_JOIN, SIZES_NEW, VariantNote } from './catalogue-variants';
 import { ScreenLink } from './screen-link';
 import { GroupControls, GroupedCards, useCategoryGroups } from './category-groups';
 import { Gate, Problem, Success, money, useProfitAccess, useToast } from './ui';
@@ -358,6 +358,7 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
       <p className="cluster">
         <button type="button" onClick={onAdd} data-tour="product-add">Add an item</button>
         <Link className="btn-sm" to={SIZES_NEW as never} data-tour="product-add-sizes">Add an item with sizes and colours</Link>
+        <Link className="btn-sm" to={SIZES_JOIN as never} data-tour="product-join-sizes">Join items as sizes of one item</Link>
       </p>
       <div data-tour="product-search"><SearchBox id="items-search" label="Search by name, code or category" search={search} fetching={finding} count={page.data ? items.length : undefined} more={page.hasNextPage} /></div>
       <div className="rt-row" data-tour="product-filters">

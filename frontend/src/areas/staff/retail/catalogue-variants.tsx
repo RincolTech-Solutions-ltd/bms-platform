@@ -5,7 +5,8 @@ import { RETAIL_CURRENCY, businessToday, retail, type Product, type VariantLine 
 import { MAX_VARIANTS, planVariants, repeatedCodes, splitOptions, variantKey, variantLabel, type PlannedVariant } from '../../../api/retail-variants';
 import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
-import { Gate, Problem, money, useProfitAccess } from './ui';
+import { duplicateReasonOf, existingOf } from './catalogue-names';
+import { Gate, ProductPicker, Problem, money, useProfitAccess } from './ui';
 
 // Items with sizes and colours (issue #384, ADR-051): the owner of a baby clothes shop chooses the sizes and the prints once and
 // every combination becomes a variant with its own code, price and stock. A variant is an item of its own everywhere else (sale,
@@ -14,6 +15,7 @@ import { Gate, Problem, money, useProfitAccess } from './ui';
 // offer the "Size and colour" level. The item's own page is catalogue-family.tsx.
 
 export const SIZES_NEW = '/staff/retail/catalogue/products/sizes/new';
+export const SIZES_JOIN = '/staff/retail/catalogue/products/sizes/join';
 export const familyPath = (id: string) => `/staff/retail/catalogue/products/sizes/${id}`;
 
 /** True when the business has an item with sizes and colours: the sales lists then offer the "Size and colour" level. */
@@ -50,6 +52,31 @@ export function VariantNote({ product }: { product: Product }) {
       <span className="badge badge-info">{variantLabel(v.size, v.colour)}</span>{' '}
       <Link to={familyPath(v.family_id) as never} aria-label={`All sizes and colours of ${v.family_name ?? 'this item'}`}>All sizes and colours</Link>
     </p>
+  );
+}
+
+/**
+ * The refusal of a name another item of the same unit has (ADR-044, one level up), in the owner's words; an administrator may
+ * use it anyway with a reason, which `onAnyway` sends.
+ */
+export function NameTaken({ error, busy, onAnyway }: { error: unknown; busy: boolean; onAnyway: (reason: string) => void }) {
+  const { me } = useStaff();
+  const [reason, setReason] = useState('');
+  const found = existingOf(error);
+  if (!found) return <Problem error={error} />;
+  const admin = found.mayAddAnyway && (me.permissions ?? []).includes('core.settings.manage');
+  const why = duplicateReasonOf(reason);
+  return (
+    <div role="alert" className="alert alert-warning" data-testid="item-name-taken">
+      <p>{found.name} ({found.code}) has this name already. Choose another name{admin ? ', or say why both are needed' : ''}.</p>
+      {admin && (
+        <>
+          <label htmlFor="item-name-reason">Why both are needed</label>
+          <input id="item-name-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} autoComplete="off" />
+          <button type="button" disabled={why === null || busy} onClick={() => why && onAnyway(why)}>Use this name anyway</button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -166,9 +193,10 @@ export function NewFamilyPage() {
   const complete = name.trim() !== '' && baseCode.trim() !== '' && categoryId !== '' && unitId !== '' && sellMinor !== null && costMinor !== null && problem === null;
   const sending = useRef(false);
   const save = useMutation({
-    mutationFn: () => retail.createFamily({
+    mutationFn: (duplicateReason?: string) => retail.createFamily({
       name: name.trim(), base_code: baseCode.trim(), category_id: categoryId, unit_id: unitId, sell_minor: sellMinor ?? 0, cost_minor: costMinor ?? 0,
       sizes: splitOptions(sizes), colours: splitOptions(colours), variants: linesOf(preview.rows, profit),
+      ...(duplicateReason ? { duplicate_reason: duplicateReason } : {}),
     }),
     onSuccess: (family) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -179,7 +207,7 @@ export function NewFamilyPage() {
   const submit = () => {
     if (!complete || save.isPending || sending.current) return;
     sending.current = true;
-    save.mutate();
+    save.mutate(undefined);
   };
   return (
     <Gate screen="products" title="Add an item with sizes and colours">
@@ -221,7 +249,7 @@ export function NewFamilyPage() {
           <VariantPreview rows={preview.rows} profit={profit} onEdit={preview.edit} />
         </section>
         {problem && preview.rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
-        <Problem error={save.error} />
+        {save.error && <NameTaken error={save.error} busy={save.isPending} onAnyway={(reason) => save.mutate(reason)} />}
         <button type="submit" className="rt-primary" data-tour="sizes-save" disabled={!complete || save.isPending}>
           {save.isPending ? 'Saving' : preview.rows.length > 0 ? `Make these ${preview.rows.length}` : 'Make them'}
         </button>
@@ -276,4 +304,91 @@ export function MakeFamilyPanel({ product }: { product: Product }) {
   );
 }
 
+/** One item kept apart until now, and the size and colour it becomes. */
+interface JoinRow {
+  product: Product;
+  size: string;
+  colour: string;
+}
+
+/**
+ * Items you already have, one per size (FR-RET-51): "Cable 1.5mm" and "Cable 2.5mm" typed as two items become the sizes of one
+ * item. Each keeps its code, prices, stock and history; its name becomes the item's with its size and colour.
+ */
+export function JoinPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [rows, setRows] = useState<JoinRow[]>([]);
+  const unit = rows[0]?.product.unit_id;
+  const keys = rows.map((r) => variantKey(r.size.trim() || undefined, r.colour.trim() || undefined));
+  const problem = rows.length === 0
+    ? 'Pick the items that are sizes or colours of one thing.'
+    : rows.some((r) => r.product.unit_id !== unit)
+      ? 'Pick items counted in one unit: the sizes of one item are counted the same way.'
+      : rows.some((r) => r.size.trim() === '' && r.colour.trim() === '')
+        ? 'Give each one its size, its colour or both.'
+        : new Set(keys).size !== keys.length
+          ? 'Two of them have the same size and colour.'
+          : name.trim() === '' ? 'Give the item a name.' : null;
+  const save = useMutation({
+    mutationFn: (duplicateReason?: string) => retail.joinFamily(null, {
+      name: name.trim(),
+      items: rows.map((r) => ({ product_id: r.product.id ?? '', ...(r.size.trim() ? { size: r.size.trim() } : {}), ...(r.colour.trim() ? { colour: r.colour.trim() } : {}) })),
+      ...(duplicateReason ? { duplicate_reason: duplicateReason } : {}),
+    }),
+    onSuccess: (family) => {
+      void queryClient.invalidateQueries({ queryKey: ['retail'] });
+      void navigate({ to: familyPath(family.id ?? '') as never });
+    },
+  });
+  const change = (i: number, patch: Partial<JoinRow>) => setRows((all) => all.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  return (
+    <Gate screen="products" title="Join items as sizes of one item">
+      <p><Link to={'/staff/retail/catalogue/products' as never}>Back to Items</Link></p>
+      <p>Use this when you already have one item per size or colour, such as Cable 1.5mm and Cable 2.5mm. Each keeps its code, price, stock and history, and they show together as one item.</p>
+      <div data-tour="join-name">
+        <label htmlFor="join-name">What is the item called?</label>
+        <input id="join-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="Twin cable" />
+      </div>
+      <section data-tour="join-pick" aria-label="Pick the items">
+        <h2>Pick the items</h2>
+        <ProductPicker
+          id="join-search" showStock={false} addLabel="Add as a size"
+          onAdd={(p) => setRows((all) => (p.variant || all.some((r) => r.product.id === p.id) ? all : [...all, { product: p, size: '', colour: '' }]))}
+        />
+        <p className="hint">An item that is a size of another item already is not added.</p>
+      </section>
+      <section data-tour="join-list" aria-label="Their sizes and colours">
+        <h2>{rows.length === 0 ? 'Their sizes and colours' : `${rows.length} picked`}</h2>
+        {rows.length === 0 && <p className="empty-state">The items you pick show here, each with a box for its size and colour.</p>}
+        <ul style={{ listStyle: 'none', padding: 0 }}>
+          {rows.map((r, i) => (
+            <li key={r.product.id} className="rt-card">
+              <p><strong>{r.product.description}</strong> ({r.product.code})</p>
+              <div className="rt-row">
+                <div>
+                  <label htmlFor={`join-size-${r.product.id}`}>Size</label>
+                  <input id={`join-size-${r.product.id}`} value={r.size} maxLength={30} onChange={(e) => change(i, { size: e.target.value })} autoComplete="off" aria-label={`Size of ${r.product.description}`} />
+                </div>
+                <div>
+                  <label htmlFor={`join-colour-${r.product.id}`}>Colour or print</label>
+                  <input id={`join-colour-${r.product.id}`} value={r.colour} maxLength={30} onChange={(e) => change(i, { colour: e.target.value })} autoComplete="off" aria-label={`Colour of ${r.product.description}`} />
+                </div>
+              </div>
+              <button type="button" className="btn-ghost" onClick={() => setRows((all) => all.filter((_, j) => j !== i))}>Take it off the list</button>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {problem && rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
+      {save.error && <NameTaken error={save.error} busy={save.isPending} onAnyway={(reason) => save.mutate(reason)} />}
+      <button type="button" className="rt-primary" data-tour="join-save" disabled={problem !== null || save.isPending} onClick={() => save.mutate(undefined)}>
+        {save.isPending ? 'Saving' : 'Join them as one item'}
+      </button>
+    </Gate>
+  );
+}
+
 export const NewFamilyRoute = createLazyRoute(SIZES_NEW)({ component: NewFamilyPage });
+export const JoinRoute = createLazyRoute(SIZES_JOIN)({ component: JoinPage });

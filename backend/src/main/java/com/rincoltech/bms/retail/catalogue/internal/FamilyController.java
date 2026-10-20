@@ -4,6 +4,7 @@ import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CreateFamilyRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Family;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.JoinRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.MakeFamilyRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UpdateFamilyRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -85,6 +86,32 @@ class FamilyController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .eTag(String.valueOf(f.version()))
                 .body(f);
+    }
+
+    // New routes of the join action (issue #384 review): a new item from items kept apart, or more sizes for one.
+    @PostMapping("/product-families/join")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary =
+                    "Make items kept apart (one per size) the sizes and colours of one new item; each keeps its stock and"
+                            + " history (issue #384)",
+            operationId = "joinRetailProductsAsFamily")
+    ResponseEntity<Family> join(@Valid @RequestBody JoinRequest request) {
+        Family created = service.join(null, request);
+        return ResponseEntity.created(URI.create("/api/v1/retail/product-families/" + created.id()))
+                .eTag(String.valueOf(created.version()))
+                .body(created);
+    }
+
+    @PostMapping("/product-families/{family_id}/join")
+    @RequiresPermission("retail.catalogue.manage")
+    @Operation(
+            summary =
+                    "Add items kept apart to an item as more sizes and colours; each keeps its stock and history (issue #384)",
+            operationId = "joinRetailProductsToFamily")
+    ResponseEntity<Family> joinInto(@PathVariable("family_id") UUID id, @Valid @RequestBody JoinRequest request) {
+        Family f = service.join(id, request);
+        return ResponseEntity.ok().eTag(String.valueOf(f.version())).body(f);
     }
 
     @PostMapping("/products/{product_id}/family")

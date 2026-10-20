@@ -3724,6 +3724,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/product-families/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make items kept apart (one per size) the sizes and colours of one new item; each keeps its stock and history (issue #384) */
+        post: operations["joinRetailProductsAsFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/product-families/{family_id}": {
         parameters: {
             query?: never;
@@ -3740,6 +3757,23 @@ export interface paths {
         head?: never;
         /** Rename an item with sizes and colours or change its category, under If-Match (issue #384) */
         patch: operations["updateRetailProductFamily"];
+        trace?: never;
+    };
+    "/api/v1/retail/product-families/{family_id}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add items kept apart to an item as more sizes and colours; each keeps its stock and history (issue #384) */
+        post: operations["joinRetailProductsToFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/retail/product-families/{family_id}/variants": {
@@ -6136,6 +6170,8 @@ export interface components {
              * @description Each variant's cost unless it has its own; 0 without retail.profit.read
              */
             cost_minor: number;
+            /** @description Issue #384, ADR-044 one level up: an item's name is kept once per unit against other items with sizes and items without; only an administrator (core.settings.manage) may use a name that exists, with a reason of at least 5 characters. Without it that is refused with 422 duplicate_product_name */
+            duplicate_reason?: string;
             /** @description The item's name, as Baby romper */
             name: string;
             /**
@@ -9919,6 +9955,29 @@ export interface components {
             /** Format: date */
             transfer_date?: string;
         };
+        /** @description An item without sizes that becomes one size or colour of the item */
+        RetailJoinItem: {
+            /** @description A colour or a print */
+            colour?: string;
+            /** Format: uuid */
+            product_id: string;
+            size?: string;
+        };
+        /** @description Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps its id, code, prices, stock and history; its name becomes the item's name with its size and colour, its category the item's. They must share one unit and have no sizes yet */
+        RetailJoinRequest: {
+            /** @description What later variant codes start with; by default the first item's code */
+            base_code?: string;
+            /**
+             * Format: uuid
+             * @description The item's category; by default the first item's
+             */
+            category_id?: string;
+            /** @description Issue #384, ADR-044 one level up: an item's name is kept once per unit against other items with sizes and items without; only an administrator (core.settings.manage) may use a name that exists, with a reason of at least 5 characters. Without it that is refused with 422 duplicate_product_name */
+            duplicate_reason?: string;
+            items: components["schemas"]["RetailJoinItem"][];
+            /** @description The item's name; required for a new item */
+            name?: string;
+        };
         RetailLandedCost: {
             /** Format: uuid */
             bill_id?: string;
@@ -10227,6 +10286,8 @@ export interface components {
             /** @description The colour or print of the stock the item holds now */
             colour?: string;
             colours?: string[];
+            /** @description Issue #384, ADR-044 one level up: an item's name is kept once per unit against other items with sizes and items without; only an administrator (core.settings.manage) may use a name that exists, with a reason of at least 5 characters. Without it that is refused with 422 duplicate_product_name */
+            duplicate_reason?: string;
             /** @description The size of the stock the item holds now */
             size?: string;
             sizes?: string[];
@@ -14173,6 +14234,8 @@ export interface components {
         UpdateRetailFamilyRequest: {
             /** Format: uuid */
             category_id?: string;
+            /** @description Issue #384, ADR-044 one level up: an item's name is kept once per unit against other items with sizes and items without; only an administrator (core.settings.manage) may use a name that exists, with a reason of at least 5 characters. Without it that is refused with 422 duplicate_product_name */
+            duplicate_reason?: string;
             name?: string;
         };
         /** @description Omitted fields are unchanged; prices change only through /prices */
@@ -20910,6 +20973,30 @@ export interface operations {
             };
         };
     };
+    joinRetailProductsAsFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailJoinRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
     getRetailProductFamily: {
         parameters: {
             query?: never;
@@ -20946,6 +21033,32 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateRetailFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
+    joinRetailProductsToFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailJoinRequest"];
             };
         };
         responses: {

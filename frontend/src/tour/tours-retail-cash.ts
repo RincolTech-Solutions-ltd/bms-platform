@@ -32,7 +32,7 @@ const step = (s: Omit<TourStep, 'module'>): TourStep => ({ module: 'retail', ...
 
 export const productsPage: Tour = {
   id: 'page-products',
-  version: 2,
+  version: 3,
   title: 'This page: items',
   audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
   autoStart: false,
@@ -40,6 +40,7 @@ export const productsPage: Tour = {
   steps: [
     step({ id: 'add', target: 'product-add', title: 'Add an item', body: 'Tap here to add something you sell. Type the code, the name, pick the category and the unit, then the price.' }),
     step({ id: 'sizes', target: 'product-add-sizes', title: 'Sizes and colours', body: 'Sell one design in several sizes or prints? Tap here, type the sizes and the colours once, and each one gets its own code, price and stock.' }),
+    step({ id: 'join', target: 'product-join-sizes', title: 'One item per size?', body: 'If you typed each size as its own item, tap here to join them. Each keeps its stock and history.' }),
     step({ id: 'search', target: 'product-search', title: 'Find an item', body: 'Type a name, a code or a category. The list narrows as you type.' }),
     step({ id: 'filters', target: 'product-filters', title: 'Narrow the list', body: 'Pick a category, or choose Switched off to see items you no longer sell.' }),
     step({ id: 'edit', target: 'product-list', title: 'Change an item', body: 'Tap Edit on an item to change its name, category or unit. Tap Stock to see how much of it you hold.' }),
@@ -60,6 +61,22 @@ export const sizesNewPage: Tour = {
     step({ id: 'options', target: 'sizes-options', title: 'Sizes and colours', body: 'Type the sizes, then the colours or prints, each list separated by commas. Every size comes in every colour.' }),
     step({ id: 'preview', target: 'sizes-preview', title: 'Check the list', body: 'Each one shows its code and price. Change a price here if a bigger size costs more.' }),
     step({ id: 'save', target: 'sizes-save', title: 'Make them', body: 'Tap here. Each size and colour is then an item you can sell, restock, move and count on its own.' }),
+  ],
+};
+
+/** Issue #384: items kept apart, one per size, joined as the sizes of one item. */
+export const sizesJoinPage: Tour = {
+  id: 'page-sizes-join',
+  version: 1,
+  title: 'This page: join items as sizes',
+  audience: (me) => held(me, CATALOGUE) && held(me, STOCK_READ),
+  autoStart: false,
+  page: '/staff/retail/catalogue/products/sizes/join',
+  steps: [
+    step({ id: 'name', target: 'join-name', title: 'Name the item', body: 'Type what the item is called, such as Twin cable. Each size gets this name with its size.' }),
+    step({ id: 'pick', target: 'join-pick', title: 'Pick the items', body: 'Find each item that is one size or colour, and tap Add as a size.' }),
+    step({ id: 'list', target: 'join-list', title: 'Say which size', body: 'Type the size or the colour of each one. They keep their codes, prices and stock.' }),
+    step({ id: 'save', target: 'join-save', title: 'Join them', body: 'Tap here. They now show together as one item, and sell and restock as before.' }),
   ],
 };
 
@@ -313,7 +330,7 @@ export const customerAgeingPage: Tour = {
 };
 
 export const RETAIL_CASH_TOURS: readonly Tour[] = [
-  productsPage, sizesNewPage, sizesPage, categoriesPage, unitsPage, suppliersPage, buyersPage, importPage,
+  productsPage, sizesNewPage, sizesJoinPage, sizesPage, categoriesPage, unitsPage, suppliersPage, buyersPage, importPage,
   bankingPage, bankingReportPage, expensesPage, expensesReportPage, expenseListsPage, withdrawalsPage, advancesPage, cashSummaryPage, savingsPage,
   branchRolesPage, customerGroupsPage, customerAgeingPage,
 ];

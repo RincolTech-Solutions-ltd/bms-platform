@@ -495,7 +495,10 @@ final class CatalogueApi {
 
             @Size(max = 30) List<@Size(max = 30) String> sizes,
             @Size(max = 30) List<@Size(max = 30) String> colours,
-            @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants) {}
+            @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants,
+
+            @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
+            String duplicateReason) {}
 
     @Schema(
             name = "AddRetailVariantsRequest",
@@ -531,13 +534,57 @@ final class CatalogueApi {
 
             @Size(max = 30) List<@Size(max = 30) String> sizes,
             @Size(max = 30) List<@Size(max = 30) String> colours,
-            @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants) {}
+            @Size(max = VariantGrid.MAX_VARIANTS) List<@Valid VariantLine> variants,
+
+            @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
+            String duplicateReason) {}
 
     @Schema(
             name = "UpdateRetailFamilyRequest",
             description =
                     "Omitted fields are unchanged. A new name renames every variant; a new category moves every variant")
-    record UpdateFamilyRequest(@Size(min = 1, max = 200) String name, UUID categoryId) {}
+    record UpdateFamilyRequest(
+            @Size(min = 1, max = 200) String name,
+            UUID categoryId,
+
+            @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
+            String duplicateReason) {}
+
+    static final String ITEM_DUPLICATE_REASON =
+            "Issue #384, ADR-044 one level up: an item's name is kept once per unit against other items with sizes and items"
+                    + " without; only an administrator (core.settings.manage) may use a name that exists, with a reason of at"
+                    + " least 5 characters. Without it that is refused with 422 duplicate_product_name";
+
+    @Schema(name = "RetailJoinItem", description = "An item without sizes that becomes one size or colour of the item")
+    record JoinItem(
+            @NotNull UUID productId,
+            @Size(max = 30) String size,
+
+            @Size(max = 30) @Schema(description = "A colour or a print")
+            String colour) {}
+
+    @Schema(
+            name = "RetailJoinRequest",
+            description =
+                    "Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps"
+                            + " its id, code, prices, stock and history; its name becomes the item's name with its size and colour,"
+                            + " its category the item's. They must share one unit and have no sizes yet")
+    record JoinRequest(
+            @Size(min = 1, max = 200) @Schema(description = "The item's name; required for a new item")
+            String name,
+
+            @Size(min = 1, max = 24)
+            @Schema(description = "What later variant codes start with; by default the first item's code")
+            String baseCode,
+
+            @Schema(description = "The item's category; by default the first item's")
+            UUID categoryId,
+
+            @NotNull @Size(min = 1, max = VariantGrid.MAX_VARIANTS)
+            List<@Valid @NotNull JoinItem> items,
+
+            @Size(max = 300) @Schema(description = ITEM_DUPLICATE_REASON)
+            String duplicateReason) {}
 
     @Schema(name = "RetailBranchStock", description = "What the item holds in one branch, all its variants together")
     record BranchStock(UUID branchId, String qty) {}

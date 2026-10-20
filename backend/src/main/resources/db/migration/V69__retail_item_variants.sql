@@ -40,6 +40,8 @@ CREATE TABLE retail_product_families (
     base_code   varchar(24)  NOT NULL CHECK (base_code = btrim(base_code) AND base_code <> ''),
     category_id uuid         NOT NULL,
     unit_id     uuid         NOT NULL,
+    -- ADR-044 one level up: an administrator who names an item like another item or product of the same unit says why.
+    duplicate_reason varchar(300) CHECK (duplicate_reason IS NULL OR btrim(duplicate_reason) <> ''),
     created_by  uuid,
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, category_id) REFERENCES retail_categories (tenant_id, id),

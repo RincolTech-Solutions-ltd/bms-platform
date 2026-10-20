@@ -177,10 +177,17 @@ class CatalogueRepository {
 
     /** A product found by its name key, for the duplicate refusal and the near-duplicate warning. */
     record NameMatch(
-            UUID id, String code, String description, UUID unitId, String unit, boolean active, String nameKey) {}
+            UUID id,
+            String code,
+            String description,
+            UUID unitId,
+            String unit,
+            boolean active,
+            String nameKey,
+            UUID familyId) {}
 
     private static final String SELECT_NAME = """
-            SELECT p.id, p.code, p.description, p.unit_id, u.name AS unit, p.active, p.name_key
+            SELECT p.id, p.code, p.description, p.unit_id, u.name AS unit, p.active, p.name_key, p.family_id
               FROM retail_products p JOIN retail_units u ON u.id = p.unit_id
             """;
 
@@ -192,7 +199,28 @@ class CatalogueRepository {
                 rs.getObject("unit_id", UUID.class),
                 rs.getString("unit"),
                 rs.getBoolean("active"),
-                rs.getString("name_key"));
+                rs.getString("name_key"),
+                rs.getObject("family_id", UUID.class));
+    }
+
+    /** Issue #384, ADR-044 one level up: an item with sizes and colours whose name has the same key as {@code name}. */
+    record FamilyMatch(UUID id, String baseCode, String name, UUID unitId) {}
+
+    List<FamilyMatch> sameFamilyName(String name, UUID excludeId) {
+        return jdbc.sql("""
+                        SELECT f.id, f.base_code, f.name, f.unit_id FROM retail_product_families f
+                         WHERE bms_name_key(f.name) = bms_name_key(:d)
+                           AND (CAST(:exclude AS uuid) IS NULL OR f.id <> CAST(:exclude AS uuid))
+                         ORDER BY f.name, f.id
+                        """)
+                .param("d", name)
+                .param("exclude", excludeId)
+                .query((rs, n) -> new FamilyMatch(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("base_code"),
+                        rs.getString("name"),
+                        rs.getObject("unit_id", UUID.class)))
+                .list();
     }
 
     /**
@@ -372,7 +400,7 @@ class CatalogueRepository {
                                                      sell_minor, currency, active, created_by, duplicate_reason,
                                                      family_id, variant_size, variant_colour, variant_sort)
                         VALUES (:id, current_setting('app.tenant_id')::uuid, :code, :description, :categoryId, :unitId,
-                                :costMinor, :sellMinor, :currency, true, :createdBy, :duplicateReason,
+                                :costMinor, :sellMinor, :currency, :active, :createdBy, :duplicateReason,
                                 :familyId, :size, :colour, :position)
                         """)
                 .param("familyId", familyId, java.sql.Types.OTHER)
@@ -380,6 +408,7 @@ class CatalogueRepository {
                 .param("colour", colour, java.sql.Types.VARCHAR)
                 .param("position", position, java.sql.Types.INTEGER)
                 .param("duplicateReason", duplicateReason)
+                .param("active", p.active())
                 .param("id", p.id())
                 .param("code", p.code())
                 .param("description", p.description())
@@ -683,19 +712,53 @@ class CatalogueRepository {
                 .optional();
     }
 
-    void insertFamily(UUID id, String name, String baseCode, UUID categoryId, UUID unitId, UUID createdBy) {
+    void insertFamily(
+            UUID id,
+            String name,
+            String baseCode,
+            UUID categoryId,
+            UUID unitId,
+            UUID createdBy,
+            String duplicateReason) {
         jdbc.sql("""
-                        INSERT INTO retail_product_families (id, tenant_id, name, base_code, category_id, unit_id, created_by)
-                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?)
-                        """).params(id, name, baseCode, categoryId, unitId, createdBy).update();
+                        INSERT INTO retail_product_families (id, tenant_id, name, base_code, category_id, unit_id, created_by,
+                                                             duplicate_reason)
+                        VALUES (:id, current_setting('app.tenant_id')::uuid, :name, :base, :category, :unit, :by, :reason)
+                        """)
+                .param("id", id)
+                .param("name", name)
+                .param("base", baseCode)
+                .param("category", categoryId)
+                .param("unit", unitId)
+                .param("by", createdBy)
+                .param("reason", duplicateReason, java.sql.Types.VARCHAR)
+                .update();
     }
 
     /** Rows changed: 0 when the version moved since it was read. */
-    int updateFamily(UUID id, String name, UUID categoryId, int expectedVersion) {
+    int updateFamily(
+            UUID id, String name, UUID categoryId, int expectedVersion, boolean renamed, String duplicateReason) {
         return jdbc.sql("""
-                        UPDATE retail_product_families SET name = ?, category_id = ?, updated_at = now(), version = version + 1
-                         WHERE id = ? AND version = ?
-                        """).params(name, categoryId, id, expectedVersion).update();
+                        UPDATE retail_product_families SET name = :name, category_id = :category, updated_at = now(),
+                               version = version + 1,
+                               duplicate_reason = CASE WHEN :renamed THEN :reason ELSE duplicate_reason END
+                         WHERE id = :id AND version = :version
+                        """)
+                .param("name", name)
+                .param("category", categoryId)
+                .param("renamed", renamed)
+                .param("reason", duplicateReason, java.sql.Types.VARCHAR)
+                .param("id", id)
+                .param("version", expectedVersion)
+                .update();
+    }
+
+    /** A product joining an item with sizes takes the item's category (issue #384). */
+    void setCategory(UUID productId, UUID categoryId) {
+        jdbc.sql("""
+                        UPDATE retail_products SET category_id = ?, updated_at = now(), version = version + 1
+                         WHERE id = ? AND category_id <> ?
+                        """).params(categoryId, productId, categoryId).update();
     }
 
     /** Every variant of an item, active or not, in the item's order. */

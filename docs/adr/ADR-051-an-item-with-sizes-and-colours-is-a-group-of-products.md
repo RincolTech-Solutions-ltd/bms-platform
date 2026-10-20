@@ -43,13 +43,21 @@ movement and every report, and the many rows already on staging would need a def
   order given, each coded from the base code (`ROMP-03M-BLUE`), at the item's prices unless the request names a variant's own code or
   prices. More sizes later skip a combination the item has (`POST /retail/product-families/{id}/variants`). An item without variants is
   given sizes in place (`POST /retail/products/{id}/family`): it becomes the variant of the size and colour its stock is, keeping its id,
-  code, prices, stock and history, and the other combinations are made at its prices. At most 100 variants are made per request.
+  code, prices, stock and history, and the other combinations are made at its prices (switched off when it is). Items kept apart
+  until now, one per size, are joined as the sizes of one item (`POST /retail/product-families/join`, or `.../{id}/join` for one that
+  exists): each keeps its id, code, prices, stock and history; its name becomes the item's with its size and colour, its category
+  the item's; they must share one unit. A size added to an item whose every size is switched off starts switched off. At most 100
+  variants are made per request; a size or colour is one line of at most 30 characters after trimming.
 - **Reports roll up to the item.** The sales and restock summaries group an `item` as the item with sizes (all its variants together)
   or the item without; a new `variant` level splits an item by size and colour, offered in `available_levels` only to a tenant that has
   an item with sizes. Wherever an item id is a filter (`product_id` of the sales and restock lists, `item_id` of the summaries), the id
   of an item with sizes stands for all its variants; ids are unique across both tables. The item's own page sums the stock of its
   variants per branch and in all, over the branches the caller may read. The analytics tables (margins, stock health, sales analysis)
   stay per product, which is now per variant, each named with its size and colour.
+- **One name per item (ADR-044 one level up).** An item's name is kept once per unit against the other items with sizes and the
+  items without (the same key, the same 422 `duplicate_product_name` naming the one that exists, the same add-anyway with a reason
+  for an administrator, kept as `retail_product_families.duplicate_reason`), and an item without sizes cannot take the name of an
+  item with sizes of its unit either.
 - **No new permission.** Making and changing items is `retail.catalogue.manage`, reading them `retail.stock.read`; cost is shown only
   with `retail.profit.read`, as for any product.
 

@@ -1144,6 +1144,11 @@ stock list shows it on its own row.
   colour follows). Links to Items, Record a sale, Restock, Move stock, Stock and Sales.
 - **An existing item** gets **Give this item sizes and colours** on its edit form: the owner says which size or colour its stock is
   now; it keeps its code, prices, stock and history, and the others are made at its prices.
+- **Join items as sizes of one item** (`/staff/retail/catalogue/products/sizes/join`, a third button on Items): for a shop that
+  typed one item per size. Name the item, pick the items with Add as a size, type each one's size or colour, Join them as one item.
+  Each keeps its code, price, stock and history. Tour `page-sizes-join`; `page-products` is version 3 with a Join step.
+- **A name another item has** (on Add an item with sizes and colours and on Join) is refused in plain words naming the one that
+  exists; an administrator may use it anyway with a reason.
 - **A size's own edit form** shows its name, category and unit as the item's, with a link to change them on the item's page, and lets
   the size, colour, code and on sale change. A card in the Items list shows the size and colour and **All sizes and colours**.
 - **All sales, Credit sales and Past restocks (grouped)**: the Item level shows an item with sizes once, every size and colour

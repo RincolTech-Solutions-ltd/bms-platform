@@ -55,4 +55,17 @@ describe('items with sizes and colours in the mock', () => {
     expect(family.variants?.[1]?.sell_minor).toBe(before.sell_minor);
     await expect(api.makeFamily(item?.id ?? '', { size: 'Small' })).rejects.toMatchObject({ code: 'already_has_variants' });
   });
+
+  it('joins items kept apart as the sizes of one item, each keeping its id and stock', async () => {
+    const api = createMockRetail();
+    const all = await api.listProducts({});
+    const a = all[0];
+    const b = all.find((p) => p.unit === a?.unit && p.id !== a?.id);
+    const before = await api.getProduct(a?.id ?? '');
+    const family = await api.joinFamily(null, { name: 'Test joined', items: [{ product_id: a?.id ?? '', size: 'Small' }, { product_id: b?.id ?? '', size: 'Large' }] });
+    expect(family.variants?.map((v) => v.id)).toEqual([a?.id, b?.id]);
+    expect(family.variants?.[0]?.description).toBe('Test joined (Small)');
+    expect(family.variants?.[0]?.stock_on_hand).toBe(before.stock_on_hand);
+    await expect(api.joinFamily(null, { name: 'Again', items: [{ product_id: a?.id ?? '', size: 'S' }] })).rejects.toMatchObject({ code: 'already_has_variants' });
+  });
 });

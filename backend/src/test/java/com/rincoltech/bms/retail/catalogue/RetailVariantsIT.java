@@ -538,4 +538,202 @@ class RetailVariantsIT extends IntegrationTest {
         JsonNode items = summary("/sales/summary?group_by=item");
         assertThat(items.get("levels")).hasSize(1);
     }
+
+    // ---- review of #388: on sale, one name per item, joining items kept apart, sizes on one line
+    // -------------------------
+
+    static final String ADMINISTRATOR = ADMIN + ",core.settings.manage";
+
+    /** An item without variants in this test's category and unit. */
+    UUID plain(String code, String description) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", code);
+        body.put("description", description);
+        body.put("category_id", category);
+        body.put("unit_id", pieces);
+        body.put("cost_minor", 1_000);
+        body.put("sell_minor", 2_000);
+        return RetailTestSupport.id(api.post("/products", body, ADMIN));
+    }
+
+    @Test
+    void frRet51ASwitchedOffItemGivenSizesKeepsEverySizeSwitchedOffAndSoDoesASizeAddedToIt() {
+        UUID old = plain("OFF-1", "Test Old Dress");
+        assertThat(patchProduct(old, Map.of("active", false)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("size", "Small");
+        body.put("sizes", List.of("Small", "Large"));
+        ResponseEntity<JsonNode> r = api.post("/products/" + old + "/family", body, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        for (JsonNode v : r.getBody().get("variants")) {
+            assertThat(v.get("active").asBoolean()).as(v.get("code").asString()).isFalse();
+        }
+        ResponseEntity<JsonNode> more = api.post(
+                "/product-families/" + r.getBody().get("id").asString() + "/variants",
+                Map.of("sizes", List.of("Medium")),
+                ADMIN);
+        assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
+        for (JsonNode v : more.getBody().get("variants")) {
+            assertThat(v.get("active").asBoolean()).as(v.get("code").asString()).isFalse();
+        }
+        // An item on sale gives on-sale sizes.
+        JsonNode f = romper();
+        ResponseEntity<JsonNode> added = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants", Map.of("sizes", List.of("12-18m")), ADMIN);
+        assertThat(added.getBody().get("variants").get(6).get("active").asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void adr044AnItemsNameIsKeptOncePerUnitAgainstItemsWithAndWithoutSizes() {
+        // The HATS case: a shop that has "Test Twin Cable" as an item names an item with sizes the same.
+        UUID existing = plain("TWIN-1", "Test Twin Cable");
+        ResponseEntity<JsonNode> same = createFamily("test  twin cable", "TWIN", List.of("1.5mm", "2.5mm"), List.of());
+        assertThat(same.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(same.getBody().get("code").asString()).isEqualTo("duplicate_product_name");
+        assertThat(same.getBody().get("existing_id").asString()).isEqualTo(existing.toString());
+        assertThat(same.getBody().get("may_add_anyway").asBoolean()).isFalse();
+
+        Map<String, Object> anyway = new LinkedHashMap<>();
+        anyway.put("name", "Test Twin Cable");
+        anyway.put("base_code", "TWIN");
+        anyway.put("category_id", category);
+        anyway.put("unit_id", pieces);
+        anyway.put("cost_minor", 1_000);
+        anyway.put("sell_minor", 2_000);
+        anyway.put("sizes", List.of("1.5mm"));
+        anyway.put("duplicate_reason", "Old item kept for history");
+        assertThat(api.post("/product-families", anyway, ADMIN).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        ResponseEntity<JsonNode> added = api.post("/product-families", anyway, ADMINISTRATOR);
+        assertThat(added.getStatusCode()).as("%s", added.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        // Another item with sizes holds its name too, and a new item without sizes cannot take it either.
+        JsonNode f = romper();
+        ResponseEntity<JsonNode> twice = createFamily("Test Romper", "ROMQ", List.of("Small"), List.of());
+        assertThat(twice.getBody().get("code").asString()).isEqualTo("duplicate_product_name");
+        assertThat(twice.getBody().get("existing_id").asString())
+                .isEqualTo(f.get("id").asString());
+        Map<String, Object> product = new LinkedHashMap<>();
+        product.put("code", "ROMP-PLAIN");
+        product.put("description", "Test Romper");
+        product.put("category_id", category);
+        product.put("unit_id", pieces);
+        product.put("cost_minor", 1);
+        product.put("sell_minor", 2);
+        assertThat(api.post("/products", product, ADMIN).getBody().get("code").asString())
+                .isEqualTo("duplicate_product_name");
+
+        // A rename to a name another item holds is refused the same way.
+        String etag = api.get("/product-families/" + f.get("id").asString(), ADMIN)
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> renamed = api.call(
+                HttpMethod.PATCH,
+                "/product-families/" + f.get("id").asString(),
+                Map.of("name", "Test Twin Cable"),
+                ADMIN,
+                "*",
+                Map.of("If-Match", etag));
+        assertThat(renamed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(renamed.getBody().get("code").asString()).isEqualTo("duplicate_product_name");
+
+        // In another unit the same name is a different thing.
+        Map<String, Object> rolls = new LinkedHashMap<>(anyway);
+        rolls.remove("duplicate_reason");
+        rolls.put("unit_id", api.unit("test-roll"));
+        rolls.put("base_code", "TWINR");
+        assertThat(api.post("/product-families", rolls, ADMIN).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void frRet51ItemsKeptApartOnePerSizeBecomeTheSizesOfOneItemKeepingIdsStockAndHistory() {
+        UUID thin = plain("CAB-15", "Test Cable thin");
+        UUID thick = plain("CAB-25", "Test Cable thick");
+        api.stockUp(hq, thin, "8");
+        api.stockUp(hq, thick, "3");
+        UUID sale = sell(hq, thin, "1");
+        UUID other = api.category("Test Cables");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name", "Test Twin Cable");
+        body.put("category_id", other);
+        body.put(
+                "items",
+                List.of(Map.of("product_id", thin, "size", "1.5mm"), Map.of("product_id", thick, "size", "2.5mm")));
+        ResponseEntity<JsonNode> r = api.post("/product-families/join", body, ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode f = r.getBody();
+        assertThat(f.get("variants")).hasSize(2);
+        JsonNode first = f.get("variants").get(0);
+        assertThat(first.get("id").asString()).isEqualTo(thin.toString());
+        assertThat(first.get("code").asString()).isEqualTo("CAB-15");
+        assertThat(first.get("description").asString()).isEqualTo("Test Twin Cable (1.5mm)");
+        assertThat(first.get("category_id").asString()).isEqualTo(other.toString());
+        assertThat(first.get("stock_on_hand").asString()).isEqualTo("7.000");
+        assertThat(f.get("stock_on_hand").asString()).isEqualTo("10.000");
+        assertThat(f.get("base_code").asString()).isEqualTo("CAB-15");
+        assertThat(api.get("/sales/" + sale, ADMIN)
+                        .getBody()
+                        .get("lines")
+                        .get(0)
+                        .get("product_id")
+                        .asString())
+                .isEqualTo(thin.toString());
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND entity_id = ? AND action = 'retail.product.updated'")
+                        .params(t.tenantId(), thick)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+
+        // A third item joins the item that exists; a size it has, another unit or a size already taken is refused.
+        UUID heavy = plain("CAB-40", "Test Cable heavy");
+        String familyId = f.get("id").asString();
+        ResponseEntity<JsonNode> clash = api.post(
+                "/product-families/" + familyId + "/join",
+                Map.of("items", List.of(Map.of("product_id", heavy, "size", "2.5MM"))),
+                ADMIN);
+        assertThat(clash.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(clash.getBody().get("code").asString()).isEqualTo("duplicate_variant");
+        ResponseEntity<JsonNode> joined = api.post(
+                "/product-families/" + familyId + "/join",
+                Map.of("items", List.of(Map.of("product_id", heavy, "size", "4mm"))),
+                ADMIN);
+        assertThat(joined.getStatusCode()).as("%s", joined.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(joined.getBody().get("variants")).hasSize(3);
+        UUID roll = api.product("CAB-ROLL", 1, 2);
+        assertThat(api.post(
+                                "/product-families/" + familyId + "/join",
+                                Map.of("items", List.of(Map.of("product_id", roll, "size", "6mm"))),
+                                ADMIN)
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("unit_differs");
+        assertThat(api.post(
+                                "/product-families/join",
+                                Map.of("name", "Test Other", "items", List.of(Map.of("product_id", thin, "size", "S"))),
+                                ADMIN)
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("already_has_variants");
+    }
+
+    @Test
+    void frRet51ASizeOrColourIsOneLineOfAtMostThirtyLetters() {
+        ResponseEntity<JsonNode> lineBreak = createFamily("Test Sock", "SOCK", List.of("S\nM"), List.of());
+        assertThat(lineBreak.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(lineBreak.getBody().get("code").asString()).isEqualTo("validation_failed");
+        // Spaces around a size are not part of it.
+        ResponseEntity<JsonNode> trimmed = createFamily("Test Sock", "SOCK", List.of("  Small  "), List.of());
+        assertThat(trimmed.getStatusCode()).as("%s", trimmed.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(trimmed.getBody()
+                        .get("variants")
+                        .get(0)
+                        .get("variant")
+                        .get("size")
+                        .asString())
+                .isEqualTo("Small");
+    }
 }

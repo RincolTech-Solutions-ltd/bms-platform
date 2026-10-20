@@ -61,8 +61,8 @@ final class VariantGrid {
         if (lines != null && !lines.isEmpty()) {
             for (int i = 0; i < lines.size(); i++) {
                 VariantLine l = lines.get(i);
-                String size = clean(l.size());
-                String colour = clean(l.colour());
+                String size = option(l.size(), "variants[" + i + "].size");
+                String colour = option(l.colour(), "variants[" + i + "].colour");
                 if (size == null && colour == null) {
                     throw ApiException.validation(List.of(new FieldProblem(
                             "variants[" + i + "]",
@@ -163,6 +163,26 @@ final class VariantGrid {
         return t.toString();
     }
 
+    /** At most this many characters in a size or a colour, after trimming. */
+    static final int OPTION_MAX = 30;
+
+    /**
+     * A size or colour as the owner typed it: trimmed, null when blank, refused when longer than {@link #OPTION_MAX} or when
+     * it holds a control character (a line break pasted from a spreadsheet).
+     */
+    static String option(String raw, String field) {
+        String t = clean(raw);
+        if (t != null
+                && (t.codePointCount(0, t.length()) > OPTION_MAX
+                        || t.codePoints()
+                                .anyMatch(
+                                        c -> Character.isISOControl(c) || Character.getType(c) == Character.FORMAT))) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    field, "invalid", "Keep a size or colour to " + OPTION_MAX + " letters, on one line.")));
+        }
+        return t;
+    }
+
     /** Trimmed, or null when blank. */
     static String clean(String s) {
         if (s == null) {
@@ -180,7 +200,7 @@ final class VariantGrid {
             return out;
         }
         for (String v : values) {
-            String t = clean(v);
+            String t = option(v, "sizes");
             if (t != null && seen.add(t.toLowerCase(Locale.ROOT))) {
                 out.add(t);
             }

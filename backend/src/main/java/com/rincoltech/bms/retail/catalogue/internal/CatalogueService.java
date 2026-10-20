@@ -328,9 +328,20 @@ class CatalogueService {
         // Issue #384: a variant's item is locked before the variant (the order a rename of the item takes), so the item
         // name
         // read below is the one committed, never one a concurrent rename is replacing.
-        repo.find(id).map(Product::variant).ifPresent(v -> repo.lockFamily(v.familyId()));
+        UUID peeked = repo.find(id)
+                .map(Product::variant)
+                .map(CatalogueApi.VariantOf::familyId)
+                .orElse(null);
+        if (peeked != null) {
+            repo.lockFamily(peeked);
+        }
         Product before = repo.lock(id).orElseThrow(ApiException::notFound);
         if (before.version() != expected) {
+            throw Versions.conflict(before.version());
+        }
+        // The item may have changed between the first read and the lock (the product was just given sizes): read again.
+        if (!java.util.Objects.equals(
+                peeked, before.variant() == null ? null : before.variant().familyId())) {
             throw Versions.conflict(before.version());
         }
         CatalogueApi.VariantOf variant = before.variant();
@@ -356,8 +367,10 @@ class CatalogueService {
                         "variant_follows_item",
                         "Every size and colour of an item has the item's category and unit. Change the category on the item's sizes and colours page.");
             }
-            size = r.variantSize() == null ? variant.size() : VariantGrid.clean(r.variantSize());
-            colour = r.variantColour() == null ? variant.colour() : VariantGrid.clean(r.variantColour());
+            size = r.variantSize() == null ? variant.size() : VariantGrid.option(r.variantSize(), "variant_size");
+            colour = r.variantColour() == null
+                    ? variant.colour()
+                    : VariantGrid.option(r.variantColour(), "variant_colour");
             if (size == null && colour == null) {
                 throw ApiException.validation(
                         List.of(new FieldProblem("variant_size", "invalid", "Keep a size, a colour or both.")));
@@ -485,10 +498,48 @@ class CatalogueService {
         List<CatalogueRepository.NameMatch> same = repo.sameName(description, selfId).stream()
                 .filter(m -> m.unitId().equals(unitId))
                 .toList();
-        if (same.isEmpty()) {
-            return null;
+        if (!same.isEmpty()) {
+            CatalogueRepository.NameMatch existing = same.getFirst();
+            return duplicateOutcome(existing.id(), existing.code(), existing.description(), reason);
         }
-        CatalogueRepository.NameMatch existing = same.getFirst();
+        // Issue #384: an item with sizes and colours of the same unit holds the name too.
+        return repo.sameFamilyName(description, null).stream()
+                .filter(f -> f.unitId().equals(unitId))
+                .findFirst()
+                .map(f -> duplicateOutcome(f.id(), f.baseCode(), f.name(), reason))
+                .orElse(null);
+    }
+
+    /**
+     * Issue #384, ADR-044 one level up: the name of an item with sizes and colours is kept once per unit, against the other
+     * items with sizes and the items without (a size's own name carries its size, so it never clashes). The same refusal as
+     * {@link #acceptName}, and the same way for an administrator to add it anyway with a reason.
+     *
+     * @param excludeFamilyId the item being renamed; null otherwise
+     * @param excludeProducts products that are becoming sizes of this item, whose own names go
+     * @return the reason of an accepted duplicate, or null when the name is new
+     */
+    String acceptItemName(
+            String name, UUID unitId, UUID excludeFamilyId, java.util.Set<UUID> excludeProducts, String reason) {
+        repo.lockName(name);
+        java.util.Optional<CatalogueRepository.NameMatch> plain = repo.sameName(name, null).stream()
+                .filter(m -> m.unitId().equals(unitId) && m.familyId() == null && !excludeProducts.contains(m.id()))
+                .findFirst();
+        if (plain.isPresent()) {
+            return duplicateOutcome(
+                    plain.get().id(), plain.get().code(), plain.get().description(), reason);
+        }
+        return repo.sameFamilyName(name, excludeFamilyId).stream()
+                .filter(f -> f.unitId().equals(unitId))
+                .findFirst()
+                .map(f -> duplicateOutcome(f.id(), f.baseCode(), f.name(), reason))
+                .orElse(null);
+    }
+
+    /** The refusal of a repeated name, or the reason an administrator gave to add it anyway. */
+    private String duplicateOutcome(UUID existingId, String existingCode, String existingName, String reason) {
+        record Existing(UUID id, String code, String description) {}
+        Existing existing = new Existing(existingId, existingCode, existingName);
         boolean admin = CurrentPrincipal.require().hasPermission(ADD_ANYWAY);
         String why = reason == null ? "" : reason.trim();
         if (why.isEmpty()) {

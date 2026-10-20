@@ -41,6 +41,8 @@ export type FamilyChange = S['UpdateRetailFamilyRequest'];
 export type AddVariants = S['AddRetailVariantsRequest'];
 export type MakeFamily = S['RetailMakeFamilyRequest'];
 export type VariantLine = S['RetailVariantLine'];
+/** Items kept apart until now (one per size) becoming the sizes and colours of one item (issue #384). */
+export type JoinRequest = S['RetailJoinRequest'];
 /** The item a product is a variant of, and its size and colour; absent for an item without variants. */
 export type VariantOf = S['RetailProductVariantOf'];
 export type PriceEdit = S['RetailPriceEditRequest'];
@@ -378,6 +380,8 @@ export interface RetailApi {
   addVariants(id: string, body: AddVariants): Promise<Family>;
   /** Gives an item without variants sizes and colours; it keeps its stock and history as one of them. */
   makeFamily(productId: string, body: MakeFamily): Promise<Family>;
+  /** Items kept apart become the sizes and colours of a new item (familyId null) or of one that exists; each keeps its stock and history. */
+  joinFamily(familyId: string | null, body: JoinRequest): Promise<Family>;
   /** The pack sizes of an item (the units capability, issue #194); 404 capability_not_enabled while it is off. */
   listPacks(productId: string): Promise<Pack[]>;
   addPack(productId: string, body: { unit_id: string; factor: string }): Promise<Pack>;
@@ -717,6 +721,12 @@ const realRetail: RetailApi = {
 
   async makeFamily(productId, body) {
     return unwrap(await api.POST('/api/v1/retail/products/{product_id}/family', { params: { path: { product_id: productId } }, body }));
+  },
+
+  async joinFamily(familyId, body) {
+    return familyId
+      ? unwrap(await api.POST('/api/v1/retail/product-families/{family_id}/join', { params: { path: { family_id: familyId } }, body }))
+      : unwrap(await api.POST('/api/v1/retail/product-families/join', { body }));
   },
 
   async listPacks(productId) {

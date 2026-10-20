@@ -522,6 +522,34 @@ export function createMockRetail(): RetailApi {
         return familyOf(f.id);
       }),
 
+    joinFamily: (familyId, body) =>
+      run(() => {
+        const items = body.items ?? [];
+        const picked = items.map((i) => find(i.product_id ?? ''));
+        if (picked.some((p) => p.familyId)) refuse(422, 'already_has_variants', 'One of these is a size or colour of an item already.');
+        const first = picked[0] ?? refuse(422, 'validation_failed', 'Pick at least one item.');
+        if (picked.some((p) => p.unit !== first.unit)) refuse(422, 'unit_differs', 'The sizes of one item are counted in one unit.');
+        let id = familyId;
+        if (!id) {
+          id = nextId('f');
+          const category = body.category_id ? cats.find((c) => c.id === body.category_id)?.name : undefined;
+          families.set(id, { id, name: (body.name ?? '').trim(), baseCode: (body.base_code ?? first.code).slice(0, 24), category: category ?? first.category, unit: first.unit, version: 1, createdAt: new Date().toISOString() });
+        }
+        const f = families.get(id) ?? refuse(404, 'not_found', 'That could not be found.');
+        const taken = new Set([...products.values()].filter((p) => p.familyId === f.id).map((p) => variantKey(p.size, p.colour)));
+        let position = [...products.values()].filter((p) => p.familyId === f.id).length;
+        items.forEach((item, i) => {
+          const p = picked[i] as MockProduct;
+          const size = cleanOption(item.size);
+          const colour = cleanOption(item.colour);
+          if (!size && !colour) refuse(422, 'validation_failed', `Give ${p.description} a size, a colour or both.`);
+          if (taken.has(variantKey(size, colour))) refuse(409, 'duplicate_variant', `The item has ${variantLabel(size, colour)} already. Each one is listed once.`);
+          taken.add(variantKey(size, colour));
+          Object.assign(p, { familyId: f.id, size, colour, position: position++, category: f.category, description: variantDescription(f.name, size, colour), version: (p.version ?? 1) + 1 });
+        });
+        return familyOf(f.id);
+      }),
+
     makeFamily: (productId, body) =>
       run(() => {
         const p = find(productId);
