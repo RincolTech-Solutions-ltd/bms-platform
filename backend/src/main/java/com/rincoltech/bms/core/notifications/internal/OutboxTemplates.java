@@ -149,10 +149,10 @@ class OutboxTemplates {
             "insights.daily_digest",
             new Template("{business_name}: daily brief for {date}", "{text}\n"));
 
-    // Sent to the administrators when two-step sign-in is turned off or narrowed (issue #348, ADR-046): what changed, who, when.
+    // Sent to the administrators when two-step sign-in is turned off or narrowed (issue #348, ADR-046): what changed,
+    // who, when.
     private static final Map<String, Template> EMAIL_POLICY = Map.of(
-            "identity.two_step_policy_weakened",
-            new Template("Two-step sign-in was relaxed for {business_name}", """
+            "identity.two_step_policy_weakened", new Template("Two-step sign-in was relaxed for {business_name}", """
                     Hello,
 
                     {who} changed the two-step sign-in rule of {business_name} on {when}: {change}.

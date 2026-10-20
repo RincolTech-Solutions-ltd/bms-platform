@@ -52,7 +52,9 @@ final class AuthApi {
             String mfaToken,
 
             @Size(max = 200)
-            @Schema(description = "A signed-in user starting their own set-up gives their current password; not needed with an mfa_token")
+            @Schema(
+                    description =
+                            "A signed-in user starting their own set-up gives their current password; not needed with an mfa_token")
             String password) {}
 
     @Schema(name = "MfaConfirmRequest")
