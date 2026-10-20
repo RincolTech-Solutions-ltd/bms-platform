@@ -96,7 +96,7 @@ class WriteOffsRepository {
     }
 
     /** An administrator who counts for the second-person rule, and the address to tell when a debt is written off alone. */
-    record Admin(UUID userId, String email) {}
+    record Admin(UUID userId, String email, boolean active) {}
 
     /**
      * The tenant administrators who count as active for the second-person rule (ADR-043): active ones, and ones whose role was
@@ -105,13 +105,16 @@ class WriteOffsRepository {
      */
     List<Admin> recentAdmins(Instant since) {
         return jdbc.sql("""
-                        SELECT DISTINCT u.id, u.email FROM users u JOIN user_role_assignments a ON a.user_id = u.id
+                        SELECT u.id, u.email, bool_or(u.status = 'active' AND a.revoked_at IS NULL) AS active
+                          FROM users u JOIN user_role_assignments a ON a.user_id = u.id
                          WHERE u.kind = 'staff' AND a.role_key = 'tenant_admin'
                            AND (a.revoked_at IS NULL OR a.revoked_at > :since)
                            AND (u.status = 'active' OR (u.status = 'deactivated' AND u.updated_at > :since))
+                         GROUP BY u.id, u.email
                         """)
                 .param("since", Timestamp.from(since))
-                .query((rs, n) -> new Admin(rs.getObject("id", UUID.class), rs.getString("email")))
+                .query((rs, n) ->
+                        new Admin(rs.getObject("id", UUID.class), rs.getString("email"), rs.getBoolean("active")))
                 .list();
     }
 

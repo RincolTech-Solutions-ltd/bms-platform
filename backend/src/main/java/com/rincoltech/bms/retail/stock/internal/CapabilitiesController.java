@@ -1,9 +1,7 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
-import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
@@ -36,20 +34,11 @@ class CapabilitiesController {
     private final RetailCapabilities capabilities;
     private final TransferService transfers;
     private final TenantSettings settings;
-    private final BusinessClock clock;
-    private final CurrentTenant tenant;
 
-    CapabilitiesController(
-            RetailCapabilities capabilities,
-            TransferService transfers,
-            TenantSettings settings,
-            BusinessClock clock,
-            CurrentTenant tenant) {
+    CapabilitiesController(RetailCapabilities capabilities, TransferService transfers, TenantSettings settings) {
         this.capabilities = capabilities;
         this.transfers = transfers;
         this.settings = settings;
-        this.clock = clock;
-        this.tenant = tenant;
     }
 
     @Schema(name = "RetailCapabilities")
@@ -131,14 +120,6 @@ class CapabilitiesController {
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
-        if (r.creditSaleRecognition() != null) {
-            // The start day and the right to cancel are decided by the group while the settings row is locked
-            // (ADR-043); it only
-            // needs the business date, which it never stores.
-            proposed.put(
-                    "credit_recognition_today",
-                    clock.today(tenant.profile().timezone()).toString());
-        }
         transfers.guardSwitchOff(proposed);
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
         return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);

@@ -732,13 +732,13 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     }
 
     @Test
-    void aReportReadsTheRuleOfTheDayItEndsOnAndSaysWhenTheRuleStarts() {
+    void aReportIsReadTheWhenPaidWayOnceTheRuleHasStartedAndSaysWhenItStarts() {
         onPayment();
         settle(ago(3).toString());
         JsonNode earlier = profit(ago(6), ago(4));
         assertThat(earlier.get("credit_sale_recognition").asString())
-                .as("the rule had not started on the last day read")
-                .isEqualTo("on_sale");
+                .as("the rule has started, so a report of days before it is read the same way")
+                .isEqualTo("on_payment");
         assertThat(earlier.get("credit_recognition_starts_on").asString()).isEqualTo(ago(3).toString());
         assertThat(profit(ago(6), today()).get("credit_sale_recognition").asString())
                 .isEqualTo("on_payment");
@@ -749,6 +749,87 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(now.get("credit_recognition_starts_on").asString())
                 .isEqualTo(today().plusDays(1).toString());
         assertThat(dashboard().get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+    }
+
+    @Test
+    void aReportThatEndsBeforeTheStartStillShowsABackdatedCreditSale() {
+        onPayment();
+        settle(ago(2).toString());
+        // Entered today, dated three days ago, before the start: counted when the buyer pays.
+        creditSale(hq, 1, ago(3));
+        JsonNode report = profit(ago(3), ago(3));
+        assertThat(report.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(report.get("sold_minor").asLong())
+                .as("it is Sold on its date, in a report that ends before the start day")
+                .isEqualTo(1_000);
+        assertThat(report.get("on_credit_minor").asLong()).as("and owed now").isEqualTo(1_000);
+        assertThat(report.get("sales_minor").asLong()).isZero();
+        assertThat(report.get("profit_minor").asLong()).isZero();
+    }
+
+    @Test
+    void aBackdatedCreditSaleEnteredAfterTheStartAddsNothingToItsDayOnTheHomeCards() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID backdated = creditSale(hq, 1, ago(3));
+        JsonNode days = dashboard().get("days");
+        assertThat(field(dayOf(days, ago(3)), "gross_profit_minor"))
+                .as("the 400 must not land three days back")
+                .isZero();
+        payEnteredToday(backdated, 1_000, today());
+        JsonNode after = dashboard().get("days");
+        assertThat(field(dayOf(after, ago(3)), "gross_profit_minor")).isZero();
+        assertThat(field(dayOf(after, today()), "gross_profit_minor")).isEqualTo(400);
+    }
+
+    @Test
+    void aPaymentOnAccountThatPaysABackdatedSaleEnteredAfterTheStartCannotBeBackdated() {
+        capability(Map.of("customer_accounts", true));
+        onPayment();
+        settle(ago(2).toString());
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 14"), ADMIN));
+        Map<String, Object> sale = new LinkedHashMap<>();
+        sale.put("branch_id", hq);
+        sale.put("sale_date", ago(3).toString());
+        sale.put("payment_method", "credit");
+        sale.put("customer_id", buyer);
+        sale.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        assertThat(api.postKeyed("/sales", sale, ADMIN, "*", UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> refused = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 500, "method", "cash", "paid_on", ago(1).toString()),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString()).contains("backdated_payment");
+        ResponseEntity<JsonNode> accepted = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 500, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(accepted.getStatusCode()).as("%s", accepted.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The sale's open-balance row says the payment is dated today.
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
+                        .getBody()
+                        .get("open_sales")
+                        .get(0)
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .isTrue();
+    }
+
+    /** The row of one day in the dashboard's 30 days, or null. */
+    JsonNode dayOf(JsonNode days, LocalDate day) {
+        for (JsonNode d : days) {
+            if (d.get("date").asString().equals(day.toString())) {
+                return d;
+            }
+        }
+        return null;
     }
 
     @Test

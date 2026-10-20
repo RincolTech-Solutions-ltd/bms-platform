@@ -390,7 +390,8 @@ class AccountsService {
         // The sales were locked above, in the same order for every payment; read them back with their numbers.
         Map<UUID, OpenSale> byId = repo.lockSales(customerId, new ArrayList<>(split.keySet())).stream()
                 .collect(Collectors.toMap(OpenSale::id, s -> s, (a, b) -> a, LinkedHashMap::new));
-        // A payment that pays a sale counted when the buyer pays (its date is inside the rule's range) is dated today
+        // A payment that pays a sale counted when the buyer pays (its counting day, the later of its date and its entry
+        // day, is on or after the start) is dated today
         // (ADR-043).
         if (!paidOn.equals(today)
                 && byId.values().stream()

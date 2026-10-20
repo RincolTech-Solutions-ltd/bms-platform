@@ -61,7 +61,7 @@ public class RetailCapabilities {
     }
 
     /**
-     * The sale dates counted when the buyer pays (ADR-043): from the first business day of the rule, for ever. Empty for a tenant that
+     * The credit sales counted when the buyer pays (ADR-043): those whose counting day (the later of the date and the entry day) is on or after the first business day of the rule. Empty for a tenant that
      * never chose it, so every report reads as it always did.
      */
     public CreditPeriods onPaymentPeriods() {

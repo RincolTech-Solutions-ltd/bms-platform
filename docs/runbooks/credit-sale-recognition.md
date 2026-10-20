@@ -30,8 +30,8 @@ buyer pays, so it adds no profit to a day already reported. Under "When the buye
 day is dated today (a backdated payment is refused: ask your administrator; a payment on a sale entered and dated before the start
 keeps its old freedom), counts on the day it is entered, and goes to the branch that took the money; a return paid out in money
 takes the profit back from the branch that paid the refund, and a return credited to the buyer's balance takes it back from the
-branches that took the sale's payments, in proportion. Reports and the home page say which rule applied on the last day they show
-and, when the rule has not started yet, the day it starts.
+branches that took the sale's payments, in proportion. Once the rule has started, reports and the home page are read the when-paid way whatever days they span, and say the day it
+starts; a report of days before the start still shows a backdated credit sale entered after it, as Sold and On credit.
 
 ## Switch it on
 
@@ -54,7 +54,7 @@ and, when the rule has not started yet, the day it starts.
 ## Write off a buyer who never pays
 
 1. Open the credit sale (Credit sales, then the sale) as an administrator (`retail.credit.write_off`).
-2. Tap Write off, give the reason and tap Write off again. Unless you set a limit for `retail_sale_write_off`, a second administrator approves it in the approvals inbox first (when the business has two or more administrators who count: active ones, locked ones, and ones removed or deactivated in the last 30 days). A single one can write off alone: the audit trail marks it (`no_second_person`, `notified_admins`) and every administrator who counts is emailed that a debt was written off. With a limit set, only a debt at or above it needs a second person.
+2. Tap Write off, give the reason and tap Write off again. Unless you set a limit for `retail_sale_write_off`, a second administrator approves it in the approvals inbox first when the business has two or more administrators who count: active ones, locked ones, and ones removed or deactivated in the last 30 days. With a limit set, only a debt at or above it needs a second person. Whenever a write-off is done without a second person, whatever the reason, the audit row says so (`no_second_person`: `only_one_active_administrator`, or `below_threshold` when two or more count but the limit let it through) with `notified_admins`, so raising the limit first does not make a write-off silent. The other administrators who count are emailed that a debt was written off, only those still active; the maker is told only when no other active administrator can be, which for a sole administrator is a notice to themselves plus the audit row. The tenant record has no contact email, so there is no further address.
 3. The sale stays and reads Written off. The unpaid amount leaves On credit and the owing and overdue lists. Daily profit shows the loss on that day (with "When the buyer pays" the unpaid share of the cost of goods, with the default the whole unpaid amount), which also lowers that day's savings suggestion.
 4. The accounts: trade debtors for the sale are cleared against bad debt loss (account 5140) and, with "When the buyer pays", sales revenue for the rest. Nothing is deleted and a write-off cannot be undone in this release; ask the maintainers if one was made by mistake.
 
@@ -62,7 +62,7 @@ and, when the rule has not started yet, the day it starts.
 
 There is no button for this, on purpose. Do it only when the owner asks and understands that the past is read again by the old rule:
 every credit sale counts at the sale again, so the profit that came in as payments leaves those days and returns to the days of the
-sales, and the savings amounts already saved keep their amounts. Write-offs already made keep the loss they stored. A write-off made
+sales, and the savings amounts already saved keep their amounts. A write-off made
 while the rule stood keeps the loss it stored, which is the cost share only. After the revert the reports show the whole profit of that
 sale at the sale, including the margin on the unpaid part that was never collected, against that smaller loss, so that margin stays in
 the reported profit until someone corrects it; list such sales first (`retail_sale_writeoffs` rows with `recognition = 'on_payment'`).
@@ -80,8 +80,8 @@ UPDATE tenant_settings
                             || '{"credit_sale_recognition": "on_sale"}'::jsonb),
        version = version + 1
  WHERE tenant_id = :'tenant_id';
-INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, data)
-VALUES (gen_random_uuid(), :'tenant_id', 'platform', 'retail.capabilities.changed', 'tenant_settings',
+INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, entity_id, data)
+VALUES (gen_random_uuid(), :'tenant_id', 'platform', 'retail.capabilities.changed', 'core.tenant_settings', :'tenant_id',
         jsonb_build_object('after', jsonb_build_object('credit_sale_recognition', 'on_sale'),
                            'reason', :'reason', 'ticket', :'ticket', 'by', 'operator SQL, credit-sale-recognition runbook'));
 -- Expect UPDATE 1 and INSERT 0 1, then COMMIT. Check Retail settings and Daily profit read "When the sale is made".
@@ -89,6 +89,9 @@ COMMIT;
 ```
 
 If the change is only pending (the start day has not come), the owner cancels it from Retail settings; no SQL is needed.
+
+Residual risk: changing the tenant's time zone can move the entry day of sales entered near midnight, and so whether such a sale counts
+from the start day; the start day itself is a stored date and does not move.
 
 ## Known differences while both rules exist
 

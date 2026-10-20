@@ -137,6 +137,6 @@ final class DashboardApi {
             @Schema(
                     description =
                             "The first business day of the rule on_payment, when it was chosen; it can lie in the future."
-                                    + " credit_sale_recognition is the rule in force today")
+                                    + " credit_sale_recognition is on_payment once that day has come")
             LocalDate creditRecognitionStartsOn) {}
 }

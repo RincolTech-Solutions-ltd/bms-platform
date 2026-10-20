@@ -140,4 +140,74 @@ class RetailCreditRecognitionClockIT extends IntegrationTest {
                 .as("one stored date: no instant is re-read in another zone")
                 .isEqualTo("2026-10-09");
     }
+
+    @Test
+    void theEntryDayOfASaleIsTheTenantsDayNotTheUtcDay() {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-crw", false, true);
+        RetailTestSupport api = new RetailTestSupport(http, t);
+        UUID product = api.product("CRW-1", 600, 1_000);
+        api.importedBalance(t.headOffice(), product, "100");
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/settings/capabilities",
+                                Map.of("credit_sale_recognition", "on_payment"),
+                                "core.settings.manage",
+                                "*",
+                                etag == null ? Map.of() : Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        // The rule starts on 6 October in Kampala.
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_recognition_effective_from}', '\"2026-10-06\"'::jsonb)"
+                        + " WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        // Two sales dated 5 October. One was entered at 22:30 UTC on the 5th, which is 01:30 on the 6th in Kampala: on
+        // the start
+        // day, so counted when the buyer pays. The other at 20:30 UTC, which is 23:30 on the 5th: before it, so counted
+        // at the sale.
+        UUID late = sale(api, t, product, "2026-10-05T22:30:00Z");
+        UUID early = sale(api, t, product, "2026-10-05T20:30:00Z");
+
+        assertThat(api.get("/sales/" + late, ADMIN)
+                        .getBody()
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .isTrue();
+        assertThat(api.get("/sales/" + early, ADMIN)
+                        .getBody()
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .isFalse();
+        JsonNode report = api.get("/reports/profit/daily?from=2026-10-05&to=2026-10-05", ADMIN)
+                .getBody();
+        assertThat(report.get("profit_minor").asLong())
+                .as("only the sale entered before the start day counts at the sale")
+                .isEqualTo(400);
+        assertThat(report.get("sold_minor").asLong()).isEqualTo(2_000);
+        assertThat(report.get("on_credit_minor").asLong())
+                .as("what both buyers still owe now, whatever the day")
+                .isEqualTo(2_000);
+    }
+
+    private UUID sale(RetailTestSupport api, TestDatabase.Fixture t, UUID product, String enteredAt) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("sale_date", "2026-10-05");
+        body.put("payment_method", "credit");
+        body.put("buyer_name", "Test Buyer 15");
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        UUID id = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sales SET created_at = TIMESTAMPTZ '" + enteredAt + "' WHERE id = '" + id
+                        + "'; END $$")
+                .update();
+        return id;
+    }
 }

@@ -226,9 +226,15 @@ class ReportsService {
         // ADR-043: with credit sales counted when the buyer pays, the figures are the money received, and Sold
         // (everything
         // sold, credit included) comes beside them.
-        // The rule in force on the last day of the report decides what is shown; the figures follow the range of sale
-        // dates.
-        boolean onPayment = profitFigures.modeOn(end).equals(RetailCapabilities.ON_PAYMENT);
+        // Once the rule has started, every report is read the when-paid way, whatever days it spans: its figures count
+        // each credit
+        // sale from its counting day (the later of the date and the entry day), so a backdated sale entered after the
+        // start is in a
+        // report of days before it, and Sold and On credit must show it. A rule that has not started yet leaves the old
+        // layout.
+        LocalDate startsOn = profitFigures.startsOn();
+        boolean onPayment = startsOn != null
+                && !startsOn.isAfter(clock.today(tenant.profile().timezone()));
         Map<String, Long> sold = new java.util.TreeMap<>();
         for (DayFigures d : profitFigures.daily(filter, start, end)) {
             long[] f = figures(days, branchOf, dateOf, d.branchId(), d.date());
@@ -289,7 +295,7 @@ class ReportsService {
                 Math.subtractExact(
                         Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference),
                         badDebt),
-                profitFigures.modeOn(end),
+                onPayment ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
                 onPayment ? soldTotal : null,
                 onPayment ? credit.onCredit(filter)[0] : null,
                 profitFigures.startsOn());

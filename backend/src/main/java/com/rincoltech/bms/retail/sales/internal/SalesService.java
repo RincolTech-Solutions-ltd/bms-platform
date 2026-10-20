@@ -816,7 +816,8 @@ class SalesService {
             throw ApiException.validation(
                     List.of(new FieldProblem("paid_on", "invalid", "A payment is dated between the sale and today.")));
         }
-        // A sale counted when the buyer pays (its date is inside the rule's range) is paid on the day the payment
+        // A sale counted when the buyer pays (its counting day, the later of its date and its entry day, is on or after
+        // the start) is paid on the day the payment
         // counts on, so the
         // payment carries that day (ADR-043). A sale dated before the rule started is paid as it always was.
         if (!s.historical()
@@ -1021,7 +1022,7 @@ class SalesService {
         return visible(s, capabilities.onPaymentPeriods());
     }
 
-    /** As above, with the rule's range read once by a caller that shows a list. */
+    /** As above, with the rule's start read once by a caller that shows a list. */
     Sale visible(Sale s, CreditPeriods periods) {
         Principal principal = CurrentPrincipal.require();
         boolean hideCost = !principal.may("retail.profit.read", s.branchId());
@@ -1030,7 +1031,8 @@ class SalesService {
                 hideCost && !java.util.Objects.equals(principal.userId(), s.createdBy()) ? null : s.createdBy();
         UUID voidedBy = hideCost && !java.util.Objects.equals(principal.userId(), s.voidedBy()) ? null : s.voidedBy();
         boolean hidePricing = !pricing.on();
-        // A credit sale dated from the first day of the rule "when the buyer pays" is paid on the day the payment
+        // A credit sale whose counting day (the later of its date and its entry day) is on or after the first day of
+        // the rule "when the buyer pays" is paid on the day the payment
         // counts on (ADR-043).
         boolean counted =
                 s.paymentMethod().equals("credit") && !s.historical() && periods.counts(s.saleDate(), s.createdAt());

@@ -258,7 +258,7 @@ export function ProfitTable({ report, nameOf }: { report: DailyProfit; nameOf?: 
       {report.credit_recognition_starts_on && (
         <p className="hint" data-testid="credit-starts-on">
           {onPayment
-            ? `Credit sales dated before ${report.credit_recognition_starts_on} count as they did, on the day of the sale.`
+            ? `Credit sales entered and dated before ${report.credit_recognition_starts_on} count as they did, on the day of the sale.`
             : `From ${report.credit_recognition_starts_on}, credit sales will count when the buyer pays.`}
         </p>
       )}

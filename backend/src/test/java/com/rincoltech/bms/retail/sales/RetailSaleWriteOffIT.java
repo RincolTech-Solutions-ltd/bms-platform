@@ -117,6 +117,30 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                 .update();
     }
 
+    /** The rule "when the buyer pays" starting {@code daysAgo} days ago. */
+    void startedDaysAgo(int daysAgo) {
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_recognition_effective_from}', CAST(? AS jsonb))"
+                        + " WHERE tenant_id = ?")
+                .params("\"" + today().minusDays(daysAgo) + "\"", t.tenantId())
+                .update();
+    }
+
+    @Test
+    void aBackdatedSaleEnteredAfterTheStartIsWrittenOffWithItsCostShareAsTheLoss() {
+        startedDaysAgo(2);
+        // Entered today, dated three days ago: counted when the buyer pays, so its profit was never counted and the
+        // loss is the
+        // cost of the goods (600), not the whole 1,000.
+        UUID s = creditSale(1, 3);
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(600);
+        assertThat(w.get("unpaid_minor").asLong()).isEqualTo(1_000);
+    }
+
     ResponseEntity<JsonNode> writeOff(UUID sale, String reason, String perms) {
         return api.postKeyed(
                 "/sales/" + sale + "/write-off",

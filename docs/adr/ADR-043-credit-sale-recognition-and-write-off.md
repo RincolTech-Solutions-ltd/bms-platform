@@ -44,8 +44,7 @@ balance today and every closed period.
    switched off from the product: the route answers 422 `credit_rule_cannot_be_switched_off` ("This rule cannot be switched off once it
    has started. Ask Rincol support.") and the screen shows the other choice off. A pending change asked for again keeps its date.
    This closes a whole family of cases that a rule that could be flipped back and forth would open (several ranges of dates, a sale
-   counted by a rule that no longer stands, a report that straddles a change); there is one range of sale dates, from the start day
-   for ever. If the rule really must be undone, the operator does it by SQL (runbook `credit-sale-recognition.md`), because that is a
+   counted by a rule that no longer stands, a report that straddles a change); there is one start day, from which a sale counts (by its counting day) for ever. If the rule really must be undone, the operator does it by SQL (runbook `credit-sale-recognition.md`), because that is a
    decision about the books that should not be one click. A credit sale is counted the way the rule stands on the day it COUNTS
    FROM, which is the later of the date written on the sale and the tenant's day on which it was entered (`created_at`, in the tenant's
    time zone). A sale with a counting day on or after the start day is counted when the buyer pays; a sale entered and dated before it
@@ -53,8 +52,9 @@ balance today and every closed period.
    21 October, would otherwise add its profit to 20 October, a day that was already reported and whose savings were already set aside.
    So switching on never counts the profit of an older sale a second time (once at the sale, once as it is paid) and never moves profit
    onto a day whose savings were already set aside. The same counting day is used in the reports, the dashboard, the savings
-   suggestion, the sale (`counted_when_paid`), the payment checks and the write-off. A report, the home figures and the sale list read the rule of the day they end on
-   (`credit_sale_recognition`) and say when it starts (`credit_recognition_starts_on`, which can lie in the future); the setting's own
+   suggestion, the sale (`counted_when_paid`), the payment checks and the write-off. Once the rule has started a report and the home figures are read the when-paid way
+   (`credit_sale_recognition` is `on_payment`) whatever days they span, so a report that ends before the start day still shows a backdated
+   credit sale entered after it, as Sold and On credit; they say when it starts (`credit_recognition_starts_on`, which can lie in the future); the setting's own
    read shows the stored choice and the start day separately, so a screen can say "will stand from". The confirmation on the switch says
    exactly this, with the date it starts, and says that it cannot be undone from the product.
 
@@ -139,7 +139,8 @@ balance today and every closed period.
     without a second person, whatever the reason, it is flagged and told:** the audit row says `no_second_person` (`only_one_active_administrator`
     when fewer than two administrators count, `below_threshold` when two or more count but the threshold let it through) with
     `notified_admins`, so raising the threshold first does not make a write-off silent. The administrators who count other than the
-    maker are told by email through the outbox (template `retail.write_off_alone`, no figure and no name in it). **Plainly, for a business
+    maker are told by email through the outbox, only those still active (a removed or deactivated one counts for the second-person rule but
+    cannot read mail), and the maker is told only when no other active administrator can be (template `retail.write_off_alone`, no figure and no name in it). **Plainly, for a business
     with a sole administrator this is a notice to themselves plus an audit row**, not a second pair of eyes; that is the accepted risk,
     and the notice, the audit row and the append-only record are the check. The tenant record has no contact email (the applicant's
     contact lives only on the platform's onboarding table, which a tenant cannot read), and no new recipient setting is added here, so
@@ -183,6 +184,8 @@ balance today and every closed period.
   also says what it does to the reports; do it only knowing that a profit once reported will be reported on other days.
 - The first migration of this change (V95, a placeholder number) sets `lock_timeout` to five seconds; if the lock on a busy table
   cannot be had it fails and is retried.
+- Residual risk: changing the tenant's time zone can move the entry day of sales that were entered near midnight, and with it whether such a
+  sale counts from the start day. The start day itself is a stored date and does not move.
 - A payment on account taken at another branch gives its profit to the branch that took the money, not to the shop of the sale (decision 6); the margin still comes from the sale.
 - The dashboard counts the cost of goods a return writes off as damaged through the sale, where the daily profit report counts it as
   usage; the two differ for that rare case only.

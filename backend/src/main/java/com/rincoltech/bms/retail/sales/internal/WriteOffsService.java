@@ -107,10 +107,15 @@ class WriteOffsService {
         // themselves
         // and the audit row (ADR-043: the tenant record has no contact email to add).
         UUID maker = CurrentPrincipal.require().userId();
-        List<Admin> others =
-                admins.stream().filter(a -> !a.userId().equals(maker)).toList();
-        List<Admin> told = (others.isEmpty() ? admins : others)
-                .stream().filter(a -> a.email() != null).toList();
+        // Removed or deactivated administrators within 30 days count for the second-person rule but cannot read an
+        // email, so only
+        // active ones are told; the maker is told only when no other active administrator can be.
+        List<Admin> activeOthers = admins.stream()
+                .filter(a -> a.active() && a.email() != null && !a.userId().equals(maker))
+                .toList();
+        List<Admin> told = !activeOthers.isEmpty()
+                ? activeOthers
+                : admins.stream().filter(a -> a.active() && a.email() != null).toList();
         String why = threshold > 0 && admins.size() >= 2 ? "below_threshold" : "only_one_active_administrator";
         WriteOff written = servicer.record(plan, r.reason(), maker, null, null, new Alone(why, told.size()));
         String business = tenant.profile().name();

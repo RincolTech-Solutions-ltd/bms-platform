@@ -8580,7 +8580,7 @@ export interface components {
             cost_of_sales_minor?: number;
             /**
              * Format: date
-             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force on the last day of the period
+             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is on_payment once that day has come, whatever days the period spans
              */
             credit_recognition_starts_on?: string;
             /**
@@ -8650,7 +8650,7 @@ export interface components {
         RetailDashboard: {
             /**
              * Format: date
-             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force today
+             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is on_payment once that day has come
              */
             credit_recognition_starts_on?: string;
             /**

@@ -1,8 +1,10 @@
 package com.rincoltech.bms.retail.manifest;
 
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.ModuleSettingsGroup;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
+import com.rincoltech.bms.kernel.BusinessClock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,6 +27,16 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
 
     private static final Logger log = LoggerFactory.getLogger(RetailCapabilityGroup.class);
 
+    private final BusinessClock clock;
+    private final CurrentTenant tenant;
+    /** The tenants whose stored rule without a start day was already reported, so a read does not log it again and again. */
+    private final Set<String> warned = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    RetailCapabilityGroup(BusinessClock clock, CurrentTenant tenant) {
+        this.clock = clock;
+        this.tenant = tenant;
+    }
+
     static final String PROFILE = "profile";
     /** How credit sales count in the reports and the daily savings (ADR-043); {@code on_sale} is the default. */
     static final String CREDIT_RECOGNITION = "credit_sale_recognition";
@@ -32,19 +44,12 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
     static final List<String> CREDIT_RECOGNITIONS = List.of("on_sale", "on_payment");
 
     /**
-     * The first business day the rule {@code on_payment} counts from: the business day after it was asked for, worked out here from
-     * {@link #TODAY} and never given by the caller. Credit sales counted from before it keep counting at the sale (ADR-043). The rule
+     * The first business day the rule {@code on_payment} counts from: the business day after it was asked for, worked out here, while
+     * the settings row is locked, from the business clock, and never given by the caller. Credit sales counted from before it keep counting at the sale (ADR-043). The rule
      * is one-way: it is switched on once, and the only way back is to cancel it before this day has come. Absent while the rule is
      * {@code on_sale}; a stored {@code on_payment} with no start day is no rule at all.
      */
     static final String EFFECTIVE_FROM = "credit_recognition_effective_from";
-
-    /**
-     * A control key the settings route adds to a change of the credit rule: the tenant's business date now. It is never stored. The
-     * start day and the right to cancel are decided in {@link #normalise} with it, which runs while the settings row is locked, so
-     * two requests cannot both see the rule as still pending.
-     */
-    static final String TODAY = "credit_recognition_today";
 
     /** The name {@code /me} lists while the rule is on_payment, so the screens can say which profit they show. */
     static final String ON_PAYMENT_FLAG = "credit_on_payment";
@@ -82,8 +87,10 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         String effective = current.get(EFFECTIVE_FROM) instanceof String d && validDate(d) ? d : null;
         if (mode.equals("on_payment") && effective == null) {
             // No start day means no rule: never guess 1970, which would count every sale ever made when the buyer pays.
-            log.warn(
-                    "retail.capabilities has credit_sale_recognition on_payment with no start day; reading it as on_sale");
+            if (warned.add(String.valueOf(tenant.profile().id()))) {
+                log.warn(
+                        "retail.capabilities has credit_sale_recognition on_payment with no start day; reading it as on_sale");
+            }
             mode = "on_sale";
             out.put(CREDIT_RECOGNITION, mode);
         }
@@ -95,10 +102,6 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             if (key.equals(CREDIT_RECOGNITION)) {
                 if (!(value instanceof String c && CREDIT_RECOGNITIONS.contains(c))) {
                     problems.add(new FieldProblem(CREDIT_RECOGNITION, "invalid", "Use on_sale or on_payment."));
-                }
-            } else if (key.equals(TODAY)) {
-                if (!(value instanceof String d && validDate(d))) {
-                    problems.add(new FieldProblem(TODAY, "invalid", "Use a date like 2026-10-20."));
                 }
             } else if (!key.equals(PROFILE) && !CAPABILITIES.contains(key)) {
                 problems.add(new FieldProblem(key, "unknown", "Not a retail capability."));
@@ -112,11 +115,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             throw ApiException.validation(problems);
         }
         if (proposed.get(CREDIT_RECOGNITION) instanceof String next && !next.equals(mode)) {
-            LocalDate today = proposed.get(TODAY) instanceof String t ? LocalDate.parse(t) : null;
-            if (today == null) {
-                throw ApiException.validation(List.of(
-                        new FieldProblem(TODAY, "required", "Changing the credit rule needs the business date.")));
-            }
+            // Read here, inside the locked change, so a request that waited for the lock decides on the day it really
+            // is.
+            LocalDate today = clock.today(tenant.profile().timezone());
             if (next.equals("on_payment")) {
                 // One way: on_payment is switched on once, and counts from the next business day.
                 effective = today.plusDays(1).toString();

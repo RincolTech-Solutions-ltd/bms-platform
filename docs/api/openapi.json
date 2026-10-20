@@ -7666,7 +7666,7 @@
             "type" : "integer"
           },
           "credit_recognition_starts_on" : {
-            "description" : "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force on the last day of the period",
+            "description" : "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is on_payment once that day has come, whatever days the period spans",
             "format" : "date",
             "type" : "string"
           },
@@ -7771,7 +7771,7 @@
       "RetailDashboard" : {
         "properties" : {
           "credit_recognition_starts_on" : {
-            "description" : "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force today",
+            "description" : "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is on_payment once that day has come",
             "format" : "date",
             "type" : "string"
           },

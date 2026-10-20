@@ -174,6 +174,6 @@ final class ReportsApi {
             @Schema(
                     description =
                             "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition"
-                                    + " is the rule in force on the last day of the period")
+                                    + " is on_payment once that day has come, whatever days the period spans")
             LocalDate creditRecognitionStartsOn) {}
 }
