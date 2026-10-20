@@ -329,6 +329,36 @@ class CatalogueService {
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
+        CatalogueApi.VariantOf variant = before.variant();
+        String size = null;
+        String colour = null;
+        if (variant == null) {
+            if (r.variantSize() != null || r.variantColour() != null) {
+                throw ApiException.rule(
+                        "not_a_variant",
+                        "This item has no sizes or colours. Give it sizes and colours first, then change one of them.");
+            }
+        } else {
+            // Issue #384: a variant's name, category and unit are its item's; only its size, colour, code and on sale
+            // change here.
+            if (r.description() != null && !r.description().trim().equals(before.description())) {
+                throw ApiException.rule(
+                        "variant_name_follows_item",
+                        "The name of a size or colour comes from its item. Change the item's name on its sizes and colours page.");
+            }
+            if ((r.categoryId() != null && !r.categoryId().equals(before.categoryId()))
+                    || (r.unitId() != null && !r.unitId().equals(before.unitId()))) {
+                throw ApiException.rule(
+                        "variant_follows_item",
+                        "Every size and colour of an item has the item's category and unit. Change the category on the item's sizes and colours page.");
+            }
+            size = r.variantSize() == null ? variant.size() : VariantGrid.clean(r.variantSize());
+            colour = r.variantColour() == null ? variant.colour() : VariantGrid.clean(r.variantColour());
+            if (size == null && colour == null) {
+                throw ApiException.validation(
+                        List.of(new FieldProblem("variant_size", "invalid", "Keep a size, a colour or both.")));
+            }
+        }
         requireCategoryAndUnit(
                 r.categoryId() == null ? before.categoryId() : r.categoryId(),
                 r.unitId() == null ? before.unitId() : r.unitId(),
@@ -337,7 +367,11 @@ class CatalogueService {
         Product after = new Product(
                 id,
                 r.code() == null ? before.code() : code(r.code()),
-                r.description() == null ? before.description() : r.description().trim(),
+                variant != null
+                        ? VariantGrid.description(variant.familyName(), size, colour)
+                        : r.description() == null
+                                ? before.description()
+                                : r.description().trim(),
                 r.categoryId() == null ? before.categoryId() : r.categoryId(),
                 null,
                 r.unitId() == null ? before.unitId() : r.unitId(),
@@ -362,6 +396,12 @@ class CatalogueService {
         diff(was, now, "category_id", before.categoryId(), after.categoryId());
         diff(was, now, "unit_id", before.unitId(), after.unitId());
         diff(was, now, "active", before.active(), after.active());
+        boolean optionsChanged =
+                variant != null && (!Objects.equals(size, variant.size()) || !Objects.equals(colour, variant.colour()));
+        if (optionsChanged) {
+            diff(was, now, "variant_size", variant.size(), size);
+            diff(was, now, "variant_colour", variant.colour(), colour);
+        }
         if (now.isEmpty()) {
             return withPacks(visible(before));
         }
@@ -405,8 +445,13 @@ class CatalogueService {
         }
         try {
             repo.update(after, duplicateReason, nameChanged);
+            if (optionsChanged) {
+                repo.setVariantName(id, size, colour, after.description());
+            }
         } catch (DuplicateKeyException e) {
-            throw duplicateCode();
+            throw optionsChanged && String.valueOf(e.getMessage()).contains("retail_products_variant")
+                    ? duplicateVariant(size, colour)
+                    : duplicateCode();
         }
         audit.record(new AuditLog.Entry("retail.product.updated", PRODUCT, id, null, was, now));
         return withPacks(visible(repo.find(id).orElseThrow()));
@@ -426,7 +471,7 @@ class CatalogueService {
      * @param selfId the product being edited, which never counts as its own duplicate; null on create
      * @return the reason of an accepted duplicate, or null when the name is new
      */
-    private String acceptName(String description, UUID unitId, UUID selfId, String reason) {
+    String acceptName(String description, UUID unitId, UUID selfId, String reason) {
         repo.lockName(description);
         List<CatalogueRepository.NameMatch> same = repo.sameName(description, selfId).stream()
                 .filter(m -> m.unitId().equals(unitId))
@@ -747,7 +792,7 @@ class CatalogueService {
         return mayReadCost() ? p : p.withoutCost();
     }
 
-    private static String code(String raw) {
+    static String code(String raw) {
         return RetailCatalogue.normaliseCode(raw)
                 .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
                         "code",
@@ -761,7 +806,7 @@ class CatalogueService {
     }
 
     /** The category and unit exist, and a newly chosen one (not the product's current one) is active. */
-    private void requireCategoryAndUnit(UUID categoryId, UUID unitId, UUID currentCategoryId, UUID currentUnitId) {
+    void requireCategoryAndUnit(UUID categoryId, UUID unitId, UUID currentCategoryId, UUID currentUnitId) {
         Category category = repo.category(categoryId).orElse(null);
         if (category == null) {
             throw ApiException.validation(
@@ -781,18 +826,25 @@ class CatalogueService {
         }
     }
 
-    private static void diff(Map<String, Object> was, Map<String, Object> now, String key, Object x, Object y) {
+    static void diff(Map<String, Object> was, Map<String, Object> now, String key, Object x, Object y) {
         if (!Objects.equals(x, y)) {
             was.put(key, x);
             now.put(key, y);
         }
     }
 
-    private static ApiException duplicateCode() {
+    /** Issue #384: the item has a variant of this size and colour already. */
+    static ApiException duplicateVariant(String size, String colour) {
+        return duplicate(
+                "duplicate_variant",
+                "The item has " + VariantGrid.label(size, colour) + " already. Each one is listed once.");
+    }
+
+    static ApiException duplicateCode() {
         return duplicate("duplicate_product_code", "A product with this code exists (codes ignore case).");
     }
 
-    private static ApiException duplicate(String code, String detail) {
+    static ApiException duplicate(String code, String detail) {
         return new ApiException(HttpStatus.CONFLICT, code, "Duplicate", detail);
     }
 }
