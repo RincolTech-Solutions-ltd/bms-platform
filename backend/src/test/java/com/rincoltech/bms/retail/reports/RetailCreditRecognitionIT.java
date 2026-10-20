@@ -1451,6 +1451,68 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     }
 
     @Test
+    void aCashSaleDatedInThePastCountsAsReceivedOnTheDayItWasEntered() {
+        onPayment();
+        settle(ago(2).toString());
+        cashSale(hq, 1, ago(3));
+        JsonNode report = profit(ago(5), today());
+        assertThat(field(row(report, hq, ago(3)), "received_minor"))
+                .as("not on the day written on the sale: that day was reported already")
+                .isZero();
+        assertThat(field(row(report, hq, today()), "received_minor")).isEqualTo(1_000);
+        assertThat(report.get("received_minor").asLong()).isEqualTo(1_000);
+        JsonNode dash = dashboard();
+        assertThat(field(dayOf(dash.get("days"), ago(3)), "received_minor")).isZero();
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(1_000);
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void aPaymentOnAccountTakenAtAnotherBranchAndReversedLeavesBothBranchesAtZero() {
+        capability(Map.of("customer_accounts", true));
+        onPayment();
+        settle(ago(2).toString());
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 19"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(10).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        UUID old = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        sellEntered(old, ago(10));
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", br2, "amount_minor", 600, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        UUID receiptId = RetailTestSupport.id(receipt);
+        ResponseEntity<JsonNode> undone = api.postKeyed(
+                "/customers/" + buyer + "/payments/" + receiptId + "/reverse",
+                Map.of("reason", "Entered by mistake"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(undone.getStatusCode().is2xxSuccessful())
+                .as("%s", undone.getBody())
+                .isTrue();
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("HQ never took the money")
+                .isZero();
+        assertThat(field(row(report, br2, today()), "received_minor"))
+                .as("taken and given back at the branch that took it")
+                .isZero();
+        assertThat(report.get("received_minor").asLong()).isZero();
+        JsonNode dash = dashboard();
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong()).isZero();
+        assertThat(dash.get("today").get("received_minor").asLong()).isZero();
+    }
+
+    @Test
     void aBranchThatOnlyTookPaymentsOnAnOldCreditSaleHasItsShopRowForAReaderWithoutStockAccess() {
         capability(Map.of("customer_accounts", true));
         onPayment();

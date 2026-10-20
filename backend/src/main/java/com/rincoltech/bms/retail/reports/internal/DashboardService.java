@@ -110,9 +110,9 @@ class DashboardService {
                 add(recBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), d.cost());
                 add(recDay, d.day(), d.sales(), d.cost());
             }
-            for (DaySales d : repo.cashSales(filter, windowStart, today)) {
-                add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), 0);
-                add(collDay, d.day(), d.sales(), 0);
+            for (ReportsRepository.DayFigures d : credit.cashSalesEntered(filter, windowStart, today)) {
+                add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.date(), d.sales(), 0);
+                add(collDay, d.date(), d.sales(), 0);
             }
             Set<UUID> scope = filter == null ? null : Set.copyOf(filter);
             for (ReportsRepository.DayFigures d : CreditRecognition.deltas(
@@ -124,9 +124,10 @@ class DashboardService {
                         d.costOfSales());
                 add(recDay, d.date(), d.sales(), d.costOfSales());
             }
-            // Received is the real money collected, the same figure as in the profit report (ADR-043): every payment on
-            // a credit
-            // sale, counted when the buyer pays or not, imported ones included, less reversals and money paid back.
+            // Received is money recorded as collected, by any method, the same figure as in the profit report
+            // (ADR-043): every
+            // payment on a credit sale, counted when the buyer pays or not, imported ones included, less reversals and
+            // refunds.
             for (ReportsRepository.DayFigures d : credit.collections(filter, windowStart, today)) {
                 add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.date(), d.sales(), 0);
                 add(collDay, d.date(), d.sales(), 0);

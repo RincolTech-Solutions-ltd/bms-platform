@@ -246,8 +246,9 @@ class ReportsService {
             f[2] = d.usageCost();
             f[4] = d.badDebt();
         }
-        // Received is real money collected (ADR-043): sales paid at the sale, and every payment recorded on a credit
-        // sale in the window,
+        // Received is money recorded as collected, by any method (ADR-043), on the day it was entered: sales paid at
+        // the sale, and
+        // every payment recorded on a credit sale in the window,
         // whatever the sale's date and whether it counts when the buyer pays, imported ones included. It is a cash
         // figure and not a
         // profit basis. The profit leg is separate: the profit counted at the sale for credit made before the rule
@@ -260,7 +261,7 @@ class ReportsService {
                 figures(days, branchOf, dateOf, d.branchId(), d.date());
                 sold.put(d.date() + "|" + d.branchId(), d.sales());
             }
-            for (DayFigures d : repo.dailyCash(filter, start, end)) {
+            for (DayFigures d : credit.cashSalesEntered(filter, start, end)) {
                 received.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
             }
             for (DayFigures d : credit.collections(filter, start, end)) {

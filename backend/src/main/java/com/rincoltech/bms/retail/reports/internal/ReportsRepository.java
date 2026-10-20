@@ -117,15 +117,6 @@ class ReportsRepository {
         return daily(branchIds, from, to, periods, false);
     }
 
-    /**
-     * Only the sales that were paid at the sale (ADR-043): no credit sale at all, counted or not, imported or not, and no return. It is
-     * the part of Received that is not a payment on a credit sale; the money paid back on returns is a refund leg of
-     * {@code CreditRecognitionRepository#collections}, charged to the refund branch, for cash and credit sales alike.
-     */
-    List<DayFigures> dailyCash(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        return daily(branchIds, from, to, CreditPeriods.NONE, true);
-    }
-
     private List<DayFigures> daily(
             List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods, boolean cashOnly) {
         Map<String, Object> periodParams = new LinkedHashMap<>();

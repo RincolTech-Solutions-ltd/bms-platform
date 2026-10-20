@@ -5,7 +5,7 @@
 Proposed (2026-10-20, issue #340). It becomes Accepted when Hillary accepts it. Builds on ADR-020 (retail posts to the ledger), ADR-022
 (the daily savings are half of the shop's profit for the day) and ADR-033 (the tenant settings group `retail.capabilities`).
 Amends ADR-022 decision 11 only for a tenant that chooses `on_payment`; for every other tenant nothing changes. The number
-follows pending ADR-041 and pending ADR-042, which are held by open pull requests.
+follows ADR-041 (#329, merged) and ADR-042 (#322, merged).
 
 ## Context
 
@@ -65,15 +65,15 @@ balance today and every closed period.
    - **Sold:** everything sold, credit included. The figure of `on_sale`, by the sale's own date.
    - **Received:** the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank). It is not a
      profit basis and it is not a claim that it equals what is in the drawer: a till can be short, and the drawer count is a different
-     check. It is the sales paid at the sale, on the sale date, plus **every payment recorded on a credit sale**, on the day it was
+     check. It is the sales paid at the sale, on the day they were **entered** (a cash sale dated in the past counts on the day it was entered), plus **every payment recorded on a credit sale**, on the day it was
      entered and at the branch that took it, whatever the sale's date and whether or not the sale counts when the buyer pays, imported
      credit sales included (a payment recorded after the import is money recorded as collected); less a payment on account when it is
      reversed (on the day of the reversal); less the money paid back on any return, cash sale or credit sale, on the day of the
      return and at the refund branch (`refund_branch_id`), and given back on the day the return is voided. The profit is a separate leg
      and is not changed by this: a credit sale from before the rule started stays counted at the sale and one from after it as the
      buyer pays, never twice. **A payment dated earlier than it was entered counts on the day it was entered**, so a day already
-     reported is never rewritten by a late entry. Voiding a cash sale does rewrite that sale's own day (the sale leaves the day it was
-     made on, as it always did), while a reversed account payment and a voided return are counted on the day they happen.
+     reported is never rewritten by a late entry, except that cancelling (voiding) a cash sale removes it from its own day (a void changes the day of the sale it cancels, as in every other report
+     of the product; no void-day leg is built). A reversed account payment and a voided return are counted on the day they happen.
      Under `on_payment` the date written on a payment (`paid_on`) must be today **for a sale that counts from the start day on** (the
      sale counted when the buyer pays; the sale says so with `counted_when_paid`, which the payment form reads): a backdated payment
      on such a sale is refused (422 `backdated_payment`, "Under the 'when the buyer pays' rule a payment is dated today. If you took
@@ -203,6 +203,8 @@ balance today and every closed period.
   cannot be had it fails and is retried.
 - Residual risk: changing the tenant's time zone can move the entry day of sales that were entered near midnight, and with it whether such a
   sale counts from the start day. The start day itself is a stored date and does not move.
+- A cash-sale refund paid from another till takes the profit back at the sale's branch but Received at the refund branch.
+- The cash book buckets payments by `paid_on` while Received buckets by the day entered, so a payment dated earlier shows on different days in the two places.
 - A payment on account taken at another branch gives its profit to the branch that took the money, not to the shop of the sale (decision 6); the margin still comes from the sale.
 - The dashboard counts the cost of goods a return writes off as damaged through the sale, where the daily profit report counts it as
   usage; the two differ for that rare case only.

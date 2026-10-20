@@ -253,4 +253,43 @@ class CreditRecognitionRepository {
                         0))
                 .list();
     }
+
+    /**
+     * The sales paid at the sale (not credit), by the day they were entered (the tenant's day of {@code created_at}) and the branch of
+     * the sale: the part of Received that is not a payment on a credit sale (ADR-043). Received is money recorded as collected on the
+     * day it was entered, so a cash sale dated in the past counts on the day it was entered, like a payment dated earlier. A cash sale
+     * that is cancelled (voided) is not here at all: cancelling it removes it from its own day, the one exception to "a day already
+     * reported is never rewritten".
+     */
+    List<ReportsRepository.DayFigures> cashSalesEntered(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        java.time.ZoneId zone = tenant.profile().timezone();
+        params.put("zone", zone.getId());
+        params.put("fromTs", java.sql.Timestamp.from(from.atStartOfDay(zone).toInstant()));
+        params.put(
+                "toTs",
+                java.sql.Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()));
+        String branch = "";
+        if (branchIds != null) {
+            params.put("branchIds", branchIds);
+            branch = " AND s.branch_id IN (:branchIds)";
+        }
+        return jdbc.sql("SELECT s.branch_id, CAST((s.created_at AT TIME ZONE :zone) AS date) AS day,"
+                        + " sum(l.line_total_minor) AS amount"
+                        + " FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id"
+                        + " WHERE s.status = 'completed' AND s.payment_method <> 'credit'"
+                        + " AND s.created_at >= :fromTs AND s.created_at < :toTs" + branch
+                        + " GROUP BY s.branch_id, CAST((s.created_at AT TIME ZONE :zone) AS date)")
+                .params(params)
+                .query((rs, n) -> new ReportsRepository.DayFigures(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getDate("day").toLocalDate(),
+                        rs.getLong("amount"),
+                        0,
+                        0))
+                .list();
+    }
 }

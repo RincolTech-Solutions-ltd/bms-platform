@@ -148,8 +148,8 @@ final class ReportsApi {
                                     + " sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales"
                                     + " included; less payments reversed (on the day of the reversal) and money paid back on returns (on the"
                                     + " day of the return, at the refund branch; given back on the day a return is voided). A payment dated"
-                                    + " earlier than it was entered counts on the day it was entered. A cash sale voided later leaves its"
-                                    + " own sale day. Not a profit basis")
+                                    + " earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they"
+                                    + " were entered; cancelling a cash sale removes it from its own day. Not a profit basis")
             Long receivedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -208,8 +208,8 @@ final class ReportsApi {
                                     + " sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales"
                                     + " included; less payments reversed (on the day of the reversal) and money paid back on returns (on the"
                                     + " day of the return, at the refund branch; given back on the day a return is voided). A payment dated"
-                                    + " earlier than it was entered counts on the day it was entered. A cash sale voided later leaves its"
-                                    + " own sale day. Not a profit basis")
+                                    + " earlier than it was entered counts on the day it was entered. Sales paid at the sale count on the day they"
+                                    + " were entered; cancelling a cash sale removes it from its own day. Not a profit basis")
             Long receivedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)

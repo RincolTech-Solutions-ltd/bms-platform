@@ -214,7 +214,7 @@ describe('the daily profit report', () => {
   const tile = (summary: string, label: string): string | undefined =>
     new RegExp(`an-stat-label">${label}</span><strong class="an-stat-value num">([^<]*)</strong>`).exec(summary)?.[1];
 
-  it('shows Received as the real money collected, apart from the profit counted at the sale before the rule', () => {
+  it('shows Received as the money recorded as collected, by any method, apart from the profit counted at the sale before the rule', () => {
     const html = renderToString(<ProfitTable report={straddle()} />);
     const summary = summaryOf(html);
     expect(tile(summary, 'Sold')).toBe('UGX 3,000');

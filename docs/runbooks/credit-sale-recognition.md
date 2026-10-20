@@ -12,8 +12,8 @@ screens, how to check the figures and how the operator undoes it. Nothing here t
 - `on_payment` (the owner's rule): a credit sale is Sold and On credit. It counts as profit only as the buyer pays, on
   the day of each payment, with its share of the sale's profit (the payment times the sale's profit margin). Received is separate: it is
   the money recorded as collected, by any method, on the day it was entered: every payment on a credit sale, new or old, imported or
-  not (a payment dated earlier counts on the day it was entered). It is not a drawer count. A cash sale voided later leaves its sale
-  day; a reversed account payment and a voided return count on the day they happen.
+  not (a payment dated earlier counts on the day it was entered). It is not a drawer count. Cash sales count on the day they were entered. A day already reported is never rewritten, except that cancelling (voiding) a cash sale removes it from its own day; a
+  reversed account payment and a voided return count on the day they happen.
 
 Stock still leaves at the sale and trade debtors are recorded at the sale, so the accounts balance either way. Imported (historical)
 credit sales are outside the rule.
@@ -43,7 +43,7 @@ relabelled. A report that straddles the start shows the older credit sales apart
 2. Under "When does a credit sale count as income and profit?", choose "When the buyer pays" and tap Review change.
 3. Read the sentences, then tap Confirm. The change is recorded with your name (audit action `retail.capabilities.changed`).
 4. The rule starts the next business day, so the Retail home page keeps its cards until then. From that day the cards read Sales today
-   (everything sold, credit included), Cash and mobile money (money received today), On credit (what buyers still owe) and Profit today
+   (everything sold, credit included), Money collected (money recorded as collected today, by any method, less money paid back), On credit (what buyers still owe) and Profit today
    (from the money received). Until then the page and Daily profit say when the rule starts.
 
 ## Check the figures

@@ -420,7 +420,7 @@ The administrator's two screens for the trade capabilities, and the rule every c
 - **Retail settings** gains one question under the features: "When does a credit sale count as income and profit?", two plain choices (When the sale is made, today's way and the default; When the buyer pays). A different choice is read back in words and confirmed before it is saved; the server audits it. The rule is one way: it starts the next day, a pending change can be cancelled by choosing the first answer, and once it has started the first choice is off and the page says "This rule cannot be switched off once it has started. Ask Rincol support." The page tour has a step for it (page tour version 3).
 - **Payment date.** On a credit sale the server marks `counted_when_paid` (the later of its date and the day it was entered is on or after the first day of the rule); only then is the payment form's date fixed to today, and the date sent is always today, whatever a stored draft holds. A payment on account is dated today in the same way when any open sale it would pay is marked. A sale entered and dated before the start keeps a free date.
 - **Profit and home figures** read the when-paid way once the rule has started and a report holds a day from the start on or a credit sale counted when the buyer pays; a report of earlier days keeps the plain layout, exactly as before. Received is the money recorded as collected on the day it was entered, by any method: sales paid at the sale and every payment recorded on a credit sale, old ones and imported ones included (not a claim that it equals the drawer). The credit profit tile leaves imported credit sales out. The report table has a Received column beside "Counted for profit", and a tile "Net credit profit counted at the sale" (from credit made before the rule started, after returns; in the profit, not taken off Received) when there is one. They say when the rule starts in one line (`credit_recognition_starts_on`).
-- **Home cards** under "When the buyer pays": Sales today (everything sold, credit included, with the count), Money collected (money recorded as collected today by any method, payments on earlier and imported credit sales included), On credit (what buyers still owe and how many sales, with a hint that it is not profit) and Profit today (from the money received). The 7 and 30 day tiles keep Sold and add Received. With the default the cards are exactly as before.
+- **Home cards** under "When the buyer pays": Sales today (everything sold, credit included, with the count), Money collected (money recorded as collected today by any method, less money paid back, payments on earlier and imported credit sales included), On credit (what buyers still owe and how many sales, with a hint that it is not profit) and Profit today (from the money received). The 7 and 30 day tiles keep Sold and add Received. With the default the cards are exactly as before.
 - **Daily profit** under "When the buyer pays": Received (the cash) and "Counted for profit" are two columns, Sold is a column and a headline figure beside them, On credit now is a headline figure, and the profit line says it is from money received when nothing was counted at the sale. The savings screens read the same profit.
 
 ## Trade screens (#193, ADR-033)
@@ -759,6 +759,46 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - **Tours.** The welcome tour is version 8 (a "Your branches" step for whoever may read branches); `page-branches` is the page tour.
 - **Tests.** `branches/state.test.ts` (the rules), `branches/branches.dom.test.tsx` (hidden then shown closed branches, the badge and reason, confirm once, the warning
   and reason, refusals in plain words, reopen, the stocking switch, a reader sees no action), `retail/not-stocking.test.tsx`, `auth/branch.test.ts`, `tour/*`.
+
+## Correcting entry mistakes (#351, #352, ADR-044)
+
+The owner fixes a mistake where he sees it, with a trail the spreadsheet never had. Everything below is phone first, in plain words, and
+shows an action only to someone who may take it; the server decides again.
+
+- **One name per item (#352).** On the Items form (add and change), pressing Save first asks the server for similar names
+  (`GET /retail/products/similar`). The same name in the same unit shows "This product already exists: <name> (code). Open it?" with Open it,
+  Change the name and, for an administrator (`core.settings.manage`) only, Add anyway: it asks "Why is this a different item?" (5 characters at
+  least), keeps the reason with the item and saves. Anyone else sees no Add anyway. A close name shows "An item with a similar name exists. Check you
+  are not adding the same item twice." with each neighbour, an Open button on each, "This is a different item, save it" and Change the name; the
+  same name in another unit is listed there as "the same name in another unit". Editing the description or unit clears the panels and asks
+  again; an edit that leaves both alone saves at once. If the server refuses at the moment of saving (someone else added the name), the same
+  panel appears from its answer. One request however often Save is pressed (`sending` ref). Open it and Open go to the Items edit screen of that item.
+  The CSV import reports a repeated name as skipped ("An item with this name exists already (code ...)").
+- **Past restocks (`/staff/retail/restocks`, crumbs Home, Retail, Past restocks; a link on the Restock screen).** Every restock, newest first, a
+  voided one marked Voided with its date and reason and never hidden; filters From, To and Show (all, not voided, voided). Each card shows the
+  number, date, supplier, payment, total and each line with its quantity; a line entered in a unit that is not the item's usual one adds "Entered in
+  metre but this item is kept in roll? If that is wrong, correct this restock and enter it again in the right unit." **Correct this restock**
+  (for someone who holds `retail.purchase.create` at every branch it touched; otherwise a line says why not) opens a form with what a void does
+  in plain words, a reason (5 characters at least) and three buttons: **Void and enter it again**, **Void only** and Keep the restock. The reason
+  and the `Idempotency-Key` are kept per restock in the tab (`usePersistedDraft`), so a lost answer and a retry send the same key; one request
+  however often a button is pressed. A refusal shows the server's words (stock sold or moved, paid, imported). Void and enter it again goes to
+  `/staff/retail/restock?again=<id>`: the restock form opens with the same supplier, date, payment and lines (quantities in the unit they were
+  entered in) dated today (the old date may be banked in the cash book; a plain warning shows if it is moved back), in a draft of its own, so a restock in progress is never overwritten, under "You are entering restock RP... again, which you
+  voided. Check each quantity, unit and price, then save." On the restock form a line whose chosen pack unit is not the item's usual unit shows the same
+  hint.
+- **Correct on a stock row.** On the stock list of one branch (not All branches) each row has Correct, for someone who holds
+  `retail.stocktake.commit` at that branch or `retail.catalogue.manage`. It opens four small choices, each on its own: *The quantity is wrong*
+  (In stock now, the right quantity, "That takes away 4 roll.", a reason: Entry mistake or Miscount, an optional note, a hint that the old figure
+  stays in the history and is not counted as shrinkage, Save the right quantity; one request, one key kept in the tab), *The category is wrong*
+  (the right category; "<item> is now in <new>. It was in <old>."; audited with both), *The unit, name or price is wrong* (where to go:
+  Past restocks for a restock entered in the wrong pack unit or at the wrong price, Items for a name or price; a unit in use is never converted, so the way out is a new item in the right unit, this one corrected to none, and a restock of the new one) and *See its history* (the item at this branch, newest first: date, what it was, the quantity with its sign,
+  "Corrected from 10 to 6. Entry mistake.", the note, "By you" or "By a colleague"). Nothing is edited underneath.
+- **Tours.** `retail-sales` is version 7 and `admin-welcome` version 10 (a Correct step on the stock list for whoever may count stock, and for the
+  welcome tour a Past restocks step); `page-stock` is version 2; `page-restocks` is new (version 1). Anchors: `stock-list`, `restock-past`,
+  `restocks-filters`, `restocks-list`.
+- **Mock.** `api/retail-mock.ts` implements `similarProducts`, the duplicate refusal (`sameNameCheck`), `listPurchases`, `getPurchase`,
+  `voidPurchase`, `correctStock` and `stockHistory` in memory, with the server's codes and words.
+- **Tests.** `catalogue-names.dom.test.tsx`, `restocks.dom.test.tsx`, `stock-correct.dom.test.tsx`, `tour/*`.
 
 ## Left to do
 
