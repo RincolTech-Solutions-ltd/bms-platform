@@ -1,6 +1,6 @@
--- V63: write-off of a credit sale whose buyer never pays (ADR-043, issue #340, slice 2).
+-- V64: write-off of a credit sale whose buyer never pays (ADR-043, issue #340, slice 2).
 --
--- Numbered V63: V62 is the staff password reset (#322), the last on main when this merged. Flyway runs with outOfOrder off, so a
+-- Numbered V64: V63 is taken by #356, which merges first, and V62 is the staff password reset (#322). Flyway runs with outOfOrder off, so a
 -- number below one already applied would never run.
 --
 -- Expand only, safe on a populated database. One new table, retail_sale_writeoffs (a write-off of the unpaid part of one credit

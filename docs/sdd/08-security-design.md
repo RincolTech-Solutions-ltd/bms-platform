@@ -394,7 +394,7 @@ Notes:
   the tenant's threshold for `retail_purchase_order` (section 8.4) cannot be its checker. Landed cost and supplier credit notes (issue #199, migration V48) add no permission: they use `retail.payable.manage` in the branch of every received line and of the invoice, and the cost columns of a line (the parts for inventory and cost of goods sold, the cost before and after, the landed amount on a receipt line) need `retail.profit.read` in the line's branch and are absent otherwise; no maker-checker action is registered for them.
   Each becomes a row of the matrix in the slice that seeds it, because `PermissionMatrixIT` compares
   the seeded permissions with the matrix; all of them go to administrators only.
-  `retail.credit.write_off` (issue #340, ADR-043, migration `V63`) writes off a debt that will never be paid: its own
+  `retail.credit.write_off` (issue #340, ADR-043, migration `V64`) writes off a debt that will never be paid: its own
   permission, administrators only, kept apart from `retail.credit.manage` because a write-off cannot be taken back in this release; above the
   tenant's threshold for `retail_sale_write_off` a second holder must approve it (section 8.4). `retail.credit.manage` alone sets credit limits and terms: `retail.customer.manage`, which the sales
   role holds, edits name and contact only. A branch role can only refuse an action, never grant a
