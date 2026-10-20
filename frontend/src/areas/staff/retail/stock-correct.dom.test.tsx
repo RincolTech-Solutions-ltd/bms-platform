@@ -204,6 +204,40 @@ describe('a quantity that moved meanwhile', () => {
   });
 });
 
+describe('a 409 after the list already moved', () => {
+  it('restarts from the list quantity and the retry sends it with a new key', async () => {
+    correctStock.mockRejectedValueOnce(refusal('stock_moved', 'The quantity changed while you were typing: it is 8 roll now.'));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (q: string) => (
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: admin, branch }}>
+          <CorrectItem row={{ ...row, qty: q }} branchId={branch} onClose={() => undefined} />
+        </StaffContext.Provider>
+      </QueryClientProvider>
+    );
+    const view = render(tree('10.000'));
+    open('The quantity is wrong');
+    fireEvent.change(qty(), { target: { value: '6' } });
+    fireEvent.change(reason(), { target: { value: 'miscount' } });
+    view.rerender(tree('8.000'));
+    await waitFor(() => expect(qty().value).toBe('8'));
+    expect(screen.getByRole('status').textContent).toContain('changed to 8');
+    fireEvent.change(reason(), { target: { value: 'miscount' } });
+    fireEvent.change(qty(), { target: { value: '5' } });
+    fireEvent.click(save());
+    await screen.findByRole('alert');
+    expect(correctStock.mock.calls[0]?.[0]).toMatchObject({ expected_qty: '8.000' });
+    expect(qty().value).toBe('8');
+    correctStock.mockResolvedValueOnce({ id: 'c4', old_qty: '8.000', new_qty: '5.000' });
+    fireEvent.change(qty(), { target: { value: '5' } });
+    fireEvent.change(reason(), { target: { value: 'miscount' } });
+    fireEvent.click(save());
+    await waitFor(() => expect(correctStock).toHaveBeenCalledTimes(2));
+    expect(correctStock.mock.calls[1]?.[0]).toMatchObject({ expected_qty: '8.000' });
+    expect(correctStock.mock.calls[1]?.[1]).not.toBe(correctStock.mock.calls[0]?.[1]);
+  });
+});
+
 describe('a unit in use', () => {
   it('sends nobody to change it in Items: a unit is never converted', () => {
     screenOf(admin, <CorrectItem row={row} branchId={branch} onClose={() => undefined} />);

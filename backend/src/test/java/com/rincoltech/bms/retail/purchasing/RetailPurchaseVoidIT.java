@@ -502,6 +502,7 @@ class RetailPurchaseVoidIT extends IntegrationTest {
                 .get("id")
                 .asString());
         assertThat(product().get("cost_minor").asLong()).isEqualTo(1_300);
+        assertThat(product().get("sell_minor").asLong()).isEqualTo(1_900);
         assertThat(voidIt(newest, "Entered the wrong price").getStatusCode()).isEqualTo(HttpStatus.OK);
         JsonNode p = product();
         assertThat(p.get("cost_minor").asLong()).isEqualTo(1_200);
