@@ -193,10 +193,12 @@ class CreditRecognitionRepository {
     }
 
     /**
-     * The money actually collected on credit sales, by the day it was entered and the branch that took it (ADR-043): every payment
-     * on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported sales included (a
-     * payment recorded after the import is real cash); less a payment on account when it is reversed, on the day of the reversal; less
-     * the money paid back on a return of a credit sale, on the day of the return, at the branch it left from. This is a cash figure.
+     * The money recorded as collected, apart from sales paid at the sale (ADR-043), by the day it was entered and the branch that took
+     * it, by any method (cash, mobile money, bank): every payment on a credit sale, whatever the sale's date and whether or not it counts
+     * when the buyer pays, imported sales included; less a payment on account when it is reversed, on the day of the reversal; less the
+     * money paid back on any return, cash sale or credit sale, on the day of the return and at the refund branch, and given back on the
+     * day a return is voided. A payment dated earlier than it was entered counts on the day it was entered, so a day already reported is
+     * not rewritten. Voiding a cash sale does rewrite that sale's own day, as it always did (the sale leaves its day).
      */
     List<ReportsRepository.DayFigures> collections(List<UUID> branchIds, LocalDate from, LocalDate to) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -235,9 +237,12 @@ class CreditRecognitionRepository {
                         + " UNION ALL"
                         + " SELECT r.refund_branch_id, r.returned_on, -r.refund_minor"
                         + " FROM retail_sale_returns r"
-                        + " JOIN retail_sales s ON s.tenant_id = r.tenant_id AND s.id = r.sale_id"
-                        + " WHERE r.status = 'completed' AND r.refund_minor > 0 AND r.returned_on BETWEEN :from AND :to"
-                        + " AND s.payment_method = 'credit'"
+                        + " WHERE r.status IN ('completed', 'voided') AND r.refund_minor > 0"
+                        + " AND r.returned_on BETWEEN :from AND :to"
+                        + " UNION ALL"
+                        + " SELECT r.refund_branch_id, r.voided_on, r.refund_minor"
+                        + " FROM retail_sale_returns r"
+                        + " WHERE r.status = 'voided' AND r.refund_minor > 0 AND r.voided_on BETWEEN :from AND :to"
                         + ") x" + branch + " GROUP BY x.br, x.d")
                 .params(params)
                 .query((rs, n) -> new ReportsRepository.DayFigures(

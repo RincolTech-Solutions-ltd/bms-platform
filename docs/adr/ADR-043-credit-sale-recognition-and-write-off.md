@@ -63,20 +63,24 @@ balance today and every closed period.
 
 3. **Three figures under `on_payment`.**
    - **Sold:** everything sold, credit included. The figure of `on_sale`, by the sale's own date.
-   - **Received:** the real money collected, a cash figure that matches the cash drawer and is not a profit basis. It is the sales
-     paid at the sale, on the sale date, plus **every payment recorded on a credit sale**, on the day it was entered and at the branch
-     that took it, whatever the sale's date and whether or not the sale counts when the buyer pays, imported credit sales included (a
-     payment recorded after the import is real cash); less a payment on account when it is reversed (on the day of the reversal) and
-     the money paid back on a return of a credit sale. The profit is a separate leg and is not changed by this: a credit sale from
-     before the rule started stays counted at the sale and one from after it as the buyer pays, never twice. A sale paid at the sale counts in full on the sale date. A payment on a credit
-     sale counts on the day it was **entered** (the tenant's day, from the one business clock), and under `on_payment` the date
-     written on the payment (`paid_on`) must be today, **for a sale that counts from the start day on** (the sale counted when the buyer
-     pays; the sale says so with `counted_when_paid`, which the payment form reads): a backdated payment on such a sale is refused (422
-     `backdated_payment`, "Under the 'when the buyer pays' rule a payment is dated today. If you took the money earlier, ask your
-     administrator."), for a payment on a sale and for a payment on account that pays any such sale. A payment on a sale entered and dated before the
-     start day keeps its old freedom, because it adds nothing to the reports; an imported sale is outside the rule. So the day the payment counts on, the day of the cash takings and the expected bank amount in the cash
-     book, and the day of the ledger entry are the same day, and a day already reported, with the savings saved for it, is never
-     rewritten by a late entry. Under `on_sale` nothing changes. Money refunded on a return takes it back on the day of the return.
+   - **Received:** the money recorded as collected on the day it was entered, by any method (cash, mobile money, bank). It is not a
+     profit basis and it is not a claim that it equals what is in the drawer: a till can be short, and the drawer count is a different
+     check. It is the sales paid at the sale, on the sale date, plus **every payment recorded on a credit sale**, on the day it was
+     entered and at the branch that took it, whatever the sale's date and whether or not the sale counts when the buyer pays, imported
+     credit sales included (a payment recorded after the import is money recorded as collected); less a payment on account when it is
+     reversed (on the day of the reversal); less the money paid back on any return, cash sale or credit sale, on the day of the
+     return and at the refund branch (`refund_branch_id`), and given back on the day the return is voided. The profit is a separate leg
+     and is not changed by this: a credit sale from before the rule started stays counted at the sale and one from after it as the
+     buyer pays, never twice. **A payment dated earlier than it was entered counts on the day it was entered**, so a day already
+     reported is never rewritten by a late entry. Voiding a cash sale does rewrite that sale's own day (the sale leaves the day it was
+     made on, as it always did), while a reversed account payment and a voided return are counted on the day they happen.
+     Under `on_payment` the date written on a payment (`paid_on`) must be today **for a sale that counts from the start day on** (the
+     sale counted when the buyer pays; the sale says so with `counted_when_paid`, which the payment form reads): a backdated payment
+     on such a sale is refused (422 `backdated_payment`, "Under the 'when the buyer pays' rule a payment is dated today. If you took
+     the money earlier, ask your administrator."), for a payment on a sale and for a payment on account that pays any such sale. A
+     payment on a sale entered and dated before the start day, or on an imported sale, keeps its freedom to carry an earlier date: it
+     counts as Received on the day it was entered and adds nothing to the profit reports (the sale was counted at the sale).
+     Under `on_sale` nothing changes.
    - **On credit:** what buyers still owe on the credit sales counted when the buyer pays: total less paid, where the paid amount
      already holds the credit given on returns. Credit sales entered and dated before the start day were counted at the sale, so
      they are not listed as uncounted. Not part of any period; it is a position now.
@@ -84,8 +88,8 @@ balance today and every closed period.
      from the start day on, or a credit sale that counts when the buyer pays (a backdated one is dated before the start). Any other
      report, such as September after a start in October, keeps the plain layout and its figures exactly as for a tenant that never
      switched, so no historical report is relabelled and no old credit sale is shown as uncollected. A report that straddles the start
-     shows Received as the cash (`received_minor`), `sales_minor` as the sales counted for profit, and `counted_at_sale_minor` as
-     the profit counted at the sale for credit made before the rule started, net of its returns: informational, part of the profit,
+     shows Received as the money recorded as collected (`received_minor`), `sales_minor` as the sales counted for profit, and `counted_at_sale_minor` as
+     the profit counted at the sale for credit made before the rule started (imported credit sales are counted at the sale too, but are not in this figure), net of its returns: informational, part of the profit,
      never subtracted from Received. The home cards show the same Received and appear only once the start day has come.
 
 4. **Profit of a credit sale is recognised in proportion to the money kept.** For one credit sale at the end of a day:
@@ -95,8 +99,8 @@ balance today and every closed period.
    With no return this is the owner's formula: payment times the sale's profit margin, and a part payment gives part of the
    profit. Rounding is one half-up division on the cumulative amount (integers only, ADR-004).
 
-5. **Where the figures apply under `on_payment`.** The daily profit report (`received_minor` is the cash, `sales_minor` the sales counted for profit, `sold_minor` and the
-   position `on_credit_minor` come beside them), the retail home cards (Sales today is Sold, Cash and mobile money is Received, the real money collected, On
+5. **Where the figures apply under `on_payment`.** The daily profit report (`received_minor` is the money recorded as collected, `sales_minor` the sales counted for profit, `sold_minor` and the
+   position `on_credit_minor` come beside them), the retail home cards (Sales today is Sold, Money collected is Received, the money recorded as collected by any method, On
    credit is the position, Profit today is the gross profit, which includes credit counted at the sale before the rule started) and the daily savings suggestion. The report and the
    savings suggestion read the same `ProfitFigures` so that they can never disagree, and the cards use the same `CreditRecognition`
    arithmetic (they show gross profit and include the debt written off, as Daily profit does, but no usage or stock-take difference, as they always did): **50 percent of the received profit per shop per day**

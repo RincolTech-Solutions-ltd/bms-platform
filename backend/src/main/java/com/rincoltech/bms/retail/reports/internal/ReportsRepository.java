@@ -118,8 +118,9 @@ class ReportsRepository {
     }
 
     /**
-     * Only the sales that were paid at the sale, and the returns of those (ADR-043): no credit sale at all, counted or not, imported
-     * or not. It is the part of Received that is not a payment on a credit sale.
+     * Only the sales that were paid at the sale (ADR-043): no credit sale at all, counted or not, imported or not, and no return. It is
+     * the part of Received that is not a payment on a credit sale; the money paid back on returns is a refund leg of
+     * {@code CreditRecognitionRepository#collections}, charged to the refund branch, for cash and credit sales alike.
      */
     List<DayFigures> dailyCash(List<UUID> branchIds, LocalDate from, LocalDate to) {
         return daily(branchIds, from, to, CreditPeriods.NONE, true);
@@ -135,8 +136,7 @@ class ReportsRepository {
                         : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
                                 + periods.sql("s.sale_date", "s.created_at", periodParams, "crpS") + ")";
         String deferredReturn = cashOnly
-                ? "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
-                        + " AND rs.payment_method = 'credit')"
+                ? "true"
                 : periods.isEmpty()
                         ? "false"
                         : "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"

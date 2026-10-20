@@ -99,19 +99,20 @@ class DashboardService {
         LocalDate windowStart = today.minusDays(29);
         Map<UUID, Map<LocalDate, long[]>> recBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> recDay = new LinkedHashMap<>();
-        // Received (ADR-043): the real money collected, a cash figure. It is the sales paid at the sale plus every
-        // payment recorded on a
-        // credit sale, and is not the profit basis above.
+        // Received (ADR-043): the money recorded as collected on the day it was entered, by any method. It is the sales
+        // paid at
+        // the sale plus every payment recorded on a credit sale, less money paid back, and is not the profit basis
+        // above.
         Map<UUID, Map<LocalDate, long[]>> collBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> collDay = new LinkedHashMap<>();
         if (onPay) {
             for (DaySales d : repo.sales(filter, windowStart, today, periods)) {
                 add(recBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), d.cost());
                 add(recDay, d.day(), d.sales(), d.cost());
-                if (!d.credit()) {
-                    add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), 0);
-                    add(collDay, d.day(), d.sales(), 0);
-                }
+            }
+            for (DaySales d : repo.cashSales(filter, windowStart, today)) {
+                add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), 0);
+                add(collDay, d.day(), d.sales(), 0);
             }
             Set<UUID> scope = filter == null ? null : Set.copyOf(filter);
             for (ReportsRepository.DayFigures d : CreditRecognition.deltas(
@@ -191,6 +192,8 @@ class DashboardService {
         // A shop row for every branch with sales in the window or with stock, in scope.
         List<UUID> branches = new ArrayList<>(byBranch.keySet());
         recBranch.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
+        // A branch that only took payments on credit sales has money collected today and needs its row.
+        collBranch.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         positions.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         branches.sort(null);
         List<Shop> shops = new ArrayList<>();

@@ -143,18 +143,21 @@ final class ReportsApi {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only with on_payment: the real money collected (Received): sales paid at the sale and every"
-                                    + " payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the"
-                                    + " buyer pays, imported credit sales included; less payments reversed and money paid back on returns."
-                                    + " A cash figure that matches the cash drawer, not a profit basis")
+                            "Present only with on_payment: the money recorded as collected on the day it was entered, by any method"
+                                    + " (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit"
+                                    + " sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales"
+                                    + " included; less payments reversed (on the day of the reversal) and money paid back on returns (on the"
+                                    + " day of the return, at the refund branch; given back on the day a return is voided). A payment dated"
+                                    + " earlier than it was entered counts on the day it was entered. A cash sale voided later leaves its"
+                                    + " own sale day. Not a profit basis")
             Long receivedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only with on_payment: the profit counted at the sale for credit sales entered and dated before"
-                                    + " the rule started, net of their returns (informational; part of the profit, never subtracted from"
-                                    + " Received)")
+                            "Present only with on_payment: the profit counted at the sale for credit sales (not imported ones)"
+                                    + " entered and dated before the rule started, net of their returns (informational; part of the profit,"
+                                    + " never subtracted from Received)")
             Long countedAtSaleMinor) {}
 
     @Schema(name = "RetailDailyProfit")
@@ -200,17 +203,20 @@ final class ReportsApi {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only with on_payment: the real money collected (Received): sales paid at the sale and every"
-                                    + " payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the"
-                                    + " buyer pays, imported credit sales included; less payments reversed and money paid back on returns."
-                                    + " A cash figure that matches the cash drawer, not a profit basis")
+                            "Present only with on_payment: the money recorded as collected on the day it was entered, by any method"
+                                    + " (cash, mobile money, bank) (Received): sales paid at the sale and every payment recorded on a credit"
+                                    + " sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales"
+                                    + " included; less payments reversed (on the day of the reversal) and money paid back on returns (on the"
+                                    + " day of the return, at the refund branch; given back on the day a return is voided). A payment dated"
+                                    + " earlier than it was entered counts on the day it was entered. A cash sale voided later leaves its"
+                                    + " own sale day. Not a profit basis")
             Long receivedMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only with on_payment: the profit counted at the sale for credit sales entered and dated before"
-                                    + " the rule started, net of their returns (informational; part of the profit, never subtracted from"
-                                    + " Received)")
+                            "Present only with on_payment: the profit counted at the sale for credit sales (not imported ones)"
+                                    + " entered and dated before the rule started, net of their returns (informational; part of the profit,"
+                                    + " never subtracted from Received)")
             Long countedAtSaleMinor) {}
 }

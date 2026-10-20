@@ -33,6 +33,35 @@ class DashboardRepository {
         return sales(branchIds, from, to, CreditPeriods.NONE);
     }
 
+    /** The sales paid at the sale, by shop and day (no credit sale, no return): the part of Received that is not a payment on credit. */
+    List<DaySales> cashSales(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("from", Date.valueOf(from));
+        params.put("to", Date.valueOf(to));
+        String branch = "";
+        if (branchIds != null) {
+            params.put("branchIds", branchIds);
+            branch = " AND s.branch_id IN (:branchIds)";
+        }
+        return jdbc.sql("SELECT s.branch_id, s.sale_date AS day, sum(l.line_total_minor) AS sales"
+                        + "  FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id"
+                        + " WHERE s.status = 'completed' AND s.payment_method <> 'credit'"
+                        + "   AND s.sale_date BETWEEN :from AND :to" + branch
+                        + " GROUP BY s.branch_id, s.sale_date")
+                .params(params)
+                .query((rs, n) -> new DaySales(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getDate("day").toLocalDate(),
+                        false,
+                        rs.getLong("sales"),
+                        0,
+                        0))
+                .list();
+    }
+
     /**
      * As above; a credit sale that is not an imported one and counts from the start day of {@code periods} on (the later of its date
      * and the day it was entered; counted when the

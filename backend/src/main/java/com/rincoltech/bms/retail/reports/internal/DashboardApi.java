@@ -35,13 +35,14 @@ final class DashboardApi {
 
             @Schema(
                     description =
-                            "Only with on_payment: money collected today for sales, paid at the sale or as a payment on a credit"
-                                    + " sale (Received). sales_minor is then Sold, everything sold today")
+                            "Only with on_payment: money recorded as collected today, by any method, for sales paid at the sale and"
+                                    + " for payments on credit sales, less money paid back (Received). sales_minor is then Sold,"
+                                    + " everything sold today")
             Long receivedMinor,
 
             @Schema(
                     description =
-                            "Only with on_payment: what buyers still owe on credit sales made on the system, all dates (On credit)")
+                            "Only with on_payment: what buyers still owe on the credit sales counted when the buyer pays, all dates (On credit)")
             Long onCreditMinor,
 
             @Schema(description = "Only with on_payment: the number of credit sales still owing")
@@ -54,7 +55,9 @@ final class DashboardApi {
             long salesMinor,
             @Schema(description = PROFIT_ONLY) Long grossProfitMinor,
 
-            @Schema(description = "Only with on_payment: money collected on the day (Received)")
+            @Schema(
+                    description =
+                            "Only with on_payment: money recorded as collected on the day, by any method (Received)")
             Long receivedMinor) {}
 
     @Schema(name = "RetailDashboardStock")

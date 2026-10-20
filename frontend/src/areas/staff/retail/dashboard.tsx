@@ -51,7 +51,7 @@ export function DashboardView({ data, nameOf, stockLink }: { data: Dashboard; na
         {onPayment ? (
           <>
             <Stat label="Sales today" value={money(today.sales_minor ?? 0)} hint={`${today.sale_count ?? 0} ${today.sale_count === 1 ? 'sale' : 'sales'} sold, including credit`} />
-            <Stat label="Cash and mobile money" value={money(today.received_minor ?? 0)} hint="Money received today, with payments on earlier credit sales" />
+            <Stat label="Money collected" value={money(today.received_minor ?? 0)} hint="Money received today by any method, with payments on earlier credit sales" />
             <Stat label="On credit" value={money(today.on_credit_minor ?? 0)} hint={`${today.on_credit_count ?? 0} ${today.on_credit_count === 1 ? 'sale' : 'sales'} not paid yet. Not counted as profit`} />
             {withProfit && today.gross_profit_minor !== undefined && <Stat label="Profit today" value={money(today.gross_profit_minor)} hint="From the money received" />}
           </>

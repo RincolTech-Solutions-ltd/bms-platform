@@ -500,6 +500,15 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .isEqualTo(800);
         assertThat(field(row(report, hq, ago(1)), "profit_minor")).isEqualTo(1_200);
         assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(-400);
+        assertThat(field(row(report, hq, ago(1)), "received_minor")).isEqualTo(3_000);
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("the cash paid back on the return, on the day of the return")
+                .isEqualTo(-1_000);
+        assertThat(report.get("received_minor").asLong()).isEqualTo(2_000);
+        JsonNode dash = dashboard();
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(-1_000);
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(-1_000);
+        assertThat(dash.get("last30_received_minor").asLong()).isEqualTo(2_000);
     }
 
     @Test
@@ -797,6 +806,10 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .isEqualTo(500);
         assertThat(report.get("cost_of_sales_minor").asLong()).isEqualTo(1_500);
         assertThat(report.get("profit_minor").asLong()).as("400 + 400 + 200").isEqualTo(1_000);
+        assertThat(report.get("sold_minor").asLong())
+                .as("Sold is the sales counted for profit plus what is still owed on the counted sale")
+                .isEqualTo(report.get("sales_minor").asLong()
+                        + report.get("on_credit_minor").asLong());
         assertThat(field(row(report, hq, ago(10)), "profit_minor")).isEqualTo(400);
         assertThat(field(row(report, hq, ago(10)), "received_minor")).isZero();
         assertThat(field(row(report, hq, today()), "received_minor")).isEqualTo(1_500);
@@ -885,6 +898,12 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .isEqualTo(1_000);
         assertThat(dash.get("last30_received_minor").asLong())
                 .isEqualTo(report.get("received_minor").asLong());
+        assertThat(report.get("counted_at_sale_minor").asLong())
+                .as("an imported credit sale is counted at the sale but is not in the credit profit tile")
+                .isZero();
+        assertThat(report.get("profit_minor").asLong())
+                .as("yet its profit is in the profit")
+                .isEqualTo(2_000);
         assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(1_000);
         assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(1_000);
     }
@@ -1027,6 +1046,15 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(report.get("profit_minor").asLong()).isEqualTo(1_600);
         assertThat(field(row(report, br2, today()), "profit_minor")).isEqualTo(1_200);
         assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(400);
+        assertThat(field(row(before, br2, today()), "received_minor")).isEqualTo(1_500);
+        assertThat(field(row(before, hq, today()), "received_minor")).isEqualTo(500);
+        assertThat(field(row(report, br2, today()), "received_minor"))
+                .as("a return credited to the balance pays nothing out")
+                .isEqualTo(1_500);
+        assertThat(field(row(report, hq, today()), "received_minor")).isEqualTo(500);
+        JsonNode dash = dashboard();
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong()).isEqualTo(1_500);
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(500);
     }
 
     @Test
@@ -1187,6 +1215,18 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(report.get("on_credit_minor").asLong())
                 .as("the debt is owed again")
                 .isEqualTo(2_000);
+        assertThat(field(row(report, hq, ago(1)), "received_minor"))
+                .as("recorded on its day")
+                .isEqualTo(2_000);
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("reversed on the day of the reversal, not on the day it was taken")
+                .isEqualTo(-2_000);
+        assertThat(report.get("received_minor").asLong()).isZero();
+        JsonNode dash = dashboard();
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(-2_000);
+        assertThat(field(dayOf(dash.get("days"), ago(1)), "received_minor")).isEqualTo(2_000);
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(-2_000);
+        assertThat(dash.get("last30_received_minor").asLong()).isZero();
     }
 
     @Test
@@ -1260,5 +1300,183 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .as("the sale's shop never had the money and does not go negative")
                 .isZero();
         assertThat(report.get("profit_minor").asLong()).isZero();
+        assertThat(field(row(report, br2, today()), "received_minor"))
+                .as("2,000 taken and 2,000 paid back at the same till")
+                .isZero();
+        assertThat(field(row(report, hq, today()), "received_minor")).isZero();
+        assertThat(report.get("received_minor").asLong()).isZero();
+        JsonNode dash = dashboard();
+        assertThat(dash.get("today").get("received_minor").asLong()).isZero();
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong()).isZero();
+    }
+
+    // ---- Received: the money recorded as collected, by the day it was entered (ADR-043)
+
+    /** A sale of {@code prod} with one piece, credit or cash, dated {@code date}. */
+    UUID oneOf(UUID prod, String method, LocalDate date) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", date.toString());
+        body.put("payment_method", method);
+        if (method.equals("credit")) {
+            body.put("buyer_name", "Test Buyer 17");
+        }
+        body.put("lines", List.of(Map.of("product_id", prod, "qty", "1")));
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(r);
+    }
+
+    /** A cash return of all of a one piece sale, the money paid back from {@code refundBranch}. */
+    JsonNode giveBackCashFrom(UUID sale, UUID refundBranch) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("sale_line_id", lineOf(sale));
+        line.put("qty", "1");
+        line.put("reason", "defective");
+        line.put("disposition", "restock");
+        Map<String, Object> ret = new LinkedHashMap<>();
+        ret.put("lines", List.of(line));
+        ret.put("refund_method", "cash");
+        ret.put("refund_branch_id", refundBranch);
+        ResponseEntity<JsonNode> r = api.postKeyed(
+                "/sales/" + sale + "/returns",
+                ret,
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody();
+    }
+
+    @Test
+    void moneyPaidBackOnACreditSaleReturnLeavesTheRefundBranchNotTheSalesBranch() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID cheap = api.product("CRD-4", 100, 400);
+        api.importedBalance(hq, cheap, "100");
+        UUID old = oneOf(cheap, "credit", ago(10));
+        sellEntered(old, ago(10));
+        payEnteredToday(old, 400, today());
+        giveBackCashFrom(old, br2);
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("taken at the sale's branch")
+                .isEqualTo(400);
+        assertThat(field(row(report, br2, today()), "received_minor"))
+                .as("paid back at the refund branch")
+                .isEqualTo(-400);
+        assertThat(report.get("received_minor").asLong()).isZero();
+        JsonNode dash = dashboard();
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(400);
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong()).isEqualTo(-400);
+        assertThat(dash.get("today").get("received_minor").asLong()).isZero();
+    }
+
+    @Test
+    void moneyPaidBackOnACashSaleReturnLeavesTheSameRefundBranch() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID cheap = api.product("CRD-5", 100, 400);
+        api.importedBalance(hq, cheap, "100");
+        UUID cash = oneOf(cheap, "cash", today());
+        giveBackCashFrom(cash, br2);
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("taken at the sale")
+                .isEqualTo(400);
+        assertThat(field(row(report, br2, today()), "received_minor"))
+                .as("paid back at the refund branch, as for a credit sale")
+                .isEqualTo(-400);
+        JsonNode dash = dashboard();
+        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(400);
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong()).isEqualTo(-400);
+    }
+
+    @Test
+    void aPaymentDatedEarlierThanItWasEnteredCountsOnTheDayItWasEntered() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID old = creditSale(hq, 1, ago(10));
+        sellEntered(old, ago(10));
+        payEnteredToday(old, 600, ago(3));
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(field(row(report, hq, ago(3)), "received_minor"))
+                .as("not on the day written on it: that day was reported already")
+                .isZero();
+        assertThat(field(row(report, hq, today()), "received_minor")).isEqualTo(600);
+        JsonNode dash = dashboard();
+        assertThat(field(dayOf(dash.get("days"), ago(3)), "received_minor")).isZero();
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(600);
+    }
+
+    @Test
+    void aVoidedReturnGivesTheMoneyBackOnTheDayItIsVoidedAndLeavesTheDayItWasMade() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID old = creditSale(hq, 1, ago(10));
+        sellEntered(old, ago(10));
+        pay(old, 1_000, ago(10));
+        JsonNode made = giveBack(old, "1", "cash");
+        // The return was made three days ago, and is voided today.
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sale_returns SET returned_on = DATE '" + ago(3) + "' WHERE id = '"
+                        + made.get("id").asString() + "'; END $$")
+                .update();
+        ResponseEntity<JsonNode> voided = api.postKeyed(
+                "/returns/" + made.get("id").asString() + "/void",
+                Map.of("reason", "Taken back by mistake"),
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(field(row(report, hq, ago(10)), "received_minor")).isEqualTo(1_000);
+        assertThat(field(row(report, hq, ago(3)), "received_minor"))
+                .as("the refund stays on the day it was made")
+                .isEqualTo(-1_000);
+        assertThat(field(row(report, hq, today()), "received_minor"))
+                .as("and comes back on the day the return is voided")
+                .isEqualTo(1_000);
+        assertThat(report.get("received_minor").asLong()).isEqualTo(1_000);
+        JsonNode dash = dashboard();
+        assertThat(field(dayOf(dash.get("days"), ago(3)), "received_minor")).isEqualTo(-1_000);
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(1_000);
+        assertThat(dash.get("last30_received_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void aBranchThatOnlyTookPaymentsOnAnOldCreditSaleHasItsShopRowForAReaderWithoutStockAccess() {
+        capability(Map.of("customer_accounts", true));
+        onPayment();
+        settle(ago(2).toString());
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 18"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(10).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        UUID old = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        sellEntered(old, ago(10));
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", br2, "amount_minor", 600, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(receipt.getStatusCode()).as("%s", receipt.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode dash = api.get("/reports/dashboard", "retail.sale.read").getBody();
+        assertThat(shopOf(dash, br2).get("today_received_minor").asLong())
+                .as("a branch with no sales and no stock access still has the money it took")
+                .isEqualTo(600);
+        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(600);
     }
 }
