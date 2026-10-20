@@ -1,7 +1,7 @@
--- V95: write-off of a credit sale whose buyer never pays (ADR-043, issue #340, slice 2).
+-- V63: write-off of a credit sale whose buyer never pays (ADR-043, issue #340, slice 2).
 --
--- PLACEHOLDER NUMBER: V95 is a stand-in. Flyway runs with outOfOrder off, so the real number is assigned at merge time above the
--- highest one on main (the placeholder migration guard of the review of #322 holds the same rule). Rename this file then.
+-- Numbered V63: V62 is the staff password reset (#322), the last on main when this merged. Flyway runs with outOfOrder off, so a
+-- number below one already applied would never run.
 --
 -- Expand only, safe on a populated database. One new table, retail_sale_writeoffs (a write-off of the unpaid part of one credit
 -- sale; never deleted, never reversed in this release), and one chart account, 5140 bad debt loss, seeded by the seed function of

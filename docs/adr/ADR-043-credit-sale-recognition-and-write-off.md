@@ -191,7 +191,7 @@ balance today and every closed period.
 - The switch is one way (decision 1): each sale keeps the way it was counted, the change starts tomorrow, so the sales of the day of the
   switch stay counted at the sale and the savings of that day do not move. The only way back is the operator's SQL in the runbook, which
   also says what it does to the reports; do it only knowing that a profit once reported will be reported on other days.
-- The first migration of this change (V95, a placeholder number) sets `lock_timeout` to five seconds; if the lock on a busy table
+- The first migration of this change (V63) sets `lock_timeout` to five seconds; if the lock on a busy table
   cannot be had it fails and is retried.
 - Residual risk: changing the tenant's time zone can move the entry day of sales that were entered near midnight, and with it whether such a
   sale counts from the start day. The start day itself is a stored date and does not move.
