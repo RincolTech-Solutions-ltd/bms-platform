@@ -95,10 +95,16 @@ class AccountsRepository {
 
     /** What a buyer owes on completed credit sales in every branch, imported ones included: exposure. */
     long exposure(UUID customerId) {
+        // Issue #385: a delivery fee left on the buyer's account and not yet paid is owed as well, while its sale
+        // stands.
         return jdbc.sql("""
-                        SELECT coalesce(sum(total_minor - paid_minor), 0) FROM retail_sales
-                         WHERE customer_id = ? AND payment_method = 'credit' AND status = 'completed'
-                        """).param(customerId).query(Long.class).single();
+                        SELECT coalesce((SELECT sum(total_minor - paid_minor) FROM retail_sales
+                                          WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'), 0)
+                             + coalesce((SELECT sum(o.delivery_fee_minor) FROM retail_customer_orders o
+                                           JOIN retail_sales s ON s.id = o.sale_id
+                                          WHERE o.customer_id = :customer AND o.fee_method = 'account' AND o.fee_paid_at IS NULL
+                                            AND s.status = 'completed'), 0)
+                        """).param("customer", customerId).query(Long.class).single();
     }
 
     /** Rows changed: 0 when the version moved since it was read (the predicate is the optimistic lock). */

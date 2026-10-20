@@ -21,6 +21,7 @@ import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancellationsR
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ChangeRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.DeliverRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Delivered;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeePaymentRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
@@ -340,7 +341,9 @@ class CustomerOrdersService {
         }
         String phone = r.customerPhone() == null ? h.customerPhone() : blankToNull(r.customerPhone());
         String place = r.deliveryPlace() == null ? h.deliveryPlace() : blankToNull(r.deliveryPlace());
-        LocalDate date = r.deliveryDate() == null ? h.deliveryDate() : r.deliveryDate();
+        LocalDate date = Boolean.TRUE.equals(r.clearDeliveryDate())
+                ? null
+                : r.deliveryDate() == null ? h.deliveryDate() : r.deliveryDate();
         if (r.deliveryDate() != null && r.deliveryDate().isBefore(today())) {
             throw ApiException.validation(List.of(new FieldProblem(
                     "delivery_date", "invalid", "A delivery cannot be planned for a day that has passed.")));
@@ -395,15 +398,19 @@ class CustomerOrdersService {
 
     // ---- Packed and out for delivery ---------------------------------------------------------------
 
+    /** Packed. A retry on an order already packed answers the order as it is, so a double tap is harmless. */
     @Transactional
     Order pack(UUID id, StepRequest r) {
         Header h = visible(id, true);
+        if (h.status().equals("packed")) {
+            return view(h, true);
+        }
         if (!h.status().equals("ordered")) {
-            throw stepRefused(h, "packed");
+            throw stepRefused(h, "marked packed");
         }
         UUID by = CurrentPrincipal.require().userId();
         if (repo.markPacked(id, h.version(), by) == 0) {
-            throw stepRefused(h, "packed");
+            throw stepRefused(h, "marked packed");
         }
         repo.event(id, "packed", blankToNull(r == null ? null : r.note()), by);
         audit.record(new AuditLog.Entry(
@@ -416,16 +423,20 @@ class CustomerOrdersService {
         return view(repo.find(id, false).orElseThrow(), true);
     }
 
+    /** Out for delivery. A retry with the same rider on an order already out answers the order as it is. */
     @Transactional
     Order send(UUID id, SendRequest r) {
         Header h = visible(id, true);
+        String rider = r.deliveredBy().trim();
+        if (h.status().equals("out_for_delivery") && rider.equals(h.deliveredBy())) {
+            return view(h, true);
+        }
         if (!h.status().equals("ordered") && !h.status().equals("packed")) {
-            throw stepRefused(h, "out_for_delivery");
+            throw stepRefused(h, "marked out for delivery");
         }
         UUID by = CurrentPrincipal.require().userId();
-        String rider = r.deliveredBy().trim();
         if (repo.markSent(id, h.version(), by, rider) == 0) {
-            throw stepRefused(h, "out_for_delivery");
+            throw stepRefused(h, "marked out for delivery");
         }
         String note = blankToNull(r.note());
         repo.event(id, "out_for_delivery", "Taken out by " + rider + "." + (note == null ? "" : " " + note), by);
@@ -448,7 +459,7 @@ class CustomerOrdersService {
     private Delivered doDeliver(UUID id, DeliverRequest r) {
         Principal principal = CurrentPrincipal.require();
         Header h = visible(id, true);
-        requireOpen(h, "delivered");
+        requireOpen(h, "marked delivered");
         if (!principal.may("retail.sale.create", h.branchId())) {
             throw new ApiException(
                     HttpStatus.FORBIDDEN,
@@ -457,6 +468,7 @@ class CustomerOrdersService {
                     "Delivering an order records a sale, and you may not record sales at this branch.");
         }
         boolean credit = r.paymentMethod().equals("credit");
+        boolean feeOnAccount = Boolean.TRUE.equals(r.feeOnAccount());
         long items = h.itemsTotalMinor();
         long fee = h.deliveryFeeMinor();
         long paidNow = r.paidNowMinor() == null ? 0 : r.paidNowMinor();
@@ -467,25 +479,50 @@ class CustomerOrdersService {
                     "invalid",
                     "Only a part payment names the amount paid now. Paid in full needs no amount."));
         }
+        if (!credit && r.paidNowMethod() != null) {
+            problems.add(new FieldProblem(
+                    "paid_now_method", "invalid", "Paid in full is paid by the payment method; leave this out."));
+        }
         if (!credit && r.dueDate() != null) {
             problems.add(new FieldProblem("due_date", "invalid", "Only an order on credit has a payment date."));
+        }
+        if (!credit && feeOnAccount) {
+            problems.add(new FieldProblem(
+                    "fee_on_account", "invalid", "Only an order on credit can leave the delivery fee on the account."));
         }
         if (credit && paidNow > 0 && r.paidNowMethod() == null) {
             problems.add(new FieldProblem("paid_now_method", "required", "Say how the money taken now was paid."));
         }
+        if (credit && paidNow == 0 && r.paidNowMethod() != null) {
+            problems.add(new FieldProblem(
+                    "paid_now_method", "invalid", "No money is taken now, so there is no way it was paid."));
+        }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
+        }
+        if (feeOnAccount && (h.customerId() == null || fee == 0)) {
+            throw ApiException.rule(
+                    "fee_on_account_not_allowed",
+                    fee == 0
+                            ? "This order has no delivery fee."
+                            : "Only a credit buyer on the list can have the delivery fee put on the account.");
         }
         if (credit && paidNow >= items + fee) {
             throw ApiException.rule(
                     "paid_in_full",
                     "The customer paid everything, so nothing goes on credit. Choose cash, mobile money or bank.");
         }
-        if (credit && paidNow < fee) {
+        if (credit && !feeOnAccount && paidNow < fee) {
             throw ApiException.rule(
                     "delivery_fee_unpaid",
                     "The delivery fee of " + fee + " is paid when the goods arrive. Take at least that now; the rest"
-                            + " of the order can go on credit.");
+                            + " of the order can go on credit. A credit buyer on the list can have the fee put on the account.");
+        }
+        if (feeOnAccount && paidNow > items) {
+            throw ApiException.rule(
+                    "paid_now_exceeds_items",
+                    "With the delivery fee on the account, the money taken now pays the items, so it cannot be more than "
+                            + items + ".");
         }
         LocalDate today = today();
         // Locks in the order of the sale path: the order row (taken above), the buyer's row, then the balance rows.
@@ -508,24 +545,35 @@ class CustomerOrdersService {
                 saleLines.add(new SaleLineRequest(l.productId(), l.qty(), l.unitPriceMinor(), l.unitId(), agreed));
             }
         }
-        // The ordinary sale path: stock, the two journal entries, credit and its limit, the receipt number and the
-        // audit row.
-        Sale sale = sales.record(new SaleRequest(
-                h.branchId(),
-                null,
-                r.paymentMethod(),
-                h.customerId(),
-                h.customerId() == null ? h.customerName() : null,
-                h.customerId() == null ? h.customerPhone() : null,
-                credit ? r.dueDate() : null,
-                null,
-                r.creditOverrideReason(),
-                saleLines));
-        long onSale = credit ? paidNow - fee : 0;
+        // What goes on the buyer's credit: the money taken now pays the fee first (unless the fee is on the account),
+        // the rest
+        // pays the items.
+        long onSale = !credit ? 0 : feeOnAccount ? paidNow : paidNow - fee;
+        long onCredit = !credit ? 0 : items - onSale + (feeOnAccount ? fee : 0);
+        // The ordinary sale path at the prices agreed on the order: stock, the two journal entries, credit and its
+        // limit
+        // (checked against what actually goes on credit), the receipt number and the audit row.
+        Sale sale = sales.record(
+                new SaleRequest(
+                        h.branchId(),
+                        null,
+                        r.paymentMethod(),
+                        h.customerId(),
+                        h.customerId() == null ? h.customerName() : null,
+                        h.customerId() == null ? h.customerPhone() : null,
+                        credit ? r.dueDate() : null,
+                        null,
+                        r.creditOverrideReason(),
+                        saleLines),
+                credit ? onCredit : null,
+                true);
         if (onSale > 0) {
             sales.recordPayment(sale.id(), new PaymentRequest(onSale, r.paidNowMethod(), null));
         }
-        String feeMethod = fee == 0 ? null : credit ? r.paidNowMethod() : r.paymentMethod();
+        String feeMethod = fee == 0 ? null : feeOnAccount ? "account" : credit ? r.paidNowMethod() : r.paymentMethod();
+        Leg feeDebit = feeOnAccount
+                ? Leg.debit("trade_debtors", fee).withSubledger(SalesService.SALE, sale.id())
+                : fee == 0 ? null : Leg.debit(SalesService.accountFor(feeMethod), fee);
         UUID feeEntry = fee == 0
                 ? null
                 : books.post(new Posting(
@@ -536,18 +584,17 @@ class CustomerOrdersService {
                                 ORDER,
                                 id,
                                 "retail.order_fee:" + id,
-                                List.of(
-                                        Leg.debit(SalesService.accountFor(feeMethod), fee),
-                                        Leg.credit("delivery_income", fee))))
+                                List.of(feeDebit, Leg.credit("delivery_income", fee))))
                         .map(PostedEntry::entryId)
                         .orElse(null);
         if (repo.markDelivered(id, h.version(), principal.userId(), today, sale.id(), feeMethod, feeEntry) == 0) {
-            throw stepRefused(h, "delivered");
+            throw stepRefused(h, "marked delivered");
         }
         long paidAtDoor = credit ? paidNow : Math.addExact(sale.totalMinor(), fee);
         long owed = credit ? Math.addExact(sale.totalMinor(), fee) - paidNow : 0;
         String how = credit
                 ? (paidNow == 0 ? "All on credit." : "Part payment of " + paidNow + ", " + owed + " on credit.")
+                        + (feeOnAccount ? " The delivery fee is on the account." : "")
                 : "Paid in full by " + r.paymentMethod().replace('_', ' ') + ".";
         String note = blankToNull(r.note());
         repo.event(
@@ -562,17 +609,90 @@ class CustomerOrdersService {
         after.put("payment_method", r.paymentMethod());
         after.put("paid_now_minor", paidAtDoor);
         after.put("delivery_fee_minor", fee);
+        after.put("fee_on_account", feeOnAccount);
         audit.record(new AuditLog.Entry(
                 "retail.order.delivered", ORDER, id, h.branchId(), Map.of("status", h.status()), after));
         return new Delivered(
                 view(repo.find(id, false).orElseThrow(), true), sale.id(), sale.saleNo(), paidAtDoor, owed);
     }
 
+    // ---- A delivery fee left on the account, paid later ----------------------------------------------
+
+    @Transactional
+    Outcome<Order> payFee(String idempotencyKey, UUID id, FeePaymentRequest r) {
+        return idempotency.once(
+                idempotencyKey, "POST", PATH + "/" + id + "/fee-payment", r, Order.class, () -> doPayFee(id, r));
+    }
+
+    private Order doPayFee(UUID id, FeePaymentRequest r) {
+        Principal principal = CurrentPrincipal.require();
+        Header h = visible(id, true);
+        if (!h.status().equals("delivered") || !"account".equals(h.feeMethod())) {
+            throw ApiException.rule("fee_not_on_account", "This order has no delivery fee left on the account.");
+        }
+        if (h.feePaidOn() != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "fee_already_paid",
+                    "Fee already paid",
+                    "The delivery fee of order " + h.orderNo() + " was paid on " + h.feePaidOn() + ".");
+        }
+        if (!principal.may("retail.sale.create", h.branchId())) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "Taking a payment needs permission to record sales at this branch.");
+        }
+        branches.requireSells(h.branchId(), "branch_id");
+        if (salesRepo
+                .find(h.saleId(), false)
+                .map(x -> x.sale().status())
+                .orElse("")
+                .equals("voided")) {
+            throw ApiException.rule(
+                    "sale_voided", "The sale of this order was voided, so its delivery fee was reversed.");
+        }
+        LocalDate today = today();
+        UUID entry = books.post(new Posting(
+                        h.branchId(),
+                        today,
+                        h.orderNo(),
+                        "Delivery fee paid " + h.orderNo(),
+                        ORDER,
+                        id,
+                        "retail.order_fee_payment:" + id,
+                        List.of(
+                                Leg.debit(SalesService.accountFor(r.method()), h.deliveryFeeMinor()),
+                                Leg.credit("trade_debtors", h.deliveryFeeMinor())
+                                        .withSubledger(SalesService.SALE, h.saleId()))))
+                .map(PostedEntry::entryId)
+                .orElseThrow();
+        if (repo.markFeePaid(id, h.version(), principal.userId(), today, r.method(), entry) == 0) {
+            throw Versions.conflict(repo.find(id, false).orElseThrow().version());
+        }
+        repo.event(
+                id,
+                "fee_paid",
+                "Delivery fee of " + h.deliveryFeeMinor() + " paid by "
+                        + r.method().replace('_', ' ') + ".",
+                principal.userId());
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("fee_paid_method", r.method());
+        after.put("delivery_fee_minor", h.deliveryFeeMinor());
+        audit.record(new AuditLog.Entry("retail.order.fee_paid", ORDER, id, h.branchId(), Map.of(), after));
+        return view(repo.find(id, false).orElseThrow(), true);
+    }
+
     // ---- Cancelled -----------------------------------------------------------------------------------
 
+    /** Cancelled, with a reason. A retry on an order already cancelled answers the order as it is. */
     @Transactional
     Order cancel(UUID id, CancelRequest r) {
         Header h = visible(id, true);
+        if (h.status().equals("cancelled")) {
+            return view(h, true);
+        }
         requireOpen(h, "cancelled");
         String reason = r.reason().trim();
         UUID by = CurrentPrincipal.require().userId();
@@ -699,6 +819,8 @@ class CustomerOrdersService {
                 h.feeMethod(),
                 h.cancelledAt(),
                 h.cancelReason(),
+                h.feePaidOn(),
+                h.feePaidMethod(),
                 h.createdAt(),
                 h.createdBy(),
                 h.version(),
@@ -712,7 +834,7 @@ class CustomerOrdersService {
         }
     }
 
-    /** 409 {@code order_step_not_allowed}, in the words of where the order stands. */
+    /** 409 {@code order_step_not_allowed}, in the words of where the order stands; {@code step} says what was asked ("marked packed"). */
     static ApiException stepRefused(Header h, String step) {
         String where = switch (h.status()) {
             case "delivered" -> "was delivered already";
@@ -725,7 +847,7 @@ class CustomerOrdersService {
                 HttpStatus.CONFLICT,
                 "order_step_not_allowed",
                 "Order step not allowed",
-                "Order " + h.orderNo() + " " + where + ", so it cannot be marked " + step.replace('_', ' ') + ".");
+                "Order " + h.orderNo() + " " + where + ", so it cannot be " + step + ".");
     }
 
     static String blankToNull(String s) {

@@ -306,7 +306,7 @@ class CatalogueRepository {
         } else {
             // The balance of retail_stock_balances (the stock module's table), read for the search row.
             sql = new StringBuilder(
-                    select.replace(" FROM retail_products p", ", b.qty FROM retail_products p")
+                    select.replace(" FROM retail_products p", ", b.qty, b.reserved_qty FROM retail_products p")
                             + " LEFT JOIN retail_stock_balances b ON b.product_id = p.id AND b.branch_id = :branchId WHERE true");
             params.put("branchId", branchId);
         }
@@ -572,23 +572,30 @@ class CatalogueRepository {
         BigDecimal qty = rs.getBigDecimal("qty");
         BigDecimal q = (qty == null ? BigDecimal.ZERO : qty).setScale(3);
         return new Product(
-                p.id(),
-                p.code(),
-                p.description(),
-                p.categoryId(),
-                p.category(),
-                p.unitId(),
-                p.unit(),
-                p.sellMinor(),
-                p.costMinor(),
-                p.currency(),
-                p.active(),
-                p.createdAt(),
-                p.updatedAt(),
-                p.version(),
-                q.toPlainString(),
-                q.signum() < 0,
-                null);
+                        p.id(),
+                        p.code(),
+                        p.description(),
+                        p.categoryId(),
+                        p.category(),
+                        p.unitId(),
+                        p.unit(),
+                        p.sellMinor(),
+                        p.costMinor(),
+                        p.currency(),
+                        p.active(),
+                        p.createdAt(),
+                        p.updatedAt(),
+                        p.version(),
+                        q.toPlainString(),
+                        q.signum() < 0,
+                        null)
+                .withReserved(reserved(rs));
+    }
+
+    /** What customer orders keep aside of the branch balance (issue #385), or null when nothing is. */
+    private static String reserved(ResultSet rs) throws SQLException {
+        BigDecimal kept = rs.getBigDecimal("reserved_qty");
+        return kept == null || kept.signum() == 0 ? null : kept.setScale(3).toPlainString();
     }
 
     static Instant instant(ResultSet rs, String column) throws SQLException {

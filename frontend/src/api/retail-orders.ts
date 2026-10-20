@@ -64,6 +64,9 @@ export const retailOrders = {
   async deliver(id: string, body: DeliverRequest, key: string): Promise<Delivered> {
     return unwrap(await api.POST('/api/v1/retail/orders/{order_id}/deliver', { params: { ...path(id), header: { 'Idempotency-Key': key } }, body }));
   },
+  async payFee(id: string, method: 'cash' | 'mobile_money' | 'bank', key: string): Promise<Order> {
+    return unwrap(await api.POST('/api/v1/retail/orders/{order_id}/fee-payment', { params: { ...path(id), header: { 'Idempotency-Key': key } }, body: { method } }));
+  },
   async cancel(id: string, reason: string): Promise<Order> {
     return unwrap(await api.POST('/api/v1/retail/orders/{order_id}/cancel', { params: path(id), body: { reason } }));
   },

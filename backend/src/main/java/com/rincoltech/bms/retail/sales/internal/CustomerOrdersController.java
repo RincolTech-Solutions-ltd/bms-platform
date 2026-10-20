@@ -9,6 +9,7 @@ import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancellationsR
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ChangeRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.DeliverRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Delivered;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeePaymentRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
@@ -200,6 +201,25 @@ class CustomerOrdersController {
             HttpServletResponse response) {
         NoStore.apply(response);
         Outcome<Delivered> outcome = service.deliver(idempotencyKey, id, request);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok();
+        if (outcome.replayed()) {
+            builder.header("Idempotent-Replayed", "true");
+        }
+        return builder.body(outcome.body());
+    }
+
+    @PostMapping("/{order_id}/fee-payment")
+    @RequiresPermission(CustomerOrdersService.MANAGE)
+    @Operation(
+            summary = "Take the payment of a delivery fee left on a credit buyer's account; M (issue #385)",
+            operationId = "payRetailOrderFee")
+    ResponseEntity<Order> payFee(
+            @PathVariable("order_id") UUID id,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody FeePaymentRequest request,
+            HttpServletResponse response) {
+        NoStore.apply(response);
+        Outcome<Order> outcome = service.payFee(idempotencyKey, id, request);
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok();
         if (outcome.replayed()) {
             builder.header("Idempotent-Replayed", "true");

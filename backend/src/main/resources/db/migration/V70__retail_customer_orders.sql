@@ -120,7 +120,8 @@ ON CONFLICT DO NOTHING;
 -- agreed are on the lines; items_total_minor is their sum and delivery_fee_minor is charged on top, posted to 4120 on delivery.
 -- status moves forward only (the guard below): ordered, packed, out_for_delivery, then delivered (sale_id set) or cancelled (with
 -- a reason). delivered_by is who takes it out (a rider's name, often not a staff user). fee_method and fee_entry_id say how the fee
--- was paid and its journal entry.
+-- was paid and its journal entry: cash, mobile money or bank at the door, or account (a credit buyer's account, debiting trade
+-- debtors against the sale); a fee on account is paid later once (fee_paid_*, its own entry crediting trade debtors).
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_customer_orders (
@@ -154,8 +155,13 @@ CREATE TABLE retail_customer_orders (
     delivered_on       date,
     delivered_by_user  uuid,
     sale_id            uuid,
-    fee_method         text         CHECK (fee_method IN ('cash', 'mobile_money', 'bank')),
+    fee_method         text         CHECK (fee_method IN ('cash', 'mobile_money', 'bank', 'account')),
     fee_entry_id       uuid,
+    fee_paid_at        timestamptz,
+    fee_paid_on        date,
+    fee_paid_method    text         CHECK (fee_paid_method IN ('cash', 'mobile_money', 'bank')),
+    fee_paid_by        uuid,
+    fee_payment_entry_id uuid,
     cancelled_at       timestamptz,
     cancelled_on       date,
     cancelled_by       uuid,
@@ -166,6 +172,10 @@ CREATE TABLE retail_customer_orders (
     FOREIGN KEY (tenant_id, customer_id) REFERENCES retail_customers (tenant_id, id),
     FOREIGN KEY (tenant_id, sale_id) REFERENCES retail_sales (tenant_id, id),
     FOREIGN KEY (tenant_id, fee_entry_id) REFERENCES journal_entries (tenant_id, id),
+    FOREIGN KEY (tenant_id, fee_payment_entry_id) REFERENCES journal_entries (tenant_id, id),
+    CHECK ((fee_paid_at IS NULL) = (fee_paid_on IS NULL) AND (fee_paid_at IS NULL) = (fee_paid_method IS NULL)
+           AND (fee_paid_at IS NULL) = (fee_paid_by IS NULL) AND (fee_paid_at IS NULL) = (fee_payment_entry_id IS NULL)),
+    CHECK (fee_paid_at IS NULL OR fee_method = 'account'),
     CHECK ((status = 'delivered') = (sale_id IS NOT NULL AND delivered_at IS NOT NULL AND delivered_on IS NOT NULL
                                      AND delivered_by_user IS NOT NULL)),
     CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL AND cancelled_on IS NOT NULL AND cancelled_by IS NOT NULL
@@ -191,10 +201,12 @@ SELECT bms_apply_tenant_rls('retail_customer_orders');
 SELECT bms_grant_app('retail_customer_orders', 'SELECT, INSERT');
 GRANT UPDATE (updated_at, version, customer_id, customer_name, customer_phone, delivery_place, delivery_date, delivery_fee_minor,
               notes, status, packed_at, packed_by, sent_at, sent_by, delivered_by, delivered_at, delivered_on, delivered_by_user,
-              sale_id, fee_method, fee_entry_id, cancelled_at, cancelled_on, cancelled_by, cancel_reason)
+              sale_id, fee_method, fee_entry_id, fee_paid_at, fee_paid_on, fee_paid_method, fee_paid_by, fee_payment_entry_id,
+              cancelled_at, cancelled_on, cancelled_by, cancel_reason)
     ON retail_customer_orders TO bms_app;
 
--- An order moves forward only, by one version at a time, and nothing changes once it is delivered or cancelled.
+-- An order moves forward only, by one version at a time, and nothing changes once it is delivered or cancelled, except that a
+-- delivery fee left on a credit buyer's account is marked paid, once.
 CREATE FUNCTION retail_customer_orders_guard_update() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -203,6 +215,11 @@ BEGIN
     END IF;
     IF NEW.version <> OLD.version + 1 THEN
         RAISE EXCEPTION 'retail_customer_orders: the version rises by one per change';
+    END IF;
+    IF OLD.status = 'delivered' AND NEW.status = 'delivered' AND OLD.fee_method = 'account' AND OLD.fee_paid_at IS NULL
+       AND NEW.fee_paid_at IS NOT NULL AND NEW.sale_id = OLD.sale_id AND NEW.fee_entry_id = OLD.fee_entry_id
+       AND NEW.fee_method = OLD.fee_method AND NEW.delivery_fee_minor = OLD.delivery_fee_minor THEN
+        RETURN NEW;
     END IF;
     IF OLD.status IN ('delivered', 'cancelled') THEN
         RAISE EXCEPTION 'retail_customer_orders: a % order does not change', OLD.status;
@@ -248,7 +265,8 @@ SELECT bms_make_append_only('retail_customer_order_lines');
 
 -- ---------------------------------------------------------------------------------------------
 -- retail_customer_order_events: the order's history, who did what and when (ordered, changed, packed, out_for_delivery,
--- delivered, cancelled), with the note of the step. Append-only.
+-- delivered, cancelled, and after delivery fee_paid for a fee on account and sale_voided when the sale it became is voided),
+-- with the note of the step. Append-only.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_customer_order_events (
@@ -256,7 +274,8 @@ CREATE TABLE retail_customer_order_events (
     tenant_id  uuid         NOT NULL REFERENCES tenants (id),
     created_at timestamptz  NOT NULL DEFAULT now(),
     order_id   uuid         NOT NULL,
-    step       text         NOT NULL CHECK (step IN ('ordered', 'changed', 'packed', 'out_for_delivery', 'delivered', 'cancelled')),
+    step       text         NOT NULL CHECK (step IN ('ordered', 'changed', 'packed', 'out_for_delivery', 'delivered', 'cancelled',
+                                                     'fee_paid', 'sale_voided')),
     note       varchar(500),
     by_user    uuid         NOT NULL,
     UNIQUE (tenant_id, id),
@@ -266,3 +285,7 @@ CREATE INDEX retail_customer_order_events_order ON retail_customer_order_events 
 SELECT bms_apply_tenant_rls('retail_customer_order_events');
 SELECT bms_grant_app('retail_customer_order_events', 'SELECT, INSERT');
 SELECT bms_make_append_only('retail_customer_order_events');
+
+-- The quick entry also finds a credit buyer by the last nine digits of the contact. CREATE INDEX takes a SHARE lock on
+-- retail_customers while it builds (reads go on, a new buyer waits); the table is small.
+CREATE INDEX retail_customers_phone ON retail_customers (tenant_id, right(bms_digits(contact), 9)) WHERE contact IS NOT NULL;

@@ -39,21 +39,35 @@ Controls page all read `retail_sales`.
    damage, transfer out, goods sent back to a supplier) may not take the balance below `reserved_qty`, so the till cannot sell a unit kept for
    an order; the refusal says the units are kept for customer orders. A stock-take may (the count is what is on the shelf), and the order then
    cannot be delivered until stock arrives. Reservations post nothing and move nothing, so the valuation, the reports and the reconciliation
-   of balances against movements are unchanged.
+   of balances against movements are unchanged. Imported history (`StockLedger.recordHistorical`) ignores what orders keep, as it ignores
+   the zero floor: history already happened. A branch with an open order, or with stock kept aside, is neither closed nor made a Store
+   (422 `branch_has_open_orders`, through the finding `open_orders` of the branch closing check; no reason overrides it).
 3. **Prices are agreed when the order is taken**, by `SalesService.priceLines`, the rules a sale would apply that day (units, price lists, the
    price floor, an override with a reason). On delivery the sale is made at the agreed prices; while price lists are on an agreed price that
-   now differs from the list is an override with the reason "Price agreed on order OR...", as a quotation kept at its price is.
+   now differs from the list is an override with the reason "Price agreed on order OR...". Delivery takes a trusted path of the sale
+   (`SalesService.record(request, creditAmount, agreed)`): the price override permission, the price floor and the inactive product (or
+   pack) are not checked again, since they were checked when the order was taken and the goods are already promised; the stock, the
+   branch, the credit limit and every other rule of a sale are. So a price list change, a cost that rose above the agreed price, an item
+   switched off since, or a deliverer who may not change prices never blocks a delivery.
 4. **Delivery is one transaction through the ordinary sale path.** It locks the order row, then the credit buyer's row when customer accounts
    are on and the sale is on credit (the sale path's own order), releases what the order kept, calls `SalesService.record` (stock, the
    revenue and cost entries, credit and its limit, the receipt number, the audit), records the part paid now on a credit sale with
-   `SalesService.recordPayment`, posts the delivery fee and marks the order delivered. Any refusal rolls the whole step back, the order still
+   `SalesService.recordPayment`, posts the delivery fee and marks the order delivered. The credit limit is checked against what actually
+   goes on credit (the items less the part paid now, plus a fee left on the account), not the items total. A retry of packed, out for
+   delivery (same rider) or cancel on an order already at that step answers the order as it is. Any refusal rolls the whole step back, the order still
    keeping its stock. It needs `retail.sale.create` at the order's shop besides `retail.order.manage`, and an `Idempotency-Key`.
-5. **The delivery fee is income of its own, paid at the door.** It is posted as its own entry (debit the payment method's account, credit
-   the new chart account 4120 `delivery_income`), never added to the sale, so the sale shows the items only, the profit reports stay item
-   profit, and the fee is shown and reported separately. It is always paid in money: paid in full (cash, mobile money or bank) takes the
+5. **The delivery fee is income of its own.** It is posted as its own entry (debit the payment method's account, credit the new chart
+   account 4120 `delivery_income`), never added to the sale, so the sale shows the items only, the profit reports stay item profit, and
+   the fee is shown and reported separately. A cash customer pays it at the door: paid in full (cash, mobile money or bank) takes the
    items and the fee by that method; part payment and all later (credit) take at least the fee now (422 `delivery_fee_unpaid`), the fee
-   first and the rest of the money as a payment on the credit sale; paying everything with credit chosen is refused (422 `paid_in_full`). A
-   fee paid in cash counts in the cash book's takings on the day of delivery, so the day agrees with the ledger's cash on hand.
+   first and the rest as a payment on the credit sale; paying everything with credit chosen is refused (422 `paid_in_full`). A credit
+   buyer on the list (a wholesale or account customer) may have it put on the account instead (`fee_on_account`, credit only): the entry
+   debits trade debtors with the sale as subledger, the fee counts in the buyer's exposure for the credit limit until it is paid, and it is
+   paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
+   sale of a delivered order reverses its fee entry in the same transaction and writes `sale_voided` in the history; a sale whose fee on
+   account was already paid is not voided here (422 `order_fee_paid`). The cash book counts a cash fee as takings on the day of delivery
+   (or of its later payment) and, when the sale is voided, among the voids of the day of the void, as it does a voided cash sale, so a past
+   day is never rewritten and every day agrees with the ledger's cash on hand.
 6. **Cancel releases the stock and keeps the reason** (at least three characters), with the day it was cancelled, for the cancellations
    report. A delivered or cancelled order changes no more.
 7. **Where it came from and the quick entry.** Every order has a `source` (whatsapp, instagram, facebook, phone, walk_in, other); the list
@@ -74,9 +88,9 @@ balance row and not by the screens; the fee is visible on its own in the ledger 
 when, where the orders come from and why they were cancelled.
 
 **Worse:** a balance column that every guarded movement now reads; a stock-take can leave a balance below what orders keep, which the order
-then shows when it is delivered and refused; a fee is never on credit (a wholesale customer on account pays the fee at the door or the fee is
-set to zero); voiding the sale of a delivered order gives the stock and the item money back but leaves the fee posted, which is corrected
-by a journal if it was refunded; the order's lines are fixed.
+then shows when it is delivered and refused; a fee on account is owed in the ledger and on the order, but not in the customer statement or
+the ageing, which read sales only (a follow-up); writing off a credit sale leaves its fee on account owed; the order's lines are fixed
+(editing them is a follow-up issue); item photos in the order picker come with item variants (#384).
 
 **Watch for:** `reserved_qty` must always equal the base quantities of the open orders of that branch and product; a test proves it after
 every step, and a nightly check beside the balance reconciliation is a follow-up. A future path that moves stock out must go through

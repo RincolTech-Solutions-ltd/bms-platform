@@ -1141,13 +1141,17 @@ own: the order is copied from the chat, so the form asks for the phone first and
   search (with the shop's stock) and the sale's line cards (packs, a changed price); the place (empty: collects at the shop), the day, the fee
   and notes; the totals. Saving keeps the items aside; the draft and its Idempotency-Key survive a reload.
 - **Delivered**: five plain choices: Cash, all of it; Mobile money, all of it; Bank, all of it; Part now, the rest later (the amount, at least
-  the fee, and how it was paid); All later (credit), fee paid now. The figures show what is paid now and what goes on credit. Offered only
-  to whoever may sell at the order's shop. The success line names the sale.
+  the fee, and how it was paid); All later (credit), fee paid now; and, for a credit buyer on the list, On the customer account, delivery
+  fee too (an optional amount paid now for the items). The figures show what is paid now and what goes on credit. Offered only to whoever
+  may sell at the order's shop. The success line names the sale. A fee left on the account shows on the order with a Save: the fee is paid
+  form.
 - **One order** (`/staff/retail/orders/$orderId`, `order.tsx`): the summary and the step buttons, Change the delivery details (name, phone,
   place, day, fee, notes; the items do not change), Open sale (the ordinary sale view, with its payments, returns and void) once delivered,
   and the history: each step with the time, the person and the note. The breadcrumb names the order.
 - **Delivery fees and cancellations** (`/staff/retail/orders-report`, `orders-report.tsx`): the days (the last 30 by default), the fees taken
   grouped by day, where the orders came from or who delivered, and the orders cancelled with the reason and the source, each opening the
   order.
+- Stock kept aside: the Stock list and the item search of the sale, restock and order forms show "N free, M kept for orders" beside a
+  balance that open orders hold part of (`reserved_qty`).
 - Tours: `page-orders`, `page-order`, `page-orders-report` (`frontend/src/tour/tours-retail-orders.ts`). The retail menu has an Orders
-  shortcut after Sale, and the retail home an Orders tile, for whoever holds `retail.order.manage`.
+  shortcut right after Sale, and the retail home an Orders tile, for whoever holds `retail.order.manage`.

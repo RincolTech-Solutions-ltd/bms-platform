@@ -523,6 +523,32 @@ class SalesRepository {
                         """).params(c.id(), c.name(), c.contact(), by).update();
     }
 
+    /** The customer order a sale was delivered from (issue #385): its delivery fee entry, if any, and whether a fee on account was paid. */
+    record OrderFee(UUID orderId, String orderNo, UUID feeEntryId, long feeMinor, boolean feePaidLater) {}
+
+    Optional<OrderFee> orderFee(UUID saleId) {
+        return jdbc.sql("""
+                        SELECT id, order_no, fee_entry_id, delivery_fee_minor, fee_paid_at IS NOT NULL AS paid
+                          FROM retail_customer_orders WHERE sale_id = ? FOR UPDATE
+                        """)
+                .param(saleId)
+                .query((rs, n) -> new OrderFee(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("order_no"),
+                        rs.getObject("fee_entry_id", UUID.class),
+                        rs.getLong("delivery_fee_minor"),
+                        rs.getBoolean("paid")))
+                .optional();
+    }
+
+    /** One line of a customer order's history (append-only), written by the sale path when the sale is voided. */
+    void orderEvent(UUID orderId, String step, String note, UUID by) {
+        jdbc.sql("""
+                        INSERT INTO retail_customer_order_events (id, tenant_id, created_at, order_id, step, note, by_user)
+                        VALUES (gen_random_uuid(), current_setting('app.tenant_id')::uuid, clock_timestamp(), ?, ?, ?, ?)
+                        """).params(orderId, step, note, by).update();
+    }
+
     Optional<Customer> customer(UUID id) {
         return jdbc.sql(
                         "SELECT id, name, contact, created_at, version, customer_group_id, price_list_id, credit_limit_minor, terms_days FROM retail_customers WHERE id = ?")

@@ -181,7 +181,14 @@ final class CatalogueApi {
                     description =
                             "Issue #342: in how many of the branches the caller may read the balance is not zero (a positive and a"
                                     + " negative balance do not cancel); sent only by GET /retail/products/{id}")
-            Integer stockBranches) {
+            Integer stockBranches,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #385: of the branch balance, what open customer orders keep aside (so not free to"
+                                    + " sell); sent only with branch_id, and only when something is kept")
+            String reservedQty) {
 
         /** A product with packs but no stock total, the shape every list row has. */
         Product(
@@ -220,6 +227,7 @@ final class CatalogueApi {
                     qty,
                     negative,
                     packs,
+                    null,
                     null,
                     null);
         }
@@ -282,7 +290,33 @@ final class CatalogueApi {
                     negative,
                     packs,
                     stockOnHand,
-                    stockBranches);
+                    stockBranches,
+                    reservedQty);
+        }
+
+        /** The same product with what customer orders keep aside of the branch balance (issue #385). */
+        Product withReserved(String reserved) {
+            return new Product(
+                    id,
+                    code,
+                    description,
+                    categoryId,
+                    category,
+                    unitId,
+                    unit,
+                    sellMinor,
+                    costMinor,
+                    currency,
+                    active,
+                    createdAt,
+                    updatedAt,
+                    version,
+                    qty,
+                    negative,
+                    packs,
+                    stockOnHand,
+                    stockBranches,
+                    reserved);
         }
 
         Product withStock(String total, int branches) {
@@ -305,7 +339,8 @@ final class CatalogueApi {
                     negative,
                     packs,
                     total,
-                    branches);
+                    branches,
+                    reservedQty);
         }
 
         Product withoutCost() {
@@ -328,7 +363,8 @@ final class CatalogueApi {
                     negative,
                     packs,
                     stockOnHand,
-                    stockBranches);
+                    stockBranches,
+                    reservedQty);
         }
     }
 

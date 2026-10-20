@@ -10,8 +10,8 @@ import { useStaff } from '../context';
 import { newIdempotencyKey, usePersistedDraft } from './idempotency';
 import { showDate } from './maths';
 import {
-  PAY_CHOICES, SOURCES, blankDeliver, blankOrder, buildDeliverRequest, buildOrderRequest, deliverFigures, deliverProblem, feeOf, isOpen, itemsTotal,
-  lookupKey, nextSteps, orderProblem, sourceLabel, stepOf, type DeliverForm, type OrderDraft,
+  SOURCES, blankDeliver, blankOrder, buildDeliverRequest, buildOrderRequest, deliverFigures, deliverProblem, feeOf, isOpen, itemsTotal,
+  lookupKey, nextSteps, orderProblem, payChoicesFor, sourceLabel, stepOf, type DeliverForm, type OrderDraft,
 } from './orders-state';
 import { UNITS, capabilityOn, holdsAt } from './permissions';
 import { newLine, withUnit } from './sale-state';
@@ -47,23 +47,23 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
   });
   const problem = deliverProblem(order, form);
   const fig = deliverFigures(order, form);
-  const later = form.choice === 'part' || form.choice === 'credit';
+  const later = form.choice === 'part' || form.choice === 'credit' || form.choice === 'account';
   return (
     <fieldset data-testid="deliver-panel">
       <legend>Delivered: how did the customer pay?</legend>
       <p className="hint">Items {money(order.items_total_minor ?? 0)} and delivery {money(order.delivery_fee_minor ?? 0)}: <strong>{money(order.total_minor ?? 0)}</strong></p>
-      {PAY_CHOICES.map((c) => (
+      {payChoicesFor(order).map((c) => (
         <label key={c.value} className="check">
           <input type="radio" name={`pay-${order.id}`} checked={form.choice === c.value} onChange={() => setForm({ ...form, choice: c.value })} /> {c.label}
         </label>
       ))}
-      {form.choice === 'part' && (
+      {(form.choice === 'part' || form.choice === 'account') && (
         <>
-          <label htmlFor={`paid-${order.id}`}>Amount paid now (at least the delivery fee)</label>
+          <label htmlFor={`paid-${order.id}`}>{form.choice === 'part' ? 'Amount paid now (at least the delivery fee)' : 'Amount paid now for the items (optional)'}</label>
           <input id={`paid-${order.id}`} inputMode="numeric" value={form.paidNow} onChange={(e) => setForm({ ...form, paidNow: e.target.value })} />
         </>
       )}
-      {later && (form.choice === 'part' || (order.delivery_fee_minor ?? 0) > 0) && (
+      {later && (form.choice === 'part' || (form.choice === 'credit' && (order.delivery_fee_minor ?? 0) > 0) || (form.choice === 'account' && (feeOf(form.paidNow) ?? 0) > 0)) && (
         <>
           <label htmlFor={`paid-how-${order.id}`}>The money taken now was paid by</label>
           <select id={`paid-how-${order.id}`} value={form.paidNowMethod} onChange={(e) => setForm({ ...form, paidNowMethod: e.target.value as DeliverForm['paidNowMethod'] })}>
@@ -174,6 +174,7 @@ export function OrderSummary({ order, branchName }: { order: Order; branchName?:
       <p className="hint">Items {money(order.items_total_minor ?? 0)}, delivery {money(order.delivery_fee_minor ?? 0)}, <strong>total {money(order.total_minor ?? 0)}</strong></p>
       {order.notes && <p className="hint">{order.notes}</p>}
       {order.status === 'delivered' && <p className="hint">Delivered {showDate(order.delivered_on)}, sale {order.sale_no}</p>}
+      {order.fee_method === 'account' && <p className="hint">{order.fee_paid_on ? `Delivery fee paid on ${showDate(order.fee_paid_on)}` : 'Delivery fee on the customer account, not paid yet'}</p>}
       {order.status === 'cancelled' && <p className="hint">Cancelled because: {order.cancel_reason}</p>}
     </>
   );

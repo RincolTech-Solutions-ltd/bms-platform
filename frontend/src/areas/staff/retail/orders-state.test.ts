@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from '../../../api/retail';
 import {
-  blankDeliver, blankOrder, buildDeliverRequest, buildOrderRequest, deliverFigures, deliverProblem, feeOf, lookupKey, nextSteps, orderProblem, sourceLabel, stepOf,
+  blankDeliver, blankOrder, keptWords, payChoicesFor, buildDeliverRequest, buildOrderRequest, deliverFigures, deliverProblem, feeOf, lookupKey, nextSteps, orderProblem, sourceLabel, stepOf,
 } from './orders-state';
 import { newLine } from './sale-state';
 
@@ -73,5 +73,22 @@ describe('delivered and paid', () => {
     expect(deliverFigures(order, f)).toEqual({ now: 5000, later: 20000 });
     expect(buildDeliverRequest(order, f)).toEqual({ payment_method: 'credit', paid_now_minor: 5000, paid_now_method: 'cash' });
     expect(buildDeliverRequest({ delivery_fee_minor: 0 }, f)).toEqual({ payment_method: 'credit' });
+  });
+});
+
+describe('fees on the account and stock kept aside', () => {
+  it('offers the account only to a credit buyer with a fee, and sends the fee on the account', () => {
+    expect(payChoicesFor({ delivery_fee_minor: 5000 }).map((c) => c.value)).not.toContain('account');
+    expect(payChoicesFor({ customer_id: 'c1', delivery_fee_minor: 5000 }).map((c) => c.value)).toContain('account');
+    const f = { ...blankDeliver(), choice: 'account' as const };
+    expect(deliverFigures(order, f)).toEqual({ now: 0, later: 25000 });
+    expect(buildDeliverRequest(order, f)).toEqual({ payment_method: 'credit', fee_on_account: true });
+    expect(deliverProblem(order, { ...f, paidNow: '21000' })).toMatch(/more than the items/i);
+  });
+
+  it('says what is free and what is kept for orders', () => {
+    expect(keptWords('10.000', undefined)).toBeNull();
+    expect(keptWords('10.000', '2.000')).toBe('8 free, 2 kept for orders');
+    expect(keptWords('1.000', '2.000')).toBe('0 free, 2 kept for orders');
   });
 });

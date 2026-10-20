@@ -93,7 +93,10 @@ final class CustomerOrdersApi {
             @PositiveOrZero @Max(RetailCatalogue.MAX_AMOUNT_MINOR)
             Long deliveryFeeMinor,
 
-            @Size(max = 500) String notes) {}
+            @Size(max = 500) String notes,
+
+            @Schema(description = "True takes the delivery day off the order")
+            Boolean clearDeliveryDate) {}
 
     @Schema(name = "RetailOrderStepRequest")
     record StepRequest(@Size(max = 500) String note) {}
@@ -131,7 +134,18 @@ final class CustomerOrdersApi {
             @Size(max = 300) @Schema(description = "As on a credit sale above the buyer's limit")
             String creditOverrideReason,
 
+            @Schema(
+                    description =
+                            "Credit only, for a credit buyer on the list: the delivery fee goes on the buyer's account"
+                                    + " (trade debtors, against the sale) instead of being paid at the door; paid later with"
+                                    + " POST /retail/orders/{order_id}/fee-payment")
+            Boolean feeOnAccount,
+
             @Size(max = 500) String note) {}
+
+    @Schema(name = "RetailOrderFeePaymentRequest")
+    record FeePaymentRequest(
+            @NotNull @Pattern(regexp = MONEY) String method) {}
 
     @Schema(name = "RetailOrderCancelRequest")
     record CancelRequest(@NotBlank @Size(min = 3, max = 300) String reason) {}
@@ -193,9 +207,20 @@ final class CustomerOrdersApi {
             @JsonInclude(JsonInclude.Include.NON_NULL) LocalDate deliveredOn,
             @JsonInclude(JsonInclude.Include.NON_NULL) UUID saleId,
             @JsonInclude(JsonInclude.Include.NON_NULL) String saleNo,
-            @JsonInclude(JsonInclude.Include.NON_NULL) String feeMethod,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "cash, mobile_money, bank (paid at the door) or account (on the credit buyer's account)")
+            String feeMethod,
+
             @JsonInclude(JsonInclude.Include.NON_NULL) Instant cancelledAt,
             @JsonInclude(JsonInclude.Include.NON_NULL) String cancelReason,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "When a fee on account was paid")
+            LocalDate feePaidOn,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) String feePaidMethod,
             Instant createdAt,
             UUID createdBy,
             int version,

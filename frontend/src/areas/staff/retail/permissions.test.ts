@@ -91,16 +91,16 @@ describe('retail permission gating', () => {
 });
 
 describe('the retail bottom bar', () => {
-  it('follows the pilot order: Sales, Banked, Savings, Expenses, Advances', () => {
-    expect(shortcutsFor(mockMe('admin')).map((s) => s.screen)).toEqual(['sale', 'banking', 'savings', 'expenses', 'advances']);
+  it('follows the pilot order: Sales, Orders (issue #385), Banked, Savings, Expenses', () => {
+    expect(shortcutsFor(mockMe('admin')).map((s) => s.screen)).toEqual(['sale', 'orders', 'banking', 'savings', 'expenses']);
   });
 
   it('gives a cashier only the shortcuts their permissions allow, then orders and the stock ones', () => {
-    expect(shortcutsFor(mockMe('cashier')).map((s) => s.screen)).toEqual(['sale', 'banking', 'savings', 'expenses', 'orders']);
+    expect(shortcutsFor(mockMe('cashier')).map((s) => s.screen)).toEqual(['sale', 'orders', 'banking', 'savings', 'expenses']);
   });
 
   it('gives the seeded sales role its sale shortcut, the three it records, then orders', () => {
-    expect(shortcutsFor(mockMe('sales')).map((s) => s.screen)).toEqual(['sale', 'banking', 'savings', 'expenses', 'orders']);
+    expect(shortcutsFor(mockMe('sales')).map((s) => s.screen)).toEqual(['sale', 'orders', 'banking', 'savings', 'expenses']);
   });
 
   it('keeps the old shortcuts for a user with no cash book permission', () => {

@@ -1,5 +1,5 @@
 import type { DeliverRequest, Order, OrderRequest, OrderSource, OrderStatus } from '../../../api/retail-orders';
-import { qtyString } from './maths';
+import { milliOf, qtyString, showQty } from './maths';
 import { defaultPrice, lineFigures, lineHint, type DraftLine } from './sale-state';
 import { chosenPack } from './units-state';
 
@@ -15,6 +15,13 @@ export const SOURCES: { value: OrderSource; label: string }[] = [
   { value: 'walk_in', label: 'Walk-in' },
   { value: 'other', label: 'Other' },
 ];
+
+/** The words for a balance some of which open orders keep aside: what is free to sell and what is kept; null when nothing is kept. */
+export function keptWords(qty: string | undefined, reserved: string | undefined): string | null {
+  if (!reserved || milliOf(reserved) === 0) return null;
+  const free = Math.max(0, milliOf(qty ?? '0') - milliOf(reserved));
+  return `${showQty(qtyString(free))} free, ${showQty(reserved)} kept for orders`;
+}
 
 export const sourceLabel = (s: string | undefined): string => SOURCES.find((x) => x.value === s)?.label ?? 'Other';
 
@@ -110,7 +117,7 @@ export function buildOrderRequest(d: OrderDraft): OrderRequest {
   };
 }
 
-export type PayChoice = 'cash' | 'mobile_money' | 'bank' | 'part' | 'credit';
+export type PayChoice = 'cash' | 'mobile_money' | 'bank' | 'part' | 'credit' | 'account';
 
 export const PAY_CHOICES: { value: PayChoice; label: string }[] = [
   { value: 'cash', label: 'Cash, all of it' },
@@ -118,7 +125,12 @@ export const PAY_CHOICES: { value: PayChoice; label: string }[] = [
   { value: 'bank', label: 'Bank, all of it' },
   { value: 'part', label: 'Part now, the rest later' },
   { value: 'credit', label: 'All later (credit), fee paid now' },
+  { value: 'account', label: 'On the customer account, delivery fee too' },
 ];
+
+/** The payment choices an order offers: the account, fee included, only for a credit buyer on the list. */
+export const payChoicesFor = (o: Pick<Order, 'customer_id' | 'delivery_fee_minor'>) =>
+  PAY_CHOICES.filter((c) => c.value !== 'account' || (o.customer_id !== undefined && (o.delivery_fee_minor ?? 0) > 0));
 
 export interface DeliverForm {
   choice: PayChoice;
@@ -134,7 +146,7 @@ export const blankDeliver = (): DeliverForm => ({ choice: 'cash', paidNow: '', p
 export function deliverFigures(o: Pick<Order, 'items_total_minor' | 'delivery_fee_minor'>, f: DeliverForm): { now: number; later: number } | null {
   const total = (o.items_total_minor ?? 0) + (o.delivery_fee_minor ?? 0);
   if (f.choice === 'cash' || f.choice === 'mobile_money' || f.choice === 'bank') return { now: total, later: 0 };
-  const now = f.choice === 'credit' ? (o.delivery_fee_minor ?? 0) : feeOf(f.paidNow);
+  const now = f.choice === 'credit' ? (o.delivery_fee_minor ?? 0) : f.choice === 'account' ? (feeOf(f.paidNow) ?? null) : feeOf(f.paidNow);
   if (now === null) return null;
   return { now, later: total - now };
 }
@@ -149,6 +161,7 @@ export function deliverProblem(o: Pick<Order, 'items_total_minor' | 'delivery_fe
     if (fig.now < fee) return 'The delivery fee is paid when the goods arrive, so take at least the fee now.';
     if (fig.later <= 0) return 'That is everything, so choose Cash, Mobile money or Bank.';
   }
+  if (f.choice === 'account' && fig.now > (o.items_total_minor ?? 0)) return 'With the fee on the account, the money taken now cannot be more than the items.';
   return null;
 }
 
@@ -158,6 +171,7 @@ export function buildDeliverRequest(o: Pick<Order, 'delivery_fee_minor'>, f: Del
   const now = f.choice === 'credit' ? (o.delivery_fee_minor ?? 0) : (feeOf(f.paidNow) ?? 0);
   return {
     payment_method: 'credit',
+    ...(f.choice === 'account' ? { fee_on_account: true } : {}),
     ...(now > 0 ? { paid_now_minor: now, paid_now_method: f.paidNowMethod } : {}),
     ...(f.dueDate ? { due_date: f.dueDate } : {}),
     ...extra,

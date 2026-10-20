@@ -7,9 +7,10 @@ import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
 import { OrderActions, OrderSummary } from './orders';
 import { feeOf, isOpen } from './orders-state';
-import { canUse } from './permissions';
+import { newIdempotencyKey } from './idempotency';
+import { canUse, holdsAt } from './permissions';
 import { OpenSale } from './sales';
-import { Gate, Problem, useBranchName } from './ui';
+import { Gate, Problem, money, useBranchName } from './ui';
 
 // One customer order (issue #385, ADR-052): what was ordered, where it stands, who did what and when, the delivery details that
 // can still change, and, once delivered, the sale it became (with its receipt, payments, returns and void like any sale).
@@ -21,6 +22,8 @@ const STEP_WORDS: Record<string, string> = {
   out_for_delivery: 'Out for delivery',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
+  fee_paid: 'Delivery fee paid',
+  sale_voided: 'Sale voided',
 };
 
 function ChangeDetails({ order }: { order: Order }) {
@@ -37,7 +40,7 @@ function ChangeDetails({ order }: { order: Order }) {
       customer_name: name.trim(),
       customer_phone: phone.trim(),
       delivery_place: place.trim(),
-      ...(date ? { delivery_date: date } : {}),
+      ...(date ? { delivery_date: date } : { clear_delivery_date: true }),
       delivery_fee_minor: feeOf(fee) ?? 0,
       notes: notes.trim(),
     }),
@@ -73,6 +76,34 @@ function ChangeDetails({ order }: { order: Order }) {
   );
 }
 
+/** A delivery fee left on a credit buyer's account, paid later: the money and how it came. */
+function PayFee({ order }: { order: Order }) {
+  const client = useQueryClient();
+  const [method, setMethod] = useState<'cash' | 'mobile_money' | 'bank'>('cash');
+  const [key, setKey] = useState(newIdempotencyKey);
+  const pay = useMutation({
+    mutationFn: () => retailOrders.payFee(order.id ?? '', method, key),
+    onSuccess: () => {
+      setKey(newIdempotencyKey());
+      void client.invalidateQueries({ queryKey: ['retail', 'order', order.id] });
+      void client.invalidateQueries({ queryKey: ['retail', 'orders'] });
+    },
+  });
+  return (
+    <fieldset>
+      <legend>The delivery fee of {money(order.delivery_fee_minor ?? 0)} is on the account</legend>
+      <label htmlFor="fee-method">Paid by</label>
+      <select id="fee-method" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
+        <option value="cash">Cash</option>
+        <option value="mobile_money">Mobile money</option>
+        <option value="bank">Bank</option>
+      </select>
+      <Problem error={pay.error} />
+      <button type="button" disabled={pay.isPending} onClick={() => pay.mutate()}>{pay.isPending ? 'Saving' : 'Save: the fee is paid'}</button>
+    </fieldset>
+  );
+}
+
 export function OrderPage({ orderId }: { orderId: string }) {
   const { me } = useStaff();
   const nameOf = useBranchName();
@@ -93,6 +124,7 @@ export function OrderPage({ orderId }: { orderId: string }) {
         {o && isOpen(o) && <OrderActions order={o} />}
       </section>
       {o && isOpen(o) && <ChangeDetails key={o.version} order={o} />}
+      {o && o.status === 'delivered' && o.fee_method === 'account' && !o.fee_paid_on && holdsAt(me, 'retail.sale.create', o.branch_id) && <PayFee order={o} />}
       {o?.sale_id && !saleOpen && (
         <p><button type="button" className="btn-sm" onClick={() => setSaleOpen(true)}>Open sale {o.sale_no}</button></p>
       )}

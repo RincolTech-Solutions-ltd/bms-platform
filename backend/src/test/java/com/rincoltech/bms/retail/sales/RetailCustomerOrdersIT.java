@@ -124,6 +124,50 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                 .single();
     }
 
+    /** reserved_qty of every balance row equals the base quantities of the open orders of that branch and product. */
+    void assertKeptMatchesOpenOrders() {
+        long wrong = TestDatabase.owner()
+                .sql("""
+                        SELECT count(*) FROM retail_stock_balances b
+                          LEFT JOIN (SELECT o.branch_id, l.product_id, sum(l.base_qty) AS q
+                                       FROM retail_customer_orders o JOIN retail_customer_order_lines l ON l.order_id = o.id
+                                      WHERE o.tenant_id = ? AND o.status IN ('ordered', 'packed', 'out_for_delivery')
+                                      GROUP BY 1, 2) k ON k.branch_id = b.branch_id AND k.product_id = b.product_id
+                         WHERE b.tenant_id = ? AND b.reserved_qty <> coalesce(k.q, 0)
+                        """)
+                .params(t.tenantId(), t.tenantId())
+                .query(Long.class)
+                .single();
+        assertThat(wrong)
+                .as("balance rows whose kept quantity differs from the open orders")
+                .isZero();
+    }
+
+    /** The legs of an order's delivery fee entry, as account:D or C:amount, debits first. */
+    List<String> feeLegs(UUID order) {
+        return TestDatabase.owner().sql("""
+                        SELECT a.system_key || ':' || CASE WHEN l.debit > 0 THEN 'D:' || l.debit ELSE 'C:' || l.credit END
+                          FROM retail_customer_orders o JOIN journal_lines l ON l.entry_id = o.fee_entry_id
+                          JOIN gl_accounts a ON a.id = l.account_id
+                         WHERE o.id = ?
+                         ORDER BY l.debit DESC, a.system_key
+                        """).param(order).query(String.class).list();
+    }
+
+    void capability(String key) {
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> r = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of(key, true),
+                "core.settings.manage",
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
     static String code(ResponseEntity<JsonNode> r) {
         return r.getBody().get("code").asString();
     }
@@ -152,9 +196,11 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         ResponseEntity<JsonNode> packed = api.post("/orders/" + id + "/pack", Map.of("note", "In a blue bag"), ORDERS);
         assertThat(packed.getStatusCode()).as("%s", packed.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(packed.getBody().get("status").asString()).isEqualTo("packed");
+        assertKeptMatchesOpenOrders();
+        // A retry of a step already done answers the order as it is, and writes nothing again.
         ResponseEntity<JsonNode> again = api.post("/orders/" + id + "/pack", Map.of(), ORDERS);
-        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(code(again)).isEqualTo("order_step_not_allowed");
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getBody().get("status").asString()).isEqualTo("packed");
 
         ResponseEntity<JsonNode> noRider = api.post("/orders/" + id + "/send", Map.of(), ORDERS);
         assertThat(noRider.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -163,6 +209,10 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(sent.getBody().get("status").asString()).isEqualTo("out_for_delivery");
         assertThat(sent.getBody().get("delivered_by").asString()).isEqualTo("Test Rider 01");
+        assertThat(api.post("/orders/" + id + "/send", Map.of("delivered_by", "Test Rider 01"), ORDERS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertKeptMatchesOpenOrders();
 
         long cashBefore = account("cash_on_hand", true);
         ResponseEntity<JsonNode> done = deliver(id, Map.of("payment_method", "cash"));
@@ -186,6 +236,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         // The fee is posted on its own: delivery fees income, and the cash of the items and the fee.
         assertThat(account("delivery_income", false)).isEqualTo(5_000);
         assertThat(account("cash_on_hand", true) - cashBefore).isEqualTo(25_000);
+        assertThat(feeLegs(id)).containsExactly("cash_on_hand:D:5000", "delivery_income:C:5000");
+        assertKeptMatchesOpenOrders();
 
         JsonNode history = api.get("/orders/" + id, ORDERS).getBody().get("history");
         List<String> steps = new ArrayList<>();
@@ -605,5 +657,300 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(second.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
         assertThat(balance(hq, product)[1]).isEqualByComparingTo("2");
+    }
+
+    // ---- review fixes: voids, the agreed prices, branches, holds, fees on account -----------------------
+
+    /** FR-RET-53: voiding the sale of a delivered order reverses its fee too, and the cash book takes the fee out that day. */
+    @Test
+    void voidingTheSaleOfADeliveredOrderReversesItsDeliveryFee() {
+        api.stockUp(hq, product, "5");
+        UUID id = placed("1", 3_000);
+        String sale = deliver(id, Map.of("payment_method", "cash"))
+                .getBody()
+                .get("sale_id")
+                .asString();
+        assertThat(account("delivery_income", false)).isEqualTo(3_000);
+        ResponseEntity<JsonNode> voided =
+                api.post("/sales/" + sale + "/void", Map.of("reason", "Test void reason"), ADMIN);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(account("delivery_income", false)).isZero();
+        JsonNode day = api.get(
+                        "/reports/cash/daily?branch_id=" + hq + "&from=" + today() + "&to=" + today(),
+                        "retail.cashbook.read")
+                .getBody()
+                .get("items")
+                .get(0);
+        assertThat(day.get("cash_takings_minor").asLong()).isEqualTo(13_000);
+        assertThat(day.get("cash_sale_voids_minor").asLong()).isEqualTo(13_000);
+        JsonNode history = api.get("/orders/" + id, ORDERS).getBody().get("history");
+        assertThat(history.get(history.size() - 1).get("step").asString()).isEqualTo("sale_voided");
+    }
+
+    /**
+     * FR-RET-53: an order is delivered at the prices agreed even when the price list now gives another price, the cost rose
+     * above the agreed price, and the person delivering may not change prices; the sale line says the price was agreed.
+     */
+    @Test
+    void anOrderIsDeliveredAtTheAgreedPriceWhateverChangedSince() {
+        api.stockUp(hq, product, "5");
+        UUID id = placed("1", 0);
+        capability("price_lists");
+        api.editPrices(product, Map.of("cost_minor", 11_000, "sell_minor", 13_000, "reason", "Test new prices"), ADMIN);
+        ResponseEntity<JsonNode> done = deliver(id, Map.of("payment_method", "cash"));
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode line = api.get("/sales/" + done.getBody().get("sale_id").asString(), ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0);
+        assertThat(line.get("unit_price_minor").asLong()).isEqualTo(10_000);
+        assertThat(line.get("price").get("source").asString()).isEqualTo("override");
+        assertThat(line.get("price").get("override_reason").asString()).startsWith("Price agreed on order OR");
+        // The till still refuses that price to a seller who may not change it.
+        Map<String, Object> till = new LinkedHashMap<>();
+        till.put("branch_id", hq);
+        till.put("payment_method", "cash");
+        till.put("lines", List.of(Map.of("product_id", product, "qty", "1", "unit_price_minor", 10_000)));
+        assertThat(api.postKeyed("/sales", till, ORDERS, "*", UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    /** FR-RET-53: an item switched off after the order was taken is still delivered; a new order for it is refused. */
+    @Test
+    void anItemSwitchedOffAfterTheOrderIsStillDelivered() {
+        api.stockUp(hq, product, "5");
+        UUID id = placed("2", 0);
+        String etag = api.get("/products/" + product, ADMIN).getHeaders().getETag();
+        assertThat(api.call(
+                                HttpMethod.PATCH,
+                                "/products/" + product,
+                                Map.of("active", false),
+                                ADMIN,
+                                "*",
+                                Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(order(body(hq, "phone", 0, List.of(line(product, "1")))).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        ResponseEntity<JsonNode> done = deliver(id, Map.of("payment_method", "cash"));
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(balance(hq, product)[0]).isEqualByComparingTo("3");
+        assertKeptMatchesOpenOrders();
+    }
+
+    /** FR-RET-52: usage, damage and a transfer out may not take units kept for an order. */
+    @Test
+    void usageDamageAndTransfersCannotTakeUnitsKeptForAnOrder() {
+        api.stockUp(hq, product, "3");
+        placed("2", 0);
+        for (String kind : List.of("used", "damaged")) {
+            ResponseEntity<JsonNode> r = api.postKeyed(
+                    "/usage",
+                    Map.of(
+                            "branch_id",
+                            hq,
+                            "kind",
+                            kind,
+                            "reason",
+                            "Test reason " + kind,
+                            "lines",
+                            List.of(Map.of("product_id", product, "qty", "2"))),
+                    ADMIN,
+                    "*",
+                    UUID.randomUUID().toString());
+            assertThat(r.getStatusCode()).as("%s %s", kind, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+            assertThat(code(r)).isEqualTo("insufficient_stock");
+        }
+        Map<String, Object> move = new LinkedHashMap<>();
+        move.put("from_branch_id", hq);
+        move.put("to_branch_id", t.secondBranch());
+        move.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        ResponseEntity<JsonNode> moved =
+                api.postKeyed("/transfers", move, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(moved.getStatusCode()).as("%s", moved.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(moved)).isEqualTo("insufficient_stock");
+        // The one free unit still moves.
+        move.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        assertThat(api.postKeyed(
+                                "/transfers",
+                                move,
+                                ADMIN,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertKeptMatchesOpenOrders();
+    }
+
+    /** FR-RET-52: a count below what is kept is recorded; the order then cannot be delivered until stock arrives. */
+    @Test
+    void aStockTakeBelowWhatIsKeptStopsTheDeliveryUntilStockArrives() {
+        api.stockUp(hq, product, "3");
+        UUID id = placed("2", 0);
+        api.stockUp(hq, product, "1");
+        ResponseEntity<JsonNode> refused = deliver(id, Map.of("payment_method", "cash"));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("insufficient_stock");
+        assertThat(api.get("/orders/" + id, ORDERS).getBody().get("status").asString())
+                .isEqualTo("ordered");
+        assertKeptMatchesOpenOrders();
+        api.stockUp(hq, product, "4");
+        assertThat(deliver(id, Map.of("payment_method", "cash")).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertKeptMatchesOpenOrders();
+    }
+
+    /** A branch with an open order is neither closed nor made a store; once the order is done it can be. */
+    @Test
+    void aBranchWithOpenOrdersIsNotClosed() {
+        api.stockUp(t.secondBranch(), product, "3");
+        UUID id = RetailTestSupport.id(order(body(t.secondBranch(), "phone", 0, List.of(line(product, "1")))));
+        String perms = "core.branches.manage,core.branches.read";
+        String etag = http.exchange(
+                        "/api/v1/branches/" + t.secondBranch(),
+                        HttpMethod.GET,
+                        new org.springframework.http.HttpEntity<>(api.headers(perms, "*", Map.of())),
+                        JsonNode.class)
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> closed = http.exchange(
+                "/api/v1/branches/" + t.secondBranch() + "/close",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(
+                        Map.of("reason", "Test shop shut"), api.headers(perms, "*", Map.of("If-Match", etag))),
+                JsonNode.class);
+        assertThat(closed.getStatusCode()).as("%s", closed.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(closed)).isEqualTo("branch_has_open_orders");
+        assertThat(closed.getBody().get("open_orders").asInt()).isEqualTo(1);
+        api.post("/orders/" + id + "/cancel", Map.of("reason", "Test shop shutting"), ORDERS);
+        ResponseEntity<JsonNode> again = http.exchange(
+                "/api/v1/branches/" + t.secondBranch() + "/close",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(
+                        Map.of("reason", "Test shop shut"), api.headers(perms, "*", Map.of("If-Match", etag))),
+                JsonNode.class);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    /**
+     * FR-RET-53: a credit buyer's delivery fee goes on the account (trade debtors, against the sale) and is paid later; the
+     * credit limit counts what actually goes on credit; a sale whose fee was paid later is not voided here.
+     */
+    @Test
+    void aCreditBuyerCanHaveTheFeeOnTheAccountAndPayItLater() {
+        api.stockUp(hq, product, "5");
+        capability("customer_accounts");
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 05"), ADMIN));
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/customers/" + buyer + "/account",
+                                Map.of("credit_limit_minor", 15_000, "clear_terms_days", true),
+                                ADMIN + ",retail.credit.manage",
+                                "*",
+                                Map.of("If-Match", "1"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        Map<String, Object> b = body(hq, "whatsapp", 5_000, List.of(line(product, "2")));
+        b.put("customer_id", buyer);
+        UUID id = RetailTestSupport.id(order(b));
+        // 20000 of items and 5000 of fee, 8000 taken now: 17000 would go on credit, above the limit of 15000.
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("paid_now_minor", 8_000);
+        pay.put("paid_now_method", "cash");
+        ResponseEntity<JsonNode> over = deliver(id, pay);
+        assertThat(over.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(over)).isEqualTo("credit_limit_exceeded");
+        // 10000 taken now pays the fee and 5000 of the items: 15000 on credit, at the limit.
+        pay.put("paid_now_minor", 10_000);
+        assertThat(deliver(id, pay).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(account("trade_debtors", true)).isEqualTo(15_000);
+
+        // Another order with the fee on the account and nothing paid now.
+        Map<String, Object> b2 = body(hq, "phone", 2_000, List.of(line(other, "1")));
+        b2.put("customer_id", buyer);
+        api.stockUp(hq, other, "3");
+        UUID second = RetailTestSupport.id(order(b2));
+        Map<String, Object> onAccount = new LinkedHashMap<>();
+        onAccount.put("payment_method", "credit");
+        onAccount.put("fee_on_account", true);
+        onAccount.put("credit_override_reason", "Test regular customer");
+        // 4500 more goes on credit (the item and the fee), above the limit: delivered by someone who may go above it.
+        ResponseEntity<JsonNode> done = api.postKeyed(
+                "/orders/" + second + "/deliver",
+                onAccount,
+                ORDERS + ",retail.credit.override",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("order").get("fee_method").asString()).isEqualTo("account");
+        assertThat(feeLegs(second)).containsExactly("trade_debtors:D:2000", "delivery_income:C:2000");
+        assertThat(account("trade_debtors", true)).isEqualTo(15_000 + 2_500 + 2_000);
+
+        ResponseEntity<JsonNode> paid = api.postKeyed(
+                "/orders/" + second + "/fee-payment",
+                Map.of("method", "cash"),
+                ORDERS,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(paid.getBody().get("fee_paid_method").asString()).isEqualTo("cash");
+        assertThat(account("trade_debtors", true)).isEqualTo(15_000 + 2_500);
+        assertThat(api.postKeyed(
+                                "/orders/" + second + "/fee-payment",
+                                Map.of("method", "cash"),
+                                ORDERS,
+                                "*",
+                                UUID.randomUUID().toString())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        ResponseEntity<JsonNode> noVoid = api.post(
+                "/sales/" + done.getBody().get("sale_id").asString() + "/void",
+                Map.of("reason", "Test void reason"),
+                ADMIN);
+        assertThat(noVoid.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(noVoid)).isEqualTo("order_fee_paid");
+        // A cash customer's fee is still paid at the door.
+        UUID third = placed("1", 1_000);
+        Map<String, Object> cashCustomer = new LinkedHashMap<>();
+        cashCustomer.put("payment_method", "credit");
+        cashCustomer.put("fee_on_account", true);
+        assertThat(code(deliver(third, cashCustomer))).isEqualTo("fee_on_account_not_allowed");
+    }
+
+    /** Minor rules: a delivery day can be cleared, and paid in full names no method for money taken now. */
+    @Test
+    void aDeliveryDayCanBeClearedAndPaidInFullNamesNoSecondMethod() {
+        api.stockUp(hq, product, "3");
+        UUID id = placed("1", 0);
+        String etag = api.get("/orders/" + id, ORDERS).getHeaders().getETag();
+        ResponseEntity<JsonNode> cleared = api.call(
+                HttpMethod.PATCH,
+                "/orders/" + id,
+                Map.of("clear_delivery_date", true),
+                ORDERS,
+                "*",
+                Map.of("If-Match", etag));
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cleared.getBody().has("delivery_date")).isFalse();
+        ResponseEntity<JsonNode> refused =
+                deliver(id, Map.of("payment_method", "cash", "paid_now_method", "mobile_money"));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("validation_failed");
+        api.post("/orders/" + id + "/cancel", Map.of("reason", "Test changed mind"), ORDERS);
+        ResponseEntity<JsonNode> late = api.call(
+                HttpMethod.PATCH,
+                "/orders/" + id,
+                Map.of("notes", "x"),
+                ORDERS,
+                "*",
+                Map.of("If-Match", api.get("/orders/" + id, ORDERS).getHeaders().getETag()));
+        assertThat(late.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(late.getBody().get("detail").asString()).endsWith("so it cannot be changed.");
+        // Cancelling again answers the cancelled order.
+        assertThat(api.post("/orders/" + id + "/cancel", Map.of("reason", "Test changed mind"), ORDERS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 }

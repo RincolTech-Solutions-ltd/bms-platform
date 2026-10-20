@@ -71,6 +71,8 @@ class CustomerOrdersRepository {
             String feeMethod,
             Instant cancelledAt,
             String cancelReason,
+            LocalDate feePaidOn,
+            String feePaidMethod,
             Instant createdAt,
             UUID createdBy,
             int version) {
@@ -419,6 +421,16 @@ class CustomerOrdersRepository {
                 .update();
     }
 
+    int markFeePaid(UUID id, int version, UUID by, LocalDate on, String method, UUID entryId) {
+        return jdbc.sql("""
+                        UPDATE retail_customer_orders SET fee_paid_at = now(), fee_paid_on = ?, fee_paid_method = ?, fee_paid_by = ?,
+                               fee_payment_entry_id = ?, updated_at = now(), version = version + 1
+                         WHERE id = ? AND version = ? AND status = 'delivered' AND fee_method = 'account' AND fee_paid_at IS NULL
+                        """)
+                .params(Date.valueOf(on), method, by, entryId, id, version)
+                .update();
+    }
+
     int markCancelled(UUID id, int version, UUID by, LocalDate on, String reason) {
         return jdbc.sql("""
                         UPDATE retail_customer_orders SET status = 'cancelled', cancelled_at = now(), cancelled_on = ?,
@@ -551,6 +563,8 @@ class CustomerOrdersRepository {
                 rs.getString("fee_method"),
                 instant(rs, "cancelled_at"),
                 rs.getString("cancel_reason"),
+                localDate(rs, "fee_paid_on"),
+                rs.getString("fee_paid_method"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getObject("created_by", UUID.class),
                 rs.getInt("version"));
