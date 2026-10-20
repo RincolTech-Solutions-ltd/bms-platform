@@ -282,7 +282,7 @@ class CreditRecognitionRepository {
                         + " FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id"
                         + " WHERE s.status = 'completed' AND s.payment_method <> 'credit'"
                         + " AND s.created_at >= :fromTs AND s.created_at < :toTs" + branch
-                        + " GROUP BY s.branch_id, CAST((s.created_at AT TIME ZONE :zone) AS date)")
+                        + " GROUP BY 1, 2")
                 .params(params)
                 .query((rs, n) -> new ReportsRepository.DayFigures(
                         rs.getObject("branch_id", UUID.class),
