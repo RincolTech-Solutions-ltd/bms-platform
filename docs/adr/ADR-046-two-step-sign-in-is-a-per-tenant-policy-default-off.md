@@ -51,7 +51,7 @@ out, and how the platform recommends the stricter setting without forcing it.
    optional user, for the grace period only. `GET /me` adds `mfa_due_by` (the deadline, only for a covered user without a factor whose deadline has not
    passed, otherwise null) and `two_step_policy` (`off`, `roles` or `everyone`), so the app can show the reminder and the recommendation without a second
    call. `mfa_required` on `/me` keeps its meaning.
-5. **The forgotten-password and admin-reset rules do not change.** The step-up of the admin reset of a sign-in (ADR-042 decision 9(c)) stays: a current
+5. **The forgotten-password and admin-reset rules do not change, and a link from an administrator is not refused for a covered person.** Only the self-service mailbox link is refused for a user who is required now with no factor (ADR-042 decision 7). A link an administrator or the operator hands over (the Reset sign-in button of the Users screen, #339) is issued as before, because it travels out of band; when it is used after the deadline, the sign-in that follows (`afterReset`) sends the person to enrolment, never to a session, exactly as a normal sign-in does. Before the deadline it signs them in and the reminder shows. The step-up of the admin reset of a sign-in (ADR-042 decision 9(c)) stays: a current
    authenticator code when the admin has one, otherwise the admin's own current password. The operator routes stay code-only. A tenant administrator can
    still not reset another tenant administrator or themselves.
 6. **A plain-words warning before it takes effect, and a recommendation while it is off.** The Two-step sign-in screen (Business set-up) shows the three

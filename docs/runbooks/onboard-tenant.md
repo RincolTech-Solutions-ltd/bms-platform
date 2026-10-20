@@ -233,8 +233,10 @@ For a user with no email on file, an unreachable inbox, or a host without SMTP, 
 `POST /api/v1/users/{user_id}/reset-sign-in` and hands the returned link to the user once; it is not emailed, and the user is emailed
 that a reset was issued. The body proves the admin is still themselves: `{"totp_code": "<the current code from their own
 authenticator>"}` when they have two-step sign-in, otherwise `{"password": "<their own current password>"}` (two-step sign-in is
-optional by default; a wrong password counts toward the same 15 minute lock as at sign-in, and the fifth wrong password ends the session that sent it). **This is API only for now:** the Users screen has no
-button yet (issue #339). A tenant admin cannot be reset this way, nor can an admin reset themselves.
+optional by default; a wrong password counts toward the same 15 minute lock as at sign-in, and the fifth wrong password ends the session that sent it). **On the Users screen** (`/staff/users`) this is the **Reset sign-in** button on the person's card: the administrator types the
+6 digit code from their own authenticator app (or their own password when they have none), and the link is shown once with Copy and
+Send on WhatsApp (issue #339). A tenant admin cannot be reset this way, nor can an admin reset themselves; the platform operator's
+route for a tenant admin has no screen and is called by API.
 
 **Two-step sign-in is optional by default** (migration `V91`, issue #348, ADR-046): no role is flagged, so a new tenant admin is signed in after
 the first run and is offered the second factor, and every database behaves the same (staging's hand edit of `roles.mfa_required` is no longer needed). A
