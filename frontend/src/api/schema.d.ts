@@ -4520,6 +4520,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/stock/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M */
+        post: operations["correctRetailStockQuantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/stock/movements": {
         parameters: {
             query?: never;
@@ -11225,6 +11242,41 @@ export interface components {
             next_cursor?: string;
             totals?: components["schemas"]["RetailLocationTotals"];
         };
+        RetailStockCorrection: {
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            by?: string;
+            code?: string;
+            description?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            movement_id?: string;
+            new_qty?: string;
+            note?: string;
+            old_qty?: string;
+            /** Format: uuid */
+            product_id?: string;
+            reason_code?: string;
+        };
+        /** @description Issue #351: the right quantity of an item at a branch, with why it was wrong */
+        RetailStockCorrectionRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            /**
+             * @description The quantity there should be, not the difference
+             * @example 12.5
+             */
+            new_qty: string;
+            note?: string;
+            /** Format: uuid */
+            product_id: string;
+            /** @description entry_mistake (a restock or sale was entered wrongly) or miscount */
+            reason_code: string;
+        };
         RetailStockHealth: {
             cover?: components["schemas"]["RetailCoverList"];
             /** Format: int32 */
@@ -11253,6 +11305,7 @@ export interface components {
             branch_id?: string;
             /** Format: uuid */
             by?: string;
+            correction?: components["schemas"]["RetailStockMovementCorrection"];
             historical?: boolean;
             /** Format: uuid */
             id?: string;
@@ -11271,6 +11324,12 @@ export interface components {
              * @description Present only with retail.profit.read
              */
             unit_cost_minor?: number;
+        };
+        /** @description Present on a quantity correction (issue #351): why, and the quantity before and after */
+        RetailStockMovementCorrection: {
+            new_qty?: string;
+            old_qty?: string;
+            reason_code?: string;
         };
         RetailStockMovementPage: {
             items?: components["schemas"]["RetailStockMovement"][];
@@ -21434,6 +21493,32 @@ export interface operations {
             };
         };
     };
+    correctRetailStockQuantity: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailStockCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockCorrection"];
+                };
+            };
+        };
+    };
     listRetailStockMovements: {
         parameters: {
             query?: {
@@ -21441,6 +21526,7 @@ export interface operations {
                 product_id?: string;
                 from?: string;
                 to?: string;
+                newest_first?: boolean;
                 limit?: number;
                 cursor?: string;
             };

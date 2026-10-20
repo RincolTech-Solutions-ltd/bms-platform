@@ -1,5 +1,5 @@
 import type {
-  AllBranchesRow, Category, CapabilitiesRead, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, SimilarProduct, Stocktake, StockByLocation, StockRow,
+  AllBranchesRow, Category, CapabilitiesRead, Pack, Customer, InFlightReport, LocationRow, PriceChange, DailyProfit, DailyProfitRow, Product, Purchase, RetailApi, Sale, SaleLine, SimilarProduct, StockMovement, Stocktake, StockByLocation, StockRow,
   Supplier, Transfer, Unit, Usage, Valuation, ValuationRow,
 } from './retail';
 import type { SalesQuery } from './retail';
@@ -191,6 +191,10 @@ export function createMockRetail(): RetailApi {
     }
     if ((reason ?? '').trim().length < 5) refuse(422, 'validation_failed', 'Give a reason of at least 5 characters.');
   };
+  // The stock history of this mock instance (issue #351): restocks, their voids and quantity corrections, in order.
+  const stockLog: StockMovement[] = [];
+  const logMove = (m: Omit<StockMovement, 'id' | 'at' | 'by' | 'historical'>) =>
+    stockLog.push({ id: nextId('m'), at: new Date().toISOString(), by: mockMe('admin').user_id, historical: false, ...m });
   // Restocks of this mock instance (issue #351): kept with the prices before each, so a void can give them back.
   const purchases: (Purchase & { before: Record<string, { cost: number; sell: number }> })[] = [];
   const customers: Customer[] = [{ id: 'c0000000-0000-4000-8000-000000000001', name: 'Test Buyer 01', contact: '+256700000001', version: 1 }];
@@ -713,6 +717,7 @@ export function createMockRetail(): RetailApi {
         l.qty_by_branch.forEach((q) => {
           move(q.branch_id, p.id, toMilli(q.qty));
           qtyTotal += toMilli(q.qty);
+          logMove({ branch_id: q.branch_id, product_id: p.id, kind: 'purchase', qty: fromMilli(toMilli(q.qty)), source_type: 'retail.purchase' });
         });
         total += lineTotal(l.cost_minor, qtyTotal);
         return { id: nextId('p'), line_no: n + 1, product_id: p.id, code: p.code, description: p.description, cost_minor: l.cost_minor, sell_minor: p.sellMinor, qty_total: fromMilli(qtyTotal), qty_by_branch: l.qty_by_branch, line_total_minor: lineTotal(l.cost_minor, qtyTotal), base_unit: p.unit };
@@ -721,6 +726,23 @@ export function createMockRetail(): RetailApi {
       purchases.push({ ...made, before });
       return made;
       })),
+
+    correctStock: (body, key) =>
+      run(() => once(`correct-stock|${key}`, body, () => {
+        const p = find(body.product_id);
+        const was = bal(body.branch_id, p.id);
+        const next = toMilli(body.new_qty);
+        if (next < 0) refuse(422, 'validation_failed', 'The quantity cannot be below none.');
+        if (next === was) refuse(422, 'quantity_unchanged', `The quantity is ${plainQty(fromMilli(was))} ${p.unit} already. Type the right quantity.`);
+        move(body.branch_id, p.id, next - was);
+        const label = body.reason_code === 'entry_mistake' ? 'Entry mistake' : 'Miscount';
+        const id = nextId('c');
+        logMove({ branch_id: body.branch_id, product_id: p.id, kind: 'adjustment', qty: fromMilli(next - was), source_type: 'retail.stock_correction', note: body.note ? `${label}: ${body.note}` : label, correction: { reason_code: body.reason_code, old_qty: fromMilli(was), new_qty: fromMilli(next) } });
+        return { id, branch_id: body.branch_id, product_id: p.id, code: p.code, description: p.description, old_qty: fromMilli(was), new_qty: fromMilli(next), reason_code: body.reason_code, ...(body.note ? { note: body.note } : {}), at: new Date().toISOString(), by: mockMe('admin').user_id };
+      })),
+
+    stockHistory: ({ productId, branchId }) =>
+      run(() => ({ items: stockLog.filter((m) => m.product_id === productId && m.branch_id === branchId).reverse() })),
 
     listPurchases: ({ from, to, status }) =>
       run(() => ({
@@ -752,7 +774,10 @@ export function createMockRetail(): RetailApi {
           }
         }
         for (const l of found.lines ?? []) {
-          for (const b of l.qty_by_branch ?? []) move(b.branch_id ?? '', l.product_id ?? '', -toMilli(b.qty ?? '0'));
+          for (const b of l.qty_by_branch ?? []) {
+            move(b.branch_id ?? '', l.product_id ?? '', -toMilli(b.qty ?? '0'));
+            logMove({ branch_id: b.branch_id, product_id: l.product_id, kind: 'adjustment', qty: fromMilli(-toMilli(b.qty ?? '0')), source_type: 'retail.purchase_void', note: reason.trim() });
+          }
           const was = found.before[l.product_id ?? ''];
           const p = products.get(l.product_id ?? '');
           if (was && p) Object.assign(p, { costMinor: was.cost, sellMinor: was.sell, version: (p.version ?? 1) + 1 });

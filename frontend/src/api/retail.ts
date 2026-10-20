@@ -15,6 +15,11 @@ export type Product = S['RetailProduct'];
 /** A pack size of an item (units of measure, ADR-033): `factor` base units in one pack of `unit`, three places ("12.000"). */
 export type Pack = S['RetailPack'];
 export type StockRow = S['RetailStockRow'];
+/** A quantity corrected on the stock list (issue #351): the old and new quantity, why, who and when. */
+export type StockCorrection = S['RetailStockCorrection'];
+export type StockCorrectionRequest = S['RetailStockCorrectionRequest'];
+/** One line of a product's stock history; a correction carries `correction` (why, and the quantity before and after). */
+export type StockMovement = S['RetailStockMovement'];
 export type AllBranchesRow = S['RetailAllBranchesRow'];
 export type StockBranch = S['RetailStockBranch'];
 export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[]; closed_branches?: number };
@@ -319,6 +324,10 @@ export interface RetailApi {
   listUnits(): Promise<Unit[]>;
   createUnit(name: string): Promise<Unit>;
   updateUnit(id: string, version: number, body: { name?: string; active?: boolean }): Promise<Unit>;
+  /** Corrects the quantity of an item at a branch (retail.stocktake.commit there); takes the Idempotency-Key of its form (issue #351). */
+  correctStock(body: StockCorrectionRequest, idempotencyKey: string): Promise<StockCorrection>;
+  /** The stock history of an item at a branch, newest first (issue #351). */
+  stockHistory(q: { productId: string; branchId: string; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<{ items: StockMovement[]; next_cursor?: string }>;
   listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<StockRow[]>;
   /** One page of sales, newest first, narrowed by the filters (#145). */
   listSales(q: SalesQuery): Promise<SalePage>;
@@ -655,6 +664,20 @@ const realRetail: RetailApi = {
 
   async updateUnit(id, version, body) {
     return unwrap(await api.PATCH('/api/v1/retail/units/{unit_id}', { params: { path: { unit_id: id }, header: { 'If-Match': `"${version}"` } }, body }));
+  },
+
+  async correctStock(body, key) {
+    return unwrap(await api.POST('/api/v1/retail/stock/corrections', { params: { header: { 'Idempotency-Key': key } }, body }));
+  },
+
+  async stockHistory({ productId, branchId, cursor, limit, signal }) {
+    const page = unwrap(
+      await api.GET('/api/v1/retail/stock/movements', {
+        params: { query: { product_id: productId, branch_id: [branchId], newest_first: true, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) } },
+        signal,
+      }),
+    );
+    return { items: page.items ?? [], ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}) };
   },
 
   async listStock({ branchId, query, categoryId, negativeOnly, level, signal }) {

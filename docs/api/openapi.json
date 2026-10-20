@@ -12679,6 +12679,81 @@
           }
         }
       },
+      "RetailStockCorrection" : {
+        "properties" : {
+          "at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "movement_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "new_qty" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "old_qty" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reason_code" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailStockCorrectionRequest" : {
+        "description" : "Issue #351: the right quantity of an item at a branch, with why it was wrong",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "new_qty" : {
+            "description" : "The quantity there should be, not the difference",
+            "example" : "12.5",
+            "type" : "string"
+          },
+          "note" : {
+            "maxLength" : 280,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reason_code" : {
+            "description" : "entry_mistake (a restock or sale was entered wrongly) or miscount",
+            "pattern" : "entry_mistake|miscount",
+            "type" : "string"
+          }
+        },
+        "required" : [ "branch_id", "new_qty", "product_id", "reason_code" ]
+      },
       "RetailStockHealth" : {
         "properties" : {
           "cover" : {
@@ -12743,6 +12818,9 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "correction" : {
+            "$ref" : "#/components/schemas/RetailStockMovementCorrection"
+          },
           "historical" : {
             "type" : "boolean"
           },
@@ -12778,6 +12856,20 @@
             "description" : "Present only with retail.profit.read",
             "format" : "int64",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailStockMovementCorrection" : {
+        "description" : "Present on a quantity correction (issue #351): why, and the quantity before and after",
+        "properties" : {
+          "new_qty" : {
+            "type" : "string"
+          },
+          "old_qty" : {
+            "type" : "string"
+          },
+          "reason_code" : {
+            "type" : "string"
           }
         }
       },
@@ -29823,6 +29915,43 @@
         "tags" : [ "retail-stock" ]
       }
     },
+    "/api/v1/retail/stock/corrections" : {
+      "post" : {
+        "operationId" : "correctRetailStockQuantity",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailStockCorrectionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailStockCorrection"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M",
+        "tags" : [ "retail-stock" ]
+      }
+    },
     "/api/v1/retail/stock/movements" : {
       "get" : {
         "operationId" : "listRetailStockMovements",
@@ -29860,6 +29989,14 @@
           "schema" : {
             "format" : "date",
             "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "newest_first",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
           }
         }, {
           "in" : "query",
