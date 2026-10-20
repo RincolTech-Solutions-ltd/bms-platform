@@ -305,11 +305,12 @@ class RetailControlsIT extends IntegrationTest {
     }
 
     @Test
-    void personWithNoUserRowIsUnknownAndItsRecordsStaySeparate() {
+    void aPersonWithNoUserRowReadsUnknownPersonAndKeepsTheirOwnGroup() {
         RetailTestSupport ghost = new RetailTestSupport(http, t);
         void_(adm, sell(ghost, t.headOffice(), null), "Test ghost sale");
         JsonNode users = get("/groups?metric=voided_sales&group_by=user", CONTROLS);
-        JsonNode unknown = group(users, "");
+        // The sale carries a user id the users table does not know: a group of its own, named Unknown person.
+        JsonNode unknown = group(users, ghost.userId().toString());
         assertThat(unknown.get("label").asString()).isEqualTo("Unknown person");
         assertThat(unknown.get("count").asLong()).isEqualTo(1);
     }
