@@ -1425,10 +1425,10 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         TestDatabase.owner()
                 .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
                         + " UPDATE retail_sale_returns SET returned_on = DATE '" + ago(3) + "' WHERE id = '"
-                        + made.get("id").asString() + "'; END $$")
+                        + made.get("sale_return").get("id").asString() + "'; END $$")
                 .update();
         ResponseEntity<JsonNode> voided = api.postKeyed(
-                "/returns/" + made.get("id").asString() + "/void",
+                "/returns/" + made.get("sale_return").get("id").asString() + "/void",
                 Map.of("reason", "Taken back by mistake"),
                 RETURNER,
                 "*",
