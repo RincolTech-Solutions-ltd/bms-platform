@@ -325,6 +325,10 @@ class CatalogueService {
     @Transactional
     Product update(UUID id, String ifMatch, UpdateProductRequest r) {
         int expected = Versions.fromIfMatch(ifMatch);
+        // Issue #384: a variant's item is locked before the variant (the order a rename of the item takes), so the item
+        // name
+        // read below is the one committed, never one a concurrent rename is replacing.
+        repo.find(id).map(Product::variant).ifPresent(v -> repo.lockFamily(v.familyId()));
         Product before = repo.lock(id).orElseThrow(ApiException::notFound);
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
@@ -451,7 +455,7 @@ class CatalogueService {
         try {
             repo.update(after, duplicateReason, nameChanged);
             if (optionsChanged) {
-                repo.setVariantName(id, size, colour, after.description());
+                repo.setVariantName(id, size, colour, after.description(), false);
             }
         } catch (DuplicateKeyException e) {
             throw optionsChanged && String.valueOf(e.getMessage()).contains("retail_products_variant")

@@ -45,7 +45,8 @@ export function splitOptions(text: string): string[] {
 /** The letters and digits of a size or colour in capitals, seven at most: "0-3m" gives 03M, "Sky blue" SKYBLUE. */
 export function codeToken(part: string | undefined): string {
   if (!part) return '';
-  const t = [...part.toUpperCase()].filter((c) => /[\p{L}\p{N}]/u.test(c)).join('');
+  // Letters and decimal digits, as Java's Character.isLetterOrDigit keeps them on the server.
+  const t = [...part.toUpperCase()].filter((c) => /[\p{L}\p{Nd}]/u.test(c)).join('');
   return [...t].slice(0, VARIANT_TOKEN).join('');
 }
 

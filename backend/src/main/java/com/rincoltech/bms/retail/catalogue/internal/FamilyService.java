@@ -7,6 +7,7 @@ import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
+import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.AddVariantsRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BranchStock;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.CreateFamilyRequest;
@@ -105,6 +106,7 @@ class FamilyService {
         }
         UUID by = CurrentPrincipal.require().userId();
         insertVariants(familyId, family.name(), family.categoryId(), family.unitId(), plan, by);
+        repo.touchFamily(familyId);
         audit.record(new AuditLog.Entry(
                 "retail.product_family.variants_added",
                 FAMILY,
@@ -253,14 +255,33 @@ class FamilyService {
         if (repo.updateFamily(id, name, categoryId, expected) == 0) {
             throw Versions.conflict(before.version() + 1);
         }
-        if (!name.equals(before.name())) {
-            for (Product v : repo.variants(id)) {
-                // Each variant is locked before it is renamed, in the item's order (the same order every writer uses).
-                repo.lock(v.id());
+        // Every variant is locked before any is changed, in id order (the order a restock locks products in), and each
+        // is
+        // rewritten from its locked row, so a concurrent change of one variant's size or colour is never lost.
+        List<Product> locked = new ArrayList<>();
+        for (UUID vid : repo.variants(id).stream().map(Product::id).sorted().toList()) {
+            repo.lock(vid).ifPresent(locked::add);
+        }
+        String category =
+                repo.category(categoryId).map(CatalogueApi.Category::name).orElse(null);
+        for (Product v : locked) {
+            Map<String, Object> vWas = new LinkedHashMap<>();
+            Map<String, Object> vNow = new LinkedHashMap<>();
+            if (!name.equals(before.name())) {
                 String description = VariantGrid.description(
                         name, v.variant().size(), v.variant().colour());
                 catalogue.acceptName(description, before.unitId(), v.id(), null);
                 repo.setVariantName(v.id(), v.variant().size(), v.variant().colour(), description);
+                CatalogueService.diff(vWas, vNow, "description", v.description(), description);
+            }
+            if (!categoryId.equals(v.categoryId())) {
+                CatalogueService.diff(vWas, vNow, "category_id", v.categoryId(), categoryId);
+                vWas.put("category", v.category());
+                vNow.put("category", category);
+            }
+            if (!vNow.isEmpty()) {
+                audit.record(new AuditLog.Entry(
+                        "retail.product.updated", CatalogueService.PRODUCT, v.id(), null, vWas, vNow));
             }
         }
         if (!categoryId.equals(before.categoryId())) {
@@ -360,7 +381,11 @@ class FamilyService {
     }
 
     private static String baseCode(String raw) {
-        String code = CatalogueService.code(raw);
+        String code = RetailCatalogue.normaliseCode(raw)
+                .orElseThrow(() -> ApiException.validation(List.of(new FieldProblem(
+                        "base_code",
+                        "invalid",
+                        "A code must not be blank or contain control characters or special spaces."))));
         if (code.length() > 24) {
             throw ApiException.validation(
                     List.of(new FieldProblem("base_code", "invalid", "Keep the base code to 24 characters.")));

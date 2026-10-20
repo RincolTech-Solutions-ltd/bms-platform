@@ -14,7 +14,7 @@ import org.springframework.http.HttpStatus;
  * The quick creation of an item's variants (issue #384, ADR-051): the sizes and colours are chosen once and every
  * combination is made, each with a code built from the item's base code and its own prices defaulting to the item's.
  * No database and no transaction: the service checks the plan against the catalogue. The PWA builds the same preview
- * (variants-state.ts), so the codes it shows are the codes saved.
+ * (api/retail-variants.ts), so the codes it shows are the codes saved.
  */
 final class VariantGrid {
 
@@ -158,8 +158,9 @@ final class VariantGrid {
         part.toUpperCase(Locale.ROOT)
                 .codePoints()
                 .filter(Character::isLetterOrDigit)
+                .limit(TOKEN)
                 .forEach(t::appendCodePoint);
-        return t.length() > TOKEN ? t.substring(0, TOKEN) : t.toString();
+        return t.toString();
     }
 
     /** Trimmed, or null when blank. */

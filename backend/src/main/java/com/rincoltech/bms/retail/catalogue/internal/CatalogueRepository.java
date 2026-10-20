@@ -740,13 +740,26 @@ class CatalogueRepository {
                 .update();
     }
 
-    /** A variant's size, colour and description, after a correction or a rename of its item. */
+    /** Adding variants changes the item: its version moves, so an item read before is known to be stale. */
+    void touchFamily(UUID id) {
+        jdbc.sql("UPDATE retail_product_families SET updated_at = now(), version = version + 1 WHERE id = ?")
+                .param(id)
+                .update();
+    }
+
+    /** A variant's size, colour and description, after a rename of its item. */
     void setVariantName(UUID productId, String size, String colour, String description) {
+        setVariantName(productId, size, colour, description, true);
+    }
+
+    /** As above; {@code bump} false when the caller's own update of the row has moved its version already. */
+    void setVariantName(UUID productId, String size, String colour, String description, boolean bump) {
         jdbc.sql("""
                         UPDATE retail_products SET variant_size = :size, variant_colour = :colour, description = :description,
-                               updated_at = now(), version = version + 1
+                               updated_at = now(), version = version + CASE WHEN :bump THEN 1 ELSE 0 END
                          WHERE id = :id
                         """)
+                .param("bump", bump)
                 .param("size", size, java.sql.Types.VARCHAR)
                 .param("colour", colour, java.sql.Types.VARCHAR)
                 .param("description", description)
