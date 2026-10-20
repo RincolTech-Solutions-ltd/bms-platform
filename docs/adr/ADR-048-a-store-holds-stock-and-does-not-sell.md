@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-20, issue #366; the product owner decided the behaviour on 20 October 2026, the ADR is not yet accepted). Builds on ADR-041 and ADR-033. The migration is `V88` (placeholder): the real number is set at merge, the highest on `main` plus one.
+Proposed (2026-10-20, issue #366; the product owner decided the behaviour on 20 October 2026, the ADR is not yet accepted). Builds on ADR-041 and ADR-033. The migration is `V67` (merge order: #349 `V64`, #361 `V65`, #359 `V66`, then this one).
 
 ## Context
 
@@ -15,7 +15,7 @@ sell)", that works for every business without switching a capability on.
 
 ## Decision
 
-- **A Store is a branch flag, `branches.sells_goods boolean NOT NULL DEFAULT true` (migration V88).** A branch with `sells_goods = false` holds
+- **A Store is a branch flag, `branches.sells_goods boolean NOT NULL DEFAULT true` (migration V67).** A branch with `sells_goods = false` holds
   stock, receives purchases (restocks and goods receipts) and takes transfers in and out, and does not sell. Every existing branch keeps the default,
   so nothing changes until an administrator marks one. The flag sits beside `stocks_goods` (ADR-041) and is changed in the same call
   (`PATCH /branches/{id}`, `sells_goods`, also accepted when a branch is created).
@@ -63,4 +63,4 @@ sell)", that works for every business without switching a capability on.
 - Two ways now say "this branch does not sell" (the ADR-033 role and this flag); a tenant that sets both sees whichever refusal fires first.
 - A credit sale still owing at a branch blocks marking it; the owner has to let the buyers pay or settle them, or choose another branch.
 - A refund for an old sale made at what is now a Store must name a shop as the paying branch.
-- The migration adds one defaulted column and one check to `branches` (expand only). The real `V` number must be set at merge.
+- The migration adds one defaulted column and one check to `branches` (expand only). The number follows the merge order above.
