@@ -86,7 +86,8 @@ export const adminWelcome: Tour = {
   // Version 7 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
   // Version 8 adds the Branches step (issue #329): closing a branch and keeping its history.
   // Version 9 adds the Cash and change step (issue #346): the amount received and the change to give on a cash sale.
-  version: 9,
+  // Version 10 adds the Two-step sign-in step (issue #348): who must use a code from the phone, and how long they have to set it up.
+  version: 10,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -142,6 +143,13 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'Your branches',
       body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it later.',
+    },
+    {
+      id: 'two-step',
+      route: '/staff/setup/two-step',
+      target: 'twostep-choice',
+      title: 'Two-step sign-in',
+      body: 'Ask your staff for a code from their phone as well as the password. It is optional until you choose who must use it.',
     },
     {
       id: 'modules',
@@ -768,6 +776,30 @@ export const branchesPage: Tour = {
   ],
 };
 
+// The Two-step sign-in page (issue #348): a page tour for whoever may change the settings.
+export const twoStepPage: Tour = {
+  id: 'page-two-step',
+  version: 1,
+  title: 'This page: two-step sign-in',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/setup/two-step',
+  steps: [
+    {
+      id: 'intro',
+      target: 'twostep-intro',
+      title: 'A code from the phone',
+      body: 'Two-step sign-in asks for a code from a phone as well as the password. Then a stolen password is not enough to sign in.',
+    },
+    {
+      id: 'choice',
+      target: 'twostep-choice',
+      title: 'Who must use it',
+      body: 'Optional means nobody has to. Pick some roles, or everyone, to require it. Before you save, you see who will be asked and from which day.',
+    },
+  ],
+};
+
 export const branchRolesCapability: Tour = {
   id: 'capability-branch-roles',
   version: 1,
@@ -1298,5 +1330,5 @@ export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, twoStepPage, ...CUSTOMER_TOURS,
 ];
