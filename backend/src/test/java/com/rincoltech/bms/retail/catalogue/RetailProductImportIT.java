@@ -142,7 +142,7 @@ class RetailProductImportIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
 
-        assertThat(run(csv.replace("IMP-1", "IMP-2"), false, ADMINISTRATOR).getStatusCode())
+        assertThat(run(csv.replace("IMP-1", "IMP-2").replace("Test cable", "Test cable two"), false, ADMINISTRATOR).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         JsonNode item =
                 api.get("/products?query=IMP-2", ADMIN).getBody().get("items").get(0);
@@ -153,7 +153,7 @@ class RetailProductImportIT extends IntegrationTest {
                 .get(0);
         assertThat(plain.has("cost_minor")).isFalse();
         ResponseEntity<JsonNode> below =
-                run(csv.replace("IMP-1", "IMP-3").replace("1000,700", "600,700"), true, ADMINISTRATOR);
+                run(csv.replace("IMP-1", "IMP-3").replace("Test cable", "Test cable three").replace("1000,700", "600,700"), true, ADMINISTRATOR);
         assertThat(below.getBody().get("errors").asInt()).isEqualTo(1);
     }
 

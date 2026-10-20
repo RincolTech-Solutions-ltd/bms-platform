@@ -292,6 +292,18 @@ class ProductImportService {
             int added,
             int skipped,
             UUID by) {
+        // Issue #352: the names are locked in a fixed order before any row is written, so a person adding the same name
+        // through the screen at this moment queues behind the import (or the import behind them) and sees it.
+        pending.stream().map(Pending::description).sorted().distinct().forEach(repo::lockName);
+        for (Pending row : pending) {
+            if (repo.sameName(row.description(), null).stream().anyMatch(m -> m.unit().equalsIgnoreCase(row.unit()))) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "import_conflict",
+                        "Import conflict",
+                        "Another change added an item named " + row.description() + " while this file was being applied. Nothing was added. Run the check again and apply the file again.");
+            }
+        }
         Map<String, UUID> categoryIds = new HashMap<>(categories);
         Map<String, UUID> unitIds = new HashMap<>(units);
         for (Map.Entry<String, String> e : newCategories.entrySet()) {

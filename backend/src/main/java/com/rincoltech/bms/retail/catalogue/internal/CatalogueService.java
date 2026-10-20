@@ -370,14 +370,16 @@ class CatalogueService {
                     "The unit cannot change while a price list has a price for the product: prices are per unit.");
         }
         String duplicateReason = null;
-        if (!before.description().equals(after.description()) || !before.unitId().equals(after.unitId())) {
+        // A new name or unit settles the question again: the reason of an earlier add-anyway goes unless this one needs its own.
+        boolean nameChanged = !before.description().equals(after.description()) || !before.unitId().equals(after.unitId());
+        if (nameChanged) {
             duplicateReason = acceptName(after.description(), after.unitId(), id, r.duplicateReason());
             if (duplicateReason != null) {
                 now.put("duplicate_reason", duplicateReason);
             }
         }
         try {
-            repo.update(after, duplicateReason);
+            repo.update(after, duplicateReason, nameChanged);
         } catch (DuplicateKeyException e) {
             throw duplicateCode();
         }
@@ -666,7 +668,8 @@ class CatalogueService {
                         && purchaseId.equals(h.sourceId())
                         && h.oldCostMinor() != null
                         && h.oldSellMinor() != null
-                        && (!h.oldCostMinor().equals(h.newCostMinor()) || h.oldSellMinor() != h.newSellMinor()))
+                        && (h.oldCostMinor().longValue() != h.newCostMinor().longValue()
+                                || h.oldSellMinor().longValue() != h.newSellMinor()))
                 .toList();
         if (mine.isEmpty()) {
             return false;

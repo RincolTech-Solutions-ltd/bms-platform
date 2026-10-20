@@ -216,7 +216,7 @@ class CatalogueRepository {
     /** Every product's name key and unit (lower-cased), as {@code key + NAME_SEP + unit}, to its code: the import's duplicate check. */
     Map<String, String> productNames() {
         Map<String, String> out = new java.util.HashMap<>();
-        jdbc.sql("SELECT p.name_key, lower(u.name) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
+        jdbc.sql("SELECT p.name_key, lower(btrim(u.name)) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
                 .query((rs, n) -> {
                     out.putIfAbsent(rs.getString("name_key") + NAME_SEP + rs.getString("unit"), rs.getString("code"));
                     return 0;
@@ -361,14 +361,15 @@ class CatalogueRepository {
                 .update();
     }
 
-    void update(Product p, String duplicateReason) {
+    void update(Product p, String duplicateReason, boolean nameChanged) {
         jdbc.sql("""
                         UPDATE retail_products SET code = :code, description = :description, category_id = :categoryId,
                                unit_id = :unitId, active = :active, updated_at = now(), version = version + 1,
-                               duplicate_reason = coalesce(:duplicateReason, duplicate_reason)
+                               duplicate_reason = CASE WHEN :nameChanged THEN :duplicateReason ELSE duplicate_reason END
                          WHERE id = :id
                         """)
                 .param("duplicateReason", duplicateReason, java.sql.Types.VARCHAR)
+                .param("nameChanged", nameChanged)
                 .param("id", p.id())
                 .param("code", p.code())
                 .param("description", p.description())
