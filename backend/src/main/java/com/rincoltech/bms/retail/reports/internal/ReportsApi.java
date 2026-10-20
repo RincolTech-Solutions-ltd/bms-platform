@@ -134,9 +134,16 @@ final class ReportsApi {
             @Schema(
                     description =
                             "Present only when credit_sale_recognition is on_payment: everything sold on the day, credit"
-                                    + " sales included (Sold). Then sales_minor is Received, the money collected for sales,"
-                                    + " and the profit columns are the profit of the money received (ADR-043)")
-            Long soldMinor) {}
+                                    + " sales included (Sold). Then sales_minor is the money collected for sales plus"
+                                    + " counted_at_sale_minor, and the profit columns are the profit of both (ADR-043)")
+            Long soldMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the"
+                                    + " rule started, counted at the sale and not collected (the money collected is sales_minor less this)")
+            Long countedAtSaleMinor) {}
 
     @Schema(name = "RetailDailyProfit")
     record DailyProfit(
@@ -166,8 +173,9 @@ final class ReportsApi {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit);"
-                                    + " not part of the period")
+                            "Present only with on_payment: what buyers still owe now on the credit sales counted when the buyer"
+                                    + " pays, all dates (On credit); not part of the period. Credit sales from before the rule started"
+                                    + " were counted at the sale and are not in it")
             Long onCreditMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -175,5 +183,12 @@ final class ReportsApi {
                     description =
                             "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition"
                                     + " is on_payment once that day has come, whatever days the period spans")
-            LocalDate creditRecognitionStartsOn) {}
+            LocalDate creditRecognitionStartsOn,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the"
+                                    + " rule started, counted at the sale and not collected (the money collected is sales_minor less this)")
+            Long countedAtSaleMinor) {}
 }

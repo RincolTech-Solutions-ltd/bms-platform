@@ -188,5 +188,27 @@ describe('the daily profit report', () => {
     expect(html).toContain('UGX 3,000');
     expect(html).toContain('UGX 2,000');
     expect(html).toContain('Savings use this profit');
+    expect(html).not.toContain('Credit counted at the sale');
+  });
+
+  it('keeps credit counted at the sale apart from the money collected when a report straddles the start', () => {
+    const straddle = report({
+      credit_sale_recognition: 'on_payment',
+      sold_minor: 3000,
+      on_credit_minor: 500,
+      sales_minor: 2500,
+      cost_of_sales_minor: 1500,
+      profit_minor: 1000,
+      counted_at_sale_minor: 1000,
+      rows: [
+        { branch_id: 'b1', date: '2026-10-10', sales_minor: 1000, cost_of_sales_minor: 600, gross_profit_minor: 400, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 400, sold_minor: 1000, counted_at_sale_minor: 1000 },
+        { branch_id: 'b1', date: '2026-10-20', sales_minor: 1500, cost_of_sales_minor: 900, gross_profit_minor: 600, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 600, sold_minor: 2000, counted_at_sale_minor: 0 },
+      ],
+    });
+    const html = renderToString(<ProfitTable report={straddle} />);
+    expect(html).toContain('Credit counted at the sale');
+    expect(html).toContain('UGX 1,500');
+    expect(html).not.toContain('Profit from money received');
+    expect(html).toContain('UGX 1,000');
   });
 });

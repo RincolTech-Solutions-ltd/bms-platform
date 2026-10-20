@@ -754,6 +754,37 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     @Test
+    void aDeactivatedAdministratorCountsButIsNotEmailedWhenTheMakerGoesThroughBelowTheThreshold() {
+        UUID a = admin(api.userId(), 0, "active", null, null);
+        UUID b = admin(1, "deactivated", 5, null);
+        threshold(1_000_000_000L);
+        JsonNode w = writeOffOk(creditSale(1, 1));
+        assertThat(noSecondPerson(w))
+                .as("two administrators count, so the threshold let it through")
+                .isEqualTo("below_threshold");
+        assertThat(toldIds(w))
+                .as("only an active administrator can be told, and no other is active: the maker")
+                .containsExactly(a.toString());
+        assertThat(toldIds(w)).doesNotContain(b.toString());
+    }
+
+    @Test
+    void anAdministratorWhoseRoleWasRevokedCountsButIsNotEmailedWhenTheMakerGoesThroughBelowTheThreshold() {
+        UUID a = admin(api.userId(), 0, "active", null, null);
+        UUID c = admin(1, "active", null, null);
+        TestDatabase.owner()
+                .sql("UPDATE user_role_assignments SET revoked_at = now() - interval '3 days', revoked_by = ?"
+                        + " WHERE user_id = ?")
+                .params(c, c)
+                .update();
+        threshold(1_000_000_000L);
+        JsonNode w = writeOffOk(creditSale(1, 1));
+        assertThat(noSecondPerson(w)).isEqualTo("below_threshold");
+        assertThat(toldIds(w)).containsExactly(a.toString());
+        assertThat(toldIds(w)).doesNotContain(c.toString());
+    }
+
+    @Test
     void aSoleAdministratorWhoMadeTheRequestIsTheOnlyOneToldAndTheAuditRowSaysSo() {
         UUID a = admin(api.userId(), 0, "active", null, null);
         UUID gone = admin(1, "deactivated", 40, null);

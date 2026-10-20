@@ -29,8 +29,8 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
 
     private final BusinessClock clock;
     private final CurrentTenant tenant;
-    /** The tenants whose stored rule without a start day was already reported, so a read does not log it again and again. */
-    private final Set<String> warned = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Whether a stored rule without a start day was already reported, so a read does not log it again and again. */
+    private final java.util.concurrent.atomic.AtomicBoolean warned = new java.util.concurrent.atomic.AtomicBoolean();
 
     RetailCapabilityGroup(BusinessClock clock, CurrentTenant tenant) {
         this.clock = clock;
@@ -87,7 +87,7 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         String effective = current.get(EFFECTIVE_FROM) instanceof String d && validDate(d) ? d : null;
         if (mode.equals("on_payment") && effective == null) {
             // No start day means no rule: never guess 1970, which would count every sale ever made when the buyer pays.
-            if (warned.add(String.valueOf(tenant.profile().id()))) {
+            if (warned.compareAndSet(false, true)) {
                 log.warn(
                         "retail.capabilities has credit_sale_recognition on_payment with no start day; reading it as on_sale");
             }

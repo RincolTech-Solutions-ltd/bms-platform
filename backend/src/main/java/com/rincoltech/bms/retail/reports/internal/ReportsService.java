@@ -15,6 +15,7 @@ import com.rincoltech.bms.retail.reports.internal.ReportsApi.Valuation;
 import com.rincoltech.bms.retail.reports.internal.ReportsApi.ValuationRow;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.DayFigures;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.Holding;
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.math.BigDecimal;
@@ -214,7 +215,8 @@ class ReportsService {
     DailyProfit dailyProfit(List<UUID> branchIds, LocalDate from, LocalDate to) {
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter(PROFIT_READ, branchIds);
-        LocalDate end = to == null ? clock.today(tenant.profile().timezone()) : to;
+        LocalDate today = clock.today(tenant.profile().timezone());
+        LocalDate end = to == null ? today : to;
         LocalDate start = from == null ? end.minusDays(29) : from;
         if (start.isAfter(end) || ChronoUnit.DAYS.between(start, end) >= MAX_DAYS) {
             throw ApiException.validation(List.of(
@@ -226,15 +228,16 @@ class ReportsService {
         // ADR-043: with credit sales counted when the buyer pays, the figures are the money received, and Sold
         // (everything
         // sold, credit included) comes beside them.
-        // Once the rule has started, every report is read the when-paid way, whatever days it spans: its figures count
-        // each credit
-        // sale from its counting day (the later of the date and the entry day), so a backdated sale entered after the
-        // start is in a
-        // report of days before it, and Sold and On credit must show it. A rule that has not started yet leaves the old
-        // layout.
-        LocalDate startsOn = profitFigures.startsOn();
+        // The when-paid layout (Sold, Received, On credit) is for a report that holds days from the start on, or a
+        // credit sale that counts
+        // when the buyer pays (a backdated sale entered after the start is dated before it). Any other report, such as
+        // a month before the
+        // start, reads exactly as it did for a tenant that never switched, so a historical report is not relabelled.
+        CreditPeriods periods = profitFigures.periods();
+        LocalDate startsOn = periods.from();
         boolean onPayment = startsOn != null
-                && !startsOn.isAfter(clock.today(tenant.profile().timezone()));
+                && !startsOn.isAfter(today)
+                && (!end.isBefore(startsOn) || credit.countedSaleDatedIn(filter, start, end, periods));
         Map<String, Long> sold = new java.util.TreeMap<>();
         for (DayFigures d : profitFigures.daily(filter, start, end)) {
             long[] f = figures(days, branchOf, dateOf, d.branchId(), d.date());
@@ -243,10 +246,21 @@ class ReportsService {
             f[2] = d.usageCost();
             f[4] = d.badDebt();
         }
+        // The part of sales_minor that is credit counted at the sale (before the rule started), not collected: what the
+        // figures count
+        // with the rule, less what they would count if every credit sale were left out.
+        Map<String, Long> atSale = new java.util.TreeMap<>();
         if (onPayment) {
             for (DayFigures d : repo.daily(filter, start, end)) {
                 figures(days, branchOf, dateOf, d.branchId(), d.date());
                 sold.put(d.date() + "|" + d.branchId(), d.sales());
+            }
+            CreditPeriods everyCredit = new CreditPeriods(LocalDate.of(1970, 1, 1), periods.zone());
+            for (DayFigures d : repo.daily(filter, start, end, periods)) {
+                atSale.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
+            }
+            for (DayFigures d : repo.daily(filter, start, end, everyCredit)) {
+                atSale.merge(d.date() + "|" + d.branchId(), -d.sales(), Long::sum);
             }
         }
         for (ReportsRepository.Difference d : repo.stocktakeDifferences(filter, start, end)) {
@@ -261,6 +275,7 @@ class ReportsService {
         long difference = 0;
         long badDebt = 0;
         long soldTotal = 0;
+        long atSaleTotal = 0;
         for (Map.Entry<String, long[]> e : days.entrySet()) {
             long[] f = e.getValue();
             long gross = Math.subtractExact(f[0], f[1]);
@@ -274,8 +289,10 @@ class ReportsService {
                     f[4],
                     f[3],
                     Math.subtractExact(Math.addExact(Math.subtractExact(gross, f[2]), f[3]), f[4]),
-                    onPayment ? sold.getOrDefault(e.getKey(), 0L) : null));
+                    onPayment ? sold.getOrDefault(e.getKey(), 0L) : null,
+                    onPayment ? atSale.getOrDefault(e.getKey(), 0L) : null));
             soldTotal = Math.addExact(soldTotal, sold.getOrDefault(e.getKey(), 0L));
+            atSaleTotal = Math.addExact(atSaleTotal, atSale.getOrDefault(e.getKey(), 0L));
             sales = Math.addExact(sales, f[0]);
             costOfSales = Math.addExact(costOfSales, f[1]);
             usage = Math.addExact(usage, f[2]);
@@ -297,8 +314,9 @@ class ReportsService {
                         badDebt),
                 onPayment ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
                 onPayment ? soldTotal : null,
-                onPayment ? credit.onCredit(filter)[0] : null,
-                profitFigures.startsOn());
+                onPayment ? credit.onCredit(filter, periods)[0] : null,
+                startsOn,
+                onPayment ? atSaleTotal : null);
     }
 
     /** One row of sales, cost of sales, usage, stock-take difference and bad debt per day then branch (hex order, as the database sorts uuids). */

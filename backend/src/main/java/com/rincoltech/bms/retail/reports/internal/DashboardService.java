@@ -94,14 +94,24 @@ class DashboardService {
         // other credit
         // sale counts at the sale as it always did.
         CreditPeriods periods = capabilities.onPaymentPeriods();
-        boolean onPay = !periods.isEmpty();
+        // The when-paid fields appear once the rule has started, not while its start day is still ahead.
+        boolean onPay = periods.contains(today);
         LocalDate windowStart = today.minusDays(29);
         Map<UUID, Map<LocalDate, long[]>> recBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> recDay = new LinkedHashMap<>();
+        // What was collected: the same, without the credit sales counted at the sale (made before the rule started, or
+        // imported),
+        // which the profit includes but nobody has paid.
+        Map<UUID, Map<LocalDate, long[]>> collBranch = new LinkedHashMap<>();
+        Map<LocalDate, long[]> collDay = new LinkedHashMap<>();
         if (onPay) {
             for (DaySales d : repo.sales(filter, windowStart, today, periods)) {
                 add(recBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), d.cost());
                 add(recDay, d.day(), d.sales(), d.cost());
+                if (!d.credit()) {
+                    add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), 0);
+                    add(collDay, d.day(), d.sales(), 0);
+                }
             }
             Set<UUID> scope = filter == null ? null : Set.copyOf(filter);
             for (ReportsRepository.DayFigures d : CreditRecognition.deltas(
@@ -112,6 +122,8 @@ class DashboardService {
                         d.sales(),
                         d.costOfSales());
                 add(recDay, d.date(), d.sales(), d.costOfSales());
+                add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.date(), d.sales(), 0);
+                add(collDay, d.date(), d.sales(), 0);
             }
         }
         Map<LocalDate, long[]> profitDay = onPay ? recDay : byDay;
@@ -133,14 +145,17 @@ class DashboardService {
             long[] f = byDay.getOrDefault(date, new long[2]);
             long[] p = profitDay.getOrDefault(date, new long[2]);
             days.add(new Day(
-                    date, f[0], profit ? p[0] - p[1] : null, onPay ? recDay.getOrDefault(date, new long[2])[0] : null));
+                    date,
+                    f[0],
+                    profit ? p[0] - p[1] : null,
+                    onPay ? collDay.getOrDefault(date, new long[2])[0] : null));
             last30 += f[0];
             profit30 += p[0] - p[1];
-            received30 += onPay ? recDay.getOrDefault(date, new long[2])[0] : 0;
+            received30 += onPay ? collDay.getOrDefault(date, new long[2])[0] : 0;
             if (i < 7) {
                 last7 += f[0];
                 profit7 += p[0] - p[1];
-                received7 += onPay ? recDay.getOrDefault(date, new long[2])[0] : 0;
+                received7 += onPay ? collDay.getOrDefault(date, new long[2])[0] : 0;
             }
         }
 
@@ -200,10 +215,10 @@ class DashboardService {
                     p != null && cost ? p.atCost() : null,
                     p == null ? null : p.out(),
                     p == null ? null : p.low(),
-                    onPay && sold ? rt[0] : null));
+                    onPay && sold ? collBranch.getOrDefault(b, Map.of()).getOrDefault(today, new long[2])[0] : null));
         }
-        long[] rToday = recDay.getOrDefault(today, new long[2]);
-        long[] owed = onPay ? credit.onCredit(filter) : new long[2];
+        long[] rToday = collDay.getOrDefault(today, new long[2]);
+        long[] owed = onPay ? credit.onCredit(filter, periods) : new long[2];
         long[] pToday = profitDay.getOrDefault(today, new long[2]);
         return new Report(
                 today,

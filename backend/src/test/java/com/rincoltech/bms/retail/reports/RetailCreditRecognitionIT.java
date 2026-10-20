@@ -732,13 +732,13 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     }
 
     @Test
-    void aReportIsReadTheWhenPaidWayOnceTheRuleHasStartedAndSaysWhenItStarts() {
+    void aReportOfDaysBeforeTheStartKeepsTheOldLayoutAndSaysWhenTheRuleStarts() {
         onPayment();
         settle(ago(3).toString());
         JsonNode earlier = profit(ago(6), ago(4));
         assertThat(earlier.get("credit_sale_recognition").asString())
-                .as("the rule has started, so a report of days before it is read the same way")
-                .isEqualTo("on_payment");
+                .as("no day from the start on and no credit sale counted when the buyer pays: read as it always was")
+                .isEqualTo("on_sale");
         assertThat(earlier.get("credit_recognition_starts_on").asString()).isEqualTo(ago(3).toString());
         assertThat(profit(ago(6), today()).get("credit_sale_recognition").asString())
                 .isEqualTo("on_payment");
@@ -749,6 +749,81 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(now.get("credit_recognition_starts_on").asString())
                 .isEqualTo(today().plusDays(1).toString());
         assertThat(dashboard().get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+    }
+
+    @Test
+    void aReportOfAMonthBeforeTheStartIsNotRelabelledByTheRuleThatCameLater() {
+        onPayment();
+        settle(ago(2).toString());
+        // Unpaid, made and entered ten days ago, before the start: counted at the sale, as it always was.
+        UUID old = creditSale(hq, 1, ago(10));
+        sellEntered(old, ago(10));
+        JsonNode report = profit(ago(12), ago(8));
+        assertThat(report.get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+        assertThat(report.has("sold_minor")).as("no Sold").isFalse();
+        assertThat(report.has("on_credit_minor")).as("no On credit").isFalse();
+        assertThat(report.has("counted_at_sale_minor")).isFalse();
+        assertThat(report.get("sales_minor").asLong()).as("Sales, as before").isEqualTo(1_000);
+        assertThat(report.get("profit_minor").asLong())
+                .as("the 400 is the profit of the sale")
+                .isEqualTo(400);
+        assertThat(row(report, hq, ago(10)).has("sold_minor")).isFalse();
+    }
+
+    @Test
+    void aReportThatStraddlesTheStartKeepsCreditCountedAtTheSaleApartFromMoneyCollected() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID old = creditSale(hq, 1, ago(10));
+        sellEntered(old, ago(10));
+        cashSale(hq, 1, today());
+        UUID counted = creditSale(hq, 1, today());
+        payEnteredToday(counted, 500, today());
+
+        JsonNode report = profit(ago(12), today());
+        assertThat(report.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(report.get("sold_minor").asLong()).as("everything sold").isEqualTo(3_000);
+        assertThat(report.get("counted_at_sale_minor").asLong())
+                .as("the old credit sale, not collected")
+                .isEqualTo(1_000);
+        assertThat(report.get("sales_minor").asLong())
+                .as("the cash sale, the part payment and the old credit counted at the sale")
+                .isEqualTo(2_500);
+        assertThat(report.get("sales_minor").asLong()
+                        - report.get("counted_at_sale_minor").asLong())
+                .as("Received: money collected only")
+                .isEqualTo(1_500);
+        assertThat(report.get("on_credit_minor").asLong())
+                .as("only what is owed on the sale counted when the buyer pays")
+                .isEqualTo(500);
+        assertThat(report.get("cost_of_sales_minor").asLong()).isEqualTo(1_500);
+        assertThat(report.get("profit_minor").asLong()).as("400 + 400 + 200").isEqualTo(1_000);
+        // Sold is what was collected, what was counted at the sale and what is still owed on the counted sale.
+        assertThat(report.get("sold_minor").asLong())
+                .isEqualTo(report.get("sales_minor").asLong()
+                        + report.get("on_credit_minor").asLong());
+        assertThat(field(row(report, hq, ago(10)), "counted_at_sale_minor")).isEqualTo(1_000);
+        assertThat(field(row(report, hq, ago(10)), "profit_minor")).isEqualTo(400);
+        assertThat(field(row(report, hq, today()), "counted_at_sale_minor")).isZero();
+        assertThat(field(row(report, hq, today()), "sales_minor")).isEqualTo(1_500);
+    }
+
+    @Test
+    void theWhenPaidFieldsOfTheHomeCardsAppearOnlyOnceTheRuleHasStarted() {
+        onPayment();
+        JsonNode pending = dashboard();
+        assertThat(pending.get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+        assertThat(pending.get("today").has("received_minor")).isFalse();
+        assertThat(pending.get("today").has("on_credit_minor")).isFalse();
+        assertThat(pending.get("today").has("on_credit_count")).isFalse();
+        assertThat(pending.has("last7_received_minor")).isFalse();
+        assertThat(pending.has("last30_received_minor")).isFalse();
+        settle(today().toString());
+        JsonNode started = dashboard();
+        assertThat(started.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(started.get("today").has("received_minor")).isTrue();
+        assertThat(started.get("today").has("on_credit_minor")).isTrue();
+        assertThat(started.has("last7_received_minor")).isTrue();
     }
 
     @Test

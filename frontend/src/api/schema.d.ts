@@ -8579,6 +8579,11 @@ export interface components {
             /** Format: int64 */
             cost_of_sales_minor?: number;
             /**
+             * Format: int64
+             * @description Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the rule started, counted at the sale and not collected (the money collected is sales_minor less this)
+             */
+            counted_at_sale_minor?: number;
+            /**
              * Format: date
              * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is on_payment once that day has come, whatever days the period spans
              */
@@ -8593,7 +8598,7 @@ export interface components {
             from?: string;
             /**
              * Format: int64
-             * @description Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit); not part of the period
+             * @description Present only with on_payment: what buyers still owe now on the credit sales counted when the buyer pays, all dates (On credit); not part of the period. Credit sales from before the rule started were counted at the sale and are not in it
              */
             on_credit_minor?: number;
             /** Format: int64 */
@@ -8626,6 +8631,11 @@ export interface components {
             branch_id?: string;
             /** Format: int64 */
             cost_of_sales_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the rule started, counted at the sale and not collected (the money collected is sales_minor less this)
+             */
+            counted_at_sale_minor?: number;
             /** Format: date */
             date?: string;
             /** Format: int64 */
@@ -8636,7 +8646,7 @@ export interface components {
             sales_minor?: number;
             /**
              * Format: int64
-             * @description Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is Received, the money collected for sales, and the profit columns are the profit of the money received (ADR-043)
+             * @description Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is the money collected for sales plus counted_at_sale_minor, and the profit columns are the profit of both (ADR-043)
              */
             sold_minor?: number;
             /**

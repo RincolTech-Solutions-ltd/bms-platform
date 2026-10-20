@@ -142,12 +142,13 @@ class CreditRecognitionRepository {
     }
 
     /**
-     * What buyers still owe on credit sales made on the system (completed, not imported): total less paid, where the paid
-     * amount already holds the credit given on returns. Returns {amount, number of sales}. Imported sales are left out,
-     * the owner having settled them outside the system.
+     * What buyers still owe on the credit sales counted when the buyer pays ({@code periods}; completed, not imported): total less
+     * paid, where the paid amount already holds the credit given on returns. Returns {amount, number of sales}. Credit sales from
+     * before the rule started were counted at the sale, so they are not listed here as uncounted, and imported sales were settled
+     * outside the system.
      */
-    long[] onCredit(List<UUID> branchIds) {
-        if (branchIds != null && branchIds.isEmpty()) {
+    long[] onCredit(List<UUID> branchIds, CreditPeriods periods) {
+        if ((branchIds != null && branchIds.isEmpty()) || periods.isEmpty()) {
             return new long[] {0, 0};
         }
         Map<String, Object> params = new LinkedHashMap<>();
@@ -159,9 +160,35 @@ class CreditRecognitionRepository {
         return jdbc.sql("SELECT coalesce(sum(s.total_minor - s.paid_minor), 0) AS owed, count(*) AS n"
                         + "  FROM retail_sales s"
                         + " WHERE s.payment_method = 'credit' AND s.status = 'completed' AND NOT s.historical"
-                        + "   AND s.total_minor > s.paid_minor" + branch)
+                        + "   AND s.total_minor > s.paid_minor AND "
+                        + periods.sql("s.sale_date", "s.created_at", params, "crpO") + branch)
                 .params(params)
                 .query((rs, n) -> new long[] {rs.getLong("owed"), rs.getLong("n")})
+                .single();
+    }
+
+    /**
+     * Whether a credit sale dated inside the window counts when the buyer pays ({@code periods}): a backdated sale entered after the
+     * start is dated before it, yet a report of those days must show it.
+     */
+    boolean countedSaleDatedIn(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
+        if ((branchIds != null && branchIds.isEmpty()) || periods.isEmpty()) {
+            return false;
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("from", Date.valueOf(from));
+        params.put("to", Date.valueOf(to));
+        String branch = "";
+        if (branchIds != null) {
+            params.put("branchIds", branchIds);
+            branch = " AND s.branch_id IN (:branchIds)";
+        }
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_sales s"
+                        + " WHERE s.payment_method = 'credit' AND s.status = 'completed' AND NOT s.historical"
+                        + "   AND s.sale_date BETWEEN :from AND :to AND "
+                        + periods.sql("s.sale_date", "s.created_at", params, "crpC") + branch + ")")
+                .params(params)
+                .query(Boolean.class)
                 .single();
     }
 }

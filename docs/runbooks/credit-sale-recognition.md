@@ -30,8 +30,9 @@ buyer pays, so it adds no profit to a day already reported. Under "When the buye
 day is dated today (a backdated payment is refused: ask your administrator; a payment on a sale entered and dated before the start
 keeps its old freedom), counts on the day it is entered, and goes to the branch that took the money; a return paid out in money
 takes the profit back from the branch that paid the refund, and a return credited to the buyer's balance takes it back from the
-branches that took the sale's payments, in proportion. Once the rule has started, reports and the home page are read the when-paid way whatever days they span, and say the day it
-starts; a report of days before the start still shows a backdated credit sale entered after it, as Sold and On credit.
+branches that took the sale's payments, in proportion. Once the rule has started, a report that holds a day from the start on, or a credit sale counted when the buyer pays, is read the
+when-paid way and says the day it starts; a report of earlier days, such as the month before, keeps the plain layout and is not
+relabelled. A report that straddles the start shows the older credit sales apart, as "Credit counted at the sale".
 
 ## Switch it on
 

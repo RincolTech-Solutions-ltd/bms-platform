@@ -190,8 +190,11 @@ class RetailCreditRecognitionClockIT extends IntegrationTest {
                 .isEqualTo(400);
         assertThat(report.get("sold_minor").asLong()).isEqualTo(2_000);
         assertThat(report.get("on_credit_minor").asLong())
-                .as("what both buyers still owe now, whatever the day")
-                .isEqualTo(2_000);
+                .as("only what is owed on the sale counted when the buyer pays")
+                .isEqualTo(1_000);
+        assertThat(report.get("counted_at_sale_minor").asLong())
+                .as("the sale entered before the start day, counted at the sale and not collected")
+                .isEqualTo(1_000);
     }
 
     private UUID sale(RetailTestSupport api, TestDatabase.Fixture t, UUID product, String enteredAt) {

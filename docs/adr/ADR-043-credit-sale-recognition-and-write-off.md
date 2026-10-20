@@ -72,8 +72,17 @@ balance today and every closed period.
      start day keeps its old freedom, because it adds nothing to the reports; an imported sale is outside the rule. So the day the payment counts on, the day of the cash takings and the expected bank amount in the cash
      book, and the day of the ledger entry are the same day, and a day already reported, with the savings saved for it, is never
      rewritten by a late entry. Under `on_sale` nothing changes. Money refunded on a return takes it back on the day of the return.
-   - **On credit:** what buyers still owe on credit sales made on the system: total less paid, where the paid amount already
-     holds the credit given on returns. Not part of any period; it is a position now.
+   - **On credit:** what buyers still owe on the credit sales counted when the buyer pays: total less paid, where the paid amount
+     already holds the credit given on returns. Credit sales entered and dated before the start day were counted at the sale, so
+     they are not listed as uncounted. Not part of any period; it is a position now.
+   - **Which reports use the three figures.** A report is read this way only when the rule has started and the report holds a day
+     from the start day on, or a credit sale that counts when the buyer pays (a backdated one is dated before the start). Any other
+     report, such as September after a start in October, keeps the plain layout and its figures exactly as for a tenant that never
+     switched, so no historical report is relabelled and no old credit sale is shown as uncollected. A report that straddles the start
+     keeps the credit sales counted at the sale apart: `sales_minor` is the money collected plus `counted_at_sale_minor` (credit
+     entered and dated before the start, in the profit, not collected), so Received is `sales_minor` less `counted_at_sale_minor`
+     and Sold equals `sales_minor` plus On credit when nothing else is owed. The home cards show the same Received (credit counted at
+     the sale is in their profit but not in Received) and appear only once the start day has come.
 
 4. **Profit of a credit sale is recognised in proportion to the money kept.** For one credit sale at the end of a day:
    `net = total - value of returns`, `kept = payments - payments reversed - money refunded`, `received = min(net, kept)` and
