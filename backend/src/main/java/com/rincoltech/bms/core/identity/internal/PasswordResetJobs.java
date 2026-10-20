@@ -17,7 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * The nightly retention of {@code user_password_resets} (FR-IAM-15, ADR-042): a link is useless an hour after it was made; the
  * row is kept {@link #RETENTION} for the audit trail and then deleted, for every tenant at once, suspended and closed ones
- * included. One database function does it (migration V99, {@code user_password_resets_purge}): a job has no tenant bound, so a
+ * included. One database function does it (migration V62, {@code user_password_resets_purge}): a job has no tenant bound, so a
  * plain DELETE by the application role would see no row, and the role holds no DELETE grant on the table.
  */
 @Configuration(proxyBeanMethods = false)

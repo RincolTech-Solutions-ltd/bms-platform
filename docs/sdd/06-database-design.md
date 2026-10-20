@@ -464,7 +464,7 @@ foreign key).
 
 ### `user_password_resets` (RLS)
 
-(std, no `version`; issue #320, FR-IAM-15, ADR-042; the migration is the placeholder `V99` until it is renumbered at merge)
+(std, no `version`; issue #320, FR-IAM-15, ADR-042; migration `V62`)
 `user_id uuid NOT NULL` (FK `(tenant_id, user_id)`), `token_hash char(64) NOT NULL UNIQUE` (SHA-256 of the one-time token),
 `expires_at timestamptz NOT NULL` (one hour), `origin text NOT NULL` [`self`, `admin`, `operator`], `requested_by uuid` (the tenant admin
 who issued an `admin` link or the platform operator who issued an `operator` link; null for `self`; no foreign key; a CHECK ties the two), `used_at timestamptz` (the link set a password),

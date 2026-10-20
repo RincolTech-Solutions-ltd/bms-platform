@@ -1,9 +1,7 @@
 -- Staff forgot password and the admin reset of sign-in (issue #320, FR-IAM-15, ADR-042).
 --
--- PLACEHOLDER NUMBER: this file is V99 only so that it sorts after every migration on main while the branch is open.
--- Flyway runs with outOfOrder off, so it MUST be renumbered to the next free number before it merges: a V99 on main would make
--- every later migration (V61 to V98) a number below an applied one, which can never run. The CI guard
--- .github/scripts/placeholder_migration_guard.py fails a pull request that still holds a V99 file.
+-- Numbered V62: V61 is the branch close (#347), the last on main when this merged. Flyway runs with outOfOrder off, so a number
+-- is taken above the highest on main at merge time.
 --
 -- Locking, for the rollout (chapter 6 section 6.9, expand and contract):
 --  1. CREATE TABLE user_password_resets takes SHARE ROW EXCLUSIVE on tenants and users (the foreign keys) until the commit, which

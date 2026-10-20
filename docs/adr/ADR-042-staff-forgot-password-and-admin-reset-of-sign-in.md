@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (issue #320; requirement FR-IAM-15; the Users screen action is #339; the per-tenant policy for two-step sign-in is #348). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
+Accepted (Hillary, 20 Oct 2026: "Yes merge", relayed by the coordinator; he accepts the staging caveat that whoever reads a no-factor tenant admin's mailbox can take that admin over until #348) (issue #320; requirement FR-IAM-15; the Users screen action is #339; the per-tenant policy for two-step sign-in is #348). Builds on ADR-014 (staff authentication: argon2id, TOTP with recovery
 codes, revocable server-side sessions, invitations), ADR-025 (accepting an invitation signs the user in under the
 sign-in rules), ADR-003 (row-level security) and ADR-017 (per-permission branch scope). Does not supersede any of
 them. The contract is in chapter 7 section 7.11.2 and 7.11.4, the threat model in chapter 8 section 8.2a.
@@ -87,7 +87,7 @@ inbox.
 8. **A new table with forced row-level security.** `user_password_resets` (chapter 6): `tenant_id`, the standard
    policy through `bms_apply_tenant_rls`, a composite foreign key to `users`, grants `SELECT, INSERT, UPDATE` (rows are deleted by a definer function, decision 12),
    and a factory row in `RlsIsolationIT`. A link of tenant A used on tenant B's host is simply not found. The migration
-   is the placeholder `V99__staff_password_reset.sql`, renumbered at merge (`placeholder-migration-guard` fails a pull request that still holds a `V99` file, with no override, and the first job of `deploy.yml` refuses to build one, because a `V99` on main would make every later migration a number below an applied one); it also widens the `auth_sessions`
+   is `V62__staff_password_reset.sql` (`placeholder-migration-guard` and the first job of `deploy.yml` still refuse a `V99` placeholder: a `V99` on main would make every later migration a number below an applied one); it also widens the `auth_sessions`
    `revoked_reason` check (added `NOT VALID`, last, behind a five second `lock_timeout`).
 9. **The admin and operator resets return the link once, are not emailed, and are narrow.** Same shape as the
    invitation link (`{url, expires_at}`), no store (`Cache-Control: no-store`), audited as
