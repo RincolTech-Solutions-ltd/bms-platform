@@ -262,6 +262,7 @@ class ReportsService {
                 sold.put(d.date() + "|" + d.branchId(), d.sales());
             }
             for (DayFigures d : credit.cashSalesEntered(filter, start, end)) {
+                figures(days, branchOf, dateOf, d.branchId(), d.date());
                 received.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
             }
             for (DayFigures d : credit.collections(filter, start, end)) {
