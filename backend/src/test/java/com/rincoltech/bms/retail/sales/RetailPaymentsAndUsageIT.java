@@ -105,7 +105,11 @@ class RetailPaymentsAndUsageIT extends IntegrationTest {
                         VALUES (?, ?, ?, ?, CAST('2025-10-01' AS date), 'credit', 'Test Buyer 01',
                             'UGX', 4000, 0, 0, 'completed', true, gen_random_uuid())
                         """)
-                .params(imported, t.tenantId(), t.headOffice(), "RS9" + imported.toString().substring(0, 7))
+                .params(
+                        imported,
+                        t.tenantId(),
+                        t.headOffice(),
+                        "RS9" + imported.toString().substring(0, 7))
                 .update();
         Long before = TestDatabase.owner()
                 .sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ?")
