@@ -512,7 +512,7 @@ class RetailPurchaseVoidIT extends IntegrationTest {
     /** ADR-045: voiding a restock corrects what was entered, so it works for an item switched off since. */
     @Test
     void aRestockOfAnItemMadeInactiveCanStillBeVoided() {
-        JsonNode purchase = buy("cash", "2026-10-20", 1_000, 1_500, null, Map.of(hq, "3"));
+        JsonNode purchase = buy("cash", TODAY, 1_000, 1_500, null, Map.of(hq, "3"));
         switchOff(product);
         ResponseEntity<JsonNode> voided =
                 voidIt(UUID.fromString(purchase.get("id").asString()), "Typed the wrong number");
