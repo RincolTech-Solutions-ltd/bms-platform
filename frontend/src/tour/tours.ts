@@ -85,9 +85,10 @@ export const adminWelcome: Tour = {
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
   // Version 7 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
   // Version 8 adds the Branches step (issue #329): closing a branch and keeping its history.
-  // Version 9 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
-  // Version 10 adds the step on writing off a debt that will never be paid (issue #340).
-  version: 10,
+  // Version 9 adds the Cash and change step (issue #346): the amount received and the change to give on a cash sale.
+  // Version 10 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
+  // Version 11 adds the step on writing off a debt that will never be paid (issue #340).
+  version: 11,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -192,6 +193,16 @@ export const adminWelcome: Tour = {
       body: 'Record sales, check stock and restock from here. One big button for each job.',
     },
     {
+      id: 'sale-change',
+      route: '/staff/retail/sale',
+      target: 'sale-change',
+      module: 'retail',
+      needs: [SELL],
+      optional: true,
+      title: 'Cash and change',
+      body: 'For a cash sale, type the amount the customer gave, or tap a note. The change to give back shows in large figures. It is only a guide, and the sale is still saved at its total.',
+    },
+    {
       id: 'credit-payments',
       route: '/staff/retail',
       target: 'retail-creditSales',
@@ -279,7 +290,8 @@ export const retailSales: Tour = {
   // Version 3 adds the credit payment step (issue #326), so whoever finished version 2 sees it once.
   // Version 4 words that step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
   // Version 5 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
-  version: 5,
+  // Version 6 adds the Cash and change step (issue #346): the amount received and the change to give on a cash sale.
+  version: 6,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -315,6 +327,15 @@ export const retailSales: Tour = {
       optional: true,
       title: 'How the customer pays',
       body: 'Choose how the customer pays. For credit, pick the buyer and the day they will pay.',
+    },
+    {
+      id: 'sale-change',
+      route: '/staff/retail/sale',
+      target: 'sale-change',
+      module: 'retail',
+      optional: true,
+      title: 'Cash and change',
+      body: 'For a cash sale, type the amount the customer gave, or tap a note. The change to give back shows in large figures. It is only a guide, and the sale is still saved at its total.',
     },
     {
       id: 'sale-save',
