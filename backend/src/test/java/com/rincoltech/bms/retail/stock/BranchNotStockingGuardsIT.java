@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -222,9 +223,9 @@ class BranchNotStockingGuardsIT extends IntegrationTest {
                 s.executeUpdate("UPDATE branches SET stocks_goods = false WHERE id = '" + hq + "'");
             }
             CompletableFuture<ResponseEntity<JsonNode>> restock = CompletableFuture.supplyAsync(() -> restock(hq));
-            assertThat(finishedWithinPause(restock))
+            assertThat(blockedOnABranchRow(restock))
                     .as("the restock waits for the branch row")
-                    .isFalse();
+                    .isTrue();
             c.commit();
             assertNotStocking(restock.get(30, TimeUnit.SECONDS));
         }
@@ -247,9 +248,9 @@ class BranchNotStockingGuardsIT extends IntegrationTest {
             }
             CompletableFuture<ResponseEntity<JsonNode>> sale =
                     CompletableFuture.supplyAsync(() -> api.sell(br2, "cash", product, "1"));
-            assertThat(finishedWithinPause(sale))
+            assertThat(blockedOnABranchRow(sale))
                     .as("the sale waits for the branch row")
-                    .isFalse();
+                    .isTrue();
             c.commit();
             ResponseEntity<JsonNode> answer = sale.get(30, TimeUnit.SECONDS);
             assertThat(answer.getStatusCode()).as("%s", answer.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
@@ -262,15 +263,99 @@ class BranchNotStockingGuardsIT extends IntegrationTest {
                 .isZero();
     }
 
-    /** True when the call finished within the pause, which here means it did not wait. */
-    private static boolean finishedWithinPause(CompletableFuture<?> call) {
-        try {
-            call.get(1500, TimeUnit.MILLISECONDS);
-            return true;
-        } catch (java.util.concurrent.TimeoutException e) {
-            return false;
-        } catch (Exception e) {
-            throw new AssertionError(e);
+    /**
+     * The other direction: a write that is already past its branch check holds the row FOR SHARE, so the administrator's change
+     * of the flag waits for it instead of slipping in, and applies once the write has finished.
+     */
+    @Test
+    void anAdministratorsChangeWaitsForAWriteAlreadyPastItsCheck() throws Exception {
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                s.execute("SELECT 1 FROM branches WHERE id = '" + hq + "' FOR SHARE");
+            }
+            CompletableFuture<ResponseEntity<JsonNode>> change = CompletableFuture.supplyAsync(() -> http.exchange(
+                    "/api/v1/branches/" + hq,
+                    HttpMethod.PATCH,
+                    new HttpEntity<>(
+                            Map.of("stocks_goods", false),
+                            api.headers("core.branches.read,core.branches.manage", "*", Map.of("If-Match", "\"1\""))),
+                    JsonNode.class));
+            assertThat(blockedOnABranchRow(change))
+                    .as("the change waits for the write's share lock")
+                    .isTrue();
+            c.commit();
+            ResponseEntity<JsonNode> done = change.get(30, TimeUnit.SECONDS);
+            assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+            assertThat(done.getBody().get("stocks_goods").asBoolean()).isFalse();
         }
+    }
+
+    /** A rename takes no explicit lock, so a write holding the row does not hold it up. */
+    @Test
+    void aRenameDoesNotWaitForAWriteHoldingTheRow() throws Exception {
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                s.execute("SELECT 1 FROM branches WHERE id = '" + br2 + "' FOR KEY SHARE");
+            }
+            ResponseEntity<JsonNode> renamed = http.exchange(
+                    "/api/v1/branches/" + br2,
+                    HttpMethod.PATCH,
+                    new HttpEntity<>(
+                            Map.of("name", "Test Branch Two Renamed"),
+                            api.headers("core.branches.read,core.branches.manage", "*", Map.of("If-Match", "\"1\""))),
+                    JsonNode.class);
+            assertThat(renamed.getStatusCode()).as("%s", renamed.getBody()).isEqualTo(HttpStatus.OK);
+            c.rollback();
+        }
+    }
+
+    /** A sale held up longer than the request's lock timeout is told to try again, and nothing is saved. */
+    @Test
+    void aSaleHeldUpTooLongIsToldToTryAgain() throws Exception {
+        api.stockUp(br2, product, "10");
+        try (Connection c = TestDatabase.ownerDataSource().getConnection()) {
+            c.setAutoCommit(false);
+            try (Statement s = c.createStatement()) {
+                s.executeUpdate("UPDATE branches SET name = name WHERE id = '" + br2 + "'");
+            }
+            ResponseEntity<JsonNode> held = api.sell(br2, "cash", product, "1");
+            assertThat(held.getStatusCode()).as("%s", held.getBody()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(code(held)).isEqualTo("lock_timeout");
+            c.rollback();
+        }
+        assertThat(api.sell(br2, "cash", product, "1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    /** A void at a branch that keeps no goods is still allowed: the sale exists, and the goods go back on the shelf. */
+    @Test
+    void aVoidAtABranchThatKeepsNoGoodsIsStillAllowed() {
+        api.stockUp(hq, product, "5");
+        UUID sale = RetailTestSupport.id(api.sell(hq, "cash", product, "2"));
+        setFlag(hq, false);
+        ResponseEntity<JsonNode> voided =
+                api.post("/sales/" + sale + "/void", Map.of("reason", "Test void after the flag was set"), ADMIN);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    /**
+     * Waits (up to 30 seconds) until a database backend is waiting for a lock, then reports whether the
+     * call is still unfinished: deterministic, with no fixed pause that a slow machine could outrun.
+     */
+    private boolean blockedOnABranchRow(CompletableFuture<?> call) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline) {
+            // pg_locks is readable by every role; the only lock waits in this test are the ones it arranges.
+            long waiting = TestDatabase.owner()
+                    .sql("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                    .query(Long.class)
+                    .single();
+            if (waiting > 0) {
+                return !call.isDone();
+            }
+            Thread.sleep(50);
+        }
+        return false;
     }
 }

@@ -378,7 +378,8 @@ class TransferService {
                         "retail.transfer_in:" + id,
                         List.of(
                                 Leg.debit("inventory", receivedValue),
-                                Leg.credit("interbranch_clearing", receivedValue))))
+                                Leg.credit("interbranch_clearing", receivedValue)),
+                        true))
                 .map(PostedEntry::entryId)
                 .orElse(null);
         UUID shortageEntry = books.post(new Posting(
@@ -389,7 +390,8 @@ class TransferService {
                         TRANSFER,
                         id,
                         "retail.transfer_shortage:" + id,
-                        List.of(Leg.debit("stock_shrinkage", shortage), Leg.credit("interbranch_clearing", shortage))))
+                        List.of(Leg.debit("stock_shrinkage", shortage), Leg.credit("interbranch_clearing", shortage)),
+                        true))
                 .map(PostedEntry::entryId)
                 .orElse(null);
         for (StoredLine l : lines) {

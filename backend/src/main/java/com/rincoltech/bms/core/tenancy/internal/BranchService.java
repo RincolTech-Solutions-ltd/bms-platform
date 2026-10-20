@@ -151,7 +151,15 @@ class BranchService implements BranchProvisioning {
     @Transactional
     BranchResponse update(UUID branchId, String ifMatch, UpdateBranchRequest request) {
         int expected = Versions.fromIfMatch(ifMatch);
-        BranchResponse before = lockForUpdate(branchId);
+        Principal principal = CurrentPrincipal.require();
+        BranchResponse seen = find(branchId)
+                .filter(b -> principal.may("core.branches.manage", b.id()))
+                .orElseThrow(ApiException::notFound);
+        // Only a change of the stocking flag takes the explicit row lock that stock writes queue behind (ADR-041); a
+        // rename or a
+        // new location must not hold up a sale, so it relies on the version check of its own update.
+        boolean flagChange = request.stocksGoods() != null && request.stocksGoods() != seen.stocksGoods();
+        BranchResponse before = flagChange ? lockForUpdate(branchId) : seen;
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
@@ -161,10 +169,15 @@ class BranchService implements BranchProvisioning {
         if (before.stocksGoods() && !stocks) {
             refuseWhileGoodsRemain(before);
         }
-        jdbc.sql("""
+        int changed = jdbc.sql("""
                         UPDATE branches SET name = ?, location = ?, stocks_goods = ?, updated_at = now(),
-                               version = version + 1 WHERE id = ?
-                        """).params(name, location, stocks, branchId).update();
+                               version = version + 1 WHERE id = ? AND version = ?
+                        """)
+                .params(name, location, stocks, branchId, before.version())
+                .update();
+        if (changed == 0) {
+            throw Versions.conflict(find(branchId).map(BranchResponse::version).orElse(before.version()));
+        }
         audit.record(new AuditLog.Entry(
                 "core.branch.updated",
                 "core.branch",

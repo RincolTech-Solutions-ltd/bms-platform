@@ -1556,6 +1556,7 @@ public class RetailImporter {
          */
         void checksum(ExportFile file) {
             List<Balance> rows = new ArrayList<>();
+            int[] excluded = {0};
             ImportReport quiet = new ImportReport("", "", true);
             Run reader = new Run(export, quiet, id, null);
             reader.begin();
@@ -1569,7 +1570,9 @@ public class RetailImporter {
                             row.qty("qty"));
                     // A balance for a branch that keeps no goods is refused (reported by balances()), so it is not
                     // compared.
-                    if (!reader.noGoods.contains(b.branch())) {
+                    if (reader.noGoods.contains(b.branch())) {
+                        excluded[0]++;
+                    } else {
                         rows.add(b);
                     }
                 } catch (RuntimeException e) {
@@ -1578,6 +1581,14 @@ public class RetailImporter {
             });
             Map<String, BigDecimal> derived = new HashMap<>();
             stock.positions().forEach(p -> derived.put(p.branchId() + "|" + p.productId(), p.balance()));
+            // A branch that keeps no goods should hold none: say so when the books show a balance there (issue #329).
+            stock.positions().stream()
+                    .filter(p -> noGoods.contains(p.branchId()) && p.balance().signum() != 0)
+                    .forEach(p -> report.anomaly(
+                            file.name,
+                            0,
+                            "branch " + codeOf(p.branchId()) + " keeps no goods but holds "
+                                    + Quantities.format(p.balance()) + " of " + productCode(p.productId())));
             List<String> source = new ArrayList<>();
             List<String> after = new ArrayList<>();
             Set<String> keys = new HashSet<>();
@@ -1595,7 +1606,8 @@ public class RetailImporter {
             String s = sha256(source);
             String d = sha256(after);
             report.checksum("balances checksum: rows=" + source.size() + " total_qty=" + Quantities.format(total)
-                    + " source_sha256=" + s + " derived_sha256=" + d + " match=" + (s.equals(d) ? "yes" : "NO"));
+                    + " source_sha256=" + s + " derived_sha256=" + d + " match=" + (s.equals(d) ? "yes" : "NO")
+                    + " excluded_no_goods=" + excluded[0]);
         }
     }
 

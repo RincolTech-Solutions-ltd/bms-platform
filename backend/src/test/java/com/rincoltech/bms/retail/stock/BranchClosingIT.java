@@ -275,6 +275,61 @@ class BranchClosingIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
     }
 
+    /**
+     * The goods on the road to a branch that closes meanwhile are physically there: the receipt succeeds, the stock lands in the
+     * closed branch and the history shows it, while an ordinary sale at the closed branch is still refused (ADR-041).
+     */
+    @Test
+    void aClosedBranchStillReceivesATransferAlreadyOnTheRoad() {
+        retail.stockUp(t.headOffice(), product, "10");
+        String etag =
+                retail.get("/settings/capabilities", SETTINGS).getHeaders().getETag();
+        assertThat(retail.call(
+                                HttpMethod.PUT,
+                                "/settings/capabilities",
+                                Map.of("transfer_receipt", true),
+                                SETTINGS,
+                                "*",
+                                etag == null ? Map.of() : Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> sent = transfer(t.headOffice(), t.secondBranch());
+        assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID transfer = RetailTestSupport.id(sent);
+        assertThat(close(t.secondBranch(), Map.of("reason", "Test closing with a parcel on the way"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> received = retail.postKeyed(
+                "/transfers/" + transfer + "/receive",
+                Map.of(),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(received.getStatusCode()).as("%s", received.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(retail.get("/transfers/" + transfer, ADMIN)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("received");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT qty FROM retail_stock_balances WHERE tenant_id = ? AND branch_id = ?")
+                        .params(t.tenantId(), t.secondBranch())
+                        .query(java.math.BigDecimal.class)
+                        .single())
+                .isEqualByComparingTo("1");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND branch_id = ?")
+                        .params(t.tenantId(), t.secondBranch())
+                        .query(Long.class)
+                        .single())
+                .as("the receipt is posted to the closed branch")
+                .isPositive();
+        assertThat(retail.sell(t.secondBranch(), "cash", product, "1").getStatusCode())
+                .as("an ordinary sale at the closed branch is still refused")
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
     /** A closed branch is refused for sales, restocks and transfers, and a stale or missing If-Match is refused. */
     @Test
     void aClosedBranchIsRefusedAndTheVersionIsChecked() {
@@ -350,6 +405,8 @@ class BranchClosingIT extends IntegrationTest {
         // Goods stranded at the branch (a void or an old balance) can still leave: it may be a transfer source, and
         // take
         // usage and damage out (ADR-041); it still cannot take anything in.
+        // With nothing on its shelves there is nothing to send: the source exit is for stranded goods only.
+        assertThat(transfer(hq, t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         retail.importedBalance(hq, product, "3");
         assertThat(transfer(hq, t.secondBranch()).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(usage(hq).getStatusCode()).isEqualTo(HttpStatus.CREATED);

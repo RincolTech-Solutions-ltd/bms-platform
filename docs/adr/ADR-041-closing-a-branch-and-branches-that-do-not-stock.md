@@ -47,9 +47,14 @@ screen.
   (`Branches.lockBranch`), and a close or a not-stocking change holds it `FOR UPDATE`. A write that is checking the
   branch therefore queues behind the change and sees it, and the change waits for a write already past its check, so
   goods cannot land in a branch that has just stopped keeping them and a sale cannot commit at a branch that has just
-  closed. Read only requests read the branch plainly.
-- **A closed branch may still receive a transfer already on the road to it** (the goods are physically there); the
-  stock then sits in the closed branch, outside the default stock list but in the valuation, and the Branches screen
+  closed. Read only requests read the branch plainly. A rename or a new location takes no explicit lock and relies on the version
+  check of its own update, so it never holds up a sale; only a change of the flag, a close and a reopen take the lock. A
+  request that waits for the row longer than its lock timeout (5 seconds with an `Idempotency-Key`) gets 409 `lock_timeout`
+  ("Try again in a moment") and saved nothing.
+- **A closed branch may still receive a transfer already on the road to it** (the goods are physically there). The ledger
+  normally refuses an entry for an inactive branch; the two entries of a transfer receipt (the receipt and the shortage)
+  alone carry a flag (`EntryRequest.allowClosedBranch`, set through `Posting.closedBranchOk`) so the ledger checks that the
+  branch exists, not that it is open. The stock then sits in the closed branch, outside the default stock list but in the valuation, and the Branches screen
   shows what a closed branch still holds. The importer refuses a balance row for a branch that keeps no goods and reports
   it like any other refused row.
   `/me` reports `stocks_goods` per branch so the sale, restock and transfer forms skip it, and the default branch avoids it.

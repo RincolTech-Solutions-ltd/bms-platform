@@ -12,6 +12,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -40,11 +42,27 @@ class JdbcTenancy implements Branches, CurrentTenant, TenantModules, TenantSeque
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<Branch> lockBranch(UUID branchId) {
-        return jdbc.sql(
-                        "SELECT id, code, name, is_head_office, status, stocks_goods FROM branches WHERE id = ? FOR SHARE")
-                .param(branchId)
-                .query(JdbcTenancy::branch)
-                .optional();
+        try {
+            return jdbc.sql(
+                            "SELECT id, code, name, is_head_office, status, stocks_goods FROM branches WHERE id = ? FOR SHARE")
+                    .param(branchId)
+                    .query(JdbcTenancy::branch)
+                    .optional();
+        } catch (DataAccessException e) {
+            // The administrator's change held the row longer than the request's lock timeout (an Idempotency-Key sets 5
+            // s).
+            // Nothing was saved, so the same request is safe to send again.
+            for (Throwable t = e; t != null; t = t.getCause()) {
+                if (t instanceof SQLException sql && "55P03".equals(sql.getSQLState())) {
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
+                            "lock_timeout",
+                            "Try again in a moment",
+                            "This branch is being changed at this moment. Try again in a moment.");
+                }
+            }
+            throw e;
+        }
     }
 
     @Override
