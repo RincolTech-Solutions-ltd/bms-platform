@@ -255,7 +255,8 @@ export function ControlsPage() {
   const range = periodRange(kind, today, custom);
   const problem = kind === 'custom' ? rangeProblem(range.from, range.to) : null;
   const base: Base = { branchId: all ? undefined : (branchId ?? undefined), from: range.from, to: range.to, withinMinutes: within };
-  const ready = !problem && (all || branchId !== null);
+  // Nothing is asked of the server for someone the page is shut to.
+  const ready = canUse(me, 'controls') && !problem && (all || branchId !== null);
   const summary = useQuery({
     queryKey: ['retail', 'controls', 'summary', base],
     queryFn: ({ signal }) => retailControls.summary(base, signal),
