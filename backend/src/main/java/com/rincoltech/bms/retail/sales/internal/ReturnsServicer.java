@@ -334,6 +334,9 @@ class ReturnsServicer {
             }
         }
         UUID payBranch = refundBranch(principal, s, money > 0 ? r.refundBranchId() : null);
+        if (money > 0) {
+            stockBranches.requireSells(payBranch, "refund_branch_id");
+        }
         return new Plan(
                 s, on, lines, total, cost, account, money, method, choice, payBranch, repo.returnedTotal(saleId));
     }
