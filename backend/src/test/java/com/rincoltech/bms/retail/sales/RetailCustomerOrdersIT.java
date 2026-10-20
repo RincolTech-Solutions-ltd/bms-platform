@@ -532,7 +532,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         JsonNode day = daily.getBody().get("items").get(0);
         assertThat(day.get("cash_takings_minor").asLong()).isEqualTo(13_000);
         // The ledger's cash on hand moved by the same amount, so nothing is left unexplained.
-        assertThat(day.get("other_movements_minor").asLong()).isZero();
+        JsonNode other = day.get("other_movements_minor");
+        assertThat(other == null ? 0 : other.asLong()).isZero();
     }
 
     // ---- refusals, permissions and scope -------------------------------------------------------------

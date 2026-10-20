@@ -3619,6 +3619,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Orders in the caller's branch scope, newest first, by step, delivery day and source (issue #385) */
+        get: operations["listRetailOrders"];
+        put?: never;
+        /** Take a customer order: priced, numbered, its stock kept aside, nothing paid yet (issue #385) */
+        post: operations["createRetailOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many open orders are at each step, and today's deliveries (issue #385) */
+        get: operations["getRetailOrderBoard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/customer-lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The customer of a phone number, from earlier orders and the credit buyers, to fill an order in (issue #385) */
+        get: operations["lookUpRetailOrderCustomer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/reports/cancellations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Orders cancelled and why, by source (issue #385) */
+        get: operations["getRetailOrderCancellationsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/reports/delivery-fees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Delivered orders and the delivery fees taken, by day, source or rider (issue #385) */
+        get: operations["getRetailOrderFeesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/{order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An order with its lines and its history (issue #385) */
+        get: operations["getRetailOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change the customer's name, phone, delivery place, day or fee, or the notes, of an open order (issue #385) */
+        patch: operations["updateRetailOrder"];
+        trace?: never;
+    };
+    "/api/v1/retail/orders/{order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel an open order with a reason; its stock goes back (issue #385) */
+        post: operations["cancelRetailOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/{order_id}/deliver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark an order delivered and paid: it becomes a sale through the ordinary sale path, the delivery fee posted on its own; M (issue #385) */
+        post: operations["deliverRetailOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/{order_id}/pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark an order packed (issue #385) */
+        post: operations["packRetailOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/orders/{order_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark an order out for delivery, with who takes it (issue #385) */
+        post: operations["sendRetailOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/price-lists": {
         parameters: {
             query?: never;
@@ -8329,6 +8501,23 @@ export interface components {
             top?: number;
             total?: components["schemas"]["RetailEvaluationTotal"];
         };
+        /** @description At most 500, newest first */
+        RetailCancelledOrder: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            cancelled_by?: string;
+            /** Format: date */
+            cancelled_on?: string;
+            customer_name?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: int64 */
+            items_total_minor?: number;
+            order_no?: string;
+            reason?: string;
+            source?: string;
+        };
         RetailCapabilities: {
             branch_roles?: boolean;
             /**
@@ -10158,6 +10347,286 @@ export interface components {
             sale_no?: string;
             /** Format: int64 */
             total_minor?: number;
+        };
+        RetailOrder: {
+            /** Format: uuid */
+            branch_id?: string;
+            cancel_reason?: string;
+            /** Format: date-time */
+            cancelled_at?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            created_by?: string;
+            currency?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            customer_name?: string;
+            customer_phone?: string;
+            /** Format: date-time */
+            delivered_at?: string;
+            delivered_by?: string;
+            /** Format: date */
+            delivered_on?: string;
+            /** Format: date */
+            delivery_date?: string;
+            /** Format: int64 */
+            delivery_fee_minor?: number;
+            delivery_place?: string;
+            fee_method?: string;
+            /** @description Who did what, when; on a single order only */
+            history?: components["schemas"]["RetailOrderEvent"][];
+            /** Format: uuid */
+            id?: string;
+            /** Format: int64 */
+            items_total_minor?: number;
+            lines?: components["schemas"]["RetailOrderLine"][];
+            notes?: string;
+            order_no?: string;
+            /** Format: date */
+            ordered_on?: string;
+            /** Format: date-time */
+            packed_at?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+            /** Format: date-time */
+            sent_at?: string;
+            source?: string;
+            /** @description ordered, packed, out_for_delivery, delivered or cancelled */
+            status?: string;
+            /**
+             * Format: int64
+             * @description items_total_minor plus delivery_fee_minor
+             */
+            total_minor?: number;
+            /** Format: int32 */
+            version?: number;
+        };
+        /** @description How many open orders are at each step, and the deliveries of today */
+        RetailOrderBoard: {
+            /** Format: int64 */
+            delivered_today?: number;
+            /**
+             * Format: int64
+             * @description Open orders to deliver today
+             */
+            due_today?: number;
+            /** Format: int64 */
+            ordered?: number;
+            /** Format: int64 */
+            out_for_delivery?: number;
+            /**
+             * Format: int64
+             * @description Open orders whose delivery day has passed
+             */
+            overdue?: number;
+            /** Format: int64 */
+            packed?: number;
+            /** Format: date */
+            today?: string;
+        };
+        RetailOrderCancelRequest: {
+            reason: string;
+        };
+        /** @description Orders cancelled, and why */
+        RetailOrderCancellationsReport: {
+            /** @description By source; fees_minor is 0 */
+            by_source?: components["schemas"]["RetailOrderReportRow"][];
+            currency?: string;
+            /** Format: date */
+            from?: string;
+            /** @description At most 500, newest first */
+            items?: components["schemas"]["RetailCancelledOrder"][];
+            /** Format: int64 */
+            items_minor?: number;
+            /** Format: int64 */
+            orders?: number;
+            /** Format: date */
+            to?: string;
+        };
+        /** @description A field left out keeps its value; an empty text clears it */
+        RetailOrderChangeRequest: {
+            customer_name?: string;
+            customer_phone?: string;
+            /** Format: date */
+            delivery_date?: string;
+            /** Format: int64 */
+            delivery_fee_minor?: number;
+            delivery_place?: string;
+            notes?: string;
+        };
+        /** @description What the last orders of a phone number say about its customer */
+        RetailOrderCustomerLookup: {
+            /**
+             * Format: uuid
+             * @description A credit buyer whose contact is this number
+             */
+            customer_id?: string;
+            customer_name?: string;
+            customer_phone?: string;
+            /** Format: int64 */
+            delivery_fee_minor?: number;
+            delivery_place?: string;
+            found?: boolean;
+            /**
+             * Format: int64
+             * @description Orders this number made before, in the caller's branches
+             */
+            orders?: number;
+        };
+        RetailOrderDeliverRequest: {
+            /** @description As on a credit sale above the buyer's limit */
+            credit_override_reason?: string;
+            /**
+             * Format: date
+             * @description Credit only: when the customer will pay the rest
+             */
+            due_date?: string;
+            note?: string;
+            /** @description Credit only: how the money taken at the door was paid */
+            paid_now_method?: string;
+            /**
+             * Format: int64
+             * @description Credit only: the money taken at the door; the delivery fee first, the rest on the sale
+             */
+            paid_now_minor?: number;
+            /** @description cash, mobile_money or bank: everything paid at the door; credit: the goods on credit, with paid_now_minor taken at the door (at least the delivery fee) */
+            payment_method: string;
+        };
+        RetailOrderDelivered: {
+            order?: components["schemas"]["RetailOrder"];
+            /**
+             * Format: int64
+             * @description Left on credit
+             */
+            owed_minor?: number;
+            /**
+             * Format: int64
+             * @description Money taken at the door, delivery fee included
+             */
+            paid_now_minor?: number;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
+        };
+        /** @description Who did what, when; on a single order only */
+        RetailOrderEvent: {
+            /** Format: date-time */
+            at?: string;
+            by_name?: string;
+            /** Format: uuid */
+            by_user?: string;
+            note?: string;
+            step?: string;
+        };
+        /** @description Delivered orders and the delivery fees taken, by day, source or rider */
+        RetailOrderFeesReport: {
+            currency?: string;
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: date */
+            from?: string;
+            group_by?: string;
+            /** Format: int64 */
+            items_minor?: number;
+            /** Format: int64 */
+            orders?: number;
+            rows?: components["schemas"]["RetailOrderReportRow"][];
+            /** Format: date */
+            to?: string;
+        };
+        RetailOrderLine: {
+            /** @description What the order keeps aside, in the product's base unit */
+            base_qty?: string;
+            code?: string;
+            description?: string;
+            /** Format: int32 */
+            line_no?: number;
+            /** Format: int64 */
+            line_total_minor?: number;
+            /** Format: uuid */
+            product_id?: string;
+            /** @description In unit */
+            qty?: string;
+            unit?: string;
+            /** Format: uuid */
+            unit_id?: string;
+            /**
+             * Format: int64
+             * @description The price agreed per unit
+             */
+            unit_price_minor?: number;
+        };
+        RetailOrderLineRequest: {
+            /** @description As on a sale: why the price differs from the price list's (price_lists capability) */
+            price_override_reason?: string;
+            /** Format: uuid */
+            product_id: string;
+            /** @example 2 */
+            qty: string;
+            /**
+             * Format: uuid
+             * @description A pack unit of the product (units capability); absent means the base unit
+             */
+            unit_id?: string;
+            /**
+             * Format: int64
+             * @description The price agreed per unit_id (per base unit when none); defaults to the price a sale would take today
+             */
+            unit_price_minor?: number;
+        };
+        RetailOrderPage: {
+            items?: components["schemas"]["RetailOrder"][];
+            next_cursor?: string;
+        };
+        RetailOrderReportRow: {
+            /** Format: int64 */
+            fees_minor?: number;
+            /** Format: int64 */
+            items_minor?: number;
+            key?: string;
+            label?: string;
+            /** Format: int64 */
+            orders?: number;
+        };
+        RetailOrderRequest: {
+            /**
+             * Format: uuid
+             * @description Defaults to the caller's one branch; a shop, never a store
+             */
+            branch_id?: string;
+            /**
+             * Format: uuid
+             * @description A credit buyer on the list; then customer_name defaults to theirs
+             */
+            customer_id?: string;
+            customer_name?: string;
+            customer_phone?: string;
+            /**
+             * Format: date
+             * @description The day it should be delivered; not in the past
+             */
+            delivery_date?: string;
+            /**
+             * Format: int64
+             * @description Charged on top of the items and paid on delivery; defaults to 0
+             */
+            delivery_fee_minor?: number;
+            /** @description Where to deliver; absent means the customer collects at the shop */
+            delivery_place?: string;
+            lines: components["schemas"]["RetailOrderLineRequest"][];
+            notes?: string;
+            /** @description Where the order came from: whatsapp, instagram, facebook, phone, walk_in or other */
+            source: string;
+        };
+        RetailOrderSendRequest: {
+            /** @description Who takes it out, for example the rider's name */
+            delivered_by: string;
+            note?: string;
+        };
+        RetailOrderStepRequest: {
+            note?: string;
         };
         RetailOverdueSale: {
             /** Format: uuid */
@@ -20486,6 +20955,309 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailLandedCost"];
+                };
+            };
+        };
+    };
+    listRetailOrders: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                status?: string;
+                due?: string;
+                source?: string;
+                query?: string;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderPage"];
+                };
+            };
+        };
+    };
+    createRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
+                };
+            };
+        };
+    };
+    getRetailOrderBoard: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderBoard"];
+                };
+            };
+        };
+    };
+    lookUpRetailOrderCustomer: {
+        parameters: {
+            query: {
+                phone: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderCustomerLookup"];
+                };
+            };
+        };
+    };
+    getRetailOrderCancellationsReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderCancellationsReport"];
+                };
+            };
+        };
+    };
+    getRetailOrderFeesReport: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                group_by?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderFeesReport"];
+                };
+            };
+        };
+    };
+    getRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
+                };
+            };
+        };
+    };
+    updateRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
+                };
+            };
+        };
+    };
+    cancelRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
+                };
+            };
+        };
+    };
+    deliverRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderDeliverRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrderDelivered"];
+                };
+            };
+        };
+    };
+    packRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderStepRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
+                };
+            };
+        };
+    };
+    sendRetailOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderSendRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
                 };
             };
         };
