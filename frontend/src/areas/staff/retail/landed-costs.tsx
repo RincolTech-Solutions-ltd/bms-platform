@@ -6,7 +6,7 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type LandedCost, type LandedCostLine } from '../../../api/retail';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
-import { useStaff } from '../context';
+import { useOptionalStaff, useStaff } from '../context';
 import { LANDED_STATUS, costEffectWords, hasProfitFigures, kindWords, lineQtyWords, methodWords } from './landed-state';
 import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
 import { Facts, MoreButton, ReasonPanel, StatusBadge, SupplierOwed, useActionKeys, useCursorList } from './purchasing-ui';
@@ -85,6 +85,8 @@ export function LandedCostsPage() {
  * did to the cost of one. Used for a recorded landed cost and for the review before saving.
  */
 export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; total?: number }) {
+  const session = useOptionalStaff();
+  const openReceipts = session !== null && canUse(session.me, 'goodsReceived');
   const profit = hasProfitFigures(lines);
   // The share of each line is sent only with retail.profit.read in the line's branch; the total of the charges always is.
   const shares = lines.some((l) => l.allocated_minor !== undefined);
@@ -108,7 +110,7 @@ export function AllocationTable({ lines, total }: { lines: LandedCostLine[]; tot
           {lines.map((l, i) => (
             <tr key={l.receipt_line_id ?? i}>
               <td>{l.description}</td>
-              <td>{l.receipt_id ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
+              <td>{l.receipt_id && openReceipts ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
               <td className="num">{lineQtyWords(l.qty, '')}</td>
               {shares && <td className="num">{l.allocated_minor === undefined ? '' : money(l.allocated_minor)}</td>}
               {profit && <td className="num">{money(l.to_inventory_minor ?? 0)}</td>}

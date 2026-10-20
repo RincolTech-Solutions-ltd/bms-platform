@@ -6,6 +6,7 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { investments, type Investment } from '../../../api/investments';
 import { branchFilter } from '../../../auth/branch';
 import { useStaff } from '../context';
+import { MemberLink } from './member-ui';
 import { Problem } from '../retail/ui';
 import { INVESTMENTS_OPEN, PRODUCTS_MANAGE, investmentBadge, may, percent, showInvestments } from './investment-state';
 import { money, words } from './loan-state';
@@ -139,7 +140,7 @@ export function MemberInvestmentsBody({ memberId }: { memberId: string }) {
     <>
       {first && (
         <p className="ln-muted">
-          Member <Link to="/staff/lending/members/$memberId" params={{ memberId }}>{first.member_no}</Link>. Held now: <strong>{money(held, first.currency)}</strong> in {items.filter((i) => ['active', 'matured'].includes(i.status ?? '')).length} open investments.
+          Member <MemberLink memberId={memberId}>{first.member_no}</MemberLink>. Held now: <strong>{money(held, first.currency)}</strong> in {items.filter((i) => ['active', 'matured'].includes(i.status ?? '')).length} open investments.
           {showSavings(me) && (
             <>
               {' '}

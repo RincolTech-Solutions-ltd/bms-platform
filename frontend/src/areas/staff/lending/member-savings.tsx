@@ -3,6 +3,7 @@ import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react
 import { useState } from 'react';
 import { savings } from '../../../api/savings';
 import { useStaff } from '../context';
+import { MemberLink } from './member-ui';
 import { Problem } from '../retail/ui';
 import { money } from './loan-state';
 import { AccountRows, SavingsGate } from './savings';
@@ -72,7 +73,7 @@ export function MemberSavingsBody({ memberId }: { memberId: string }) {
       {first && (
         <section className="rt-card ln-head" aria-label="Member">
           <p>
-            <Link to="/staff/lending/members/$memberId" params={{ memberId }}><strong>{first.member_name}</strong></Link> ({first.member_no})
+            <MemberLink memberId={memberId}><strong>{first.member_name}</strong></MemberLink> ({first.member_no})
             {showInvestments(me) && (
               <>
                 {' '}

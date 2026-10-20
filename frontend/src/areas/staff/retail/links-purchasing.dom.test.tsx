@@ -5,6 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PurchaseOrder, SaleReturn, SupplierBill } from '../../../api/retail';
+import { mockMe } from '../../../api/retail-mock';
+import { StaffContext } from '../context';
 import { CreditNoteView } from './credit-note';
 import { PurchaseOrderView } from './purchase-order';
 import { SupplierBillView } from './supplier-bills';
@@ -15,10 +17,13 @@ import { SupplierBillView } from './supplier-bills';
 
 afterEach(cleanup);
 
+// A buyer: an administrator of a business with purchasing on, so the delivery and payment screens may be opened.
+const ME = { ...mockMe('admin'), module_capabilities: { retail: ['purchasing'] } };
+
 const STUBS = ['/accounts/$customerId', '/supplier-payments/new', '/goods-received/$receiptId'];
 
 function show(view: ReactElement) {
-  const root = createRootRoute({ component: () => <QueryClientProvider client={new QueryClient()}><Outlet /></QueryClientProvider> });
+  const root = createRootRoute({ component: () => <QueryClientProvider client={new QueryClient()}><StaffContext.Provider value={{ me: ME, branch: null }}><Outlet /></StaffContext.Provider></QueryClientProvider> });
   const staff = createRoute({ getParentRoute: () => root, path: '/staff' });
   const retail = createRoute({ getParentRoute: () => staff, path: '/retail' });
   const here = createRoute({ getParentRoute: () => retail, path: '/here', component: () => view });

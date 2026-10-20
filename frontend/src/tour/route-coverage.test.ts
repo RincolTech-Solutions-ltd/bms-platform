@@ -33,6 +33,13 @@ describe('every staff route has a page tour (ADR-049)', () => {
     }
   });
 
+  it('finds, for every route, the tour whose page is that route exactly (a fixed segment before its $ sibling)', () => {
+    for (const route of routes) {
+      const first = TOURS.find((t) => t.page !== undefined && covers(t.page, route));
+      expect(first?.page, route).toBe(route);
+    }
+  });
+
   it('points every page tour at a route that exists', () => {
     for (const tour of TOURS.filter((t) => t.page !== undefined)) {
       expect(routes.some((route) => covers(tour.page as string, route)), `${tour.id}: ${tour.page}`).toBe(true);

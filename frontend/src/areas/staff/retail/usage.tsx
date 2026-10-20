@@ -8,7 +8,7 @@ import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { parseQty, qtyString, showQty } from './maths';
 import { BranchRequired, CategoryLabel, Gate, Problem, useStockingBranch } from './ui';
-import { needsOf } from './permissions';
+import { canUse, needsOf } from './permissions';
 
 // Usage and damage (FR-RET-07): items taken out of stock for use in the shop or because they are
 // damaged, with a reason. Valued at cost by the server; no cost is shown here.
@@ -105,6 +105,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
 }
 
 export function UsagePage() {
+  const { me } = useStaff();
   const { branchId, branchName } = useStockingBranch();
   const [done, setDone] = useState<Usage | null>(null);
   const [round, setRound] = useState(0);
@@ -115,7 +116,7 @@ export function UsagePage() {
       ) : done ? (
         <section aria-label="Saved">
           <h2>Saved</h2>
-          <p>{done.kind === 'used' ? 'Usage' : 'Damage'} recorded for {(done.lines ?? []).length} items. Stock is reduced. <Link to="/staff/retail/stock">See the stock</Link></p>
+          <p>{done.kind === 'used' ? 'Usage' : 'Damage'} recorded for {(done.lines ?? []).length} items. Stock is reduced. {canUse(me, 'stock') && <Link to="/staff/retail/stock">See the stock</Link>}</p>
           <button type="button" className="rt-primary" onClick={() => { setDone(null); setRound((n) => n + 1); }}>Record another</button>
         </section>
       ) : (

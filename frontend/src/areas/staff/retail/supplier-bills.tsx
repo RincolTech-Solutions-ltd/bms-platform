@@ -6,7 +6,7 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { retail, type SupplierBill } from '../../../api/retail';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { SkeletonList } from '../../../components/states';
-import { useStaff } from '../context';
+import { useOptionalStaff, useStaff } from '../context';
 import { canCredit } from './credits-state';
 import { showQty } from './maths';
 import { PAYABLE_MANAGE, canUse, holdsAt } from './permissions';
@@ -77,6 +77,8 @@ export function SupplierBillsPage() {
 /** One invoice: facts, the goods it bills against what they were received at, and what is paid and owed. */
 export function SupplierBillView({ bill, nameOf, landedCostId, payable }: { bill: SupplierBill; nameOf: (branchId: string | undefined) => string; landedCostId?: string; payable?: boolean }) {
   const landedCost = bill.kind === 'landed_cost';
+  const session = useOptionalStaff();
+  const openReceipts = session !== null && canUse(session.me, 'goodsReceived');
   return (
     <section aria-label="Supplier invoice" data-testid="supplier-bill" data-tour="bill-summary">
       <h2>{bill.bill_no} <StatusBadge words={BILL_STATUS[bill.status ?? ''] ?? (bill.status ?? '')} warn={bill.status === 'voided'} /></h2>
@@ -124,7 +126,7 @@ export function SupplierBillView({ bill, nameOf, landedCostId, payable }: { bill
             {(bill.lines ?? []).map((l) => (
               <tr key={l.id}>
                 <td>{l.description}</td>
-                <td>{l.receipt_id ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
+                <td>{l.receipt_id && openReceipts ? <Link to="/staff/retail/goods-received/$receiptId" params={{ receiptId: l.receipt_id }}>{l.receipt_no}</Link> : l.receipt_no}</td>
                 <td className="num">{showQty(l.unit_qty ?? l.qty ?? '0')} {l.unit}</td>
                 <td className="num">{money(l.unit_price_minor ?? 0)}</td>
                 <td className="num">{money(l.line_total_minor ?? 0)}</td>

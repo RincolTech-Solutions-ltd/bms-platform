@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
-import { Link, createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
+import { createLazyRoute, getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Highlight, NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -9,6 +9,7 @@ import { INVESTMENTS_OPEN, instructionWords, may, payoutWords, percent } from '.
 import { InvestmentsGate } from './investments';
 import { money, parseAmount } from './loan-state';
 import { useStaff } from '../context';
+import { MemberLink } from './member-ui';
 
 // The subscribe form (FR-INV-02): choose the member, the product, the amount and the term, see the
 // return schedule the server works out for them (R-INV-1 to R-INV-4), record the member's maturity
@@ -87,7 +88,7 @@ export function SubscribeForm({ member, products }: { member: { id: string; labe
   const p = preview.data;
   return (
     <form aria-label="New investment" onSubmit={(e) => { e.preventDefault(); if (amountMinor !== null && termOk && !save.isPending) save.mutate(); }}>
-      <p>For <Link to="/staff/lending/members/$memberId" params={{ memberId: member.id }}><strong>{member.label}</strong></Link></p>
+      <p>For <MemberLink memberId={member.id}><strong>{member.label}</strong></MemberLink></p>
       <label htmlFor="iv-product">Product</label>
       <select id="iv-product" data-tour="investment-product" value={productId} onChange={(e) => {
         setProductId(e.target.value);

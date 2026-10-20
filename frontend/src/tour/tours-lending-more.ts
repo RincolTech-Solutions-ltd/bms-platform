@@ -28,6 +28,8 @@ const NOTIFICATIONS_READ = 'core.notifications.read';
 const TEMPLATES_MANAGE = 'core.notification_templates.manage';
 const REPORT_PERMISSIONS = ['lending.reports.portfolio', 'lending.reports.collections', 'lending.reports.members', 'lending.reports.compliance'];
 
+/** The tenant has the lending module (a /me without a module list counts as having it, as member-permissions.ts reads it). */
+const lendingTenant = (me: Me) => { const modules = (me as Me & { modules?: string[] }).modules; return !modules || modules.includes('lending'); };
 const held = (me: Me, permission: string) => (me.permissions ?? []).includes(permission);
 const heldAny = (me: Me, permissions: readonly string[]) => permissions.some((p) => held(me, p));
 
@@ -35,7 +37,7 @@ export const savingsPage: Tour = {
   id: 'page-lending-savings',
   version: 1,
   title: 'This page: savings accounts',
-  audience: (me) => held(me, SAVINGS_READ),
+  audience: (me) => lendingTenant(me) && held(me, SAVINGS_READ),
   autoStart: false,
   page: '/staff/lending/savings',
   steps: [
@@ -69,7 +71,7 @@ export const savingsProductsPage: Tour = {
   id: 'page-savings-products',
   version: 1,
   title: 'This page: savings products',
-  audience: (me) => held(me, SAVINGS_READ),
+  audience: (me) => lendingTenant(me) && held(me, SAVINGS_READ),
   autoStart: false,
   page: '/staff/lending/savings/products',
   steps: [
@@ -87,7 +89,7 @@ export const savingsProductsPage: Tour = {
       target: 'savings-products-list',
       module: 'lending',
       title: 'Your products',
-      body: 'Each product shows its interest and rules. Tap the number of accounts to see the accounts.',
+      body: 'Each product shows its interest and rules. Tap the number of accounts to open the list of all savings accounts.',
     },
   ],
 };
@@ -96,7 +98,7 @@ export const savingsAccountPage: Tour = {
   id: 'page-savings-account',
   version: 1,
   title: 'This page: one savings account',
-  audience: (me) => held(me, SAVINGS_READ),
+  audience: (me) => lendingTenant(me) && held(me, SAVINGS_READ),
   autoStart: false,
   page: '/staff/lending/savings/accounts/$accountId',
   steps: [
@@ -137,7 +139,7 @@ export const savingsStatementPage: Tour = {
   id: 'page-savings-statement',
   version: 1,
   title: 'This page: account statement',
-  audience: (me) => held(me, SAVINGS_READ),
+  audience: (me) => lendingTenant(me) && held(me, SAVINGS_READ),
   autoStart: false,
   page: '/staff/lending/savings/accounts/$accountId/statement',
   steps: [
@@ -162,7 +164,7 @@ export const memberSavingsPage: Tour = {
   id: 'page-member-savings',
   version: 1,
   title: 'This page: a member\'s savings',
-  audience: (me) => held(me, SAVINGS_READ),
+  audience: (me) => lendingTenant(me) && held(me, SAVINGS_READ),
   autoStart: false,
   page: '/staff/lending/members/$memberId/savings',
   steps: [
@@ -196,7 +198,7 @@ export const memberEditPage: Tour = {
   id: 'page-member-edit',
   version: 1,
   title: 'This page: change a member',
-  audience: (me) => held(me, MEMBERS_UPDATE),
+  audience: (me) => lendingTenant(me) && held(me, MEMBERS_UPDATE),
   autoStart: false,
   page: '/staff/lending/members/$memberId/edit',
   steps: [
@@ -228,7 +230,7 @@ export const collateralEditPage: Tour = {
   id: 'page-collateral-edit',
   version: 1,
   title: 'This page: change collateral',
-  audience: (me) => held(me, COLLATERAL_MANAGE),
+  audience: (me) => lendingTenant(me) && held(me, COLLATERAL_MANAGE),
   autoStart: false,
   page: '/staff/lending/collateral/$collateralId/edit',
   steps: [
@@ -260,7 +262,7 @@ export const investmentsPage: Tour = {
   id: 'page-investments',
   version: 1,
   title: 'This page: investments',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments',
   steps: [
@@ -292,7 +294,7 @@ export const investmentNewPage: Tour = {
   id: 'page-investment-new',
   version: 1,
   title: 'This page: new investment',
-  audience: (me) => held(me, INVESTMENTS_OPEN),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_OPEN),
   autoStart: false,
   page: '/staff/lending/investments/new',
   steps: [
@@ -316,7 +318,7 @@ export const investmentNewForMemberPage: Tour = {
   id: 'page-investment-new-member',
   version: 1,
   title: 'This page: new investment for a member',
-  audience: (me) => held(me, INVESTMENTS_OPEN),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_OPEN),
   autoStart: false,
   page: '/staff/lending/investments/member/$memberId/new',
   steps: [
@@ -351,7 +353,7 @@ export const maturitiesPage: Tour = {
   id: 'page-investment-maturities',
   version: 1,
   title: 'This page: maturities',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments/maturities',
   steps: [
@@ -376,7 +378,7 @@ export const investmentProductsPage: Tour = {
   id: 'page-investment-products',
   version: 1,
   title: 'This page: investment products',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments/products',
   steps: [
@@ -403,7 +405,7 @@ export const memberInvestmentsPage: Tour = {
   id: 'page-member-investments',
   version: 1,
   title: 'This page: a member\'s investments',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments/member/$memberId',
   steps: [
@@ -430,7 +432,7 @@ export const investmentPage: Tour = {
   id: 'page-investment',
   version: 1,
   title: 'This page: one investment',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments/$investmentId',
   steps: [
@@ -479,7 +481,7 @@ export const certificatePage: Tour = {
   id: 'page-investment-certificate',
   version: 1,
   title: 'This page: certificate',
-  audience: (me) => held(me, INVESTMENTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INVESTMENTS_READ),
   autoStart: false,
   page: '/staff/lending/investments/$investmentId/certificate',
   steps: [
@@ -575,7 +577,7 @@ export const insightsPage: Tour = {
   id: 'page-insights',
   version: 1,
   title: 'This page: insights',
-  audience: (me) => held(me, INSIGHTS_READ),
+  audience: (me) => lendingTenant(me) && held(me, INSIGHTS_READ),
   autoStart: false,
   page: '/staff/insights',
   steps: [

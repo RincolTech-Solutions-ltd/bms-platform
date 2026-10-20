@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { investments, type Investment, type InvestmentSchedule, type InvestmentStatementLine } from '../../../api/investments';
 import { useCrumbLabel } from '../../../components/breadcrumbs';
 import { useStaff } from '../context';
+import { MemberLink } from './member-ui';
 import { Problem } from '../retail/ui';
 import { EarlyWithdrawalForm, FundForm, InstructionForm, PayForm, ReverseForm, RolloverForm } from './investment-actions';
 import {
@@ -40,9 +41,9 @@ export function InvestmentHeader({ inv }: { inv: Investment }) {
         <span className={investmentBadge(inv.status)}>{words(inv.status)}</span>
       </p>
       <p>
-        <Link to="/staff/lending/members/$memberId" params={{ memberId: inv.member_id ?? '' }}>
+        <MemberLink memberId={inv.member_id ?? ''}>
           {inv.member_name} ({inv.member_no})
-        </Link>
+        </MemberLink>
         {' '}
         <Link to="/staff/lending/investments/member/$memberId" params={{ memberId: inv.member_id ?? '' }}>All their investments</Link>
       </p>

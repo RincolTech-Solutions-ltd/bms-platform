@@ -54,7 +54,7 @@ def tour_changed(names: list[str]) -> bool:
 
 
 def exemption(body: str) -> str | None:
-    match = EXEMPT.search(body or "")
+    match = EXEMPT.search((body or "").replace("\r", ""))
     return match.group(1).strip() if match else None
 
 

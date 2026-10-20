@@ -110,6 +110,11 @@ class TourGuardTest(unittest.TestCase):
         self.commit("elsewhere")
         self.assertEqual(self.run_guard().returncode, 0)
 
+    def test_windows_line_endings_in_the_body(self) -> None:
+        self.write("frontend/src/areas/staff/retail/usage.tsx", PAGE.replace("stock", "usage"))
+        self.commit("add a redirect")
+        self.assertEqual(self.run_guard("Closes #1\r\n\r\nTOUR-EXEMPT: a redirect with no controls\r\n").returncode, 0)
+
     def test_pure_helpers(self) -> None:
         self.assertIsNone(tour_guard.exemption(""))
         self.assertEqual(tour_guard.exemption("a\nTOUR-EXEMPT: only a redirect\nb"), "only a redirect")

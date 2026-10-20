@@ -6,7 +6,9 @@ import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Investment } from '../../../api/investments';
 import type { SavingsProduct } from '../../../api/savings';
+import { mockMe } from '../../../api/retail-mock';
 import { router as appRouter } from '../../../app/router';
+import { StaffContext } from '../context';
 import { InvestmentHeader } from './investment';
 import { SubscribeForm } from './investment-new';
 import { ProductRow } from './savings-products';
@@ -16,13 +18,15 @@ import { ProductRow } from './savings-products';
 
 afterEach(cleanup);
 
+// A loan officer who may read members.
+const ME = { ...mockMe('admin'), modules: ['retail', 'lending'], permissions: ['lending.members.read'] };
 const MEMBER = '00000000-0000-4000-8000-000000000101';
 const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/lending/savings'] }) });
 
-function mount(node: ReactElement) {
+function mount(node: ReactElement, me = ME) {
   render(
     <RouterContextProvider router={router}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{node}</QueryClientProvider>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><StaffContext.Provider value={{ me, branch: null }}>{node}</StaffContext.Provider></QueryClientProvider>
     </RouterContextProvider>,
   );
 }
@@ -49,5 +53,12 @@ describe('cross links on savings and investments', () => {
     mount(<InvestmentHeader inv={inv} />);
     expect(screen.getByRole('link', { name: 'Test Investor 01 (M000001)' }).getAttribute('href')).toBe(`/staff/lending/members/${MEMBER}`);
     expect(screen.getByRole('link', { name: 'All their investments' }).getAttribute('href')).toBe(`/staff/lending/investments/member/${MEMBER}`);
+  });
+
+  it('shows the member name as plain text to a user who may not read members', () => {
+    const inv: Investment = { id: 'i1', account_no: 'IV000001', member_id: MEMBER, member_no: 'M000001', member_name: 'Test Investor 01', status: 'active', term_months: 12, return_rate_bp: 1200 };
+    mount(<InvestmentHeader inv={inv} />, { ...ME, permissions: ['lending.investments.read'] });
+    expect(screen.queryByRole('link', { name: 'Test Investor 01 (M000001)' })).toBeNull();
+    expect(screen.getByText(/Test Investor 01 \(M000001\)/)).toBeTruthy();
   });
 });

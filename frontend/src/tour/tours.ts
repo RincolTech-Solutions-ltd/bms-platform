@@ -1406,4 +1406,14 @@ export const CORE_TOURS: readonly Tour[] = [
   purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
 ];
 
-export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...LENDING_MORE_TOURS];
+const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;
+
+/**
+ * Every tour. pageTourFor returns the first tour whose page matches, and a `$name` segment matches any segment, so a page with a fixed
+ * segment (`goods-received/new`) must come before its `$` sibling (`goods-received/$receiptId`): the tours with fewer `$` segments go
+ * first (the sort is stable, so the order inside each group is the order written). route-coverage.test.ts proves it for every route.
+ */
+export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...LENDING_MORE_TOURS]
+  .map((tour, order) => ({ tour, order }))
+  .sort((a, b) => dynamicSegments(a.tour) - dynamicSegments(b.tour) || a.order - b.order)
+  .map(({ tour }) => tour);
