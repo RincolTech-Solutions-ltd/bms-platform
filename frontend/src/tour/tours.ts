@@ -93,7 +93,9 @@ export const adminWelcome: Tour = {
   // Version 10 adds the two correction steps (issue #351): a wrong quantity on the stock list, and a restock entered wrongly.
   // Version 11 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
   // Version 12 adds the step on writing off a debt that will never be paid (issue #340).
-  version: 12,
+  // Version 13 adds the Controls step (issue #357): sales cancelled, goods taken back, prices changed, restocks cancelled and quantities corrected, by shop and person.
+  // Version 14 adds the Two-step sign-in step (issue #348): who must use a code from the phone, and how long they have to set it up.
+  version: 14,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -149,6 +151,13 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'Your branches',
       body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it later.',
+    },
+    {
+      id: 'two-step',
+      route: '/staff/setup/two-step',
+      target: 'twostep-choice',
+      title: 'Two-step sign-in',
+      body: 'Ask your staff for a code from their phone as well as the password. It is optional until you choose who must use it.',
     },
     {
       id: 'modules',
@@ -276,6 +285,16 @@ export const adminWelcome: Tour = {
       optional: true,
       title: 'Fix a restock entered wrongly',
       body: 'Open Past restocks, tap Correct this restock and give the reason. The stock, the books and the prices go back. The restock stays in the list as Voided. Then enter it again with the right quantity.',
+    },
+    {
+      id: 'controls',
+      route: '/staff/retail',
+      target: 'retail-controls',
+      module: 'retail',
+      needs: ['retail.controls.read'],
+      optional: true,
+      title: 'What deserves a second look',
+      body: 'Open Controls to see sales cancelled, goods taken back, prices changed, restocks cancelled and quantities corrected, by shop and by person. Items about sales are shown per 100 sales, so a busy person and a quiet one can be compared fairly.',
     },
     {
       id: 'catalogue',
@@ -851,7 +870,8 @@ export const usersPage: Tour = {
 // The Branches page (issue #329): a page tour for whoever may read branches; closing and reopening need the manage permission.
 export const branchesPage: Tour = {
   id: 'page-branches',
-  version: 1,
+  // Version 2 adds the Store step (issue #366): a branch that holds stock but does not sell.
+  version: 2,
   title: 'This page: branches',
   audience: (me) => held(me, 'core.branches.read'),
   autoStart: false,
@@ -868,6 +888,36 @@ export const branchesPage: Tour = {
       target: 'branches-list',
       title: 'Your branches',
       body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Goods left there can still be moved out. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
+    },
+    {
+      id: 'store',
+      target: 'branches-list',
+      title: 'A store holds stock but does not sell',
+      body: 'Tap Mark as a store (does not sell) for a branch that only keeps stock. It still takes restocks and stock moves, but it leaves the sale screen and the till. Tap Sells again to make it a shop.',
+    },
+  ],
+};
+
+// The Two-step sign-in page (issue #348): a page tour for whoever may change the settings.
+export const twoStepPage: Tour = {
+  id: 'page-two-step',
+  version: 1,
+  title: 'This page: two-step sign-in',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/setup/two-step',
+  steps: [
+    {
+      id: 'intro',
+      target: 'twostep-intro',
+      title: 'A code from the phone',
+      body: 'Two-step sign-in asks for a code from a phone as well as the password. Then a stolen password is not enough to sign in.',
+    },
+    {
+      id: 'choice',
+      target: 'twostep-choice',
+      title: 'Who must use it',
+      body: 'Optional means nobody has to. Pick some roles, or everyone, to require it. Before you save, you see who will be asked and from which day.',
     },
   ],
 };
@@ -1398,12 +1448,30 @@ export const landedCostsPage: Tour = {
   ],
 };
 
+// The Controls page tour (issue #357): for whoever may read the controls, the administrator's permission by default.
+// JUSTIFICATION-A3: a new tour for the new screen; each tour is data, like the ones above it.
+export const controlsPage: Tour = {
+  id: 'page-controls',
+  version: 1,
+  title: 'This page: controls',
+  audience: (me) => held(me, 'retail.controls.read'),
+  autoStart: false,
+  page: '/staff/retail/controls',
+  steps: [
+    { id: 'period', target: 'controls-period', module: 'retail', title: 'Pick the days', body: 'Choose today, this week, this month or your own days. Every count is set against the days just before.' },
+    { id: 'cards', target: 'controls-cards', module: 'retail', title: 'The figures', body: 'Each card is one kind of thing to look at. Tap a card to see where and who. A rate is the number per 100 sales, so a busy person and a quiet one can be compared.' },
+    { id: 'group-by', target: 'controls-group-by', module: 'retail', title: 'Group by', body: 'Choose how the lines are grouped: shop, person, day and reason. Move a line up or down, or take it out. We remember your choice.' },
+    { id: 'tables', target: 'controls-tables', module: 'retail', title: 'Open a line', body: 'Tap a line to open it, down to the single sales. Tap Open sale to see one. Export CSV saves what you see.' },
+    { id: 'patterns', target: 'controls-patterns', module: 'retail', title: 'Repeat patterns', body: "People or items whose rate is more than twice their shop's own. It is a reason to look, not a finding." },
+  ],
+};
+
 /** The tours whose screens tours.test.tsx maps one by one; the slices below carry their own test files (test-kit.tsx). */
 export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;

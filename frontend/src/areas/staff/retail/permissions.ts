@@ -9,7 +9,7 @@ import type { BranchRole } from '../../../api/retail';
 export const PROFIT = 'retail.profit.read';
 
 export type RetailScreen =
-  | 'sale' | 'creditSales' | 'salesHistory' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation'
+  | 'sale' | 'creditSales' | 'salesHistory' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation' | 'controls'
   | 'catalogue' | 'products' | 'categories' | 'units' | 'suppliers' | 'buyers' | 'importer'
   // The trade screens of ADR-033: offered only while their capability is on (SCREEN_CAPABILITY below).
   | 'stockByLocation' | 'inTransit' | 'priceLists' | 'customerGroups' | 'customerAccounts' | 'customerAgeing' | 'documents' | 'quotations' | 'returns'
@@ -138,6 +138,8 @@ const NEEDS: Record<RetailScreen, string[]> = {
   stockHealth: ['retail.stock.read'],
   creditControl: ['retail.sale.read'],
   evaluation: [PROFIT],
+  // The Controls page (issue #357): voids, returns and changed prices by shop and named person; the administrator's, or a custom role's.
+  controls: ['retail.controls.read'],
   // The Catalogue home needs nothing itself: canUse opens it when any screen under it may be used.
   catalogue: [],
   // The lists these screens read are stock, purchase and sale reads; changing them needs the manage permissions.
@@ -282,9 +284,9 @@ export function sellsAt(roles: BranchRole[] | undefined, branchId: string | null
   return roles.find((r) => r.branch_id === branchId)?.can_sell ?? true;
 }
 
-/** The branches of `branches` a sale may be made at: stores are left out. */
-export function sellingBranches<B extends { id?: string; stocks_goods?: boolean }>(branches: B[], roles: BranchRole[] | undefined): B[] {
-  return branches.filter((b) => b.stocks_goods !== false && sellsAt(roles, b.id));
+/** The branches of `branches` a sale may be made at: stores are left out, by a role (ADR-033) or by the branch's own flag (ADR-048). */
+export function sellingBranches<B extends { id?: string; stocks_goods?: boolean; sells_goods?: boolean }>(branches: B[], roles: BranchRole[] | undefined): B[] {
+  return branches.filter((b) => b.stocks_goods !== false && b.sells_goods !== false && sellsAt(roles, b.id));
 }
 
 export const SCREENS: { screen: RetailScreen; path: string; label: string; hint: string }[] = [
@@ -306,6 +308,7 @@ export const SCREENS: { screen: RetailScreen; path: string; label: string; hint:
   { screen: 'stockHealth', path: '/staff/retail/stock-health', label: 'Stock health', hint: 'Days of cover, reorder, dead stock, shrinkage' },
   { screen: 'creditControl', path: '/staff/retail/credit-control', label: 'Credit control', hint: 'Who owes, how late, payments received' },
   { screen: 'evaluation', path: '/staff/retail/evaluation', label: 'Business evaluation', hint: 'Profit to date and what the stock is worth' },
+  { screen: 'controls', path: '/staff/retail/controls', label: 'Controls', hint: 'Sales cancelled, goods taken back and prices changed, by shop and person' },
   { screen: 'catalogue', path: '/staff/retail/catalogue', label: 'Catalogue', hint: 'Items, categories, units, suppliers and credit buyers' },
   { screen: 'banking', path: '/staff/retail/banking', label: 'Banking', hint: 'Cash banked, and what to expect' },
   { screen: 'savings', path: '/staff/retail/savings', label: 'Savings', hint: 'Set money aside for the day' },

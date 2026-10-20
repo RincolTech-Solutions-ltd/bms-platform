@@ -762,6 +762,23 @@ again under the sale's lock; the screens only save a round trip and say each ref
 - **Tests.** `branches/state.test.ts` (the rules), `branches/branches.dom.test.tsx` (hidden then shown closed branches, the badge and reason, confirm once, the warning
   and reason, refusals in plain words, reopen, the stocking switch, a reader sees no action), `retail/not-stocking.test.tsx`, `auth/branch.test.ts`, `tour/*`.
 
+## Stores: a branch that holds stock and does not sell (#366, ADR-048)
+
+- **Screen.** On the Branches screen an administrator sees, on each open branch that keeps goods, Mark as a store (does not sell). One tap only asks, in plain
+  words: the branch keeps its stock and still takes restocks and transfers, but nothing can be sold, paid for or refunded there; Yes, make it a store sends it.
+  A store carries the badge "Store (does not sell)" (and the ADR-033 role beside it as "Branch role: store" when roles are on) and the line "Store: holds stock and
+  takes restocks and transfers in and out. Nothing is sold here. No takings, savings, banking or repayments here; expenses can still be paid." and offers Sells again (make it a shop), one tap; the Mark as keeping
+  no goods button is not offered on a store. The confirmation says there are no takings, savings, banking or repayments there and that expenses can still be paid. A refusal over a credit sale still owing, or a branch that keeps no goods, shows the server's words.
+- **Everywhere else.** The staff bar picker tags a store "(store)"; the staff area does not start on it while a shop exists. The sale screen on a store says "is a
+  store, and a store does not sell" with a button for each shop (the same note as a store by branch role, ADR-033). The sale and quotation forms, the account
+  payment's receiving branch and the return's "Pay the money out of the till of" list leave stores out (`sellingBranches`). The restock, purchase order, goods
+  receipt, move-stock and stock-take forms, the restock branch of a return and the stock lists include a store, since it keeps goods. The Quotations page hides New
+  quotation at a store and says why, and Make it a sale is not offered on a quotation made at one. A return for a sale made at a store drops "The usual branch" from the
+  refund till and, when exactly one shop can pay, chooses and sends it.
+- **Tours.** `page-branches` is version 2 with a Store step.
+- **Tests.** `branches/state.test.ts`, `branches/branches.dom.test.tsx` (confirm once, the refusal in plain words, the badge and the way back),
+  `retail/not-stocking.test.tsx`, `auth/branch.test.ts`.
+
 ## Correcting entry mistakes (#351, #352, ADR-044)
 
 The owner fixes a mistake where he sees it, with a trail the spreadsheet never had. Everything below is phone first, in plain words, and
@@ -939,6 +956,8 @@ name their last crumb after the entity they load). Page tours: 29 before this ch
 changed, so no existing version was bumped). `tour/route-coverage.test.ts` now fails when a staff route has no page tour, and the `tour-guard` CI guard fails a
 pull request that adds or renames a route without a change under `frontend/src/tour/` or a `TOUR-EXEMPT: <reason>` line in its body (ADR-049).
 
+**Added after the first audit (merge of main, 2026-10-20).** The routes that arrived with the Controls page (`/staff/retail/controls`, tour `page-controls`), the two-step policy page (`/staff/setup/two-step`, `page-two-step`) and the user's own two-step page (`/staff/two-step`, `page-own-two-step`, added here) each have a page tour, so the count stays complete; `route-coverage.test.ts` is what keeps it so, and the table below is the state at the first audit.
+
 **Conventions the tours follow.** A tour is data in one of the slice files (`tours.ts`, `tours-customers.ts`, `tours-retail-reports.ts`, `tours-retail-cash.ts`,
 `tours-retail-purchasing.ts`, `tours-lending-more.ts`), `page` is the route path (`$name` matches any one segment), plain words, one step per main action,
 `optional: true` for a step a permission or setting can hide. Its anchors are `data-tour` attributes on markup the screen draws before any data
@@ -1061,3 +1080,48 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 | `/staff/sms/wording` | Wording | `page-sms-wording` v1 (added) | none added |
 | `/staff/users` | Staff users | `page-users` v2 (existing) | none added |
 | `/staff/users/new` | Invite someone | `page-invite-user` v1 (added) | none added |
+## Controls (issue #358, part of #357, ADR-047)
+
+A read-only page for the tenant administrator and anyone given `retail.controls.read`: what deserves a second look, metrics first,
+details on drill-down. `/staff/retail/controls`; breadcrumb Retail > Controls; a tile on the retail home for a holder of the permission.
+No migration beyond the permission; no write anywhere on the page.
+
+- **Days.** Today, This week (Monday to today), This month (the 1st to today) or Choose days (two dates, at most 366 days). Every count is
+  set against the days just before ("the day before", "the 7 days before"). "Cancelled at once means within" is a choice of 2, 5, 10, 15, 30
+  or 60 minutes.
+- **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Prices changed,
+  Discounts given, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
+  of words says so otherwise). Each shows the count (for a price, a discount or a cost it says "3 lines in 2 sales, lines worth ..."), what it is worth at sale prices, the rate ("2.5 per 100 sales", always sales with such an event per 100 sales entered, so the units match), the trend ("Up 3, from 5
+  in the 7 days before"; "None, and none in ...") and its share of the value of sales. A card whose capability is off and never counted says
+  "Not switched on for this business, so nothing is recorded" instead of a calm zero. A card is a button: the chosen one sets the table below.
+  No red or green: the page lists, it does not judge.
+- **Tables.** Under the cards, the chosen kind grouped by a chain of Shop, Person, Day, Reason and Approver, in the usual order, with the same Group
+  by control as All sales (move, remove, add; kept per user in the browser; the shop level is left out when one shop is chosen at the top).
+  Each line is a button with the count, the value and the rate; opening it shows the next level and, on the last, the individual records
+  (sale number, time, person with "(deactivated)" when they are, shop, reason or "No reason recorded", item, amount) with Open sale, which
+  shows the sale as the sales lists do and comes back to the same groups. A group that opens onto groups also offers Show the records here.
+  The path shows as a breadcrumb above the groups. Imported history is not counted. **Person is whose sale it was**, also for a cancelled
+  sale or a return, so the cashier whose sales were cancelled carries the count and the administrator who cancelled them does not; the
+  administrator is the **Approver** level and the "Cancelled by ..." line of a record (the lines of a sale have no approver, so the level is
+  left out for them). Shops, people and approvers are listed by name, never by count or rate. A person the server cannot name reads Unknown
+  person, is counted and cannot be opened. Try again shows when the figures or the patterns could not be read.
+- **Rates.** "per 100 sales" is the count over the sales that person, shop or day entered, so a busy person and a quiet one can be compared;
+  a person who entered none has none ("no sales of their own to compare with").
+- **Repeat patterns.** A strip under the tables in plain sentences, by shop and name: "5 of the 13 sales Test Seller One entered at Test Branch
+  Gayaza were cancelled (38.5 per 100). The shop's own is 14.0, so 2.8 times." Only from 3 cases over 10 sales, and the page says it is a reason to look, not
+  a finding; the approver is never in it. An item reads "5 of the 20 lines of Test Cable 2m sold at ... were on cancelled sales".
+- **Export.** Export CSV under every list saves what is on screen (the groups, or the records with the time in words and the approver, or the patterns) from the browser, so it can
+  never hold more than the person may see; a text that begins with `=`, `+`, `-` or `@` is written as plain text.
+- **Permission and branch.** `retail.controls.read` only; the sales list is a separate permission, so Open sale is offered only to someone who
+  may also read sales. The server limits every figure to the shops of the permission's scope.
+- **Mobile first.** One column at 360px; the day buttons wrap, the cards are two across (four on a wide screen) and at least a tap high, each
+  record is a card of its own; nothing needs sideways scroll.
+- **Files.** `controls.tsx` (the page), `controls-state.ts` (the days, the words, the chain, the CSV; tests in `controls-state.test.ts`),
+  `controls.dom.test.tsx`, `api/retail-controls.ts`. The Group by control (`sales-group-by.tsx`), the breadcrumb (`GroupTrail` in
+  `sales-chain.tsx`) and the chain helpers (`sales-chain-state.ts`) are generic over the levels and shared with the sales lists.
+- **Tours.** `admin-welcome` (version 10) has a Controls step on the retail home; the Help page `page-controls` (version 1) walks the days, the
+  cards, Group by, the tables and the patterns.
+- **Stock cards.** Restocks cancelled and Quantities corrected (#356) are cards too: a count and a value, no rate (not about sales), no Open sale
+  on their records, and no Approver level for a correction.
+- **Not yet.** Credit write-offs (#349) have no card until that table is on `main`; groups
+  2 to 6 of #357 are separate pages.

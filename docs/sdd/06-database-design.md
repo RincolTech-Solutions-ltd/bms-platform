@@ -202,7 +202,7 @@ Prices are commercial and are not stored in this repository's seed data.
 | Table | Columns |
 |---|---|
 | `permissions` | `key text PK` (format `<module>.<resource>.<action>`, for example `lending.loans.approve`), `module text NOT NULL`, `description text NOT NULL`, `is_money_moving boolean NOT NULL` |
-| `roles` | `key text PK` [`tenant_admin`, `branch_manager`, `loan_officer`, `cashier`, `accountant`, `auditor`, `member`], `name text NOT NULL`, `kind text NOT NULL` [`staff`, `member`], `mfa_required boolean NOT NULL DEFAULT false` (true for `tenant_admin`, FR-IAM-06) |
+| `roles` | `key text PK` [`tenant_admin`, `branch_manager`, `loan_officer`, `cashier`, `accountant`, `auditor`, `member`], `name text NOT NULL`, `kind text NOT NULL` [`staff`, `member`], `mfa_required boolean NOT NULL DEFAULT false` (false for every seeded role since `V67`, issue #348, ADR-046: V2 set it true for `tenant_admin`; two-step sign-in is optional and a tenant requires it through its settings, FR-IAM-06, FR-IAM-16; a role flagged here would be required for every tenant that has it) |
 | `role_permissions` | `role_key text FK roles`, `permission_key text FK permissions`, PK both |
 
 Seeded from the matrix in chapter 8 by migration V2, with the two platform permissions
@@ -404,7 +404,10 @@ write. Keys and defaults:
 | `max_active_loans_per_member` | integer or null | null | FR-ORG-07 |
 | `appraisal_weights` | object | section 3.18.1 defaults | FR-ORG-04 |
 | `disabled_collateral_types` | string array | empty | FR-COL-05 |
-| `require_mfa_all_staff` | boolean | false | FR-IAM-06 |
+| `require_mfa_all_staff` | boolean | false; two-step sign-in is required of every staff user (issue #348, ADR-046) | FR-IAM-06, FR-IAM-16 |
+| `require_mfa_roles` | string array of staff role keys (`member` is refused) | empty; the holders of these roles are required to use two-step sign-in | FR-IAM-16 |
+| `mfa_grace_days` | integer 0 to 90 or null | null (read as 0, at once); the grace period last chosen | FR-IAM-16 |
+| `mfa_enforce_from` | ISO instant or absent | absent (at once); written by the server only, to now plus the grace days when the policy is turned on or widened or a grace period is sent, and cleared when the policy is turned off or the grace is 0; until then a covered user without a factor signs in and is shown the date | FR-IAM-16 |
 | `reports_enabled` | boolean | false; the tenant switch of the report runs (ADR-038, issue #214): off, nothing is queued, run or listed | FR-RPT-04 |
 
 `logo_document_id` is set only by the logo upload route, never by a settings patch: it names a
@@ -420,7 +423,10 @@ after values. Older logos stay in `documents` (rows are never deleted).
 `status text NOT NULL` [`active`, `inactive`; `inactive` is what the owner calls closed, ADR-041],
 `stocks_goods boolean NOT NULL DEFAULT true` (false: the branch keeps no goods and retail refuses sales, restocks, transfers and
 stock adjustments there), `closed_at timestamptz`, `closed_reason text` (set by closing, cleared by reopening; migration V61,
-issue #329).
+issue #329),
+`sells_goods boolean NOT NULL DEFAULT true` (false: a Store, a branch that holds stock but does not sell; retail refuses a sale, a payment taken and a
+refund paid there with `branch_does_not_sell`), `CHECK (sells_goods OR stocks_goods)` named `branches_store_stocks` (a Store must keep goods; migration
+V65, issue #366, ADR-048).
 `UNIQUE (tenant_id, code)`; partial unique index
 `ON branches (tenant_id) WHERE is_head_office` (exactly one head office). FR-BR-01.
 
@@ -1896,6 +1902,10 @@ error. Daily profit per branch and day is the sum of `retail_sale_lines.line_tot
 `line_cost_minor` over the lines of completed (not voided) sales by `sale_date` (the append-only
 lines, never the sale header, review F10), less `retail_usage_reports.cost_total_minor` by
 `occurred_on`; snapshots only, never current prices.
+
+### 6.11.3b Controls (FR-RET-48, issue #358, ADR-047)
+
+No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V66` adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only.
 
 ### 6.11.3a Trade capabilities (ADR-033)
 

@@ -28,6 +28,7 @@ import { OptOutsScreen } from '../areas/staff/sms/opt-outs';
 import { SmsSettingsScreen } from '../areas/staff/sms/settings';
 import { WordingScreen } from '../areas/staff/sms/wording';
 import { InviteScreen } from '../areas/staff/users/invite';
+import { OwnTwoStep } from '../areas/staff/two-step/own';
 import { describeTours } from './test-kit';
 import { LENDING_MORE_TOURS } from './tours-lending-more';
 
@@ -164,6 +165,8 @@ function screen(path: string): ReactElement {
       return <SmsSettingsScreen />;
     case '/staff/sms/wording':
       return <WordingScreen />;
+    case '/staff/two-step':
+      return <OwnTwoStep />;
     case '/staff/sms/opt-outs':
       return <OptOutsScreen />;
     default:
@@ -196,6 +199,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-sms-settings': [OWNER, ASKER],
   'page-sms-wording': [OWNER],
   'page-sms-opt-outs': [OWNER],
+  'page-own-two-step': [OWNER],
 };
 
 describeTours('lending more', LENDING_MORE_TOURS, AUDIENCE, screen, seed);

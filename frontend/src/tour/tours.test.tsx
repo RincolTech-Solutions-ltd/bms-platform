@@ -26,6 +26,7 @@ import { ReturnsPage } from '../areas/staff/retail/returns';
 import { PurchaseOrdersPage } from '../areas/staff/retail/purchase-orders';
 import { LandedCostsPage } from '../areas/staff/retail/landed-costs';
 import { CataloguePage } from '../areas/staff/retail/catalogue';
+import { ControlsPage } from '../areas/staff/retail/controls';
 import { RetailHome } from '../areas/staff/retail/home';
 import { RetailNav } from '../areas/staff/retail/nav';
 import { RecordSale } from '../areas/staff/retail/sale';
@@ -41,6 +42,7 @@ import { StaffBar } from '../areas/staff/route';
 import { AssistantSettingsPage } from '../areas/staff/assistant/page';
 import { Setup } from '../areas/staff/setup';
 import { BranchesScreen } from '../areas/staff/branches/page';
+import { TwoStepPolicyScreen } from '../areas/staff/two-step/page';
 import { UsersScreen } from '../areas/staff/users/page';
 import { FEATURES, type Tour, stepsFor } from './model';
 import { CORE_TOURS, TOURS } from './tours';
@@ -83,6 +85,8 @@ function screen(path: string | undefined): ReactElement {
       return <UsersScreen />;
     case '/staff/setup/branches':
       return <BranchesScreen />;
+    case '/staff/setup/two-step':
+      return <TwoStepPolicyScreen />;
     case '/staff/retail':
       return (
         <>
@@ -128,6 +132,8 @@ function screen(path: string | undefined): ReactElement {
       return <PurchaseOrdersPage />;
     case '/staff/retail/landed-costs':
       return <LandedCostsPage />;
+    case '/staff/retail/controls':
+      return <ControlsPage />;
     case '/staff/assistant':
       return <AssistantSettingsPage />;
     case '/staff/lending':
@@ -259,6 +265,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-assistant': [ASSISTANT],
   'page-users': [ADMIN],
   'page-branches': [ADMIN],
+  'page-two-step': [ADMIN],
   'page-members': [CLERK, OFFICER],
   'page-member-new': [CLERK],
   'page-member': [CLERK, CHECKER],
@@ -296,6 +303,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'capability-purchasing': [BUYER],
   'page-purchase-orders': [BUYER],
   'page-landed-costs': [BUYER],
+  'page-controls': [ADMIN],
 };
 
 describe('every tour target exists on its screen', () => {

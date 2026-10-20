@@ -59,6 +59,14 @@ const staffBranchesRoute = createRoute({ getParentRoute: () => staffRoute, path:
   import('../areas/staff/branches/page').then((m) => m.Route),
 );
 
+// Two-step sign-in: the administrator's policy under Business set-up, and a person's own set-up (issue #348, ADR-046).
+const staffTwoStepPolicyRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/two-step', staticData: { crumb: 'Two-step sign-in' } }).lazy(() =>
+  import('../areas/staff/two-step/page').then((m) => m.Route),
+);
+const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, path: '/two-step', staticData: { crumb: 'Your two-step sign-in' } }).lazy(() =>
+  import('../areas/staff/two-step/own').then((m) => m.Route),
+);
+
 const staffRetailRoute = createRoute({ getParentRoute: () => staffRoute, path: '/retail', component: Outlet, staticData: { crumb: 'Retail' } });
 
 const retailScreen = <P extends string>(path: P, crumb?: string) => createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb } });
@@ -82,6 +90,7 @@ const retailMarginsRoute = retailScreen('/margins', 'Margins').lazy(() => import
 const retailStockHealthRoute = retailScreen('/stock-health', 'Stock health').lazy(() => import('../areas/staff/retail/stock-health').then((m) => m.Route));
 const retailCreditControlRoute = retailScreen('/credit-control', 'Credit control').lazy(() => import('../areas/staff/retail/credit-control').then((m) => m.Route));
 const retailEvaluationRoute = retailScreen('/evaluation', 'Business evaluation').lazy(() => import('../areas/staff/retail/evaluation').then((m) => m.Route));
+const retailControlsRoute = retailScreen('/controls', 'Controls').lazy(() => import('../areas/staff/retail/controls').then((m) => m.Route));
 const retailCatalogueRoute = retailScreen('/catalogue', 'Catalogue').lazy(() => import('../areas/staff/retail/catalogue').then((m) => m.Route));
 const retailProductsRoute = retailScreen('/catalogue/products', 'Items').lazy(() => import('../areas/staff/retail/catalogue-products').then((m) => m.ProductsRoute));
 const retailCategoriesRoute = retailScreen('/catalogue/categories', 'Categories').lazy(() => import('../areas/staff/retail/catalogue-lists').then((m) => m.CategoriesRoute));
@@ -256,7 +265,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
@@ -277,6 +286,7 @@ export const router = createRouter({
         retailStockHealthRoute,
         retailCreditControlRoute,
         retailEvaluationRoute,
+        retailControlsRoute,
         retailCatalogueRoute,
         retailProductsRoute,
         retailCategoriesRoute,

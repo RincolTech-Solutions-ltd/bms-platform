@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.identity.internal.UserApi.RoleCatalogue;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleResponse;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserResponse;
 import com.rincoltech.bms.core.tenancy.Branches;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.ModuleSettings;
 import com.rincoltech.bms.core.tenancy.TenantModules;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
@@ -51,6 +52,7 @@ class MeController {
     private final TenantModules modules;
     private final ModuleSettings moduleSettings;
     private final TenantSettings settings;
+    private final CurrentTenant tenant;
 
     MeController(
             UserService users,
@@ -60,7 +62,8 @@ class MeController {
             TourProgress tours,
             TenantModules modules,
             ModuleSettings moduleSettings,
-            TenantSettings settings) {
+            TenantSettings settings,
+            CurrentTenant tenant) {
         this.users = users;
         this.accounts = accounts;
         this.branches = branches;
@@ -69,6 +72,7 @@ class MeController {
         this.modules = modules;
         this.moduleSettings = moduleSettings;
         this.settings = settings;
+        this.tenant = tenant;
     }
 
     @GetMapping("/me")
@@ -80,12 +84,16 @@ class MeController {
         UserResponse user = users.find(principal.userId()).orElseThrow(AuthFlow::unauthenticated);
         List<MeBranch> workable = branches.all().stream()
                 .filter(b -> b.active() && principal.canSeeBranch(b.id()))
-                .map(b -> new MeBranch(b.id(), b.code(), b.name(), b.headOffice(), b.stocksGoods()))
+                .map(b -> new MeBranch(b.id(), b.code(), b.name(), b.headOffice(), b.stocksGoods(), b.sellsGoods()))
                 .toList();
-        // A branch that keeps goods is the default; a head office that keeps none is the last choice (issue #329).
+        // A branch that keeps goods and sells is the default; a Store (#366) and a head office that keeps none come
+        // later.
         UUID defaultBranch = workable.stream()
-                .filter(b -> b.isHeadOffice() && b.stocksGoods())
+                .filter(b -> b.isHeadOffice() && b.stocksGoods() && b.sellsGoods())
                 .findFirst()
+                .or(() -> workable.stream()
+                        .filter(b -> b.stocksGoods() && b.sellsGoods())
+                        .findFirst())
                 .or(() -> workable.stream().filter(MeBranch::stocksGoods).findFirst())
                 .or(() -> workable.stream().findFirst())
                 .map(MeBranch::id)
@@ -108,7 +116,10 @@ class MeController {
                 tours.of(user.id()),
                 modules.enabledKeys(),
                 moduleSettings.enabledCapabilities(),
-                settings.reportsEnabled());
+                settings.reportsEnabled(),
+                accounts.mfaDueBy(user.id(), user.mfaEnabled()).orElse(null),
+                settings.twoStepPolicy().mode(),
+                tenant.profile().timezone().getId());
     }
 
     /**

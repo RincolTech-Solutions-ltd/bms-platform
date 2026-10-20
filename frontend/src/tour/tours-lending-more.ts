@@ -807,9 +807,33 @@ export const smsOptOutsPage: Tour = {
   ],
 };
 
+// Your own two-step sign-in (issue #348): every signed-in staff member can open it; the steps show while it is still off.
+export const ownTwoStepPage: Tour = {
+  id: 'page-own-two-step',
+  version: 1,
+  title: 'This page: your two-step sign-in',
+  audience: () => true,
+  autoStart: false,
+  page: '/staff/two-step',
+  steps: [
+    {
+      id: 'password',
+      target: 'twostep-password',
+      title: 'Confirm it is you',
+      body: 'Type your password here. This makes sure nobody else can turn it on for you.',
+    },
+    {
+      id: 'turn-on',
+      target: 'twostep-turn-on',
+      title: 'Turn it on',
+      body: 'Tap Turn on two-step sign-in. You scan a code with your phone, type the 6 digits it shows, and save your recovery codes.',
+    },
+  ],
+};
+
 export const LENDING_MORE_TOURS: readonly Tour[] = [
   savingsPage, savingsProductsPage, savingsAccountPage, savingsStatementPage, memberSavingsPage, memberEditPage, collateralEditPage,
   investmentsPage, investmentNewPage, investmentNewForMemberPage, maturitiesPage, investmentProductsPage, memberInvestmentsPage,
   investmentPage, certificatePage, staffHomePage, approvalsPage, insightsPage, paymentsPage, inviteUserPage, reportsPage,
-  smsSettingsPage, smsWordingPage, smsOptOutsPage,
+  smsSettingsPage, smsWordingPage, smsOptOutsPage, ownTwoStepPage,
 ];

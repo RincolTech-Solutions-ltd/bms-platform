@@ -3033,6 +3033,74 @@ export interface paths {
         patch: operations["updateRetailCategory"];
         trace?: never;
     };
+    "/api/v1/retail/controls/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One metric grouped by shop, person, day or reason, with a rate per 100 sales (issue #357) */
+        get: operations["listRetailControlsGroups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/controls/patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** People and items whose rate is more than twice their shop's own (issue #357) */
+        get: operations["getRetailControlsPatterns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/controls/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The individual records behind a metric and a group, newest first (issue #357) */
+        get: operations["listRetailControlsRecords"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/controls/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cards of the actions that deserve a second look, with the previous period (issue #357) */
+        get: operations["getRetailControlsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/customer-groups": {
         parameters: {
             query?: never;
@@ -5704,6 +5772,8 @@ export interface components {
             is_head_office?: boolean;
             location?: string;
             name?: string;
+            /** @description false for a Store: it holds stock and takes transfers but does not sell (ADR-048) */
+            sells_goods?: boolean;
             /** @description active, or inactive for a closed branch (the owner's word is closed, ADR-041) */
             status?: string;
             /**
@@ -5867,6 +5937,8 @@ export interface components {
             code: string;
             location?: string;
             name: string;
+            /** @description false creates a Store: it holds stock but does not sell (ADR-048). Omitted means a shop. */
+            sells_goods?: boolean;
         };
         CreateCollateralRequest: {
             collateral_type: string;
@@ -7315,6 +7387,11 @@ export interface components {
             email?: string;
             full_name?: string;
             kind?: string;
+            /**
+             * Format: date-time
+             * @description When the tenant's two-step policy will require this user to set up a second factor: only for a user it covers who has none yet and whose grace period is still running, otherwise null (ADR-046)
+             */
+            mfa_due_by?: string;
             mfa_enabled?: boolean;
             mfa_required?: boolean;
             /** @description Per enabled module that has a settings group, the capabilities switched on (ADR-033); the PWA offers a capability's screens only when listed */
@@ -7332,10 +7409,14 @@ export interface components {
             /** @description True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then */
             reports_enabled?: boolean;
             roles?: components["schemas"]["RoleAssignment"][];
+            /** @description The business's time zone, in which mfa_due_by is a day's end (ADR-046) */
+            tenant_timezone?: string;
             /** @description Guided tours the user finished or dismissed, by tour id (issue #19) */
             tours?: {
                 [key: string]: components["schemas"]["TourState"];
             };
+            /** @description The tenant's two-step sign-in policy: off, roles or everyone; the PWA recommends turning it on to administrators while it is off (ADR-046) */
+            two_step_policy?: string;
             /** Format: int32 */
             unused_recovery_codes?: number;
             /** Format: uuid */
@@ -7347,6 +7428,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             name?: string;
+            /** @description false for a Store, a branch that holds stock but does not sell: the sale form, the default selling branch and the till skip it; restock, goods receipt, transfer and stock-take forms include it (#366) */
+            sells_goods?: boolean;
             /** @description false for a branch that keeps no goods: sale, restock and transfer forms skip it (#329) */
             stocks_goods?: boolean;
         };
@@ -7471,6 +7554,8 @@ export interface components {
         /** @description mfa_token when enrolment is forced at sign-in; empty when signed in */
         MfaEnrolRequest: {
             mfa_token?: string;
+            /** @description A signed-in user starting their own set-up gives their current password; not needed with an mfa_token */
+            password?: string;
         };
         MfaEnrolment: {
             /** @description otpauth URI for a QR code; shown once */
@@ -8455,6 +8540,188 @@ export interface components {
         RetailCategoryUpdate: {
             active?: boolean;
             name?: string;
+        };
+        RetailControls: {
+            cards?: components["schemas"]["RetailControlsCard"][];
+            /** @description Present only with retail.profit.read in every branch the figures cover; the below_cost card is sent only then */
+            cost_visible?: boolean;
+            currency?: string;
+            period?: components["schemas"]["RetailControlsPeriod"];
+            previous?: components["schemas"]["RetailControlsPeriod"];
+            /**
+             * Format: int32
+             * @description A sale cancelled within this many minutes of being entered is a quick cancel
+             */
+            within_minutes?: number;
+        };
+        RetailControlsCard: {
+            /** Format: int64 */
+            count?: number;
+            /** @description voided_sales, quick_cancels, returns, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for */
+            metric?: string;
+            /** Format: int64 */
+            previous_count?: number;
+            /** @description The same for the previous period */
+            previous_rate_per_100?: string;
+            /** Format: int64 */
+            previous_value_minor?: number;
+            /** @description Sales with such an event per 100 sales entered in the period, one decimal; absent when no sale was entered */
+            rate_per_100?: string;
+            /**
+             * Format: int64
+             * @description Sales with such an event; a sale with two changed lines counts once
+             */
+            sales_affected?: number;
+            /**
+             * Format: int32
+             * @description The value over the completed sales of the period, in basis points; absent without sales
+             */
+            share_of_sales_bp?: number;
+            /** @description False while the capability the card depends on is off and nothing was ever recorded: the card then reads 'not switched on', not 'all clear' */
+            tracked?: boolean;
+            /**
+             * Format: int64
+             * @description At sale prices; for discounts, the money given up against the price the system chose
+             */
+            value_minor?: number;
+        };
+        RetailControlsGroup: {
+            /** Format: int64 */
+            count?: number;
+            /**
+             * Format: date
+             * @description Day level only
+             */
+            day?: string;
+            /** @description A branch id, a user id, a day (2026-10-19) or the reason text lower-cased; pass it back as the matching filter of the next level */
+            key?: string;
+            /** @description The branch, person or reason to show, or the day */
+            label?: string;
+            /** @description Sales with such an event per 100 sales the group entered, one decimal; absent when it entered none */
+            rate_per_100?: string;
+            /**
+             * Format: int64
+             * @description Sales with such an event; the rate is over these
+             */
+            sales_affected?: number;
+            /**
+             * Format: int64
+             * @description Sales entered by the group (the shop, the person or the day) in the period; the rate is over these
+             */
+            sales_count?: number;
+            /** @description User level only: active, invited or deactivated; absent when the person is unknown */
+            user_status?: string;
+            /** Format: int64 */
+            value_minor?: number;
+        };
+        RetailControlsGroups: {
+            currency?: string;
+            group_by?: string;
+            has_more?: boolean;
+            items?: components["schemas"]["RetailControlsGroup"][];
+            /** @description The level these groups are: the one answered, the first of the chain unless level is sent */
+            level?: string;
+            levels?: string[];
+            metric?: string;
+            /** @description The level under this one in the chain; absent at the end of the chain */
+            next_level?: string;
+            /** Format: int32 */
+            next_offset?: number;
+        };
+        RetailControlsPattern: {
+            /** Format: uuid */
+            branch_id?: string;
+            branch_name?: string;
+            /** Format: int64 */
+            count?: number;
+            /** @description A user id or a product id */
+            key?: string;
+            /** @description voided_sales, returns, price_overrides or below_cost */
+            metric?: string;
+            name?: string;
+            /**
+             * Format: int64
+             * @description Sales entered by the user (or lines sold of the item) in that shop in the period
+             */
+            out_of?: number;
+            rate_per_100?: string;
+            /** @description The shop's own rate for the same thing */
+            shop_rate_per_100?: string;
+            /** @description user or product */
+            subject?: string;
+            /** @description How many times the shop's rate, one decimal */
+            times?: string;
+            /** @description Users only: active, invited or deactivated */
+            user_status?: string;
+        };
+        RetailControlsPatterns: {
+            /** Format: date */
+            from?: string;
+            items?: components["schemas"]["RetailControlsPattern"][];
+            /**
+             * Format: int32
+             * @description A rate counts only from this many events and this many sales or lines
+             */
+            min_events?: number;
+            /** Format: int32 */
+            min_out_of?: number;
+            /** Format: date */
+            to?: string;
+        };
+        RetailControlsPeriod: {
+            /** Format: date */
+            from?: string;
+            /**
+             * Format: int64
+             * @description Sales entered in the period, voided ones included, imported history left out
+             */
+            sales_count?: number;
+            /**
+             * Format: int64
+             * @description Total of the completed sales of the period
+             */
+            sales_minor?: number;
+            /** Format: date */
+            to?: string;
+        };
+        RetailControlsRecord: {
+            /** Format: uuid */
+            approver_id?: string;
+            /** @description Who cancelled the sale, took the goods back or voided the restock; absent for a price, a cost and a correction */
+            approver_name?: string;
+            approver_status?: string;
+            /** Format: date-time */
+            at?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            branch_name?: string;
+            /** @description Price changes, discounts, below cost and quantity corrections only: the item */
+            item?: string;
+            reason?: string;
+            /** @description Returns only: the number of the credit note */
+            reference?: string;
+            /**
+             * Format: uuid
+             * @description The sale; for restock_voids the restock's id, and for quantity_corrections absent
+             */
+            sale_id?: string;
+            /** @description The sale number; for restock_voids the restock's number, and for quantity_corrections absent */
+            sale_no?: string;
+            /** Format: uuid */
+            user_id?: string;
+            /** @description The person whose sale it was; absent when unknown */
+            user_name?: string;
+            user_status?: string;
+            /** Format: int64 */
+            value_minor?: number;
+        };
+        RetailControlsRecords: {
+            currency?: string;
+            has_more?: boolean;
+            items?: components["schemas"]["RetailControlsRecord"][];
+            metric?: string;
+            /** Format: int32 */
+            next_offset?: number;
         };
         /** @description Items with cover below lead_days, the lowest first, with a suggested quantity */
         RetailCoverList: {
@@ -10929,7 +11196,7 @@ export interface components {
             note?: string;
             /**
              * Format: uuid
-             * @description The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the caller's own branch when their scope is one branch, else the sale's branch. Not used when nothing is paid out in money
+             * @description The branch whose till pays the money out, inside the caller's retail.sale.return scope; absent means the caller's own branch when their scope is one branch, else the sale's branch. When that branch is a store (it has no till) the one shop the caller may sell at pays, else 422 refund_branch_required (several shops to choose from, or none). Not used when nothing is paid out in money
              */
             refund_branch_id?: string;
             /** @description cash, mobile_money or bank pay the customer back out of the sale's branch. account takes the value off what the customer owes on this credit sale, never below zero; any rest is refunded in money_method */
@@ -13525,14 +13792,29 @@ export interface components {
             logo_document_id?: string;
             /** Format: int32 */
             max_active_loans_per_member?: number;
+            /**
+             * Format: date-time
+             * @description When a covered user without a second factor must set one up; null means at once or no requirement (ADR-046)
+             */
+            mfa_enforce_from?: string;
+            /**
+             * Format: int32
+             * @description The grace period in days last chosen for the two-step requirement, or null
+             */
+            mfa_grace_days?: number;
             receipt_footer?: string;
             /** @description True when the report runs are switched on for this tenant (default false; extras slice D1, ADR-038) */
             reports_enabled?: boolean;
+            /** @description Two-step sign-in is required of every staff user (FR-IAM-06, ADR-046) */
             require_mfa_all_staff?: boolean;
+            /** @description Staff role keys whose holders must use two-step sign-in (ADR-046); empty when none is chosen */
+            require_mfa_roles?: string[];
             /** @description True once the business set-up checklist has been dismissed */
             setup_dismissed?: boolean;
             /** @description Brand colour #RRGGBB, or null for the platform look (FR-TEN-08) */
             theme_primary?: string;
+            /** @description The business's time zone, in which a two-step deadline is a day's end (ADR-046) */
+            timezone?: string;
             /** Format: int32 */
             version?: number;
         };
@@ -13607,6 +13889,8 @@ export interface components {
         UpdateBranchRequest: {
             location?: string;
             name?: string;
+            /** @description false marks a Store: it holds stock, receives purchases and takes transfers in and out, but a sale, a payment taken or a refund paid there is refused (422 branch_does_not_sell). A Store must keep goods (422 store_must_stock). Refused with branch_has_open_credit_sales while a credit sale made there still has a balance owing. */
+            sells_goods?: boolean;
             /** @description false marks a branch that keeps no goods (a head office): no sales, restocks, transfers or stock adjustments there (422 branch_not_stocking). Refused with branch_still_has_stock while goods or a transfer on its way remain. */
             stocks_goods?: boolean;
         };
@@ -13753,12 +14037,24 @@ export interface components {
             display_name?: string;
             /** Format: int32 */
             max_active_loans_per_member?: number;
+            /**
+             * Format: int32
+             * @description Days a covered user without a second factor may keep signing in before it is required; 0 means at once. Sending it moves the deadline to now plus these days (ADR-046)
+             */
+            mfa_grace_days?: number;
+            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged */
+            password?: string;
             receipt_footer?: string;
             reports_enabled?: boolean;
+            /** @description Require two-step sign-in of every staff user; the grace period applies (ADR-046) */
             require_mfa_all_staff?: boolean;
+            /** @description Staff role keys whose holders must use two-step sign-in; an empty list clears the choice (ADR-046) */
+            require_mfa_roles?: string[];
             setup_dismissed?: boolean;
             /** @description #RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08) */
             theme_primary?: string;
+            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged */
+            totp_code?: string;
         };
         UpdateTenantSmsControlsRequest: {
             /** Format: int32 */
@@ -19087,6 +19383,117 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailCategory"];
+                };
+            };
+        };
+    };
+    listRetailControlsGroups: {
+        parameters: {
+            query: {
+                metric: string;
+                group_by: string;
+                level?: string;
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                user_id?: string;
+                approver_id?: string;
+                reason?: string;
+                within_minutes?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailControlsGroups"];
+                };
+            };
+        };
+    };
+    getRetailControlsPatterns: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailControlsPatterns"];
+                };
+            };
+        };
+    };
+    listRetailControlsRecords: {
+        parameters: {
+            query: {
+                metric: string;
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                user_id?: string;
+                approver_id?: string;
+                reason?: string;
+                within_minutes?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailControlsRecords"];
+                };
+            };
+        };
+    };
+    getRetailControlsSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+                from?: string;
+                to?: string;
+                within_minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailControls"];
                 };
             };
         };
