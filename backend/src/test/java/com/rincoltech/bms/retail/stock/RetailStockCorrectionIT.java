@@ -124,8 +124,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
     void theAdministratorTypesTheRightQuantityAndTheOriginalRestockIsUntouched() {
         UUID restock = restock(hq, "10");
         String k = key();
-        ResponseEntity<JsonNode> done =
-                correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
+        Map<String, Object> sent = request(hq, "6", "entry_mistake", "Typed ten, really six");
+        ResponseEntity<JsonNode> done = correct(sent, ADMIN, "*", k);
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.CREATED);
         JsonNode c = done.getBody();
         assertThat(c.get("old_qty").asString()).isEqualTo("10.000");
@@ -186,8 +186,7 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(newest.get(newest.size() - 1).get("kind").asString()).isEqualTo("purchase");
 
         // The same key replays the answer and does not correct twice.
-        ResponseEntity<JsonNode> replay =
-                correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
+        ResponseEntity<JsonNode> replay = correct(sent, ADMIN, "*", k);
         assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
         assertThat(replay.getBody().get("id").asString()).isEqualTo(c.get("id").asString());

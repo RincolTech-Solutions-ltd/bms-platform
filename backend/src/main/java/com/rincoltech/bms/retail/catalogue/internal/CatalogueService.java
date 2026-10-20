@@ -366,6 +366,11 @@ class CatalogueService {
                     "unit_in_use_by_pack",
                     "The unit cannot change while the product has active pack sizes: they count base units. Switch them off first.");
         }
+        if (!before.unitId().equals(after.unitId()) && repo.productHasPriceItems(id)) {
+            throw ApiException.rule(
+                    "unit_in_use_by_price_list",
+                    "The unit cannot change while a price list has a price for the product: prices are per unit.");
+        }
         if (!before.unitId().equals(after.unitId()) && repo.productHasStock(id)) {
             // Issue #351, ADR-044: a unit is never converted. Stock, sales and restocks were counted in the old unit,
             // so
@@ -375,11 +380,6 @@ class CatalogueService {
                     "This item has stock or stock history counted in " + before.unit() + ", so its unit cannot change: "
                             + "the numbers would only be relabelled, not converted. Add a new item with the right unit, "
                             + "correct this one to none on the Stock page, and restock the new one.");
-        }
-        if (!before.unitId().equals(after.unitId()) && repo.productHasPriceItems(id)) {
-            throw ApiException.rule(
-                    "unit_in_use_by_price_list",
-                    "The unit cannot change while a price list has a price for the product: prices are per unit.");
         }
         String duplicateReason = null;
         // A new name or unit settles the question again: the reason of an earlier add-anyway goes unless this one needs
