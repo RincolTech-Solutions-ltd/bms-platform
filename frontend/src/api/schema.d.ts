@@ -3757,6 +3757,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/orders/{order_id}/fee-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take the payment of a delivery fee left on a credit buyer's account; M (issue #385) */
+        post: operations["payRetailOrderFee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/orders/{order_id}/pack": {
         parameters: {
             query?: never;
@@ -10373,7 +10390,14 @@ export interface components {
             /** Format: int64 */
             delivery_fee_minor?: number;
             delivery_place?: string;
+            /** @description cash, mobile_money, bank (paid at the door) or account (on the credit buyer's account) */
             fee_method?: string;
+            fee_paid_method?: string;
+            /**
+             * Format: date
+             * @description When a fee on account was paid
+             */
+            fee_paid_on?: string;
             /** @description Who did what, when; on a single order only */
             history?: components["schemas"]["RetailOrderEvent"][];
             /** Format: uuid */
@@ -10447,6 +10471,8 @@ export interface components {
         };
         /** @description A field left out keeps its value; an empty text clears it */
         RetailOrderChangeRequest: {
+            /** @description True takes the delivery day off the order */
+            clear_delivery_date?: boolean;
             customer_name?: string;
             customer_phone?: string;
             /** Format: date */
@@ -10483,6 +10509,8 @@ export interface components {
              * @description Credit only: when the customer will pay the rest
              */
             due_date?: string;
+            /** @description Credit only, for a credit buyer on the list: the delivery fee goes on the buyer's account (trade debtors, against the sale) instead of being paid at the door; paid later with POST /retail/orders/{order_id}/fee-payment */
+            fee_on_account?: boolean;
             note?: string;
             /** @description Credit only: how the money taken at the door was paid */
             paid_now_method?: string;
@@ -10519,6 +10547,9 @@ export interface components {
             by_user?: string;
             note?: string;
             step?: string;
+        };
+        RetailOrderFeePaymentRequest: {
+            method: string;
         };
         /** @description Delivered orders and the delivery fees taken, by day, source or rider */
         RetailOrderFeesReport: {
@@ -10997,6 +11028,8 @@ export interface components {
             packs?: components["schemas"]["RetailPack"][];
             /** @description The branch balance, when branch_id was given */
             qty?: string;
+            /** @description Issue #385: of the branch balance, what open customer orders keep aside (so not free to sell); sent only with branch_id, and only when something is kept */
+            reserved_qty?: string;
             /** Format: int64 */
             sell_minor?: number;
             /**
@@ -12441,6 +12474,8 @@ export interface components {
             /** Format: uuid */
             product_id?: string;
             qty?: string;
+            /** @description Issue #385: of qty, what open customer orders keep aside (not free to sell); absent when nothing is kept */
+            reserved_qty?: string;
             /** Format: int64 */
             sell_minor?: number;
             unit?: string;
@@ -21206,6 +21241,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailOrderDelivered"];
+                };
+            };
+        };
+    };
+    payRetailOrderFee: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailOrderFeePaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailOrder"];
                 };
             };
         };

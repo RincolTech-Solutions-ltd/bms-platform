@@ -10204,6 +10204,15 @@
             "type" : "string"
           },
           "fee_method" : {
+            "description" : "cash, mobile_money, bank (paid at the door) or account (on the credit buyer's account)",
+            "type" : "string"
+          },
+          "fee_paid_method" : {
+            "type" : "string"
+          },
+          "fee_paid_on" : {
+            "description" : "When a fee on account was paid",
+            "format" : "date",
             "type" : "string"
           },
           "history" : {
@@ -10356,6 +10365,10 @@
       "RetailOrderChangeRequest" : {
         "description" : "A field left out keeps its value; an empty text clears it",
         "properties" : {
+          "clear_delivery_date" : {
+            "description" : "True takes the delivery day off the order",
+            "type" : "boolean"
+          },
           "customer_name" : {
             "maxLength" : 200,
             "minLength" : 0,
@@ -10432,6 +10445,10 @@
             "format" : "date",
             "type" : "string"
           },
+          "fee_on_account" : {
+            "description" : "Credit only, for a credit buyer on the list: the delivery fee goes on the buyer's account (trade debtors, against the sale) instead of being paid at the door; paid later with POST /retail/orders/{order_id}/fee-payment",
+            "type" : "boolean"
+          },
           "note" : {
             "maxLength" : 500,
             "minLength" : 0,
@@ -10502,6 +10519,15 @@
             "type" : "string"
           }
         }
+      },
+      "RetailOrderFeePaymentRequest" : {
+        "properties" : {
+          "method" : {
+            "pattern" : "cash|mobile_money|bank",
+            "type" : "string"
+          }
+        },
+        "required" : [ "method" ]
       },
       "RetailOrderFeesReport" : {
         "description" : "Delivered orders and the delivery fees taken, by day, source or rider",
@@ -11460,6 +11486,10 @@
           },
           "qty" : {
             "description" : "The branch balance, when branch_id was given",
+            "type" : "string"
+          },
+          "reserved_qty" : {
+            "description" : "Issue #385: of the branch balance, what open customer orders keep aside (so not free to sell); sent only with branch_id, and only when something is kept",
             "type" : "string"
           },
           "sell_minor" : {
@@ -14261,6 +14291,10 @@
             "type" : "string"
           },
           "qty" : {
+            "type" : "string"
+          },
+          "reserved_qty" : {
+            "description" : "Issue #385: of qty, what open customer orders keep aside (not free to sell); absent when nothing is kept",
             "type" : "string"
           },
           "sell_minor" : {
@@ -28876,6 +28910,51 @@
           }
         },
         "summary" : "Mark an order delivered and paid: it becomes a sale through the ordinary sale path, the delivery fee posted on its own; M (issue #385)",
+        "tags" : [ "retail-orders" ]
+      }
+    },
+    "/api/v1/retail/orders/{order_id}/fee-payment" : {
+      "post" : {
+        "operationId" : "payRetailOrderFee",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "order_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailOrderFeePaymentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOrder"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Take the payment of a delivery fee left on a credit buyer's account; M (issue #385)",
         "tags" : [ "retail-orders" ]
       }
     },
