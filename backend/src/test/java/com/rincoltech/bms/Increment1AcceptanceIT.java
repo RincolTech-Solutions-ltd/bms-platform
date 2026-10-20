@@ -74,8 +74,7 @@ class Increment1AcceptanceIT extends IntegrationTest {
         JsonNode adminInvitation = created.getBody().get("admin_invitation");
         UUID adminId = UUID.fromString(adminInvitation.get("user_id").asString());
 
-        // 2. The tenant requires two-step sign-in of its admins (optional by default, issue #348), so the admin accepts,
-        // is forced to enrol TOTP, and signs in.
+        // 2. This tenant requires two-step sign-in of its admins (#348), so the admin must enrol TOTP.
         Api.requireTwoStepForAdmins(
                 UUID.fromString(created.getBody().get("tenant").get("id").asString()));
         Api tenant = Api.tenant(http, slug);
