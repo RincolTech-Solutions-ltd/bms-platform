@@ -552,6 +552,8 @@ class PasswordResetIT extends IntegrationTest {
     @Test
     void aLinkOfOneTenantDoesNothingInAnother() {
         TestDatabase.Fixture other = TestDatabase.tenant("reset-b", true);
+        // The other tenant requires two-step sign-in of its admins too, so its admin gives a code, as before.
+        Api.requireTwoStepForAdmins(other);
         Api otherApi = Api.tenant(http, other.slug());
         String email = Api.email("cashier");
         UUID userId = user(email);
