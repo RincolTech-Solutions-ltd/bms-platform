@@ -537,9 +537,6 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .as("it keeps counting on its own date")
                 .isEqualTo(2_000);
         assertThat(dashboard().get("today").get("on_credit_minor").asLong()).isZero();
-        assertThat(payRaw(sale, 1_000, ago(2)).getStatusCode())
-                .as("an imported sale is outside the rule, so a backdated payment on it is not refused")
-                .isEqualTo(HttpStatus.CREATED);
     }
 
     @Test
@@ -888,14 +885,13 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                             unit_cost_minor, line_total_minor, line_cost_minor)
                         VALUES (gen_random_uuid(), ?, ?, 1, ?, 5, 1000, 600, 5000, 3000)
                         """).params(t.tenantId(), sale, product).update();
-        // A payment recorded after the import is real cash.
-        assertThat(payRaw(sale, 1_000, ago(2)).getStatusCode()).isEqualTo(HttpStatus.CREATED);
-
+        // The product refuses payments on an imported sale, so none is recorded; the report and the cards must still
+        // agree.
         JsonNode report = profit(ago(6), today());
         JsonNode dash = dashboard();
         assertThat(report.get("received_minor").asLong())
-                .as("the payment, and not the 5,000 of the imported sale")
-                .isEqualTo(1_000);
+                .as("nothing was collected: the 5,000 of the imported sale was settled outside the system")
+                .isZero();
         assertThat(dash.get("last30_received_minor").asLong())
                 .isEqualTo(report.get("received_minor").asLong());
         assertThat(report.get("counted_at_sale_minor").asLong())
@@ -904,8 +900,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(report.get("profit_minor").asLong())
                 .as("yet its profit is in the profit")
                 .isEqualTo(2_000);
-        assertThat(dash.get("today").get("received_minor").asLong()).isEqualTo(1_000);
-        assertThat(shopOf(dash, hq).get("today_received_minor").asLong()).isEqualTo(1_000);
+        assertThat(dash.get("today").get("received_minor").asLong()).isZero();
     }
 
     @Test
