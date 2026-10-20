@@ -236,12 +236,17 @@ class CatalogueRepository {
                 .list();
     }
 
-    /** Products whose name key is a trigram neighbour of the given key, most alike first; the caller measures the edit distance. */
-    List<NameMatch> neighbours(String nameKey, UUID excludeId, int limit) {
+    /**
+     * Products whose name key is within {@code spread} characters of the given key's length: the only ones that can be a few
+     * letters apart. The caller measures the edit distance; no text search operator is used, because none is usable under
+     * row-level security (V40) and a catalogue is small.
+     */
+    List<NameMatch> neighbours(String nameKey, UUID excludeId, int spread, int limit) {
         return jdbc.sql(SELECT_NAME
-                        + " WHERE similarity(p.name_key, :k) >= 0.3 AND (CAST(:exclude AS uuid) IS NULL OR p.id <> CAST(:exclude AS uuid))"
-                        + " ORDER BY similarity(p.name_key, :k) DESC, p.code, p.id LIMIT :limit")
-                .param("k", nameKey)
+                        + " WHERE length(p.name_key) BETWEEN :shortest AND :longest AND (CAST(:exclude AS uuid) IS NULL OR p.id <> CAST(:exclude AS uuid))"
+                        + " ORDER BY p.code, p.id LIMIT :limit")
+                .param("shortest", Math.max(0, nameKey.length() - spread))
+                .param("longest", nameKey.length() + spread)
                 .param("exclude", excludeId)
                 .param("limit", limit)
                 .query(CatalogueRepository::nameMatch)

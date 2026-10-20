@@ -457,7 +457,7 @@ class CatalogueService {
             boolean sameUnit = unitId != null && unitId.equals(m.unitId());
             (sameUnit ? exact : close).add(similarOf(m, 0, sameUnit));
         }
-        for (CatalogueRepository.NameMatch m : repo.neighbours(key, excludeId, NEIGHBOURS)) {
+        for (CatalogueRepository.NameMatch m : repo.neighbours(key, excludeId, MAX_DISTANCE, NEIGHBOURS)) {
             if (m.nameKey().equals(key)) {
                 continue;
             }
@@ -470,7 +470,8 @@ class CatalogueService {
         return new SimilarProducts(exact, close.size() > SIMILAR_SHOWN ? close.subList(0, SIMILAR_SHOWN) : close);
     }
 
-    static final int NEIGHBOURS = 60;
+    static final int MAX_DISTANCE = 3;
+    static final int NEIGHBOURS = 5000;
     static final int SIMILAR_SHOWN = 8;
 
     private static SimilarProduct similarOf(CatalogueRepository.NameMatch m, int distance, boolean sameUnit) {

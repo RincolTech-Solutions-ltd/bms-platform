@@ -382,9 +382,10 @@ class RetailPurchaseVoidIT extends IntegrationTest {
     @Test
     void anImportedRestockCannotBeVoidedHere() {
         UUID id = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "2")).get("id").asString());
+        // retail_purchases is append-only; the owner's maintenance escape hatch (as RetailReportsIT uses) marks it imported.
         TestDatabase.owner()
-                .sql("UPDATE retail_purchases SET historical = true WHERE id = ?")
-                .param(id)
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_purchases SET historical = true WHERE id = '" + id + "'; END $$")
                 .update();
         ResponseEntity<JsonNode> refused = voidIt(id, "Typed the wrong number");
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
