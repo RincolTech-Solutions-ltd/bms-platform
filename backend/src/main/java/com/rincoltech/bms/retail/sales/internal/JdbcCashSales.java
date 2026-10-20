@@ -156,6 +156,25 @@ class JdbcCashSales implements CashSales {
                     return 0;
                 })
                 .list();
+        // Delivery fees of customer orders (issue #385, ADR-052) paid in cash come into the till on the day of the
+        // delivery.
+        jdbc.sql("""
+                        SELECT delivered_on AS day, sum(delivery_fee_minor) AS fees FROM retail_customer_orders
+                         WHERE branch_id = :branch AND status = 'delivered' AND fee_method = 'cash' AND fee_entry_id IS NOT NULL
+                           AND delivered_on BETWEEN :from AND :to
+                         GROUP BY delivered_on
+                        """)
+                .param("branch", branchId)
+                .param("from", java.sql.Date.valueOf(from))
+                .param("to", java.sql.Date.valueOf(to))
+                .query((rs, n) -> {
+                    acc.merge(
+                            rs.getDate("day").toLocalDate(),
+                            new Acc(rs.getLong("fees"), 0, 0, false),
+                            (a, b) -> a.plus(b.takings(), b.voids(), b.sold(), b.historical()));
+                    return 0;
+                })
+                .list();
         Map<LocalDate, Day> out = new TreeMap<>();
         acc.forEach((d, a) -> out.put(d, new Day(a.takings(), a.voids(), a.sold(), a.historical())));
         return out;

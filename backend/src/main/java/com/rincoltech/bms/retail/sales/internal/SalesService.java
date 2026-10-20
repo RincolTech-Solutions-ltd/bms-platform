@@ -802,7 +802,7 @@ class SalesService {
      * the paid amount past the total. Debits the payment method's account and credits trade
      * debtors with the sale as subledger, in the sale's branch.
      */
-    private PaymentResult recordPayment(UUID saleId, PaymentRequest r) {
+    PaymentResult recordPayment(UUID saleId, PaymentRequest r) {
         Principal principal = CurrentPrincipal.require();
         Sale s = repo.find(saleId, true)
                 .map(Header::sale)
