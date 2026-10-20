@@ -56,10 +56,10 @@ class ControlsService {
     static final int MIN_EVENTS = 3;
 
     static final int MIN_OUT_OF = 10;
-    /** The one label for a person the users table does not know, on the server and in the screen. */
     /** The metrics somebody approved: a void, a return, a restock voided. A price, a cost and a correction have no approver. */
     static final List<String> HAS_APPROVER = List.of("voided_sales", "quick_cancels", "returns", "restock_voids");
 
+    /** The one label for a person the users table does not know, on the server and in the screen. */
     static final String UNKNOWN_PERSON = "Unknown person";
 
     static final int MAX_PATTERNS = 20;

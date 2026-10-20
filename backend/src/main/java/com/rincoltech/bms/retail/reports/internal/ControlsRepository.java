@@ -255,9 +255,10 @@ class ControlsRepository {
     /** Count and value of each metric asked for in the window (the cards). */
     List<Count> counts(List<String> metrics, Window w) {
         Map<String, Object> params = params(w);
-        String sql =
-                "SELECT metric, count(*) AS n, count(DISTINCT sale_id) AS a, coalesce(sum(value_minor), 0) AS v FROM ("
-                        + filtered(metrics, w, params) + ") x GROUP BY metric";
+        String sql = "SELECT metric, count(*) FILTER (WHERE metric <> 'restock_voids')"
+                + " + count(DISTINCT sale_id) FILTER (WHERE metric = 'restock_voids') AS n,"
+                + " count(DISTINCT sale_id) AS a, coalesce(sum(value_minor), 0) AS v FROM ("
+                + filtered(metrics, w, params) + ") x GROUP BY metric";
         return jdbc.sql(sql)
                 .params(params)
                 .query((rs, n) -> new Count(rs.getString("metric"), rs.getLong("n"), rs.getLong("a"), rs.getLong("v")))
@@ -328,7 +329,9 @@ class ControlsRepository {
             case "reason" -> "g.n DESC, g.k";
             default -> "lower(" + label + ") NULLS LAST, g.k";
         };
-        String sql = "WITH g AS (SELECT " + key + " AS k, count(*) AS n, count(DISTINCT ev.sale_id) AS a,"
+        String sql = "WITH g AS (SELECT " + key + " AS k, "
+                + (metric.equals("restock_voids") ? "count(DISTINCT ev.sale_id)" : "count(*)")
+                + " AS n, count(DISTINCT ev.sale_id) AS a,"
                 + " coalesce(sum(ev.value_minor), 0) AS v,"
                 + " min(btrim(ev.reason)) AS sample FROM (" + filtered(List.of(metric), w, params)
                 + ") ev GROUP BY 1), s AS (" + sales + ")"

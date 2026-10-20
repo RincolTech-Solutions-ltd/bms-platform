@@ -264,6 +264,13 @@ export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[], metric 
 export function recordsCsv(records: ControlsRecord[], metric: string): string {
   const who = metric === 'restock_voids' ? 'Entered by' : metric === 'quantity_corrections' ? 'Corrected by' : 'Person (whose sale)';
   const number = metric === 'restock_voids' ? 'Restock' : metric === 'quantity_corrections' ? 'Record' : 'Sale';
+  if (isStockMetric(metric)) {
+    // No credit note to give.
+    return csvOf([
+      [number, 'Time', 'Shop', who, 'Approver', 'Reason', 'Item', 'Value'],
+      ...records.map((r) => [r.sale_no, whenWords(r.at), r.branch_name, whoWords(r), approverWords(r, metric), r.reason, r.item, r.value_minor ?? 0]),
+    ]);
+  }
   return csvOf([
     [number, 'Credit note', 'Time', 'Shop', who, 'Approver', 'Reason', 'Item', 'Value'],
     ...records.map((r) => [r.sale_no, r.reference, whenWords(r.at), r.branch_name, whoWords(r), approverWords(r, metric), r.reason, r.item, r.value_minor ?? 0]),

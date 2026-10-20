@@ -182,25 +182,46 @@ class RetailControlsStockIT extends IntegrationTest {
         assertThat(br2.get("count").asLong()).isEqualTo(2);
         assertThat(br2.get("value_minor").asLong()).isEqualTo(15_000);
         JsonNode all = card(get("/summary", Map.of()), "restock_voids");
-        assertThat(all.get("count").asLong()).isEqualTo(3);
+        // Two restocks were voided (the one of setUp and this one of two branches): a restock counts once, however many
+        // shops it stocked.
+        assertThat(all.get("count").asLong()).isEqualTo(2);
         assertThat(all.get("sales_affected").asLong()).isEqualTo(2);
         assertThat(all.get("value_minor").asLong()).isEqualTo(30_000);
+        // By person, all shops: the clerk entered both voided restocks, so 2, not 3.
+        JsonNode people = get("/groups?metric=restock_voids&group_by=user", Map.of());
+        assertThat(people.get("items")).hasSize(1);
+        assertThat(people.get("items").get(0).get("count").asLong()).isEqualTo(2);
+        assertThat(people.get("items").get(0).get("value_minor").asLong()).isEqualTo(30_000);
+        // By shop, each shop counts the restocks it stocked: head office 1, branch two 2.
+        JsonNode shops = get("/groups?metric=restock_voids&group_by=branch", Map.of());
+        for (JsonNode g : shops.get("items")) {
+            assertThat(g.get("count").asLong())
+                    .isEqualTo(g.get("key").asString().equals(t.headOffice().toString()) ? 1 : 2);
+        }
     }
 
     @Test
-    void aCorrectionMadeAtHalfPastElevenInKampalaLandsOnThatDay() {
+    void aCorrectionMadeAtHalfPastOneAtNightInKampalaLandsOnThatDayNotTheUtcOne() {
         java.time.LocalDate yesterday =
                 java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")).minusDays(1);
-        String at = java.time.LocalDateTime.of(yesterday, java.time.LocalTime.of(23, 30))
+        String at = java.time.LocalDateTime.of(yesterday, java.time.LocalTime.of(1, 30))
                 .atZone(java.time.ZoneId.of("Africa/Kampala"))
                 .toOffsetDateTime()
                 .toString();
         TestDatabase.owner()
                 .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
-                        + " UPDATE retail_stock_corrections SET created_at = TIMESTAMPTZ '" + at + "'; END $$")
+                        + " UPDATE retail_stock_corrections SET created_at = TIMESTAMPTZ '" + at
+                        + "' WHERE tenant_id = '"
+                        + t.tenantId() + "'; END $$")
                 .update();
         JsonNode that = get("/summary?from=" + yesterday + "&to=" + yesterday, Map.of());
         assertThat(card(that, "quantity_corrections").get("count").asLong()).isEqualTo(1);
+        // 01:30 in Kampala is 22:30 UTC the day before: a dropped time zone would put it there.
+        java.time.LocalDate utcDay = yesterday.minusDays(1);
+        assertThat(card(get("/summary?from=" + utcDay + "&to=" + utcDay, Map.of()), "quantity_corrections")
+                        .get("count")
+                        .asLong())
+                .isZero();
         JsonNode today = get(
                 "/summary?from=" + java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")) + "&to="
                         + java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")),

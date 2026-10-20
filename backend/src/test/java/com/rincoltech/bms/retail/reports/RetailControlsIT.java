@@ -206,9 +206,9 @@ class RetailControlsIT extends IntegrationTest {
     }
 
     @Test
-    void aVoidAtHalfPastElevenInKampalaLandsOnThatDay() {
+    void aVoidAtHalfPastOneAtNightInKampalaLandsOnThatDayNotTheUtcOne() {
         LocalDate yesterday = LocalDate.now(KAMPALA).minusDays(1);
-        String at = LocalDateTime.of(yesterday, LocalTime.of(23, 30))
+        String at = LocalDateTime.of(yesterday, LocalTime.of(1, 30))
                 .atZone(KAMPALA)
                 .toOffsetDateTime()
                 .toString();
@@ -216,6 +216,12 @@ class RetailControlsIT extends IntegrationTest {
         JsonNode thatDay = get("/summary?from=" + yesterday + "&to=" + yesterday, CONTROLS);
         assertThat(card(thatDay, "voided_sales").get("count").asLong()).isEqualTo(1);
         assertThat(card(thatDay, "voided_sales").get("value_minor").asLong()).isEqualTo(300);
+        // 01:30 in Kampala is 22:30 UTC the day before: a dropped time zone would put it there.
+        LocalDate utcDay = yesterday.minusDays(1);
+        assertThat(card(get("/summary?from=" + utcDay + "&to=" + utcDay, CONTROLS), "voided_sales")
+                        .get("count")
+                        .asLong())
+                .isZero();
         LocalDate today = LocalDate.now(KAMPALA);
         assertThat(card(get("/summary?from=" + today + "&to=" + today, CONTROLS), "voided_sales")
                         .get("count")
