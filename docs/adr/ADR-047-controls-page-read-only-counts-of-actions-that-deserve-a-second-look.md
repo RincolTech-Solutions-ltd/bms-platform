@@ -3,7 +3,7 @@
 ## Status
 
 Proposed (2026-10-20, issue #357 group 1, task #358; not yet accepted by the product owner). Builds on ADR-003, ADR-017 and
-ADR-020. The migration is `V93`, a placeholder: the coordinator renames it to the next free number when it merges.
+ADR-020. The migration is `V66`, by the merge order of the open pull requests (V64, V65, then this one).
 
 ## Context
 
@@ -64,7 +64,7 @@ discipline, the delivery side for the dev team) are separate decisions and pull 
   void.
 - **Permission: a new `retail.controls.read`, held by the tenant administrator and nobody else by default.** The page names
   staff and compares them, so it is not part of `retail.sale.read`. It is scoped by branch like every retail permission
-  (ADR-017): every figure is a sum over the shops of the caller's scope only. Migration `V93` inserts the permission and
+  (ADR-017): every figure is a sum over the shops of the caller's scope only. Migration `V66` inserts the permission and
   grants it to the global `tenant_admin` role (system roles are global rows, so every existing tenant has it from the
   migration). A business gives it to an owner's or an auditor's custom role.
 - **Cost stays behind profit read.** Every value on the page is a sale price. `below_cost` is a judgement against cost, so its
@@ -78,7 +78,7 @@ discipline, the delivery side for the dev team) are separate decisions and pull 
   what is on screen, built in the browser so it can never hold more than the person may see; a text that begins like a
   spreadsheet formula is written as plain text.
 - **No new index.** The voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS
-  NOT NULL` (V34); the other metrics are read by the sale date, which `retail_sales_by_date` already serves. `V93` adds the
+  NOT NULL` (V34); the other metrics are read by the sale date, which `retail_sales_by_date` already serves. `V66` adds the
   permission only.
 
 ## Consequences

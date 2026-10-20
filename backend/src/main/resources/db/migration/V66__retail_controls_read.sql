@@ -1,5 +1,5 @@
--- V93: the Controls page (issue #357, group 1; ADR-047). The number is a placeholder: the coordinator renames the file to the
--- next free number when it merges, since Flyway runs with outOfOrder off.
+-- V66: the Controls page (issue #357, group 1; ADR-047). The merge order of the open pull requests fixes the number (V64, V65,
+-- then this one), since Flyway runs with outOfOrder off.
 --
 -- `retail.controls.read`: read the Controls page, which counts voids, returns, changed prices, discounts, sales below cost
 -- and sales cancelled at once, by shop, by named person, by day, by reason and by approver. It names staff, so it is the

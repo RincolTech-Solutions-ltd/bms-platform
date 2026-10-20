@@ -1869,6 +1869,14 @@ changed: a restock is voided when a row names it, and the reads join the table. 
 of the source type `retail.purchase_void` with `reverses_movement_id` set; the journal reversals are the ledger's own
 (`reverses_entry_id`), written on the void's date.
 
+The grouped restocks and stock lists (issue #350, no migration) read these tables with one grouped query per level. The restocks
+summary groups the purchase movements of `retail_purchases` (`retail_stock_movements` with `source_type = 'retail.purchase'`, through
+the index on the source) joined to `retail_purchase_lines` and `retail_purchase_voids`, so a restock is counted by what it added to
+the branches in scope, a voided one is counted apart, and the value is the movement quantity at the line's cost. The stock summary
+reads each branch against each listed product with its `retail_stock_balances` row, so an item with no balance row counts as nothing
+in stock, as in the list. Neither query is covered by an index of its own; both are bounded in the groups they return, not in the
+rows they read.
+
 `retail_stock_corrections`: one row per quantity corrected on the stock list. `branch_id`, `product_id`, `movement_id` (the
 `adjustment` movement it wrote, unique), `old_qty` and `new_qty` (numeric(14,3); `new_qty >= 0` and different from `old_qty`),
 `reason_code` (`entry_mistake` or `miscount`), `note`, `unit_cost_minor` (the cost the movement was valued at), `journal_entry_id`
@@ -1891,7 +1899,7 @@ lines, never the sale header, review F10), less `retail_usage_reports.cost_total
 
 ### 6.11.3b Controls (FR-RET-48, issue #358, ADR-047)
 
-No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V93` (a placeholder number) adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only.
+No table: `retail.reports` reads `retail_sales` (voids: `voided_at`, `voided_by`, `void_reason`; sales entered: `sale_date`, `created_by`, `historical`), `retail_sale_returns` (`returned_on`, `created_by`, `note`, `status`) and `retail_sale_lines` (`price_source`, `resolved_unit_price_minor`, `price_override_reason`, `line_total_minor`, `line_cost_minor`), and the `users` and `branches` names. Migration `V66` adds the permission `retail.controls.read`, granted to `tenant_admin` (a global role row, so every existing tenant has it). No index is added: the voids of a window are found by `retail_sales_voided (tenant_id, branch_id, voided_at) WHERE voided_at IS NOT NULL` (V34, section 6.11) and every other metric by the sale date (`retail_sales_by_date`). Expand only.
 
 ### 6.11.3a Trade capabilities (ADR-033)
 
