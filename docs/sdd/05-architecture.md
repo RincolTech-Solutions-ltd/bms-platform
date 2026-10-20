@@ -280,7 +280,7 @@ built yet keeps its steps behind a flag in `FEATURES` until its slice switches i
 payments, trial and agents are off today; the staff Users screen, issue #319, is on). The first-run
 tours cover set-up, retail selling, stock-take and the catalogue, and the loan list with its
 applications filter; page tours, started from Help, cover the sale, stock, stock-take, catalogue,
-set-up, loans and loan pages, the staff Users page (`page-users`) and the Past restocks page (`page-restocks`, issue #351); the selling tour (version 6) and the welcome tour (version 9) gained the correction steps. A page tour's `page` may hold a `$name` segment that matches any one
+set-up, loans and loan pages, the staff Users page (`page-users`) and the Past restocks page (`page-restocks`, issue #351); the selling tour (version 7) and the welcome tour (version 10) gained the correction steps. A page tour's `page` may hold a `$name` segment that matches any one
 path segment, so one tour serves every loan. Tours start by themselves under three rules (issue #292):
 `autoTourFor` picks the first-run tour while it waits, else the next pending "New:" (capability) tour; the host
 starts at most one per page load, so the rest wait for the next visit; a user with no tour history gets only the
