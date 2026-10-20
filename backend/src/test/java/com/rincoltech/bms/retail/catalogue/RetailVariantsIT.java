@@ -356,7 +356,7 @@ class RetailVariantsIT extends IntegrationTest {
 
     @Test
     void frRet52SalesAndRestocksRollUpToTheItemAndSplitBySizeAndColour() {
-        UUID plain = api.product("PLAIN-1", 1_000, 2_000);
+        UUID plain = api.product("PLAIN-1", 1_000, 5_000); // sells above the 4,000 the restock pays
         // A tenant with no item with sizes is offered the levels it always had.
         JsonNode before = summary("/sales/summary?group_by=item");
         assertThat(before.get("available_levels").toString()).doesNotContain("variant");
@@ -379,7 +379,7 @@ class RetailVariantsIT extends IntegrationTest {
         assertThat(romper.get("sales_count").asLong()).isEqualTo(2);
         JsonNode alone = group(items, plain.toString());
         assertThat(alone.get("label").asString()).isEqualTo("Test Product PLAIN-1");
-        assertThat(alone.get("total_minor").asLong()).isEqualTo(2_000);
+        assertThat(alone.get("total_minor").asLong()).isEqualTo(5_000);
 
         JsonNode sizes = summary("/sales/summary?group_by=item,variant&level=variant&item_id=" + familyKey);
         assertThat(sizes.get("items")).hasSize(2);

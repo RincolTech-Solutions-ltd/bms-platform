@@ -8423,7 +8423,7 @@ export interface components {
         RetailBranchRoleList: {
             items?: components["schemas"]["RetailBranchRole"][];
         };
-        /** @description The item's stock per branch the caller may read, where it is not zero */
+        /** @description What the item holds in one branch, all its variants together */
         RetailBranchStock: {
             /** Format: uuid */
             branch_id?: string;
@@ -10733,7 +10733,7 @@ export interface components {
             items?: components["schemas"]["RetailProduct"][];
             next_cursor?: string;
         };
-        /** @description Issue #384: the item with sizes and colours this product is one variant of; absent for an item without variants */
+        /** @description Issue #384: the item a variant belongs to, and the variant's size and colour (at least one) */
         RetailProductVariantOf: {
             colour?: string;
             /** Format: uuid */
