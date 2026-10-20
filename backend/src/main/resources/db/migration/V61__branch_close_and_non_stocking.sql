@@ -1,5 +1,5 @@
--- V96 (PLACEHOLDER NUMBER: the real number is chosen when the pull request merges; Flyway runs with outOfOrder off, so it
--- must be above the highest one on main): closing a branch and marking a branch as not stocking (issue #329).
+-- V61 (the first free number after V60 on main; Flyway runs with outOfOrder off): closing a branch and marking a branch as not
+-- stocking (issue #329).
 --
 -- Expand only, safe on a populated database. Three nullable-or-defaulted columns on `branches` and nothing else:
 --

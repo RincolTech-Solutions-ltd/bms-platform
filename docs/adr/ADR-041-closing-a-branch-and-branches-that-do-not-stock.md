@@ -2,8 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-20, issue #329; not yet accepted by the product owner). Builds on ADR-017 and ADR-020. The migration number in this change is a placeholder
-(`V96`); the real number is chosen when the pull request merges.
+Proposed (2026-10-20, issue #329; not yet accepted by the product owner). Builds on ADR-017 and ADR-020. The migration is `V61`, the first free number after `V60`.
 
 ## Context
 
