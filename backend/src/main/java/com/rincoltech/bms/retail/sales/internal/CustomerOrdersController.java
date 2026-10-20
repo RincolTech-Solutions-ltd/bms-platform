@@ -3,19 +3,19 @@ package com.rincoltech.bms.retail.sales.internal;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.kernel.NoStore;
 import com.rincoltech.bms.kernel.RequiresPermission;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Board;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.CancelRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.CancellationsReport;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.ChangeRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.DeliverRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Delivered;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.FeesReport;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Lookup;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Order;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderPage;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.SendRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.StepRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Board;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancelRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancellationsReport;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ChangeRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.DeliverRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Delivered;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderPage;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.SendRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.StepRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -43,16 +43,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(path = "/api/v1/retail/orders", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "retail-orders")
-class OrdersController {
+class CustomerOrdersController {
 
-    private final OrdersService service;
+    private final CustomerOrdersService service;
 
-    OrdersController(OrdersService service) {
+    CustomerOrdersController(OrdersService service) {
         this.service = service;
     }
 
     @PostMapping
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Take a customer order: priced, numbered, its stock kept aside, nothing paid yet (issue #385)",
             operationId = "createRetailOrder")
@@ -71,7 +71,7 @@ class OrdersController {
     }
 
     @GetMapping
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary =
                     "Orders in the caller's branch scope, newest first, by step, delivery day and source (issue #385)",
@@ -90,7 +90,7 @@ class OrdersController {
     }
 
     @GetMapping("/board")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "How many open orders are at each step, and today's deliveries (issue #385)",
             operationId = "getRetailOrderBoard")
@@ -101,7 +101,7 @@ class OrdersController {
     }
 
     @GetMapping("/customer-lookup")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "The customer of a phone number, from earlier orders and the credit buyers, to fill an order in"
                     + " (issue #385)",
@@ -112,7 +112,7 @@ class OrdersController {
     }
 
     @GetMapping("/reports/delivery-fees")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Delivered orders and the delivery fees taken, by day, source or rider (issue #385)",
             operationId = "getRetailOrderFeesReport")
@@ -127,7 +127,7 @@ class OrdersController {
     }
 
     @GetMapping("/reports/cancellations")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Orders cancelled and why, by source (issue #385)",
             operationId = "getRetailOrderCancellationsReport")
@@ -141,7 +141,7 @@ class OrdersController {
     }
 
     @GetMapping("/{order_id}")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(summary = "An order with its lines and its history (issue #385)", operationId = "getRetailOrder")
     ResponseEntity<Order> get(@PathVariable("order_id") UUID id, HttpServletResponse response) {
         NoStore.apply(response);
@@ -150,7 +150,7 @@ class OrdersController {
     }
 
     @PatchMapping("/{order_id}")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Change the customer's name, phone, delivery place, day or fee, or the notes, of an open order"
                     + " (issue #385)",
@@ -166,7 +166,7 @@ class OrdersController {
     }
 
     @PostMapping("/{order_id}/pack")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(summary = "Mark an order packed (issue #385)", operationId = "packRetailOrder")
     Order pack(
             @PathVariable("order_id") UUID id,
@@ -177,7 +177,7 @@ class OrdersController {
     }
 
     @PostMapping("/{order_id}/send")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Mark an order out for delivery, with who takes it (issue #385)",
             operationId = "sendRetailOrder")
@@ -188,7 +188,7 @@ class OrdersController {
     }
 
     @PostMapping("/{order_id}/deliver")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Mark an order delivered and paid: it becomes a sale through the ordinary sale path, the delivery"
                     + " fee posted on its own; M (issue #385)",
@@ -208,7 +208,7 @@ class OrdersController {
     }
 
     @PostMapping("/{order_id}/cancel")
-    @RequiresPermission(OrdersService.MANAGE)
+    @RequiresPermission(CustomerOrdersService.MANAGE)
     @Operation(
             summary = "Cancel an open order with a reason; its stock goes back (issue #385)",
             operationId = "cancelRetailOrder")

@@ -15,22 +15,22 @@ import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Board;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.CancelRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.CancellationsReport;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.ChangeRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.DeliverRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Delivered;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.FeesReport;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Lookup;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.Order;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderPage;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.ReportRow;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.SendRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.StepRequest;
-import com.rincoltech.bms.retail.sales.internal.OrdersRepository.Header;
-import com.rincoltech.bms.retail.sales.internal.OrdersRepository.StoredLine;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Board;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancelRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancellationsReport;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ChangeRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.DeliverRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Delivered;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderPage;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ReportRow;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.SendRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.StepRequest;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersRepository.Header;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersRepository.StoredLine;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Customer;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.PaymentRequest;
 import com.rincoltech.bms.retail.sales.internal.SalesApi.Sale;
@@ -69,7 +69,7 @@ import org.springframework.transaction.annotation.Transactional;
  * audit log.
  */
 @Service
-class OrdersService {
+class CustomerOrdersService {
 
     static final String MANAGE = "retail.order.manage";
     static final String ORDER = "retail.customer_order";
@@ -81,7 +81,7 @@ class OrdersService {
             Set.of("open", "ordered", "packed", "out_for_delivery", "delivered", "cancelled");
     static final Set<String> SOURCES = Set.of("whatsapp", "instagram", "facebook", "phone", "walk_in", "other");
 
-    private final OrdersRepository repo;
+    private final CustomerOrdersRepository repo;
     private final SalesRepository salesRepo;
     private final SalesService sales;
     private final AccountsService accounts;
@@ -96,8 +96,8 @@ class OrdersService {
     private final BusinessClock clock;
     private final AuditLog audit;
 
-    OrdersService(
-            OrdersRepository repo,
+    CustomerOrdersService(
+            CustomerOrdersRepository repo,
             SalesRepository salesRepo,
             SalesService sales,
             AccountsService accounts,

@@ -1,10 +1,10 @@
 package com.rincoltech.bms.retail.sales.internal;
 
 import com.rincoltech.bms.kernel.Search;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.CancelledOrder;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderEvent;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.OrderLine;
-import com.rincoltech.bms.retail.sales.internal.OrdersApi.ReportRow;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.CancelledOrder;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderEvent;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderLine;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ReportRow;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.ResultSet;
@@ -23,7 +23,7 @@ import org.springframework.stereotype.Repository;
 
 /** The customer order tables of V70 (issue #385, ADR-052). Every query runs in the caller's transaction. */
 @Repository
-class OrdersRepository {
+class CustomerOrdersRepository {
 
     static final String OPEN = "('ordered', 'packed', 'out_for_delivery')";
 
@@ -40,7 +40,7 @@ class OrdersRepository {
 
     private final JdbcClient jdbc;
 
-    OrdersRepository(JdbcClient jdbc) {
+    CustomerOrdersRepository(JdbcClient jdbc) {
         this.jdbc = jdbc;
     }
 

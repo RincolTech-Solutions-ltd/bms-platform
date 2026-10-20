@@ -23,12 +23,12 @@ import java.util.UUID;
  * Request and response bodies of the customer order routes (issue #385, ADR-052; chapter 7 section 7.11.20). An order carries
  * the prices agreed with the customer and never a cost.
  */
-final class OrdersApi {
+final class CustomerOrdersApi {
 
     static final String SOURCES = "whatsapp|instagram|facebook|phone|walk_in|other";
     static final String MONEY = "cash|mobile_money|bank";
 
-    private OrdersApi() {}
+    private CustomerOrdersApi() {}
 
     @Schema(name = "RetailOrderLineRequest")
     record OrderLineRequest(
