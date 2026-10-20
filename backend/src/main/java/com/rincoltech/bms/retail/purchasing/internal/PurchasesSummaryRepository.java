@@ -46,6 +46,7 @@ class PurchasesSummaryRepository {
             UUID supplierId,
             UUID categoryId,
             UUID itemId,
+            String status,
             int offset,
             int limit) {}
 
@@ -65,9 +66,14 @@ class PurchasesSummaryRepository {
         StringBuilder sql = new StringBuilder("SELECT " + key + " AS grp,");
         sql.append(" count(DISTINCT p.id) FILTER (WHERE " + live + ") AS purchases_count,");
         sql.append(" count(DISTINCT p.id) FILTER (WHERE v.id IS NOT NULL) AS voided_count,");
+        // What the card shows: a line entered in a pack is its pack quantity (rounded to three places, per branch) at
+        // the
+        // pack cost, any other line the base quantity at the cost per base unit.
+        String value = "CASE WHEN l.unit_id IS NULL THEN round(m.qty * l.cost_minor)"
+                + " ELSE round(round(m.qty / l.unit_factor, 3) * l.unit_cost_minor) END";
         sql.append(
                 spec.withCost()
-                        ? " coalesce(sum(round(m.qty * l.cost_minor)) FILTER (WHERE " + live + "), 0) AS total_minor,"
+                        ? " coalesce(sum(" + value + ") FILTER (WHERE " + live + "), 0) AS total_minor,"
                         : " 0 AS total_minor,");
         sql.append(
                 level.equals("item")
@@ -96,6 +102,11 @@ class PurchasesSummaryRepository {
             params.put("to", Date.valueOf(spec.to()));
         }
         appendSupplier(sql, params, spec.supplierId());
+        if ("voided".equals(spec.status())) {
+            sql.append(" AND v.id IS NOT NULL");
+        } else if ("posted".equals(spec.status())) {
+            sql.append(" AND v.id IS NULL");
+        }
         if (spec.categoryId() != null) {
             sql.append(" AND pr.category_id = :categoryId");
             params.put("categoryId", spec.categoryId());

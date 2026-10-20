@@ -123,9 +123,10 @@ class PurchasingController {
             @RequestParam(name = "supplier_id", required = false) UUID supplierId,
             @RequestParam(name = "category_id", required = false) UUID categoryId,
             @RequestParam(name = "item_id", required = false) UUID itemId,
+            @RequestParam(name = "status", required = false) String status,
             @RequestParam(name = "offset", required = false) Integer offset) {
         return summaryService.summary(new PurchasesSummaryService.Query(
-                groupBy, level, branchIds, from, to, supplierId, categoryId, itemId, offset));
+                groupBy, level, branchIds, from, to, supplierId, categoryId, itemId, status, offset));
     }
 
     @GetMapping("/purchases/{purchase_id}")

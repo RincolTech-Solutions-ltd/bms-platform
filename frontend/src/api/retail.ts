@@ -303,6 +303,8 @@ export interface PurchasesSummaryQuery {
   supplierId?: string;
   categoryId?: string;
   itemId?: string;
+  /** The posted or voided restocks only; absent for both. */
+  status?: 'posted' | 'voided';
   offset?: number;
   signal?: AbortSignal;
 }
@@ -1146,13 +1148,13 @@ const realRetail: RetailApi = {
     );
   },
 
-  async purchasesSummary({ level, chain, branchId, from, to, supplierId, categoryId, itemId, offset, signal }) {
+  async purchasesSummary({ level, chain, branchId, from, to, supplierId, categoryId, itemId, status, offset, signal }) {
     return unwrap(
       await api.GET('/api/v1/retail/purchases/summary', {
         params: {
           query: {
             group_by: chain.join(','), level, branch_id: branchId ? [branchId] : undefined, from: from || undefined, to: to || undefined,
-            supplier_id: supplierId || undefined, category_id: categoryId || undefined, item_id: itemId || undefined, offset: offset || undefined,
+            supplier_id: supplierId || undefined, category_id: categoryId || undefined, item_id: itemId || undefined, status, offset: offset || undefined,
           },
         },
         signal,

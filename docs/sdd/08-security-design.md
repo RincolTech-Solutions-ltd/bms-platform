@@ -348,7 +348,7 @@ Notes:
   The restocks summary (`GET /retail/purchases/summary`, issue #350) and the stock summary (`GET /retail/stock/summary`) follow the same
   rule for what they add up at cost: `total_minor` and `cost_minor` are present only when the caller holds `retail.profit.read` in every
   branch the figures cover, and the counts, quantities and the value at the selling price need only the list's own permission
-  (`retail.purchase.create` and `retail.stock.read`) and its branch scope.
+  (`retail.purchase.create` and `retail.stock.read`) and its branch scope. The restock cards under a group are the existing restocks list, which already shows each line's cost and the total to a holder of `retail.purchase.create`; the summaries add no new exposure there, and their cost figures follow the stricter `retail.profit.read` rule only because they are sums across restocks. Probing the list with `product_id` or `category_id` finds only restocks that put that product into a branch the caller may read.
   The sales role holds no `core.*` permission; the PWA reads the user's branches from `/me`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and

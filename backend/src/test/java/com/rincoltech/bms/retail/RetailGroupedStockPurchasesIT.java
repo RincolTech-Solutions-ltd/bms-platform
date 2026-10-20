@@ -172,6 +172,126 @@ class RetailGroupedStockPurchasesIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
+    // ---- the rows under a group, the pack lines, the status filter -------------------------
+
+    Map<String, Object> lineOf(UUID product, long cost, Map<UUID, String> qty, UUID unit) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("cost_minor", cost);
+        if (unit != null) {
+            line.put("unit_id", unit);
+        }
+        line.put(
+                "qty_by_branch",
+                qty.entrySet().stream()
+                        .map(e -> Map.of("branch_id", e.getKey(), "qty", e.getValue()))
+                        .toList());
+        return line;
+    }
+
+    JsonNode restock(String on, List<Map<String, Object>> lines) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("purchased_on", on);
+        body.put("payment_method", "cash");
+        body.put("lines", lines);
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/purchases", body, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return r.getBody();
+    }
+
+    @Test
+    void anAllBranchAdminOpeningAShopGroupStillSeesAndVoidsTheWholeRestock() {
+        JsonNode both = restock("2026-10-06", List.of(lineOf(p1, 1_000, Map.of(hq, "5", br2, "5"), null)));
+        JsonNode listed = body(api.get("/purchases?branch_id=" + hq + "&product_id=" + p1, ADMIN));
+        JsonNode card = null;
+        for (JsonNode item : listed.get("items")) {
+            if (item.get("id").asString().equals(both.get("id").asString())) {
+                card = item;
+            }
+        }
+        assertThat(card).as("the restock is listed under the shop").isNotNull();
+        assertThat(card.get("lines").get(0).get("qty_by_branch")).hasSize(2);
+        assertThat(card.path("partial").asBoolean(false)).isFalse();
+        ResponseEntity<JsonNode> v = api.postKeyed(
+                "/purchases/" + both.get("id").asString() + "/void",
+                Map.of("reason", "Entered in error"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void theBranchTheCategoryAndTheItemAreTestedOnTheSameMovement() {
+        // One restock: the first item went to the head office, the second to the other branch.
+        JsonNode x = restock(
+                "2026-10-07",
+                List.of(lineOf(p1, 1_000, Map.of(hq, "3"), null), lineOf(p2, 2_000, Map.of(br2, "2"), null)));
+        String id = x.get("id").asString();
+        assertThat(body(api.get("/purchases?branch_id=" + hq + "&product_id=" + p2, ADMIN))
+                        .get("items")
+                        .toString())
+                .doesNotContain(id);
+        assertThat(body(api.get("/purchases?branch_id=" + br2 + "&product_id=" + p2, ADMIN))
+                        .get("items")
+                        .toString())
+                .contains(id);
+        UUID cat2 = UUID.fromString(RetailTestSupport.idOf(api.get("/products/" + p2, ADMIN), "category_id"));
+        assertThat(body(api.get("/purchases?branch_id=" + hq + "&category_id=" + cat2, ADMIN))
+                        .get("items")
+                        .toString())
+                .doesNotContain(id);
+        // A caller who manages only the other branch cannot learn that the first item went to the head office.
+        ResponseEntity<JsonNode> probe =
+                api.call(HttpMethod.GET, "/purchases?product_id=" + p1, null, ADMIN, br2.toString(), Map.of());
+        assertThat(body(probe).get("items").toString()).doesNotContain(id);
+        // The restock has a line in two categories: each category counts it once, with its own value.
+        JsonNode cats = body(api.get("/purchases/summary?group_by=category&from=2026-10-07&to=2026-10-07", ADMIN));
+        UUID cat1 = UUID.fromString(RetailTestSupport.idOf(api.get("/products/" + p1, ADMIN), "category_id"));
+        assertThat(group(cats, cat1.toString()).get("purchases_count").asLong()).isEqualTo(1);
+        assertThat(group(cats, cat1.toString()).get("total_minor").asLong()).isEqualTo(3_000);
+        assertThat(group(cats, cat2.toString()).get("purchases_count").asLong()).isEqualTo(1);
+        assertThat(group(cats, cat2.toString()).get("total_minor").asLong()).isEqualTo(4_000);
+    }
+
+    @Test
+    void aPackLineIsValuedAsTheCardShowsIt() {
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> on = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("units", true),
+                "core.settings.manage",
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+        UUID carton = api.unit("carton");
+        ResponseEntity<JsonNode> pack =
+                api.post("/products/" + p1 + "/units", Map.of("unit_id", carton, "factor", "3"), ADMIN);
+        assertThat(pack.getStatusCode()).as("%s", pack.getBody()).isEqualTo(HttpStatus.CREATED);
+        // One carton of three at 1,000 a carton: the card says 1,000, not 3 x round(1,000 / 3) = 999.
+        JsonNode bought = restock("2026-10-08", List.of(lineOf(p1, 1_000, Map.of(hq, "1"), carton)));
+        assertThat(bought.get("total_minor").asLong()).isEqualTo(1_000);
+        JsonNode days = body(api.get("/purchases/summary?group_by=day&from=2026-10-08&to=2026-10-08", ADMIN));
+        assertThat(group(days, "2026-10-08").get("total_minor").asLong()).isEqualTo(1_000);
+    }
+
+    @Test
+    void theSummaryHonoursTheStatusFilterOfTheList() {
+        JsonNode posted = body(api.get("/purchases/summary?group_by=year&status=posted", ADMIN));
+        assertThat(group(posted, "2026").get("purchases_count").asLong()).isEqualTo(2);
+        assertThat(group(posted, "2026").get("voided_count").asLong()).isZero();
+        JsonNode gone = body(api.get("/purchases/summary?group_by=year&status=voided", ADMIN));
+        assertThat(group(gone, "2026").get("purchases_count").asLong()).isZero();
+        assertThat(group(gone, "2026").get("voided_count").asLong()).isEqualTo(1);
+        assertThat(api.get("/purchases/summary?group_by=year&status=other", ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
     // ---- stock -----------------------------------------------------------------------------
 
     @Test

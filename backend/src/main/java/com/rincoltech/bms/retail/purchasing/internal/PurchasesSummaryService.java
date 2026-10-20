@@ -53,6 +53,7 @@ class PurchasesSummaryService {
             UUID supplierId,
             UUID categoryId,
             UUID itemId,
+            String status,
             Integer offset) {}
 
     @Transactional(readOnly = true)
@@ -69,6 +70,10 @@ class PurchasesSummaryService {
         }
         if (q.offset() != null && q.offset() < 0) {
             throw ApiException.validation(List.of(new FieldProblem("offset", "invalid", "offset is zero or more.")));
+        }
+        if (q.status() != null && !q.status().equals("posted") && !q.status().equals("voided")) {
+            throw ApiException.validation(
+                    List.of(new FieldProblem("status", "invalid", "status is posted or voided.")));
         }
         String currency = tenant.profile().currency();
         int at = chain.indexOf(level);
@@ -95,6 +100,7 @@ class PurchasesSummaryService {
                 q.supplierId(),
                 q.categoryId(),
                 q.itemId(),
+                q.status(),
                 offset,
                 size + 1));
         boolean more = rows.size() > size;

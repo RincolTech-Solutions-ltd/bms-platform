@@ -394,7 +394,10 @@ class PurchasingService {
             throw ApiException.validation(
                     List.of(new FieldProblem("status", "invalid", "status is posted or voided.")));
         }
-        List<UUID> filter = CurrentPrincipal.require().branchFilter(PERMISSION, branchIds);
+        List<UUID> filter = CurrentPrincipal.require().branchFilter(PERMISSION, null);
+        // Which restocks are listed follows the branch asked for; what each card shows (and may be corrected from)
+        // follows the caller's own scope.
+        List<UUID> listed = CurrentPrincipal.require().branchFilter(PERMISSION, branchIds);
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Instant afterCreated = null;
         UUID afterId = null;

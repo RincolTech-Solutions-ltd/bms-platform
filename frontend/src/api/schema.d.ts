@@ -20594,6 +20594,7 @@ export interface operations {
                 supplier_id?: string;
                 category_id?: string;
                 item_id?: string;
+                status?: string;
                 offset?: number;
             };
             header?: never;

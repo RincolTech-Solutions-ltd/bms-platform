@@ -12,12 +12,12 @@ import { Problem, money } from './ui';
 
 const timeTitle = (level: PurchaseLevel, key: string) => (level === 'year' || level === 'month' || level === 'day' ? periodTitle(level, key) : null);
 
-const kind: TreeKind<PurchaseLevel, PurchasesSummaryGroup> = {
+const kindFor = (status: 'all' | 'posted' | 'voided'): TreeKind<PurchaseLevel, PurchasesSummaryGroup> => ({
   name: 'restocks',
   plurals: PURCHASE_PLURALS,
   fetch: (level, chain, sel, page, signal) =>
     retail.purchasesSummary({
-      level, chain, signal, branchId: sel.branchId, from: sel.from, to: page.to ?? sel.to, supplierId: sel.supplierId, categoryId: sel.categoryId, itemId: sel.itemId, offset: page.offset,
+      level, chain, signal, branchId: sel.branchId, from: sel.from, to: page.to ?? sel.to, supplierId: sel.supplierId, categoryId: sel.categoryId, itemId: sel.itemId, status: status === 'all' ? undefined : status, offset: page.offset,
     }),
   title: (level, g) => timeTitle(level, g.key ?? '') ?? g.label ?? g.key ?? '',
   figures: (level, g, sel) => (
@@ -31,7 +31,7 @@ const kind: TreeKind<PurchaseLevel, PurchasesSummaryGroup> = {
     </>
   ),
   nothing: 'No restocks here.',
-};
+});
 
 /** The restocks of an opened group, with the screen's own cards: a group of a category or an item lists whole restocks that include it. */
 function RestockRows({ sel, status, render }: { sel: ListSelection; status: 'all' | 'posted' | 'voided'; render: (p: Purchase) => React.ReactNode }) {
@@ -67,7 +67,7 @@ export function GroupedRestocks({ view, range, status, render }: {
 }) {
   return (
     <ListChain<PurchaseLevel, PurchasesSummaryGroup>
-      kind={kind} filterKey={null} chain={view.chain} enabled={range.from <= range.to} view={view} rootLabel="Past restocks" range={range}
+      kind={kindFor(status)} filterKey={status} chain={view.chain} enabled={range.from <= range.to} view={view} rootLabel="Past restocks" range={range}
       offersRows={(i) => offersRestocks(view.chain, i)} rowsWord="restocks"
       renderRows={(sel) => <RestockRows sel={sel} status={status} render={render} />}
     />

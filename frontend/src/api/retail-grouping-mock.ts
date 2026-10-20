@@ -33,7 +33,8 @@ export function summarisePurchases(purchases: Purchase[], q: PurchasesSummaryQue
   ).filter((e) => {
     const day = e.purchase.purchased_on ?? '';
     const supplier = e.purchase.supplier_id ?? NO_SUPPLIER;
-    return (!q.branchId || e.branchId === q.branchId) && (!q.from || day >= q.from) && (!q.to || day <= q.to)
+    return (!q.status || (q.status === 'voided') === (e.purchase.status === 'voided'))
+      && (!q.branchId || e.branchId === q.branchId) && (!q.from || day >= q.from) && (!q.to || day <= q.to)
       && (!q.supplierId || supplier === q.supplierId) && (!q.itemId || e.productId === q.itemId)
       && (!q.categoryId || ctx.product(e.productId)?.categoryId === q.categoryId);
   });

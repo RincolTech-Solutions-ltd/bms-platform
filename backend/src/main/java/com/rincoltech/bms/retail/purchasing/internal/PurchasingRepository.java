@@ -248,6 +248,7 @@ class PurchasingRepository {
      */
     List<Purchase> page(
             List<UUID> branchIds,
+            List<UUID> listedBranches,
             LocalDate from,
             LocalDate to,
             UUID supplierId,
@@ -260,13 +261,32 @@ class PurchasingRepository {
             int limit) {
         StringBuilder sql = new StringBuilder(HEADER + " WHERE true");
         Map<String, Object> params = new LinkedHashMap<>();
-        if (branchIds != null) {
-            if (branchIds.isEmpty()) {
-                return List.of();
+        if (listedBranches != null && listedBranches.isEmpty()) {
+            return List.of();
+        }
+        // Which restocks are listed (issue #350): one movement row must match the branch, the category and the item
+        // asked
+        // for together, as the grouped summary counts them, so a scoped caller cannot probe for what went to branches
+        // outside their scope. What each restock then shows is scoped by the caller's own branches (branchIds) alone.
+        if (listedBranches != null || categoryId != null || productId != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM retail_stock_movements m");
+            if (categoryId != null) {
+                sql.append(" JOIN retail_products cp ON cp.id = m.product_id");
             }
-            sql.append(" AND EXISTS (SELECT 1 FROM retail_stock_movements m WHERE m.source_type = 'retail.purchase'"
-                    + " AND m.source_id = p.id AND m.branch_id IN (:branchIds))");
-            params.put("branchIds", branchIds);
+            sql.append(" WHERE m.source_type = 'retail.purchase' AND m.kind = 'purchase' AND m.source_id = p.id");
+            if (listedBranches != null) {
+                sql.append(" AND m.branch_id IN (:branchIds)");
+                params.put("branchIds", listedBranches);
+            }
+            if (categoryId != null) {
+                sql.append(" AND cp.category_id = :categoryId");
+                params.put("categoryId", categoryId);
+            }
+            if (productId != null) {
+                sql.append(" AND m.product_id = :productId");
+                params.put("productId", productId);
+            }
+            sql.append(")");
         }
         if (from != null) {
             sql.append(" AND p.purchased_on >= :from");
@@ -277,18 +297,6 @@ class PurchasingRepository {
             params.put("to", Date.valueOf(to));
         }
         PurchasesSummaryRepository.appendSupplier(sql, params, supplierId);
-        // A category or an item chosen in the grouped view (issue #350): the restocks that have a line in it.
-        if (categoryId != null) {
-            sql.append(
-                    " AND EXISTS (SELECT 1 FROM retail_purchase_lines cl JOIN retail_products cp ON cp.id = cl.product_id"
-                            + " WHERE cl.purchase_id = p.id AND cp.category_id = :categoryId)");
-            params.put("categoryId", categoryId);
-        }
-        if (productId != null) {
-            sql.append(" AND EXISTS (SELECT 1 FROM retail_purchase_lines il WHERE il.purchase_id = p.id"
-                    + " AND il.product_id = :productId)");
-            params.put("productId", productId);
-        }
         if ("voided".equals(status)) {
             sql.append(" AND v.id IS NOT NULL");
         } else if ("posted".equals(status)) {
