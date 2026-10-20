@@ -343,7 +343,7 @@ export function createMockRetail(): RetailApi {
       : planVariants({ baseCode: f.baseCode, sizes, colours, costMinor, sellMinor, existing, nextPosition });
     if (plan.length > 100) refuse(422, 'too_many_variants', `That makes ${plan.length} sizes and colours. Make at most 100 at a time; add the rest afterwards.`);
     for (const v of plan) {
-      if (existing.has(variantKey(v.size, v.colour)) && lines && lines.length > 0) refuse(422, 'duplicate_variant', `The item has ${variantLabel(v.size, v.colour)} already. Each one is listed once.`);
+      if (existing.has(variantKey(v.size, v.colour)) && lines && lines.length > 0) refuse(409, 'duplicate_variant', `The item has ${variantLabel(v.size, v.colour)} already. Each one is listed once.`);
       if ([...products.values()].some((x) => x.code.toLowerCase() === v.code.toLowerCase())) refuse(409, 'duplicate_product_code', `A product with the code ${v.code} exists. Give ${variantLabel(v.size, v.colour)} another code.`);
       const p: MockProduct = { id: nextId('b'), code: v.code, description: variantDescription(f.name, v.size, v.colour), category: f.category, unit: f.unit, costMinor: v.costMinor, sellMinor: v.sellMinor, active: true, version: 1, familyId, size: v.size, colour: v.colour, position: v.position };
       products.set(p.id, p);

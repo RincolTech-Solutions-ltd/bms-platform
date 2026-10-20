@@ -754,6 +754,22 @@ class CatalogueRepository {
                 .update();
     }
 
+    /** Another variant of the item with this size and colour (case ignored), other than {@code excludeId}. */
+    boolean variantTaken(UUID familyId, String size, String colour, UUID excludeId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM retail_products
+                                        WHERE family_id = :familyId AND id <> :excludeId
+                                          AND lower(coalesce(variant_size, '')) = lower(coalesce(CAST(:size AS text), ''))
+                                          AND lower(coalesce(variant_colour, '')) = lower(coalesce(CAST(:colour AS text), '')))
+                        """)
+                .param("familyId", familyId)
+                .param("excludeId", excludeId)
+                .param("size", size, java.sql.Types.VARCHAR)
+                .param("colour", colour, java.sql.Types.VARCHAR)
+                .query(Boolean.class)
+                .single();
+    }
+
     /** Every variant of an item follows its new category. */
     void setFamilyCategory(UUID familyId, UUID categoryId) {
         jdbc.sql("""

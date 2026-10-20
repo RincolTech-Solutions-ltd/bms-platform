@@ -358,6 +358,11 @@ class CatalogueService {
                 throw ApiException.validation(
                         List.of(new FieldProblem("variant_size", "invalid", "Keep a size, a colour or both.")));
             }
+            // Before the name check: the other variant's name is the same, and the owner should hear why in item words.
+            if ((!Objects.equals(size, variant.size()) || !Objects.equals(colour, variant.colour()))
+                    && repo.variantTaken(variant.familyId(), size, colour, id)) {
+                throw duplicateVariant(size, colour);
+            }
         }
         requireCategoryAndUnit(
                 r.categoryId() == null ? before.categoryId() : r.categoryId(),

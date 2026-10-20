@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.springframework.http.HttpStatus;
 
 /**
  * The quick creation of an item's variants (issue #384, ADR-051): the sizes and colours are chosen once and every
@@ -69,8 +70,10 @@ final class VariantGrid {
                             "Give each size and colour line a size, a colour or both.")));
                 }
                 if (!seen.add(Planned.key(size, colour))) {
-                    throw ApiException.rule(
+                    throw new ApiException(
+                            HttpStatus.CONFLICT,
                             "duplicate_variant",
+                            "Duplicate",
                             "The item has " + label(size, colour) + " already. Each one is listed once.");
                 }
                 String code = l.code() == null || l.code().isBlank()
