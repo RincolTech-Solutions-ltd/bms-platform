@@ -434,7 +434,10 @@ class RetailControlsIT extends IntegrationTest {
                 "/summary?from=2026-10-10&to=2026-10-01",
                 "/groups?metric=nonsense&group_by=user",
                 "/groups?metric=voided_sales&group_by=user,user",
-                "/groups?metric=voided_sales&group_by=user&level=day")) {
+                "/groups?metric=voided_sales&group_by=user&level=day",
+                // A price, a cost and a correction have no approver to group by.
+                "/groups?metric=price_overrides&group_by=branch,approver",
+                "/groups?metric=quantity_corrections&group_by=approver")) {
             ResponseEntity<JsonNode> r = one.call(HttpMethod.GET, "/controls" + path, null, CONTROLS, "*", Map.of());
             assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         }

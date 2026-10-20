@@ -86,7 +86,7 @@ export const METRICS: MetricWords[] = [
   { metric: 'returns', title: 'Goods taken back', noun: 'returns', what: () => 'Customer returns, each with a credit note.' },
   { metric: 'price_overrides', title: 'Prices changed', noun: 'lines', what: () => 'Sale lines where the price typed was not the price the system chose. A reason is always given.' },
   { metric: 'discounts', title: 'Discounts given', noun: 'lines', what: () => 'Sale lines sold for less than the price the system chose. The money is what was given up.' },
-  { metric: 'restock_voids', title: 'Restocks cancelled', noun: 'restocks', what: () => 'Restocks entered wrongly and voided. The stock, the books and the prices went back. The value is the restock total. No rate: it is not about sales.' },
+  { metric: 'restock_voids', title: 'Restocks cancelled', noun: 'restocks', what: () => 'Restocks entered wrongly and voided, one line for each shop the restock stocked. The stock, the books and the prices went back. The value is the quantity at the selling price now. No rate: it is not about sales.' },
   { metric: 'quantity_corrections', title: 'Quantities corrected', noun: 'corrections', what: () => 'Stock quantities changed on the stock list as an entry mistake or a miscount. The value is the change at the selling price now. No rate: it is not about sales.' },
   { metric: 'below_cost', title: 'Sold below cost', noun: 'lines', what: () => 'Sale lines priced under what the item cost. Shown only to people who may read profit.' },
 ];
@@ -249,7 +249,11 @@ export function csvField(value: string | number | undefined): string {
 export const csvOf = (rows: (string | number | undefined)[][]): string => `${rows.map((r) => r.map(csvField).join(',')).join('\r\n')}\r\n`;
 
 /** The groups on screen as a CSV: the name, how many, the value, the sales entered and the rate. */
-export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[]): string {
+export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[], metric = 'voided_sales'): string {
+  if (isStockMetric(metric)) {
+    // Not about sales: no sales to count, no rate.
+    return csvOf([[LEVEL_NAMES[level], 'Count', 'Value'], ...groups.map((g) => [groupTitle(level, g), g.count ?? 0, g.value_minor ?? 0])]);
+  }
   return csvOf([
     [LEVEL_NAMES[level], 'Count', 'Sales with it', 'Value', 'Sales entered', 'Per 100 sales'],
     ...groups.map((g) => [groupTitle(level, g), g.count ?? 0, g.sales_affected ?? 0, g.value_minor ?? 0, g.sales_count ?? 0, g.rate_per_100]),
@@ -258,8 +262,10 @@ export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[]): string
 
 /** The records on screen as a CSV. */
 export function recordsCsv(records: ControlsRecord[], metric: string): string {
+  const who = metric === 'restock_voids' ? 'Entered by' : metric === 'quantity_corrections' ? 'Corrected by' : 'Person (whose sale)';
+  const number = metric === 'restock_voids' ? 'Restock' : metric === 'quantity_corrections' ? 'Record' : 'Sale';
   return csvOf([
-    ['Sale', 'Credit note', 'Time', 'Shop', 'Person (whose sale)', 'Approver', 'Reason', 'Item', 'Value'],
+    [number, 'Credit note', 'Time', 'Shop', who, 'Approver', 'Reason', 'Item', 'Value'],
     ...records.map((r) => [r.sale_no, r.reference, whenWords(r.at), r.branch_name, whoWords(r), approverWords(r, metric), r.reason, r.item, r.value_minor ?? 0]),
   ]);
 }

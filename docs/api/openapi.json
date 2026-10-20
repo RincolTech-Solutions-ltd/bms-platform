@@ -7183,7 +7183,7 @@
             "type" : "integer"
           },
           "metric" : {
-            "description" : "voided_sales, quick_cancels, returns, price_overrides, discounts or below_cost; the key to ask groups and records for",
+            "description" : "voided_sales, quick_cancels, returns, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for",
             "type" : "string"
           },
           "previous_count" : {
@@ -7412,7 +7412,7 @@
             "type" : "string"
           },
           "approver_name" : {
-            "description" : "Who cancelled the sale or took the goods back; absent for a price or a cost",
+            "description" : "Who cancelled the sale, took the goods back or voided the restock; absent for a price, a cost and a correction",
             "type" : "string"
           },
           "approver_status" : {
@@ -7430,7 +7430,7 @@
             "type" : "string"
           },
           "item" : {
-            "description" : "Price changes, discounts and below cost only: the item",
+            "description" : "Price changes, discounts, below cost and quantity corrections only: the item",
             "type" : "string"
           },
           "reason" : {
@@ -7441,10 +7441,12 @@
             "type" : "string"
           },
           "sale_id" : {
+            "description" : "The sale; for restock_voids the restock's id, and for quantity_corrections absent",
             "format" : "uuid",
             "type" : "string"
           },
           "sale_no" : {
+            "description" : "The sale number; for restock_voids the restock's number, and for quantity_corrections absent",
             "type" : "string"
           },
           "user_id" : {

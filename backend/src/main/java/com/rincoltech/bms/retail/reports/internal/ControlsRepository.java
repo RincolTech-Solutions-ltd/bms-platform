@@ -133,27 +133,31 @@ class ControlsRepository {
             case "below_cost" ->
                 "SELECT 'below_cost'" + lineColumns("CAST(NULL AS text)", "l.line_total_minor") + lines
                         + " AND l.line_total_minor < l.line_cost_minor";
-            // A restock voided (ADR-044): the person is who entered the restock, the approver who voided it, the branch
-            // the first
-            // one it stocked; sale_id and sale_no carry the restock's id and number. The value is the restock's total.
+            // A restock voided (ADR-044): one event per restock and branch it stocked, from its purchase movements. The
+            // person is
+            // who entered the restock, the approver who voided it; sale_id and sale_no carry the restock's id and
+            // number. The
+            // value is that branch's quantity at the item's SELLING price now (never the restock's cost).
             case "restock_voids" ->
                 "SELECT 'restock_voids'"
                         + COLUMNS.formatted(
                                 "p.id",
                                 "p.purchase_no",
                                 "CAST(NULL AS text)",
-                                "(SELECT m.branch_id FROM retail_stock_movements m WHERE m.tenant_id = p.tenant_id"
-                                        + " AND m.source_type = 'retail.purchase' AND m.source_id = p.id"
-                                        + " AND m.kind = 'purchase' ORDER BY m.branch_id LIMIT 1)",
+                                "mb.branch_id",
                                 "p.created_by",
                                 "v.voided_on",
                                 "v.created_at",
                                 "v.reason",
-                                "p.total_minor",
+                                "mb.value_minor",
                                 "CAST(NULL AS text)",
                                 "v.voided_by")
-                        + " FROM retail_purchase_voids v JOIN retail_purchases p ON p.tenant_id = v.tenant_id"
-                        + " AND p.id = v.purchase_id WHERE v.voided_on >= :from AND v.voided_on <= :to";
+                        + " FROM retail_purchase_voids v JOIN retail_purchases p ON p.tenant_id = v.tenant_id AND p.id"
+                        + " = v.purchase_id JOIN LATERAL (SELECT m.branch_id, round(sum(m.qty *"
+                        + " pr.sell_minor))::bigint AS value_minor FROM retail_stock_movements m JOIN retail_products"
+                        + " pr ON pr.tenant_id = m.tenant_id AND pr.id = m.product_id WHERE m.tenant_id = p.tenant_id"
+                        + " AND m.source_type = 'retail.purchase' AND m.source_id = p.id AND m.kind = 'purchase' GROUP"
+                        + " BY m.branch_id) mb ON true WHERE v.voided_on >= :from AND v.voided_on <= :to";
             // A quantity corrected on the stock list (ADR-044): the person is who corrected it, the reason the code and
             // the
             // note, the value the change at the item's selling price now (never a cost), the day the day it was made.

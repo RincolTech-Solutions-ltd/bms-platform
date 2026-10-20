@@ -63,7 +63,7 @@ function Card({ card, selected, onPick, before, within }: { card: ControlsCard; 
             <span className="hint">{count === 0 ? 'Nothing in these days' : lines ? `${count} ${count === 1 ? 'line' : 'lines'} in ${sales} ${sales === 1 ? 'sale' : 'sales'}, lines worth ${money(card.value_minor ?? 0)}` : `Worth ${money(card.value_minor ?? 0)}`}</span>
             {!isStockMetric(card.metric ?? '') && <span className="hint">{rateWords(card.rate_per_100)}</span>}
             <span className="hint">{trendWords(count, card.previous_count ?? 0, before)}</span>
-            {shareWords(card.share_of_sales_bp) && count > 0 && <span className="hint">{shareWords(card.share_of_sales_bp)}</span>}
+            {!isStockMetric(card.metric ?? '') && shareWords(card.share_of_sales_bp) && count > 0 && <span className="hint">{shareWords(card.share_of_sales_bp)}</span>}
           </>
         )}
         <span className="visually-hidden">{words.what(within)}</span>
@@ -174,7 +174,7 @@ function LevelList({ index, sel, parent, root, ...shared }: Shared & { index: nu
       {query.hasNextPage && (
         <button type="button" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? 'Loading' : `Show more ${LEVEL_PLURALS[level]}`}</button>
       )}
-      <ExportButton name={`controls-${metric}-by-${level}.csv`} text={groupsCsv(level, items)} />
+      <ExportButton name={`controls-${metric}-by-${level}.csv`} text={groupsCsv(level, items, metric)} />
     </>
   );
 }

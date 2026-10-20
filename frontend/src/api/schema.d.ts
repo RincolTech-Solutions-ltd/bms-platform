@@ -8479,7 +8479,7 @@ export interface components {
         RetailControlsCard: {
             /** Format: int64 */
             count?: number;
-            /** @description voided_sales, quick_cancels, returns, price_overrides, discounts or below_cost; the key to ask groups and records for */
+            /** @description voided_sales, quick_cancels, returns, price_overrides, discounts, below_cost, restock_voids or quantity_corrections; the key to ask groups and records for */
             metric?: string;
             /** Format: int64 */
             previous_count?: number;
@@ -8609,7 +8609,7 @@ export interface components {
         RetailControlsRecord: {
             /** Format: uuid */
             approver_id?: string;
-            /** @description Who cancelled the sale or took the goods back; absent for a price or a cost */
+            /** @description Who cancelled the sale, took the goods back or voided the restock; absent for a price, a cost and a correction */
             approver_name?: string;
             approver_status?: string;
             /** Format: date-time */
@@ -8617,13 +8617,17 @@ export interface components {
             /** Format: uuid */
             branch_id?: string;
             branch_name?: string;
-            /** @description Price changes, discounts and below cost only: the item */
+            /** @description Price changes, discounts, below cost and quantity corrections only: the item */
             item?: string;
             reason?: string;
             /** @description Returns only: the number of the credit note */
             reference?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The sale; for restock_voids the restock's id, and for quantity_corrections absent
+             */
             sale_id?: string;
+            /** @description The sale number; for restock_voids the restock's number, and for quantity_corrections absent */
             sale_no?: string;
             /** Format: uuid */
             user_id?: string;

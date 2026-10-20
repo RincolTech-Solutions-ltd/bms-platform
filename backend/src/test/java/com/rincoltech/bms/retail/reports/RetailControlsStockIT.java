@@ -110,13 +110,16 @@ class RetailControlsStockIT extends IntegrationTest {
         JsonNode s = get("/summary", Map.of());
         JsonNode restocks = card(s, "restock_voids");
         assertThat(restocks.get("count").asLong()).isEqualTo(1);
-        assertThat(restocks.get("value_minor").asLong()).isEqualTo(5_000);
+        // 5 pieces at the selling price of 1,500, never the 5,000 the restock cost.
+        assertThat(restocks.get("value_minor").asLong()).isEqualTo(7_500);
         assertThat(restocks.has("rate_per_100")).isFalse();
+        assertThat(restocks.has("share_of_sales_bp")).isFalse();
         JsonNode corrections = card(s, "quantity_corrections");
         assertThat(corrections.get("count").asLong()).isEqualTo(1);
         // 3 pieces fewer at the selling price of 1,500 now; never a cost.
         assertThat(corrections.get("value_minor").asLong()).isEqualTo(4_500);
         assertThat(corrections.has("rate_per_100")).isFalse();
+        assertThat(corrections.has("share_of_sales_bp")).isFalse();
         assertThat(s.toString()).doesNotContain("cost_minor");
     }
 
@@ -128,7 +131,7 @@ class RetailControlsStockIT extends IntegrationTest {
         assertThat(r.get("approver_name").asString()).isEqualTo("Test Admin Two");
         assertThat(r.get("reason").asString()).isEqualTo("Test wrong supplier");
         assertThat(r.get("branch_id").asString()).isEqualTo(t.secondBranch().toString());
-        assertThat(r.get("value_minor").asLong()).isEqualTo(5_000);
+        assertThat(r.get("value_minor").asLong()).isEqualTo(7_500);
 
         JsonNode fixes = get("/records?metric=quantity_corrections", Map.of());
         JsonNode f = fixes.get("items").get(0);
@@ -141,6 +144,68 @@ class RetailControlsStockIT extends IntegrationTest {
         JsonNode g = people.get("items").get(0);
         assertThat(g.get("count").asLong()).isEqualTo(1);
         assertThat(g.has("rate_per_100")).isFalse();
+    }
+
+    @Test
+    void aRestockOfTwoBranchesVoidedIsOneEventForEachAndEachReaderSeesItsOwn() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("cost_minor", 1_000);
+        line.put(
+                "qty_by_branch",
+                List.of(
+                        Map.of("branch_id", t.headOffice(), "qty", "10"),
+                        Map.of("branch_id", t.secondBranch(), "qty", "5")));
+        body.put(
+                "purchased_on",
+                java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")).toString());
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line));
+        UUID both = RetailTestSupport.id(clerk.postKeyed(
+                "/purchases", body, ADMIN, "*", UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> v = admin.call(
+                HttpMethod.POST,
+                "/purchases/" + both + "/void",
+                Map.of("reason", "Test two shops"),
+                ADMIN,
+                "*",
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(v.getStatusCode()).as("%s", v.getBody()).isEqualTo(HttpStatus.OK);
+        // Head office reads its 10 (15,000), branch two its 5 (7,500) on top of the restock voided in setUp.
+        Map<String, String> head = Map.of("X-Dev-Scopes", "retail.controls.read=" + t.headOffice());
+        JsonNode hq = card(get("/summary", head), "restock_voids");
+        assertThat(hq.get("count").asLong()).isEqualTo(1);
+        assertThat(hq.get("value_minor").asLong()).isEqualTo(15_000);
+        Map<String, String> two = Map.of("X-Dev-Scopes", "retail.controls.read=" + t.secondBranch());
+        JsonNode br2 = card(get("/summary", two), "restock_voids");
+        assertThat(br2.get("count").asLong()).isEqualTo(2);
+        assertThat(br2.get("value_minor").asLong()).isEqualTo(15_000);
+        JsonNode all = card(get("/summary", Map.of()), "restock_voids");
+        assertThat(all.get("count").asLong()).isEqualTo(3);
+        assertThat(all.get("sales_affected").asLong()).isEqualTo(2);
+        assertThat(all.get("value_minor").asLong()).isEqualTo(30_000);
+    }
+
+    @Test
+    void aCorrectionMadeAtHalfPastElevenInKampalaLandsOnThatDay() {
+        java.time.LocalDate yesterday =
+                java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")).minusDays(1);
+        String at = java.time.LocalDateTime.of(yesterday, java.time.LocalTime.of(23, 30))
+                .atZone(java.time.ZoneId.of("Africa/Kampala"))
+                .toOffsetDateTime()
+                .toString();
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_stock_corrections SET created_at = TIMESTAMPTZ '" + at + "'; END $$")
+                .update();
+        JsonNode that = get("/summary?from=" + yesterday + "&to=" + yesterday, Map.of());
+        assertThat(card(that, "quantity_corrections").get("count").asLong()).isEqualTo(1);
+        JsonNode today = get(
+                "/summary?from=" + java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")) + "&to="
+                        + java.time.LocalDate.now(java.time.ZoneId.of("Africa/Kampala")),
+                Map.of());
+        assertThat(card(today, "quantity_corrections").get("count").asLong()).isZero();
     }
 
     @Test

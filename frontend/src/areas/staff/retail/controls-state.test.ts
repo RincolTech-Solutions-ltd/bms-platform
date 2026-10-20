@@ -161,6 +161,15 @@ describe('the CSV of what is on screen', () => {
     expect(csvOf([['a', 'b']])).toBe('a,b\r\n');
   });
 
+  it('writes the stock cards with their own headers, no sales columns and no rate', () => {
+    const rows: ControlsGroup[] = [{ key: 'u1', label: 'Test Clerk One', count: 2, value_minor: 7500 }];
+    expect(groupsCsv('user', rows, 'restock_voids')).toBe('Person,Count,Value\r\nTest Clerk One,2,7500\r\n');
+    const rec = recordsCsv([{ sale_no: 'P-1', at: '2026-10-19T09:15:00Z', branch_name: 'Test Branch Gayaza', user_name: 'Test Clerk One', approver_id: 'u9', approver_name: 'Test Admin One', reason: 'Test wrong supplier', value_minor: 7500 }], 'restock_voids');
+    expect(rec.split('\r\n')[0]).toBe('Restock,Credit note,Time,Shop,Entered by,Approver,Reason,Item,Value');
+    expect(rec).toContain('Voided by Test Admin One');
+    expect(recordsCsv([], 'quantity_corrections').split('\r\n')[0]).toBe('Record,Credit note,Time,Shop,Corrected by,Approver,Reason,Item,Value');
+  });
+
   it('writes the records with the time as people read it, the person whose sale it was and who cancelled it', () => {
     const text = recordsCsv([{ sale_no: 'S-1', at: '2026-10-19T09:15:00Z', branch_name: 'Test Branch Gayaza', user_name: 'Test Seller One', user_status: 'active', approver_id: 'u9', approver_name: 'Test Admin One', approver_status: 'active', reason: 'Test wrong item', value_minor: 300 }], 'voided_sales');
     expect(text).toBe('Sale,Credit note,Time,Shop,Person (whose sale),Approver,Reason,Item,Value\r\nS-1,,"Monday 19 October 2026, 12:15",Test Branch Gayaza,Test Seller One,Cancelled by Test Admin One,Test wrong item,,300\r\n');

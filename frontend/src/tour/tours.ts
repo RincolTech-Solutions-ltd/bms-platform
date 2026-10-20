@@ -260,7 +260,7 @@ export const adminWelcome: Tour = {
       needs: ['retail.controls.read'],
       optional: true,
       title: 'What deserves a second look',
-      body: 'Open Controls to see sales cancelled, goods taken back and prices changed, by shop and by person. Each is shown per 100 sales, so a busy person and a quiet one can be compared fairly.',
+      body: 'Open Controls to see sales cancelled, goods taken back, prices changed, restocks cancelled and quantities corrected, by shop and by person. Items about sales are shown per 100 sales, so a busy person and a quiet one can be compared fairly.',
     },
     {
       id: 'catalogue',

@@ -25,9 +25,8 @@ final class ControlsApi {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Card(
             @Schema(
-                    description =
-                            "voided_sales, quick_cancels, returns, price_overrides, discounts or below_cost; the key"
-                                    + " to ask groups and records for")
+                    description = "voided_sales, quick_cancels, returns, price_overrides, discounts, below_cost,"
+                            + " restock_voids or quantity_corrections; the key to ask groups and records for")
             String metric,
 
             @Schema(
@@ -151,7 +150,13 @@ final class ControlsApi {
     @Schema(name = "RetailControlsRecord")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Entry(
+            @Schema(description = "The sale; for restock_voids the restock's id, and for quantity_corrections absent")
             UUID saleId,
+
+            @Schema(
+                    description =
+                            "The sale number; for restock_voids the restock's number, and for quantity_corrections"
+                                    + " absent")
             String saleNo,
 
             @Schema(description = "Returns only: the number of the credit note")
@@ -168,13 +173,16 @@ final class ControlsApi {
             String userStatus,
             UUID approverId,
 
-            @Schema(description = "Who cancelled the sale or took the goods back; absent for a price or a cost")
+            @Schema(
+                    description =
+                            "Who cancelled the sale, took the goods back or voided the restock; absent for a price, a"
+                                    + " cost and a correction")
             String approverName,
 
             String approverStatus,
             String reason,
 
-            @Schema(description = "Price changes, discounts and below cost only: the item")
+            @Schema(description = "Price changes, discounts, below cost and quantity corrections only: the item")
             String item,
 
             long valueMinor) {}

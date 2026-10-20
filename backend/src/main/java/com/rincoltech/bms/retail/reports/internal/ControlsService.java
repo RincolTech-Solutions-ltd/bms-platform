@@ -57,6 +57,9 @@ class ControlsService {
 
     static final int MIN_OUT_OF = 10;
     /** The one label for a person the users table does not know, on the server and in the screen. */
+    /** The metrics somebody approved: a void, a return, a restock voided. A price, a cost and a correction have no approver. */
+    static final List<String> HAS_APPROVER = List.of("voided_sales", "quick_cancels", "returns", "restock_voids");
+
     static final String UNKNOWN_PERSON = "Unknown person";
 
     static final int MAX_PATTERNS = 20;
@@ -125,7 +128,7 @@ class ControlsService {
                     b.valueMinor(),
                     stock(metric) ? null : rate(a.salesAffected(), salesNow.count()),
                     stock(metric) ? null : rate(b.salesAffected(), salesBefore.count()),
-                    shareBp(a.valueMinor(), salesNow.totalMinor())));
+                    stock(metric) ? null : shareBp(a.valueMinor(), salesNow.totalMinor())));
         }
         return new Summary(
                 currency,
@@ -153,6 +156,12 @@ class ControlsService {
         List<UUID> filter = principal.branchFilter(PERMISSION, branchIds);
         requireMetric(metric, principal, filter);
         List<String> chain = chain(groupBy);
+        if (chain.contains("approver") && !HAS_APPROVER.contains(metric)) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "group_by",
+                    "invalid",
+                    "approver is a level of voided_sales, quick_cancels, returns and restock_voids.")));
+        }
         String at = level == null ? chain.getFirst() : level;
         if (!chain.contains(at)) {
             throw ApiException.validation(List.of(new FieldProblem("level", "invalid", "level is one of group_by.")));

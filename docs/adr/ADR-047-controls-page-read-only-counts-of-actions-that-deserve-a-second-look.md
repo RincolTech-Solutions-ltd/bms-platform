@@ -37,12 +37,14 @@ discipline, the delivery side for the dev team) are separate decisions and pull 
   by ...", "Taken back by ..."), and never part of the patterns. An approver entered no sales of their own to set a rate
   against, so the Approver level shows counts and values and no rate. The lines of a sale (changed prices, discounts, below
   cost) have no approver, so the level is not offered for them.
-- **Two stock metrics from #356 (ADR-044), with no rate.** `restock_voids` (a restock voided by reversal: the person is who entered
-  the restock, the approver who voided it, the branch the first one it stocked, the value the restock's total, the day the day it
-  was voided, the reason typed) and `quantity_corrections` (a quantity corrected on the stock list: the person who corrected it,
-  the reason code and note, the value the change at the item's selling price now, never a cost). They are not about sales, so
-  there are no sales of a person or a shop to set them against: they have counts and values, no rate and no pattern, and a
-  correction has no approver.
+- **Two stock metrics from #356 (ADR-044), with no rate.** `restock_voids` (a restock voided by reversal: one event for each restock
+  and branch it stocked, from its purchase movements, so a restock of 10 at head office and 5 at a second shop is two events and each
+  shop's reader sees only its own; the person is who entered the restock, the approver who voided it, the value that branch's quantity
+  at the item's selling price now, never the restock's cost; the day the day it was voided, the reason typed) and
+  `quantity_corrections` (a quantity corrected on the stock list: the person who corrected it, the reason code and note, the value the
+  change at the selling price now, never a cost). They are not about sales, so there are no sales of a person or a shop to set them
+  against: they have counts and values, no rate, no share of sales and no pattern, and a correction has no approver. Asking for the
+  Approver level of a metric that has none (changed prices, discounts, below cost, corrections) is a 422.
 - **Left out until their data is on `main`.** Credit write-offs (#349). It becomes one more metric in `ControlsRepository.events`
   and one more card when its table lands; no other code changes.
 - **A rate per 100 sales, never only a count, and in the same units.** A rate is the **sales with such an event** over the

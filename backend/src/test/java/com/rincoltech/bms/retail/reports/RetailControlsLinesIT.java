@@ -91,6 +91,52 @@ class RetailControlsLinesIT extends IntegrationTest {
     }
 
     @Test
+    void goodsTakenBackAreCreditedToTheSellerWhoseSaleItWasAndTheAdministratorIsTheApprover() {
+        t = TestDatabase.tenant("retail-ctl-ret", false, true);
+        api = new RetailTestSupport(http, t);
+        RetailTestSupport seller = new RetailTestSupport(http, t);
+        RetailControlsIT.user(t, seller.userId(), "Test Seller A", "active");
+        RetailControlsIT.user(t, api.userId(), "Test Admin B", "active");
+        l1 = api.product("RA-1", 100, 300);
+        api.stockUp(t.headOffice(), l1, "100");
+        capability("returns");
+        capability("customer_accounts");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("payment_method", "cash");
+        body.put("lines", List.of(line(l1, "2", null)));
+        UUID sold = RetailTestSupport.id(
+                seller.postKeyed("/sales", body, SELLER, "*", UUID.randomUUID().toString()));
+        UUID saleLine = UUID.fromString(api.get("/sales/" + sold, ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0)
+                .get("id")
+                .asString());
+        Map<String, Object> returned = new LinkedHashMap<>();
+        returned.put("sale_line_id", saleLine);
+        returned.put("qty", "1");
+        returned.put("reason", "defective");
+        returned.put("disposition", "restock");
+        ResponseEntity<JsonNode> ret = api.postKeyed(
+                "/sales/" + sold + "/returns",
+                Map.of("lines", List.of(returned), "refund_method", "cash"),
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(ret.getStatusCode()).as("%s", ret.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode record = get("/records?metric=returns").get("items").get(0);
+        assertThat(record.get("user_name").asString()).isEqualTo("Test Seller A");
+        assertThat(record.get("approver_name").asString()).isEqualTo("Test Admin B");
+        JsonNode people = get("/groups?metric=returns&group_by=user");
+        assertThat(people.get("items")).hasSize(1);
+        assertThat(people.get("items").get(0).get("label").asString()).isEqualTo("Test Seller A");
+        JsonNode approvers = get("/groups?metric=returns&group_by=approver");
+        assertThat(approvers.get("items").get(0).get("label").asString()).isEqualTo("Test Admin B");
+    }
+
+    @Test
     void withTheCapabilitiesOffTheCardsSayTheyAreNotSwitchedOn() {
         t = TestDatabase.tenant("retail-ctl-off", false, true);
         api = new RetailTestSupport(http, t);
