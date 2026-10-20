@@ -559,7 +559,11 @@ class RetailSaleWriteOffIT extends IntegrationTest {
      * changed (a deactivation), {@code lockedDays} a lock that many days ahead, both null for none.
      */
     UUID admin(int i, String status, Integer daysSinceChange, Integer lockedDays) {
-        UUID user = UUID.randomUUID();
+        return admin(UUID.randomUUID(), i, status, daysSinceChange, lockedDays);
+    }
+
+    /** The same, with the id of the user (the maker of a request is the test client, whose id is {@code api.userId()}). */
+    UUID admin(UUID user, int i, String status, Integer daysSinceChange, Integer lockedDays) {
         java.time.Instant now = java.time.Instant.now();
         TestDatabase.owner()
                 .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status, updated_at, locked_until)"
@@ -582,6 +586,27 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                 .params(UUID.randomUUID(), t.tenantId(), user, user)
                 .update();
         return user;
+    }
+
+    /** The administrators emailed about a write-off, by user id. */
+    java.util.Set<String> toldIds(JsonNode writeOff) {
+        String prefix = "retail.write_off_alone:" + writeOff.get("id").asString() + ":";
+        return new java.util.TreeSet<>(TestDatabase.owner()
+                .sql("SELECT substring(idempotency_key from char_length(?) + 1) FROM notification_outbox"
+                        + " WHERE idempotency_key LIKE ?")
+                .params(prefix, prefix + "%")
+                .query(String.class)
+                .list());
+    }
+
+    String noSecondPerson(JsonNode writeOff) {
+        return TestDatabase.owner()
+                .sql("SELECT data -> 'after' ->> 'no_second_person' FROM audit_log WHERE tenant_id = ?"
+                        + " AND action = 'retail.sale.written_off' AND data -> 'after' ->> 'write_off_id' = ?")
+                .params(t.tenantId(), writeOff.get("id").asString())
+                .query(String.class)
+                .optional()
+                .orElse(null);
     }
 
     long told(JsonNode writeOff) {
@@ -686,6 +711,43 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isEqualTo(1);
+    }
+
+    @Test
+    void raisingTheThresholdFirstDoesNotMakeAWriteOffSilent() {
+        UUID a = admin(api.userId(), 0, "active", null, null);
+        UUID b = admin(1, "active", null, null);
+        threshold(1_000_000_000L);
+        UUID s = creditSale(1, 1);
+        JsonNode w = writeOffOk(s);
+        assertThat(noSecondPerson(w))
+                .as("done without a second person, with two administrators counted")
+                .isEqualTo("below_threshold");
+        assertThat(toldIds(w))
+                .as("the other administrator is told, the maker is not told about their own act")
+                .containsExactly(b.toString());
+        assertThat(toldIds(w)).doesNotContain(a.toString());
+    }
+
+    @Test
+    void aSoleAdministratorWhoMadeTheRequestIsTheOnlyOneToldAndTheAuditRowSaysSo() {
+        UUID a = admin(api.userId(), 0, "active", null, null);
+        UUID gone = admin(1, "deactivated", 40, null);
+        UUID s = creditSale(1, 1);
+        JsonNode w = writeOffOk(s);
+        assertThat(noSecondPerson(w)).isEqualTo("only_one_active_administrator");
+        assertThat(toldIds(w))
+                .as("a self-notice: the maker is the only administrator who counts; one gone for 40 days is not told")
+                .containsExactly(a.toString());
+        assertThat(toldIds(w)).doesNotContain(gone.toString());
+    }
+
+    @Test
+    void aWriteOffThatNeededNoSecondPersonBecauseOfTheThresholdWithOneAdministratorSaysOneAdministrator() {
+        admin(api.userId(), 0, "active", null, null);
+        threshold(1_000_000_000L);
+        JsonNode w = writeOffOk(creditSale(1, 1));
+        assertThat(noSecondPerson(w)).isEqualTo("only_one_active_administrator");
     }
 
     @Test

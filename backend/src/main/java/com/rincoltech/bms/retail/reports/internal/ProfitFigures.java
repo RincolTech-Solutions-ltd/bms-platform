@@ -32,7 +32,7 @@ class ProfitFigures {
         this.capabilities = capabilities;
     }
 
-    /** The stretches of sale dates counted when the buyer pays; none for a tenant that never chose it. */
+    /** The start day of the credit sales counted when the buyer pays; none for a tenant that never chose it. */
     CreditPeriods periods() {
         return capabilities.onPaymentPeriods();
     }

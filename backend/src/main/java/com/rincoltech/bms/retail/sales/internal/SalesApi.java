@@ -193,8 +193,9 @@ final class SalesApi {
 
             @Schema(
                     description =
-                            "True for a credit sale counted when the buyer pays (its date is on or after the first day of the rule"
-                                    + " on_payment, ADR-043): its payments are dated the day they are entered")
+                            "True for a credit sale counted when the buyer pays (ADR-043): the later of its date and the day it was"
+                                    + " entered is on or after the first day of the rule on_payment, so a backdated sale entered after the"
+                                    + " start counts too; its payments are dated the day they are entered")
             boolean countedWhenPaid) {}
 
     @Schema(name = "RetailSaleWriteOffInfo", description = "A credit sale whose unpaid part was written off as a loss")
@@ -269,7 +270,14 @@ final class SalesApi {
                     description =
                             "True for an imported credit sale (never posted to the ledger, skipped by payment on account);"
                                     + " present only while the customer_accounts capability is on, and only when true")
-            Boolean historical) {}
+            Boolean historical,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "True for a credit sale counted when the buyer pays (ADR-043): a payment that pays it is dated today;"
+                                    + " present only while the customer_accounts capability is on, and only when true")
+            Boolean countedWhenPaid) {}
 
     @Schema(name = "RetailCustomerBalance", description = "Credit sales in the caller's branch scope")
     record CustomerBalance(UUID customerId, String currency, long balanceMinor, List<OpenSale> openSales) {}

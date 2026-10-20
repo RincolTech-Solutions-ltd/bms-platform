@@ -109,8 +109,8 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
 -- from trade debtors. cost_share_minor is the cost of the goods that no payment had carried into the profit (the unpaid share of
 -- the cost of goods, after returns). loss_minor is the loss the entry booked and the daily profit report shows on written_off_on:
 -- cost_share_minor for a sale counted when the buyer pays (the profit of the unpaid part was never counted), unpaid_minor for a sale
--- counted at the sale (its profit was counted then). recognition records which, decided by the sale's own date against the stretches
--- of the credit rule (ADR-043), so a later switch of the rule never changes a loss already booked. The entry
+-- counted at the sale (its profit was counted then). recognition records which, decided by the sale's counting day (the later of its date and the day it was entered) against the start
+-- day of the credit rule (ADR-043), so a later switch of the rule never changes a loss already booked. The entry
 -- debits bad debt loss for loss_minor, debits sales revenue for the rest (credits it when the sale was sold below cost) and
 -- credits trade debtors for unpaid_minor with the sale as subledger. approval_id and approved_by are set when a second
 -- administrator approved it (maker-checker above the tenant's threshold for retail_sale_write_off).

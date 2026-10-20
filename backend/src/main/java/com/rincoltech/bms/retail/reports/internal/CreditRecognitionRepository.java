@@ -28,7 +28,8 @@ class CreditRecognitionRepository {
     }
 
     /**
-     * Every credit sale (completed, not imported) dated inside a stretch of {@code periods} that had a payment, the reversal of
+     * Every credit sale (completed, not imported) counted when the buyer pays ({@code periods}: the later of its date and the day it
+     * was entered is on or after the start day) that had a payment, the reversal of
      * one or a return inside the window, with all its events up to {@code to}, grouped by day and branch.
      *
      * <p>A payment sits on the day it was RECORDED (the tenant's day of its creation), not on the date written on it, so a
@@ -55,7 +56,7 @@ class CreditRecognitionRepository {
         params.put(
                 "toTs",
                 java.sql.Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()));
-        String inPeriod = periods.sql("s.sale_date", params, "crpE");
+        String inPeriod = periods.sql("s.sale_date", "s.created_at", params, "crpE");
         String paidDay = "CAST((p.created_at AT TIME ZONE :zone) AS date)";
         return jdbc.sql("WITH active AS ("
                         + " SELECT p.sale_id FROM retail_sale_payments p WHERE p.created_at >= :fromTs AND p.created_at < :toTs"
@@ -109,7 +110,7 @@ class CreditRecognitionRepository {
     /**
      * The loss of credit sales written off in the window, by the sale's branch and the day of the write-off (ADR-043), as report
      * figures with only the bad debt set. The loss was fixed when the debt was written off, by the way the sale itself was counted
-     * (its date against the stretches of the rule): the cost never carried into the profit for a sale counted when the buyer pays,
+     * (its counting day against the start day of the rule): the cost never carried into the profit for a sale counted when the buyer pays,
      * the whole unpaid amount for one counted when it was made. A written-off sale stays out of On credit because its paid amount
      * holds the debt that was cleared.
      */

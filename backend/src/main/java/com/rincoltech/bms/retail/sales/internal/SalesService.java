@@ -819,7 +819,9 @@ class SalesService {
         // A sale counted when the buyer pays (its date is inside the rule's range) is paid on the day the payment
         // counts on, so the
         // payment carries that day (ADR-043). A sale dated before the rule started is paid as it always was.
-        if (capabilities.onPaymentPeriods().contains(s.saleDate()) && !paidOn.equals(today)) {
+        if (!s.historical()
+                && capabilities.onPaymentPeriods().counts(s.saleDate(), s.createdAt())
+                && !paidOn.equals(today)) {
             throw ApiException.validation(
                     List.of(
                             new FieldProblem(
@@ -981,13 +983,18 @@ class SalesService {
     CustomerBalance balance(UUID customerId) {
         repo.customer(customerId).orElseThrow(ApiException::notFound);
         List<UUID> filter = CurrentPrincipal.require().branchFilter("retail.sale.read", null);
-        List<OpenSale> open = repo.openSales(customerId, filter);
-        long owed = open.stream().mapToLong(OpenSale::balanceMinor).reduce(0, Math::addExact);
-        // Which sales are imported is said only while customer accounts are on (issue #196); off, the answer is as
-        // before.
-        if (!accounts.on()) {
-            open = open.stream()
-                    .map(s -> new OpenSale(
+        List<SalesRepository.OpenRow> rows = repo.openSaleRows(customerId, filter);
+        long owed = rows.stream().mapToLong(r -> r.sale().balanceMinor()).reduce(0, Math::addExact);
+        // Which sales are imported, and which are counted when the buyer pays (their payments are dated today), is said
+        // only
+        // while customer accounts are on (issue #196, ADR-043); off, the answer is as before.
+        boolean accountsOn = accounts.on();
+        CreditPeriods periods = capabilities.onPaymentPeriods();
+        List<OpenSale> open = rows.stream()
+                .map(r -> {
+                    OpenSale s = r.sale();
+                    boolean imported = Boolean.TRUE.equals(s.historical());
+                    return new OpenSale(
                             s.saleId(),
                             s.saleNo(),
                             s.branchId(),
@@ -996,9 +1003,12 @@ class SalesService {
                             s.totalMinor(),
                             s.paidMinor(),
                             s.balanceMinor(),
-                            null))
-                    .toList();
-        }
+                            accountsOn ? s.historical() : null,
+                            accountsOn && !imported && periods.counts(s.saleDate(), r.createdAt())
+                                    ? Boolean.TRUE
+                                    : null);
+                })
+                .toList();
         return new CustomerBalance(customerId, tenant.profile().currency(), owed, open);
     }
 
@@ -1022,7 +1032,8 @@ class SalesService {
         boolean hidePricing = !pricing.on();
         // A credit sale dated from the first day of the rule "when the buyer pays" is paid on the day the payment
         // counts on (ADR-043).
-        boolean counted = s.paymentMethod().equals("credit") && !s.historical() && periods.contains(s.saleDate());
+        boolean counted =
+                s.paymentMethod().equals("credit") && !s.historical() && periods.counts(s.saleDate(), s.createdAt());
         if (!hideCost && !hidePricing && counted == s.countedWhenPaid()) {
             return s;
         }

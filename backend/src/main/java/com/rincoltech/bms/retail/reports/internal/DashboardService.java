@@ -87,7 +87,8 @@ class DashboardService {
                 now[4] += d.cost();
             }
         }
-        // ADR-043: credit sales dated inside a stretch of the rule "when the buyer pays" bring profit through the money
+        // ADR-043: credit sales counted from the start day of the rule "when the buyer pays" bring profit through the
+        // money
         // received (a
         // payment on the day it was recorded, with its share of the sale's profit); Sold stays what was sold, and every
         // other credit

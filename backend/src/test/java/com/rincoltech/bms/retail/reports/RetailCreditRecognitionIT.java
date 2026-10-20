@@ -167,6 +167,15 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .update();
     }
 
+    /** Moves the moment a sale was entered to the middle of {@code day}, as if it had been entered then. */
+    void sellEntered(UUID sale, LocalDate day) {
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sales SET created_at = " + enteredAt(day) + " WHERE id = '" + sale
+                        + "'; END $$")
+                .update();
+    }
+
     /** The same for every sale payment a receipt on account created. */
     void moveReceiptEntered(UUID receipt, LocalDate day) {
         TestDatabase.owner()
@@ -519,6 +528,9 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 .as("it keeps counting on its own date")
                 .isEqualTo(2_000);
         assertThat(dashboard().get("today").get("on_credit_minor").asLong()).isZero();
+        assertThat(payRaw(sale, 1_000, ago(2)).getStatusCode())
+                .as("an imported sale is outside the rule, so a backdated payment on it is not refused")
+                .isEqualTo(HttpStatus.CREATED);
     }
 
     @Test
@@ -650,13 +662,24 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         onPayment();
         settle(ago(2).toString());
         UUID before = creditSale(hq, 2, ago(5));
+        sellEntered(before, ago(5));
+        UUID backdated = creditSale(hq, 2, ago(4));
         UUID after = creditSale(hq, 2, ago(1));
         assertThat(api.get("/sales/" + before, ADMIN)
                         .getBody()
                         .get("counted_when_paid")
                         .asBoolean())
-                .as("dated before the rule started: paid as it always was")
+                .as("dated and entered before the rule started: paid as it always was")
                 .isFalse();
+        assertThat(api.get("/sales/" + backdated, ADMIN)
+                        .getBody()
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .as("dated before the start but entered after it: counted when the buyer pays")
+                .isTrue();
+        assertThat(payRaw(backdated, 500, ago(4)).getStatusCode())
+                .as("so its payments are dated today too")
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(api.get("/sales/" + after, ADMIN)
                         .getBody()
                         .get("counted_when_paid")
@@ -668,6 +691,44 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         ResponseEntity<JsonNode> refused = payRaw(after, 500, ago(1));
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(refused.getBody().toString()).contains("backdated_payment");
+    }
+
+    @Test
+    void aBackdatedCreditSaleEnteredAfterTheStartDoesNotAddProfitToAClosedDay() {
+        onPayment();
+        settle(ago(2).toString());
+        // Entered today but dated three days ago, before the rule started: it must not add 400 of profit to a day whose
+        // savings
+        // were set aside already.
+        UUID backdated = creditSale(hq, 1, ago(3));
+        JsonNode report = profit(ago(4), today());
+        assertThat(field(row(report, hq, ago(3)), "profit_minor"))
+                .as("nothing is added to the dated day")
+                .isZero();
+        assertThat(report.get("profit_minor").asLong()).isZero();
+        assertThat(report.get("on_credit_minor").asLong()).isEqualTo(1_000);
+        assertThat(suggestion(hq, ago(3)).get("suggested_minor").asLong()).isZero();
+        assertThat(profit(ago(4), today()).get("sold_minor").asLong())
+                .as("it is still Sold on its date")
+                .isEqualTo(1_000);
+        // Its profit comes in as the buyer pays, on the day of the payment, which must be dated today.
+        assertThat(payRaw(backdated, 1_000, ago(1)).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        payEnteredToday(backdated, 1_000, today());
+        JsonNode paid = profit(ago(4), today());
+        assertThat(field(row(paid, hq, today()), "profit_minor")).isEqualTo(400);
+        assertThat(field(row(paid, hq, ago(3)), "profit_minor")).isZero();
+        assertThat(dashboard().get("today").get("gross_profit_minor").asLong()).isEqualTo(400);
+    }
+
+    @Test
+    void aCreditSaleEnteredAndDatedBeforeTheStartStillCountsAtTheSale() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID old = creditSale(hq, 1, ago(3));
+        sellEntered(old, ago(3));
+        assertThat(field(row(profit(ago(4), today()), hq, ago(3)), "profit_minor"))
+                .as("entered before the start: counted at the sale, as it was")
+                .isEqualTo(400);
     }
 
     @Test
@@ -788,9 +849,10 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         sale.put("payment_method", "credit");
         sale.put("customer_id", buyer);
         sale.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
-        assertThat(api.postKeyed("/sales", sale, ADMIN, "*", UUID.randomUUID().toString())
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> made =
+                api.postKeyed("/sales", sale, ADMIN, "*", UUID.randomUUID().toString());
+        assertThat(made.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        sellEntered(RetailTestSupport.id(made), ago(5));
         ResponseEntity<JsonNode> accepted = api.postKeyed(
                 "/customers/" + buyer + "/payments",
                 Map.of("branch_id", hq, "amount_minor", 500, "method", "cash", "paid_on", ago(3).toString()),

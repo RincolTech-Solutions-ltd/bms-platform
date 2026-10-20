@@ -9606,6 +9606,10 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "counted_when_paid" : {
+            "description" : "True for a credit sale counted when the buyer pays (ADR-043): a payment that pays it is dated today; present only while the customer_accounts capability is on, and only when true",
+            "type" : "boolean"
+          },
           "due_date" : {
             "format" : "date",
             "type" : "string"
@@ -11600,7 +11604,7 @@
             "type" : "integer"
           },
           "counted_when_paid" : {
-            "description" : "True for a credit sale counted when the buyer pays (its date is on or after the first day of the rule on_payment, ADR-043): its payments are dated the day they are entered",
+            "description" : "True for a credit sale counted when the buyer pays (ADR-043): the later of its date and the day it was entered is on or after the first day of the rule on_payment, so a backdated sale entered after the start counts too; its payments are dated the day they are entered",
             "type" : "boolean"
           },
           "created_at" : {

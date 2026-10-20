@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.stock;
 
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.ModuleSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
@@ -37,9 +38,11 @@ public class RetailCapabilities {
     public static final String CREDIT_RECOGNITION = "credit_sale_recognition";
 
     private final ModuleSettings settings;
+    private final CurrentTenant tenant;
 
-    RetailCapabilities(ModuleSettings settings) {
+    RetailCapabilities(ModuleSettings settings, CurrentTenant tenant) {
         this.settings = settings;
+        this.tenant = tenant;
     }
 
     public boolean enabled(String capability) {
@@ -48,7 +51,13 @@ public class RetailCapabilities {
 
     /** The tenant's credit sale recognition, {@link #ON_SALE} unless the owner chose {@link #ON_PAYMENT} (ADR-043). */
     public String creditRecognition() {
-        return ON_PAYMENT.equals(settings.group(MODULE).get(CREDIT_RECOGNITION)) ? ON_PAYMENT : ON_SALE;
+        // on_payment with no start day is no rule at all (the group never stores that, and a hand-edited row is read as
+        // on_sale).
+        Map<String, Object> g = settings.group(MODULE);
+        return ON_PAYMENT.equals(g.get(CREDIT_RECOGNITION))
+                        && g.get("credit_recognition_effective_from") instanceof String
+                ? ON_PAYMENT
+                : ON_SALE;
     }
 
     /**
@@ -59,7 +68,7 @@ public class RetailCapabilities {
         Map<String, Object> g = settings.group(MODULE);
         if (ON_PAYMENT.equals(g.get(CREDIT_RECOGNITION))
                 && g.get("credit_recognition_effective_from") instanceof String d) {
-            return new CreditPeriods(LocalDate.parse(d));
+            return new CreditPeriods(LocalDate.parse(d), tenant.profile().timezone());
         }
         return CreditPeriods.NONE;
     }

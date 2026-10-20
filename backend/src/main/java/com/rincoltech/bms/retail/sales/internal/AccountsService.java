@@ -394,7 +394,8 @@ class AccountsService {
         // (ADR-043).
         if (!paidOn.equals(today)
                 && byId.values().stream()
-                        .anyMatch(x -> capabilities.onPaymentPeriods().contains(x.saleDate()))) {
+                        .anyMatch(x -> !x.historical()
+                                && capabilities.onPaymentPeriods().counts(x.saleDate(), x.createdAt()))) {
             throw ApiException.validation(
                     List.of(
                             new FieldProblem(

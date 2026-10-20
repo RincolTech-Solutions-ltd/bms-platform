@@ -643,8 +643,15 @@ class SalesRepository {
                 .list();
     }
 
+    /** An open credit sale and the moment it was entered (which, with its date, says how it is counted, ADR-043). */
+    record OpenRow(OpenSale sale, java.time.Instant createdAt) {}
+
     /** Credit sales of a customer that still owe, in the given branches (null: every branch). */
     List<OpenSale> openSales(UUID customerId, List<UUID> branchIds) {
+        return openSaleRows(customerId, branchIds).stream().map(OpenRow::sale).toList();
+    }
+
+    List<OpenRow> openSaleRows(UUID customerId, List<UUID> branchIds) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -656,23 +663,26 @@ class SalesRepository {
             params.put("branchIds", branchIds);
         }
         return jdbc.sql("""
-                        SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical
+                        SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical, created_at
                           FROM retail_sales
                          WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'
                            AND paid_minor < total_minor""" + branchFilter + " ORDER BY sale_date, created_at, id")
                 .params(params)
                 .query((rs, n) -> {
                     Date due = rs.getDate("due_date");
-                    return new OpenSale(
-                            rs.getObject("id", UUID.class),
-                            rs.getString("sale_no"),
-                            rs.getObject("branch_id", UUID.class),
-                            rs.getDate("sale_date").toLocalDate(),
-                            due == null ? null : due.toLocalDate(),
-                            rs.getLong("total_minor"),
-                            rs.getLong("paid_minor"),
-                            rs.getLong("total_minor") - rs.getLong("paid_minor"),
-                            rs.getBoolean("historical") ? Boolean.TRUE : null);
+                    return new OpenRow(
+                            new OpenSale(
+                                    rs.getObject("id", UUID.class),
+                                    rs.getString("sale_no"),
+                                    rs.getObject("branch_id", UUID.class),
+                                    rs.getDate("sale_date").toLocalDate(),
+                                    due == null ? null : due.toLocalDate(),
+                                    rs.getLong("total_minor"),
+                                    rs.getLong("paid_minor"),
+                                    rs.getLong("total_minor") - rs.getLong("paid_minor"),
+                                    rs.getBoolean("historical") ? Boolean.TRUE : null,
+                                    null),
+                            rs.getTimestamp("created_at").toInstant());
                 })
                 .list();
     }

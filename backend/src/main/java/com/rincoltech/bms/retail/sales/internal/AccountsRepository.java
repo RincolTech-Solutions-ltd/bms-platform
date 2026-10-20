@@ -37,7 +37,9 @@ class AccountsRepository {
             LocalDate saleDate,
             String currency,
             long totalMinor,
-            long paidMinor) {
+            long paidMinor,
+            java.time.Instant createdAt,
+            boolean historical) {
         long balanceMinor() {
             return totalMinor - paidMinor;
         }
@@ -120,7 +122,9 @@ class AccountsRepository {
                 rs.getDate("sale_date").toLocalDate(),
                 rs.getString("currency"),
                 rs.getLong("total_minor"),
-                rs.getLong("paid_minor"));
+                rs.getLong("paid_minor"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getBoolean("historical"));
     }
 
     /**
@@ -141,7 +145,7 @@ class AccountsRepository {
             params.put("branchIds", branchIds);
         }
         return jdbc.sql("""
-                        SELECT id, sale_no, branch_id, sale_date, currency, total_minor, paid_minor FROM retail_sales
+                        SELECT id, sale_no, branch_id, sale_date, currency, total_minor, paid_minor, created_at, historical FROM retail_sales
                          WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'
                            AND NOT historical AND paid_minor < total_minor AND sale_date <= :paidOn""" + branch + " ORDER BY sale_date, created_at, id FOR UPDATE")
                 .params(params)
@@ -152,7 +156,7 @@ class AccountsRepository {
     /** The named sales of a buyer, locked in a fixed order so two payments cannot deadlock. */
     List<OpenSale> lockSales(UUID customerId, List<UUID> ids) {
         return jdbc.sql("""
-                        SELECT id, sale_no, branch_id, sale_date, currency, total_minor, paid_minor FROM retail_sales
+                        SELECT id, sale_no, branch_id, sale_date, currency, total_minor, paid_minor, created_at, historical FROM retail_sales
                          WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'
                            AND id IN (:ids) ORDER BY sale_date, created_at, id FOR UPDATE
                         """)

@@ -106,8 +106,10 @@ class WriteOffsServicer {
         if (unpaid <= 0) {
             throw ApiException.rule("nothing_owing", "This sale has nothing left to pay.");
         }
-        // A sale is written off the way it was counted: by its own date against the stretches of the rule (ADR-043).
-        String recognition = capabilities.onPaymentPeriods().contains(s.saleDate())
+        // A sale is written off the way it was counted: by its counting day (the later of its date and the day it was
+        // entered)
+        // against the start day of the rule (ADR-043).
+        String recognition = capabilities.onPaymentPeriods().counts(s.saleDate(), s.createdAt())
                 ? RetailCapabilities.ON_PAYMENT
                 : RetailCapabilities.ON_SALE;
         long costShare = unrecognisedCost(s);
@@ -136,8 +138,11 @@ class WriteOffsServicer {
         return Math.max(0, remainingCost - recognised);
     }
 
+    /** A write-off done without a second person: why ({@code only_one_active_administrator} or {@code below_threshold}) and how many were told. */
+    record Alone(String why, int notified) {}
+
     /** Posts the entry, records the write-off and clears the debt on the sale. */
-    WriteOff record(Plan plan, String reason, UUID makerId, UUID approvalId, UUID checkerId, Integer notifiedAdmins) {
+    WriteOff record(Plan plan, String reason, UUID makerId, UUID approvalId, UUID checkerId, Alone alone) {
         Sale s = plan.sale();
         UUID id = UUID.randomUUID();
         LocalDate today = clock.today(tenant.profile().timezone());
@@ -185,11 +190,12 @@ class WriteOffsServicer {
         after.put("unpaid_minor", unpaid);
         after.put("reason", row.reason());
         after.put("approved", approvalId != null);
-        if (notifiedAdmins != null) {
-            // No second person was possible: the audit row says so, and how many administrators were told (ADR-043; the
-            // default checker rule awaits Hillary's confirmation).
-            after.put("no_second_person", "only_one_active_administrator");
-            after.put("notified_admins", notifiedAdmins);
+        if (alone != null) {
+            // Done without a second person: the audit row says why, and how many administrators were told (ADR-043; the
+            // default
+            // checker rule awaits Hillary's confirmation).
+            after.put("no_second_person", alone.why());
+            after.put("notified_admins", alone.notified());
         }
         audit.record(new AuditLog.Entry(
                 "retail.sale.written_off", SALE, s.id(), s.branchId(), Map.of("paid_minor", s.paidMinor()), after));

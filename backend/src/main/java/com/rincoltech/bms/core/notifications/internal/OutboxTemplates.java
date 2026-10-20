@@ -108,7 +108,7 @@ class OutboxTemplates {
                     Hello,
 
                     A debt on a credit sale was written off at {business_name} by one administrator, without a second
-                    administrator, because only one was active when it was done.
+                    administrator approving it.
 
                     If you or another administrator did this, nothing more is needed. If you do not know about it, open
                     Credit sales in BMS, check the sale, and change your password.

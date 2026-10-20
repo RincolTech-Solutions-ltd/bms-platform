@@ -6,7 +6,7 @@ import { usePersistedDraft } from './idempotency';
 import { CREDIT_WRITE_OFF, SALE_VOID, holdsAt } from './permissions';
 import {
   IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, paidWords, payFailureWords, payProblem,
-  saleMovedOn, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
+  saleMovedOn, settledDate, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
   WRITE_OFF_CHECKER, WRITE_OFF_PENDING, canWriteOff, writeOffAlreadyPending, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffWarning, writeOffWords,
 } from './sale-actions-state';
 import { Problem, Success, money } from './ui';
@@ -32,7 +32,7 @@ export function PayFormView({ sale, today, form, full, busy, error, todayOnly, o
   onCancel: () => void;
 }) {
   const id = `pay-${sale.id ?? ''}`;
-  const shown = full ? fullPay(form, sale) : form;
+  const shown = settledDate(full ? fullPay(form, sale) : form, todayOnly === true, today);
   const problem = payProblem(shown, sale, today);
   return (
     <form
@@ -71,11 +71,13 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const saleId = sale.id ?? '';
+  // The server says a sale is counted when the buyer pays; its payment is then dated today whatever a stored draft holds (ADR-043).
+  const todayOnly = sale.counted_when_paid === true;
   const { key, draft, setDraft, discard } = usePersistedDraft<PayForm>(`sale-pay:${me.user_id ?? ''}:${saleId}:${full ? 'full' : 'part'}`, blankPay(sale, today));
   // A second press before the first request has started must not send a second one: the ref answers at once, the mutation state a render later.
   const sending = useRef(false);
   const send = useMutation({
-    mutationFn: () => retail.paySale(saleId, buildPayRequest(full ? fullPay(draft, sale) : draft), key),
+    mutationFn: () => retail.paySale(saleId, buildPayRequest(settledDate(full ? fullPay(draft, sale) : draft, todayOnly, today)), key),
     onSuccess: (result) => {
       discard();
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -98,7 +100,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       today={today}
       form={draft}
       full={full}
-      todayOnly={sale.counted_when_paid === true}
+      todayOnly={todayOnly}
       busy={send.isPending}
       error={payFailureWords(send.error, full)}
       onChange={setDraft}

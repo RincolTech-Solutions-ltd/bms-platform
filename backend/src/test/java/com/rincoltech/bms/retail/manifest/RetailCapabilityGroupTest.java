@@ -76,7 +76,8 @@ class RetailCapabilityGroupTest {
 
     @Test
     void creditSaleRecognitionTakesOnlyTheTwoValuesAndSurvivesProfileAndFlagChanges() {
-        Map<String, Object> on = group.normalise(Map.of(), Map.of("credit_sale_recognition", "on_payment"));
+        Map<String, Object> on = group.normalise(
+                Map.of(), Map.of("credit_sale_recognition", "on_payment", "credit_recognition_today", "2026-10-20"));
 
         assertThat(on.get("credit_sale_recognition")).isEqualTo("on_payment");
         assertThat(group.normalise(on, Map.of("profile", "trade")).get("credit_sale_recognition"))
@@ -85,51 +86,85 @@ class RetailCapabilityGroupTest {
                 .isEqualTo("on_payment");
         assertThat(group.normalise(on, Map.of("returns", true)).get("credit_sale_recognition"))
                 .isEqualTo("on_payment");
-        assertThat(group.normalise(on, Map.of("credit_sale_recognition", "on_sale"))
+        assertThat(group.normalise(
+                                on,
+                                Map.of("credit_sale_recognition", "on_sale", "credit_recognition_today", "2026-10-20"))
                         .get("credit_sale_recognition"))
                 .isEqualTo("on_sale");
-        assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("credit_sale_recognition", "later")))
+        assertThatThrownBy(() -> group.normalise(
+                        Map.of(), Map.of("credit_sale_recognition", "later", "credit_recognition_today", "2026-10-20")))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("credit_sale_recognition", true)))
+        assertThatThrownBy(() -> group.normalise(
+                        Map.of(), Map.of("credit_sale_recognition", true, "credit_recognition_today", "2026-10-20")))
                 .isInstanceOf(ApiException.class);
     }
 
     @Test
-    void switchingOnRecordsTheDayItCountsFromAndReadingAgainChangesNothing() {
+    void switchingOnCountsFromTheNextBusinessDayAndReadingAgainChangesNothing() {
         Map<String, Object> on = group.normalise(
-                Map.of(),
-                Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "2026-10-20"));
-        assertThat(on.get("credit_recognition_effective_from")).isEqualTo("2026-10-20");
-        assertThat(on).doesNotContainKey("credit_recognition_changes");
+                Map.of(), Map.of("credit_sale_recognition", "on_payment", "credit_recognition_today", "2026-10-20"));
+        assertThat(on.get("credit_recognition_effective_from")).isEqualTo("2026-10-21");
+        assertThat(on).doesNotContainKey("credit_recognition_today").doesNotContainKey("credit_recognition_changes");
         assertThat(group.enabledCapabilities(on)).contains("credit_on_payment");
         // Reading it again changes nothing, and a profile or flag change leaves the day alone.
         assertThat(group.normalise(on, Map.of())).isEqualTo(on);
         assertThat(group.normalise(on, Map.of("profile", "trade")).get("credit_recognition_effective_from"))
-                .isEqualTo("2026-10-20");
+                .isEqualTo("2026-10-21");
         // Asking for on_payment again while it is on does not move the day.
-        assertThat(group.normalise(on, Map.of("credit_sale_recognition", "on_payment"))
+        assertThat(group.normalise(
+                                on,
+                                Map.of(
+                                        "credit_sale_recognition",
+                                        "on_payment",
+                                        "credit_recognition_today",
+                                        "2026-10-22"))
                         .get("credit_recognition_effective_from"))
-                .isEqualTo("2026-10-20");
+                .isEqualTo("2026-10-21");
     }
 
     @Test
-    void cancellingBeforeTheDayHasComeClearsItAndNothingElseGoesBack() {
+    void cancellingBeforeTheDayHasComeClearsItAndNothingAfterwardGoesBack() {
         Map<String, Object> on = group.normalise(
-                Map.of(),
-                Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "2026-10-20"));
-        Map<String, Object> back = group.normalise(on, Map.of("credit_sale_recognition", "on_sale"));
+                Map.of(), Map.of("credit_sale_recognition", "on_payment", "credit_recognition_today", "2026-10-20"));
+        Map<String, Object> back = group.normalise(
+                on, Map.of("credit_sale_recognition", "on_sale", "credit_recognition_today", "2026-10-20"));
         assertThat(back.get("credit_sale_recognition")).isEqualTo("on_sale");
         assertThat(back).doesNotContainKey("credit_recognition_effective_from");
         assertThat(group.enabledCapabilities(back)).doesNotContain("credit_on_payment");
+        // From the start day on it cannot go back, decided on the stored state the group is given.
+        assertThatThrownBy(() -> group.normalise(
+                        on, Map.of("credit_sale_recognition", "on_sale", "credit_recognition_today", "2026-10-21")))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("cannot be switched off");
+        assertThatThrownBy(() -> group.normalise(
+                        on, Map.of("credit_sale_recognition", "on_sale", "credit_recognition_today", "2026-11-30")))
+                .isInstanceOf(ApiException.class);
     }
 
     @Test
-    void theEffectiveDateMustBeADateAndASwitchWithoutOneCountsFromTheBeginning() {
+    void aChangeNeedsTheBusinessDateAndTheCallerCannotChooseTheStartDay() {
+        assertThatThrownBy(() -> group.normalise(Map.of(), Map.of("credit_sale_recognition", "on_payment")))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> group.normalise(
+                        Map.of(), Map.of("credit_sale_recognition", "on_payment", "credit_recognition_today", "soon")))
+                .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> group.normalise(
                         Map.of(),
-                        Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "soon")))
+                        Map.of(
+                                "credit_sale_recognition",
+                                "on_payment",
+                                "credit_recognition_today",
+                                "2026-10-20",
+                                "credit_recognition_effective_from",
+                                "2020-01-01")))
                 .isInstanceOf(ApiException.class);
-        Map<String, Object> g = group.normalise(Map.of(), Map.of("credit_sale_recognition", "on_payment"));
-        assertThat(g.get("credit_recognition_effective_from")).isEqualTo("1970-01-01");
+    }
+
+    @Test
+    void aStoredOnPaymentWithNoStartDayIsNoRuleAndNeverTheBeginningOfTime() {
+        Map<String, Object> g = group.normalise(Map.of("credit_sale_recognition", "on_payment"), Map.of());
+        assertThat(g.get("credit_sale_recognition")).isEqualTo("on_sale");
+        assertThat(g).doesNotContainKey("credit_recognition_effective_from");
+        assertThat(group.enabledCapabilities(g)).doesNotContain("credit_on_payment");
     }
 }

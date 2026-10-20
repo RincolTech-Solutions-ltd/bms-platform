@@ -23,10 +23,12 @@ Daily profit and the savings use.
 
 **The switch is one way.** It starts the next business day, not today, and once it has started the product does not switch it off again
 ("This rule cannot be switched off once it has started. Ask Rincol support."). Until the start day has come the change is pending and can
-be cancelled by choosing "When the sale is made". Credit sales dated before the start day keep counting the way they did, so nothing is
-counted twice and no savings already set aside move, and the sales you made today are not re-labelled. Under "When the buyer pays" a
-payment on a sale dated from the start day is dated today (a backdated payment is refused: ask your administrator; a payment on an older
-sale keeps its old freedom), counts on the day it is entered, and goes to the branch that took the money; a return paid out in money
+be cancelled by choosing "When the sale is made". A credit sale counts from the later of the date written on it and the day it was entered. Sales entered and
+dated before the start day keep counting the way they did, so nothing is counted twice and no savings already set aside move, and the
+sales you made today are not re-labelled. A sale dated before the start day but entered after it (a backdated sale) is counted when the
+buyer pays, so it adds no profit to a day already reported. Under "When the buyer pays" a payment on a sale that counts from the start
+day is dated today (a backdated payment is refused: ask your administrator; a payment on a sale entered and dated before the start
+keeps its old freedom), counts on the day it is entered, and goes to the branch that took the money; a return paid out in money
 takes the profit back from the branch that paid the refund, and a return credited to the buyer's balance takes it back from the
 branches that took the sale's payments, in proportion. Reports and the home page say which rule applied on the last day they show
 and, when the rule has not started yet, the day it starts.
@@ -36,8 +38,9 @@ and, when the rule has not started yet, the day it starts.
 1. Sign in as an administrator (`core.settings.manage`) and open Retail, then Retail settings.
 2. Under "When does a credit sale count as income and profit?", choose "When the buyer pays" and tap Review change.
 3. Read the sentences, then tap Confirm. The change is recorded with your name (audit action `retail.capabilities.changed`).
-4. Open the Retail home page. The cards now read Sales today (everything sold, credit included), Cash and mobile money (money received
-   today), On credit (what buyers still owe) and Profit today (from the money received).
+4. The rule starts the next business day, so the Retail home page keeps its cards until then. From that day the cards read Sales today
+   (everything sold, credit included), Cash and mobile money (money received today), On credit (what buyers still owe) and Profit today
+   (from the money received). Until then the page and Daily profit say when the rule starts.
 
 ## Check the figures
 
@@ -59,18 +62,29 @@ and, when the rule has not started yet, the day it starts.
 
 There is no button for this, on purpose. Do it only when the owner asks and understands that the past is read again by the old rule:
 every credit sale counts at the sale again, so the profit that came in as payments leaves those days and returns to the days of the
-sales, and the savings amounts already saved keep their amounts. Write-offs already made keep the loss they stored. Take a note of the
-reason and the ticket first. Then, as the database owner, for the one tenant (`:tenant_id`):
+sales, and the savings amounts already saved keep their amounts. Write-offs already made keep the loss they stored. A write-off made
+while the rule stood keeps the loss it stored, which is the cost share only. After the revert the reports show the whole profit of that
+sale at the sale, including the margin on the unpaid part that was never collected, against that smaller loss, so that margin stays in
+the reported profit until someone corrects it; list such sales first (`retail_sale_writeoffs` rows with `recognition = 'on_payment'`).
+Take a note of the reason and the ticket first. The change is written to the audit log in the same transaction, as the
+operator's act. Then, as the database owner, for the one tenant, with psql:
 
 ```sql
+\set tenant_id '<the tenant id>'
+\set reason '<why>'
+\set ticket '<ticket>'
 BEGIN;
 UPDATE tenant_settings
    SET settings = jsonb_set(settings, '{module_groups,retail}',
                             (settings #> '{module_groups,retail}') - 'credit_recognition_effective_from'
                             || '{"credit_sale_recognition": "on_sale"}'::jsonb),
        version = version + 1
- WHERE tenant_id = :tenant_id;
--- Expect UPDATE 1, then COMMIT. Check Retail settings and Daily profit read "When the sale is made".
+ WHERE tenant_id = :'tenant_id';
+INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, data)
+VALUES (gen_random_uuid(), :'tenant_id', 'platform', 'retail.capabilities.changed', 'tenant_settings',
+        jsonb_build_object('after', jsonb_build_object('credit_sale_recognition', 'on_sale'),
+                           'reason', :'reason', 'ticket', :'ticket', 'by', 'operator SQL, credit-sale-recognition runbook'));
+-- Expect UPDATE 1 and INSERT 0 1, then COMMIT. Check Retail settings and Daily profit read "When the sale is made".
 COMMIT;
 ```
 

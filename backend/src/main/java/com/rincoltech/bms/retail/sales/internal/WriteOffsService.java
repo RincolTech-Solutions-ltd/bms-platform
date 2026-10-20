@@ -15,6 +15,7 @@ import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOff;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffOutcome;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffRequest;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsRepository.Admin;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Alone;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
  * The route of a write-off (ADR-043, issue #340). A positive tenant threshold for {@code retail_sale_write_off} decides: a debt at or
  * above it waits for a second holder of {@code retail.credit.write_off} (maker-checker, ADR-015), a smaller one is done at once. With no
  * positive threshold the default rule applies, awaiting Hillary's confirmation: a second administrator is needed when the tenant has
- * two or more active ones, and a single active administrator may write off alone, which the audit row records.
+ * two or more who count, and a single one may write off alone. Whenever a write-off is done without a second person the audit row
+ * says so and the administrators are told, whatever the threshold is.
  */
 @Service
 class WriteOffsService {
@@ -80,21 +82,16 @@ class WriteOffsService {
         Plan plan = servicer.plan(saleId);
         long threshold = settings.approvalThresholdMinor(SaleWriteOffAction.TYPE);
         // The default rule (awaiting Hillary's confirmation): with no threshold set a write-off needs a second
-        // administrator when the
-        // tenant has two or more active ones; with a single active administrator it is allowed alone and the audit row
-        // says so. A
-        // positive threshold, set in the business settings, replaces the default: only a debt at or above it needs a
-        // second person.
-        List<Admin> admins = List.of();
-        boolean onlyAdministrator = false;
-        boolean ask;
-        if (threshold > 0) {
-            ask = plan.unpaidMinor() >= threshold;
-        } else {
-            admins = repo.recentAdmins(clock.now().minus(ADMIN_MEMORY));
-            ask = admins.size() >= 2;
-            onlyAdministrator = !ask;
-        }
+        // administrator when
+        // two or more count; with one it is allowed alone. A positive threshold replaces the default: only a debt at or
+        // above it
+        // needs a second person. The administrators who count are read in both cases: a write-off that goes through
+        // without a
+        // second person, whatever the reason, is flagged in the audit row and told to the others (ADR-043), so raising
+        // the
+        // threshold first cannot make a write-off silent.
+        List<Admin> admins = repo.recentAdmins(clock.now().minus(ADMIN_MEMORY));
+        boolean ask = threshold > 0 ? plan.unpaidMinor() >= threshold : admins.size() >= 2;
         if (ask) {
             Approvals.Outcome o = approvals.request(new ActionRequest(
                     SaleWriteOffAction.TYPE,
@@ -106,27 +103,24 @@ class WriteOffsService {
                     Map.of(SaleWriteOffAction.REASON, r.reason().trim())));
             return new WriteOffOutcome(false, o.approvalId(), null);
         }
-        WriteOff written = servicer.record(
-                plan,
-                r.reason(),
-                CurrentPrincipal.require().userId(),
-                null,
-                null,
-                onlyAdministrator ? Integer.valueOf(admins.size()) : null);
-        if (onlyAdministrator) {
-            // Done alone: every administrator of the last 30 days is told by email, and the audit row says how many
-            // (ADR-043).
-            String business = tenant.profile().name();
-            for (Admin a : admins) {
-                if (a.email() != null) {
-                    outbox.enqueue(new Outbox.Message(
-                            Outbox.EMAIL,
-                            a.email(),
-                            "retail.write_off_alone",
-                            Map.of("business_name", business),
-                            "retail.write_off_alone:" + written.id() + ":" + a.userId()));
-                }
-            }
+        // Done without a second person. The others who count are told; when the maker is the only one it is a notice to
+        // themselves
+        // and the audit row (ADR-043: the tenant record has no contact email to add).
+        UUID maker = CurrentPrincipal.require().userId();
+        List<Admin> others =
+                admins.stream().filter(a -> !a.userId().equals(maker)).toList();
+        List<Admin> told = (others.isEmpty() ? admins : others)
+                .stream().filter(a -> a.email() != null).toList();
+        String why = threshold > 0 && admins.size() >= 2 ? "below_threshold" : "only_one_active_administrator";
+        WriteOff written = servicer.record(plan, r.reason(), maker, null, null, new Alone(why, told.size()));
+        String business = tenant.profile().name();
+        for (Admin a : told) {
+            outbox.enqueue(new Outbox.Message(
+                    Outbox.EMAIL,
+                    a.email(),
+                    "retail.write_off_alone",
+                    Map.of("business_name", business),
+                    "retail.write_off_alone:" + written.id() + ":" + a.userId()));
         }
         return new WriteOffOutcome(true, null, written);
     }

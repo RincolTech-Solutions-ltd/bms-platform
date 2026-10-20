@@ -34,7 +34,8 @@ class DashboardRepository {
     }
 
     /**
-     * As above; a credit sale that is not an imported one and is dated inside a stretch of {@code periods} (counted when the
+     * As above; a credit sale that is not an imported one and counts from the start day of {@code periods} on (the later of its date
+     * and the day it was entered; counted when the
      * buyer pays, ADR-043) is left out, with the lines its returns took back, since it reaches the figures through the payments.
      */
     List<DaySales> sales(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
@@ -57,7 +58,7 @@ class DashboardRepository {
                         + (periods.isEmpty()
                                 ? ""
                                 : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
-                                        + periods.sql("s.origin_date", params, "crpD") + ")")
+                                        + periods.sql("s.origin_date", "s.origin_created_at", params, "crpD") + ")")
                         + " GROUP BY s.branch_id, s.sale_date, (s.payment_method = 'credit')")
                 .params(params)
                 .query((rs, n) -> new DaySales(

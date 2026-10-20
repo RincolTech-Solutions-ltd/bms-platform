@@ -49,6 +49,12 @@ export function payProblem(form: PayForm, sale: Pick<Sale, 'balance_minor' | 'sa
   return null;
 }
 
+/**
+ * The form as it is sent: for a sale counted when the buyer pays a payment is dated the day it is entered (ADR-043), so whatever date a
+ * stored draft holds, from yesterday or from an earlier visit, the date used is today.
+ */
+export const settledDate = (form: PayForm, todayOnly: boolean, today: string): PayForm => (todayOnly ? { ...form, paidOn: today } : form);
+
 export function buildPayRequest(form: PayForm): SalePaymentRequest {
   const amount = parseMinor(form.amount, RETAIL_CURRENCY);
   if (amount === null) throw new Error('invalid amount');

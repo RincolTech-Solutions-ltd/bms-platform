@@ -9656,6 +9656,8 @@ export interface components {
             balance_minor?: number;
             /** Format: uuid */
             branch_id?: string;
+            /** @description True for a credit sale counted when the buyer pays (ADR-043): a payment that pays it is dated today; present only while the customer_accounts capability is on, and only when true */
+            counted_when_paid?: boolean;
             /** Format: date */
             due_date?: string;
             /** @description True for an imported credit sale (never posted to the ledger, skipped by payment on account); present only while the customer_accounts capability is on, and only when true */
@@ -10646,7 +10648,7 @@ export interface components {
              * @description Present only with retail.profit.read
              */
             cost_total_minor?: number;
-            /** @description True for a credit sale counted when the buyer pays (its date is on or after the first day of the rule on_payment, ADR-043): its payments are dated the day they are entered */
+            /** @description True for a credit sale counted when the buyer pays (ADR-043): the later of its date and the day it was entered is on or after the first day of the rule on_payment, so a backdated sale entered after the start counts too; its payments are dated the day they are entered */
             counted_when_paid?: boolean;
             /** Format: date-time */
             created_at?: string;
