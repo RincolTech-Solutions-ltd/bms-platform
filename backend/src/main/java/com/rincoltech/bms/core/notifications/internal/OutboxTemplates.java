@@ -183,10 +183,8 @@ class OutboxTemplates {
     // Find your sign-in page (issue #383). Kept in its own map for the same reason as the retail one.
     private static final Map<String, Template> EMAIL_FIND_SIGN_IN = Map.of(
             // Staff who could not find their business's sign-in page ask for it on the platform home page (issue #383).
-            // Sent
-            // only to the address typed, and only when it is an active staff user's; the links are the businesses'
-            // public
-            // sign-in addresses, which carry no secret.
+            // Sent only to the address typed, and only when it is an active staff user's; the links are the
+            // businesses' public sign-in addresses, which carry no secret.
             "identity.find_sign_in", new Template("Your BMS sign-in page", """
                     Hello,
 

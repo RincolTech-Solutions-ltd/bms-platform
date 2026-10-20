@@ -7,7 +7,9 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.kernel.Masking;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
+import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -202,6 +204,43 @@ class FindSignInIT extends IntegrationTest {
         assertThat(over.getBody()).isEqualTo(first.getBody());
         assertThat(sent(email)).isEqualTo(FindSignInService.MAX_EMAILS_PER_MAILBOX_PER_HOUR);
         assertThat(audited("rate_limited", email)).isEqualTo(1);
+    }
+
+    /** Emails sent to any spelling of one mailbox, grouped as the limit groups them ({@code onboarding_email_key}). */
+    static long sentToMailbox(String email) {
+        return TestDatabase.owner()
+                .sql("""
+                        SELECT count(*) FROM notification_outbox
+                         WHERE template_key = ? AND onboarding_email_key(recipient) = onboarding_email_key(?)
+                        """)
+                .params(TEMPLATE, email)
+                .query(Long.class)
+                .single();
+    }
+
+    @Test
+    void spellingsOfOneMailboxShareItsLimit() {
+        // Both spellings are staff somewhere, so every request that reaches the lookup would send if the limit allowed
+        // it.
+        String local = "variant-" + UUID.randomUUID().toString().substring(0, 8);
+        // A domain no other test uses, so the masked address of the audit row (last four characters) is this test's.
+        String plain = local + "@example.net";
+        String tagged = local + "+shop@example.net";
+        TestDatabase.Fixture one = TestDatabase.tenant("findvariant1", false);
+        TestDatabase.Fixture two = TestDatabase.tenant("findvariant2", false);
+        Api.staff(one, plain, new Role("cashier", one.headOffice()));
+        Api.staff(two, tagged, new Role("cashier", two.headOffice()));
+
+        assertThat(ask(plain.toUpperCase(Locale.ROOT)).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        // The page trims what is typed; the route refuses surrounding spaces as invalid, so they send nothing.
+        assertThat(ask("  " + plain + " ").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(ask(tagged).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(ask(plain).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(ask("Variant" + tagged.substring("variant".length())).getStatusCode())
+                .isEqualTo(HttpStatus.ACCEPTED);
+
+        assertThat(sentToMailbox(plain)).isEqualTo(FindSignInService.MAX_EMAILS_PER_MAILBOX_PER_HOUR);
+        assertThat(audited("rate_limited", tagged)).isEqualTo(1);
     }
 
     @Test

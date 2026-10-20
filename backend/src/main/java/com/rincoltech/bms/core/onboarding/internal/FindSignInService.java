@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -20,13 +22,15 @@ import org.springframework.transaction.support.TransactionTemplate;
  * "Staff of a business? Find your sign-in page" on the platform home page (issue #383). The asker types a work email; when it
  * is an active staff user's in one or more active businesses, an email goes to that address, and only that address, with the
  * sign-in page of each business. The caller always gets the same answer: nothing the page returns, and no timing, says whether
- * the address matched. The lookup crosses tenants through the definer function {@code app_staff_sign_in_pages} (V71, ADR-003,
+ * the address matched. The lookup crosses tenants through the definer function {@code app_staff_sign_in_pages} (V72, ADR-003,
  * ADR-016) and returns only each business's public slug and name. The address is limited per client address (the controller)
  * and per mailbox (here, counted in the database from the outbox rows, so it holds across instances); a request over a bound
  * sends nothing and is audited like any other.
  */
 @Service
 class FindSignInService {
+
+    private static final Logger log = LoggerFactory.getLogger(FindSignInService.class);
 
     static final String TEMPLATE = "identity.find_sign_in";
     /** Emails one mailbox can be sent in an hour; further requests are answered and ignored. */
@@ -108,6 +112,19 @@ class FindSignInService {
                     now.plus(LINK_LIFETIME)));
             record("sent", email, pages.size());
         });
+    }
+
+    /**
+     * Audits a request that failed inside {@link #request} (its own transaction rolled back), in a new transaction. A failure
+     * here too is only logged: the caller answers the same either way.
+     */
+    void recordFailure(String typed) {
+        String email = typed.trim().toLowerCase(Locale.ROOT);
+        try {
+            transactions.executeWithoutResult(status -> record("failed", email, 0));
+        } catch (RuntimeException e) {
+            log.error("Could not audit a failed find-sign-in request", e);
+        }
     }
 
     private void record(String result, String email, int businesses) {

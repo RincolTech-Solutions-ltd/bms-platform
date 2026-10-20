@@ -4,7 +4,7 @@
 -- takes one email and returns only the public slug and the business name of each match: no user id, no role, no status.
 -- Only an active staff user of an active tenant counts; an invited, deactivated or member user and a suspended tenant
 -- match nothing. The caller never shows the answer to the asker (the page sends it to the address typed).
--- Renumbered at merge: V68 is taken by #380 and V69 and V70 may be taken by other open pull requests.
+-- Numbered V72: V68 is on main (#380); V69 (#388), V70 (#389) and V71 (#392) are claimed by open pull requests.
 CREATE FUNCTION app_staff_sign_in_pages(p_email text) RETURNS TABLE (slug text, name text)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT t.slug::text, t.name
@@ -21,3 +21,6 @@ $$;
 
 REVOKE ALL ON FUNCTION app_staff_sign_in_pages(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_staff_sign_in_pages(text) TO bms_app;
+
+-- The lookup above crosses tenants, so users_staff_email (tenant_id, lower(email)) cannot serve it: this index can.
+CREATE INDEX users_staff_email_any_tenant ON users (lower(email)) WHERE email IS NOT NULL AND kind = 'staff';
