@@ -1,4 +1,4 @@
--- V91: two-step sign-in is optional by default (issue #348, ADR-046).
+-- V65: two-step sign-in is optional by default (issue #348, ADR-046).
 --
 -- V2 seeded `roles.mfa_required = true` for the tenant admin, so on a fresh database a tenant administrator with no second factor was
 -- sent to enrolment at sign-in and never got a session, while the staging database had the flag cleared by a hand edit of reference

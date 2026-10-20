@@ -126,7 +126,7 @@ class TwoStepPolicyIT extends IntegrationTest {
                         .sql("SELECT mfa_required FROM roles WHERE key = 'tenant_admin'")
                         .query(Boolean.class)
                         .single())
-                .as("V91 clears the seed's flag")
+                .as("V65 clears the seed's flag")
                 .isFalse();
         JsonNode current = settings();
         assertThat(current.get("require_mfa_all_staff").asBoolean()).isFalse();

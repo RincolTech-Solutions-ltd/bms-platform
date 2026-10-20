@@ -4,8 +4,7 @@
 
 Proposed (2026-10-20, issue #348; not yet accepted by the product owner). Builds on ADR-014 (staff authentication) and ADR-025 (the first run offers
 the second factor), and completes the caveat that ADR-042 (forgot password, accepted 2026-10-20) recorded against itself: two-step sign-in was optional
-only where the database had been edited by hand. Does not supersede any of them. The migration is `V91`, a placeholder number that the coordinator renames
-at merge (the highest migration on `main` is `V63`).
+only where the database had been edited by hand. Does not supersede any of them. The migration is `V65` (#349 takes `V64`).
 
 ## Context
 
@@ -27,9 +26,9 @@ out, and how the platform recommends the stricter setting without forcing it.
 
 ## Decision
 
-1. **The default is off, in a migration.** `V91` sets `roles.mfa_required = false` for `tenant_admin` (an `UPDATE`, idempotent, and a no-op on staging where
+1. **The default is off, in a migration.** `V65` sets `roles.mfa_required = false` for `tenant_admin` (an `UPDATE`, idempotent, and a no-op on staging where
    the hand edit already made it so). The column and the rule stay: a role flagged there is required for every tenant that has the role, which is how a
-   future platform-wide mandate would be expressed. No seeded staff role carries the flag after `V91`. Platform operators are unaffected: an operator
+   future platform-wide mandate would be expressed. No seeded staff role carries the flag after `V65`. Platform operators are unaffected: an operator
    always enrols (ADR-014), and the operator reset routes keep asking for the operator's authenticator code.
 2. **A tenant can require it for everyone, or for chosen roles.** Three keys join the tenant settings (`tenant_settings.settings`, chapter 6), changed
    through the existing `PATCH /settings` by `core.settings.manage` (the tenant administrator), audited with before and after like every settings change:
@@ -89,7 +88,7 @@ out, and how the platform recommends the stricter setting without forcing it.
   mitigation, and the ADR-042 consequence about a no-factor administrator's mailbox now applies to every tenant until it turns the policy on.
 - One deadline for the whole policy means widening the policy gives people who were already past their date a new one. The alternative (a deadline per
   person or per role) is more to explain and to store, and the lenient direction was preferred.
-- Existing tenants keep what they have: V91 changes the reference flag only, and no tenant's policy is switched on for it. The owner accepted the mailbox
+- Existing tenants keep what they have: V65 changes the reference flag only, and no tenant's policy is switched on for it. The owner accepted the mailbox
   risk of an optional account; it is stated here and in SDD 8.2a, and the recommendation banner is the nudge.
 - Several existing integration tests assumed the V2 seed: they now turn the policy on for the tenant they test (a test-support helper) instead of relying on
   the global role flag.

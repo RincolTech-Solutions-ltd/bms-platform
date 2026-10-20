@@ -202,7 +202,7 @@ Prices are commercial and are not stored in this repository's seed data.
 | Table | Columns |
 |---|---|
 | `permissions` | `key text PK` (format `<module>.<resource>.<action>`, for example `lending.loans.approve`), `module text NOT NULL`, `description text NOT NULL`, `is_money_moving boolean NOT NULL` |
-| `roles` | `key text PK` [`tenant_admin`, `branch_manager`, `loan_officer`, `cashier`, `accountant`, `auditor`, `member`], `name text NOT NULL`, `kind text NOT NULL` [`staff`, `member`], `mfa_required boolean NOT NULL DEFAULT false` (false for every seeded role since `V91`, issue #348, ADR-046: V2 set it true for `tenant_admin`; two-step sign-in is optional and a tenant requires it through its settings, FR-IAM-06, FR-IAM-16; a role flagged here would be required for every tenant that has it) |
+| `roles` | `key text PK` [`tenant_admin`, `branch_manager`, `loan_officer`, `cashier`, `accountant`, `auditor`, `member`], `name text NOT NULL`, `kind text NOT NULL` [`staff`, `member`], `mfa_required boolean NOT NULL DEFAULT false` (false for every seeded role since `V65`, issue #348, ADR-046: V2 set it true for `tenant_admin`; two-step sign-in is optional and a tenant requires it through its settings, FR-IAM-06, FR-IAM-16; a role flagged here would be required for every tenant that has it) |
 | `role_permissions` | `role_key text FK roles`, `permission_key text FK permissions`, PK both |
 
 Seeded from the matrix in chapter 8 by migration V2, with the two platform permissions
