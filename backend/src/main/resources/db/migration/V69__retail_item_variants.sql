@@ -1,6 +1,6 @@
 -- V69: retail items with sizes and colours (variants; issue #384; ADR-051; docs/specs/retail-ui-notes.md, Sizes and colours).
 --
--- V69 is the first free number after V68 (the push subscriptions of PR #380, still open). Flyway runs with outOfOrder off
+-- V69 is the first free number after V68 (the push subscriptions of PR #380, merged). Flyway runs with outOfOrder off
 -- (AGENTS.md), so if another migration reaches main first this file is renamed to the next free number at merge.
 --
 -- A variant is a product. The romper in size 0-3m and print Blue is one row of retail_products with its own code, its own
