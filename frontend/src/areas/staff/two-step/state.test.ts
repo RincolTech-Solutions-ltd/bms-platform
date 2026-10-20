@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { bodyOf } from '../../../api/two-step';
+import { bodyOf, relaxes, widens } from '../../../api/two-step';
 import {
   GRACE_CHOICES,
   canManageTwoStep,
   choiceOf,
   dateWords,
   deadlineOf,
+  deadlineWords,
   differs,
   graceChoices,
   hideRecommendation,
+  mustSetUp,
   policyOf,
   ready,
   recommendationHidden,
@@ -73,10 +75,43 @@ describe('whether saving would change anything', () => {
 });
 
 describe('what is sent', () => {
-  it('sends the grace period only while something is required, and empties the roles unless roles are chosen', () => {
-    expect(bodyOf({ policy: 'off', roles: ['cashier'], graceDays: 14 })).toEqual({ require_mfa_all_staff: false, require_mfa_roles: [] });
-    expect(bodyOf({ policy: 'everyone', roles: ['cashier'], graceDays: 14 })).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [], mfa_grace_days: 14 });
-    expect(bodyOf({ policy: 'roles', roles: ['cashier'], graceDays: 0 })).toEqual({ require_mfa_all_staff: false, require_mfa_roles: ['cashier'], mfa_grace_days: 0 });
+  const off = { policy: 'off' as const, roles: [], graceDays: 14 };
+  const everyone = { policy: 'everyone' as const, roles: [], graceDays: 14 };
+  const cashiers = { policy: 'roles' as const, roles: ['cashier'], graceDays: 14 };
+
+  it('sends the grace period when the policy widens, and empties the roles unless roles are chosen', () => {
+    expect(bodyOf({ ...everyone, roles: ['cashier'] }, off)).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [], mfa_grace_days: 14 });
+    expect(bodyOf({ ...cashiers, graceDays: 0 }, off)).toEqual({ require_mfa_all_staff: false, require_mfa_roles: ['cashier'], mfa_grace_days: 0 });
+    expect(bodyOf({ ...cashiers, roles: ['cashier', 'auditor'] }, cashiers)).toMatchObject({ mfa_grace_days: 14 });
+    expect(bodyOf(everyone, cashiers)).toMatchObject({ mfa_grace_days: 14 });
+  });
+
+  it('narrowing keeps the deadline: no grace period is sent, only the proof', () => {
+    expect(bodyOf(cashiers, everyone, { password: 'Test-Password-1' })).toEqual({ require_mfa_all_staff: false, require_mfa_roles: ['cashier'], password: 'Test-Password-1' });
+    expect(bodyOf({ ...cashiers, roles: ['cashier'] }, { ...cashiers, roles: ['cashier', 'auditor'] }, { totp_code: '123456' })).toEqual({
+      require_mfa_all_staff: false,
+      require_mfa_roles: ['cashier'],
+      totp_code: '123456',
+    });
+    expect(bodyOf(off, everyone, { password: 'Test-Password-1' })).toEqual({ require_mfa_all_staff: false, require_mfa_roles: [], password: 'Test-Password-1' });
+  });
+
+  it('sends a grace period the administrator changed, and leaves the proof out of a change that asks more', () => {
+    expect(bodyOf({ ...everyone, graceDays: 7 }, everyone)).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [], mfa_grace_days: 7 });
+    expect(bodyOf(everyone, everyone, { password: 'x' })).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [] });
+    expect(bodyOf(everyone, off, { password: 'x' })).not.toHaveProperty('password');
+  });
+
+  it('tells widening from relaxing', () => {
+    expect(widens(off, cashiers)).toBe(true);
+    expect(widens(cashiers, everyone)).toBe(true);
+    expect(widens(everyone, cashiers)).toBe(false);
+    expect(widens(cashiers, off)).toBe(false);
+    expect(relaxes(everyone, off)).toBe(true);
+    expect(relaxes(everyone, cashiers)).toBe(true);
+    expect(relaxes({ ...cashiers, roles: ['cashier', 'auditor'] }, cashiers)).toBe(true);
+    expect(relaxes(cashiers, everyone)).toBe(false);
+    expect(relaxes(off, cashiers)).toBe(false);
   });
 });
 
@@ -88,17 +123,29 @@ describe('dates', () => {
     expect(dateWords('not a date')).toBeNull();
   });
 
-  it('puts the end of the grace period that many days on', () => {
-    expect(deadlineOf(14, NOW)).toBe('2026-11-03T09:00:00.000Z');
-    expect(deadlineOf(0, NOW)).toBe('2026-10-20T09:00:00.000Z');
+  it('rounds the end of the grace period to the start of the day after, in Kampala', () => {
+    // 20 Oct 2026 12:00 in Kampala; 14 days on is 3 Nov, so people may sign in until the end of 3 Nov: the stored instant is 4 Nov 00:00 +03:00.
+    expect(deadlineOf(14, NOW)).toBe('2026-11-03T21:00:00.000Z');
+    expect(deadlineOf(0, NOW)).toBe('2026-10-20T21:00:00.000Z');
+    // 22:30 UTC is 01:30 on the 21st in Kampala: the day is counted there, so one day on is the 22nd and the instant is the 23rd at 00:00.
+    expect(deadlineOf(1, new Date('2026-10-20T22:30:00Z'))).toBe('2026-10-22T21:00:00.000Z');
+  });
+
+  it('names the last day for a stored deadline, not the day after', () => {
+    expect(deadlineWords('2026-11-03T21:00:00.000Z')).toBe('3 Nov 2026');
+    expect(deadlineWords(deadlineOf(14, NOW))).toBe('3 Nov 2026');
+    expect(deadlineWords(null)).toBeNull();
   });
 });
 
 describe('the review before saving', () => {
-  it('says who, from when, that nobody is locked out before then, and what happens to a lost phone', () => {
-    const lines = reviewLines({ policy: 'roles', roles: ['cashier', 'accountant'], graceDays: 14 }, NAMES, ADMIN_ME, NOW);
+  const nov3 = '2026-11-03T21:00:00.000Z';
+  const roles = { policy: 'roles' as const, roles: ['cashier', 'accountant'], graceDays: 14 };
+
+  it('says who, until when, and what happens to a lost phone', () => {
+    const lines = reviewLines(roles, NAMES, ADMIN_ME, NOW);
     expect(lines[0]).toBe('People with the roles Cashier and Accountant will be asked to use it.');
-    expect(lines[1]).toContain('Nobody is locked out before 3 Nov 2026.');
+    expect(lines[1]).toContain('Nobody is locked out before the end of 3 Nov 2026.');
     expect(lines.join(' ')).not.toContain('You are covered too');
     expect(lines[lines.length - 1]).toContain('If someone loses their phone');
   });
@@ -110,14 +157,32 @@ describe('the review before saving', () => {
     expect(reviewLines({ policy: 'everyone', roles: [], graceDays: 7 }, NAMES, { roles: [] }, NOW)).toContain('You are covered too, so you will be asked as well.');
   });
 
-  it('says there is no wait when the grace period is none, and that it stays optional when it is off', () => {
+  it('says there is no wait when the grace period is none, and that making it optional is a weaker rule that needs confirming', () => {
     const now = reviewLines({ policy: 'everyone', roles: [], graceDays: 0 }, NAMES, ADMIN_ME, NOW);
     expect(now[0]).toBe('Everyone who signs in to the staff area will be asked to use it.');
     expect(now[1]).toContain('There is no wait');
     expect(now.join(' ')).not.toContain('locked out before');
-    expect(reviewLines({ policy: 'off', roles: [], graceDays: 14 }, NAMES, ADMIN_ME, NOW)).toEqual([
-      'Nobody will be required to use it. People who have already set it up keep using it, and anyone can still turn it on for themselves.',
-    ]);
+    const off = reviewLines({ policy: 'off', roles: [], graceDays: 14 }, NAMES, ADMIN_ME, NOW);
+    expect(off[0]).toContain('Nobody will be required to use it.');
+    expect(off[1]).toContain('you will be asked to confirm that it is you');
+  });
+
+  it('says that narrowing leaves the date already set, and that relaxing needs confirming', () => {
+    const saved = { choice: { policy: 'everyone' as const, roles: [], graceDays: 14 }, enforceFrom: nov3 };
+    const lines = reviewLines({ policy: 'roles', roles: ['cashier'], graceDays: 14 }, NAMES, ADMIN_ME, NOW, saved);
+    expect(lines).toContain('The date already set does not change: the end of 3 Nov 2026.');
+    expect(lines.join(' ')).not.toContain('Nobody is locked out before');
+    expect(lines.join(' ')).toContain('you will be asked to confirm that it is you, and the other administrators are told by email');
+  });
+
+  it('says in plain words when a new grace period moves the date earlier, or replaces it', () => {
+    const saved = { choice: { policy: 'everyone' as const, roles: [], graceDays: 30 }, enforceFrom: deadlineOf(30, NOW) };
+    const earlier = reviewLines({ policy: 'everyone', roles: [], graceDays: 7 }, NAMES, ADMIN_ME, NOW, saved);
+    expect(earlier.join(' ')).toContain('This moves the date earlier than the one now set, the end of 19 Nov 2026.');
+    const later = reviewLines({ policy: 'everyone', roles: [], graceDays: 60 }, NAMES, ADMIN_ME, NOW, saved);
+    expect(later.join(' ')).toContain('This replaces the date now set, the end of 19 Nov 2026.');
+    const none = reviewLines({ policy: 'everyone', roles: [], graceDays: 0 }, NAMES, ADMIN_ME, NOW, saved);
+    expect(none.join(' ')).toContain('This replaces the date now set');
   });
 
   it('falls back to the role key for a role it has no name for', () => {
@@ -126,12 +191,20 @@ describe('the review before saving', () => {
 });
 
 describe('the reminder for a covered person', () => {
-  it('names the day, only for someone without a second factor who has a deadline', () => {
-    expect(reminderWords({ mfa_due_by: '2026-11-03T09:00:00Z', mfa_enabled: false })).toBe(
-      'Your business asks you to set up two-step sign-in by 3 Nov 2026. After that day you cannot sign in without it.',
+  it('names the last day, only for someone without a second factor who has a deadline', () => {
+    expect(reminderWords({ mfa_due_by: '2026-11-03T21:00:00Z', mfa_enabled: false })).toBe(
+      'Your business asks you to set up two-step sign-in by 3 Nov 2026 (you can sign in until the end of that day). After that you cannot sign in without it.',
     );
-    expect(reminderWords({ mfa_due_by: '2026-11-03T09:00:00Z', mfa_enabled: true })).toBeNull();
+    expect(reminderWords({ mfa_due_by: '2026-11-03T21:00:00Z', mfa_enabled: true })).toBeNull();
     expect(reminderWords({ mfa_enabled: false })).toBeNull();
+  });
+
+  it('says it is required now once the date has passed, and blocks the person until it is set up', () => {
+    expect(reminderWords({ mfa_required: true, mfa_enabled: false })).toBe('Your business now requires two-step sign-in. Set it up to go on using the app.');
+    expect(mustSetUp({ mfa_required: true, mfa_enabled: false })).toBe(true);
+    expect(mustSetUp({ mfa_required: true, mfa_enabled: true })).toBe(false);
+    expect(mustSetUp({ mfa_required: false, mfa_enabled: false })).toBe(false);
+    expect(mustSetUp({})).toBe(false);
   });
 });
 

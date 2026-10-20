@@ -5015,6 +5015,12 @@
         "properties" : {
           "mfa_token" : {
             "type" : "string"
+          },
+          "password" : {
+            "description" : "A signed-in user starting their own set-up gives their current password; not needed with an mfa_token",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
           }
         }
       },
@@ -17227,6 +17233,12 @@
             "minimum" : 0,
             "type" : "integer"
           },
+          "password" : {
+            "description" : "Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "receipt_footer" : {
             "maxLength" : 500,
             "minLength" : 0,
@@ -17254,6 +17266,12 @@
           "theme_primary" : {
             "description" : "#RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08)",
             "pattern" : "^(#[0-9A-Fa-f]{6})?$",
+            "type" : "string"
+          },
+          "totp_code" : {
+            "description" : "Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged",
+            "maxLength" : 20,
+            "minLength" : 0,
             "type" : "string"
           }
         }

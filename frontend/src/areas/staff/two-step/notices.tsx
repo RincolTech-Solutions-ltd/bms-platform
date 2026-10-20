@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import type { Me } from '../../../api/client';
-import { hideRecommendation, recommendationHidden, recommends, reminderWords } from './state';
+import { hideRecommendation, mustSetUp, recommendationHidden, recommends, reminderWords } from './state';
 
 // The two notices of the two-step policy (issue #348; ADR-046 decision 6), drawn by the staff layout. A person the policy covers who has
 // not set it up sees a reminder with the date on every staff screen until they do. An administrator sees a recommendation while the
@@ -18,7 +18,7 @@ export function TwoStepNotices({ me, pathname }: { me: Me; pathname: string }) {
       {reminder && !ownPage && (
         <p role="status" className="alert alert-warning" data-tour="twostep-reminder">
           {reminder}{' '}
-          <Link to={'/staff/two-step' as never}>Set it up now</Link>
+          {!mustSetUp(me) && <Link to={'/staff/two-step' as never}>Set it up now</Link>}
         </p>
       )}
       {recommends(me) && !hidden && ON_SETUP_PAGES.includes(pathname) && (

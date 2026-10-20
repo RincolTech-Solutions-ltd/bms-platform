@@ -1,5 +1,5 @@
 import { Link, createLazyRoute, useNavigate } from '@tanstack/react-router';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { invitationToken, plainProblem } from '../../auth/codes';
 import { setAccessToken } from '../../auth/session';
@@ -34,6 +34,8 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
   const [code, setCode] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The password just chosen, kept in memory only until the person turns two-step on or leaves: starting the set-up asks for it.
+  const chosen = useRef('');
 
   async function run(action: () => Promise<void>, fallback: string) {
     if (busy) return;
@@ -48,7 +50,10 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
     }
   }
 
-  const home = () => void navigate({ to: '/staff' });
+  const home = () => {
+    chosen.current = '';
+    void navigate({ to: '/staff' });
+  };
 
   async function afterPassword(body: SignInResponse) {
     // The token has done its job; drop it from the address bar and the history.
@@ -75,6 +80,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
     void run(async () => {
       const { data, error } = await api.POST('/api/v1/auth/staff/invitations/accept', { body: { token, password } });
       if (error || !data) throw error;
+      chosen.current = password;
       setPassword('');
       setConfirm('');
       await afterPassword(data);
@@ -83,8 +89,9 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
 
   function turnOn() {
     void run(async () => {
-      const { data, error } = await api.POST('/api/v1/auth/staff/mfa/enrol', {});
+      const { data, error } = await api.POST('/api/v1/auth/staff/mfa/enrol', { body: { password: chosen.current } });
       if (error || !data) throw error;
+      chosen.current = '';
       setStep({ kind: 'enrol', enrolment: data, mfaToken: null });
     }, 'Two-step sign-in could not start. Try again.');
   }

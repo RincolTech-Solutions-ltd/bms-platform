@@ -22,6 +22,8 @@ import { showReceivePayments } from './payments/state';
 import { showSms } from './sms/state';
 import { showUsers } from './users/state';
 import { TwoStepNotices } from './two-step/notices';
+import { OwnTwoStep } from './two-step/own';
+import { mustSetUp } from './two-step/state';
 
 // The staff area layout: restores the session from the refresh cookie, shows who is signed in,
 // and holds the branch switcher (FR-BR-03). Switching the branch changes what lists show without
@@ -93,7 +95,7 @@ function StaffLayout() {
         <TwoStepNotices me={profile} pathname={pathname} />
         {pathname.startsWith('/staff/retail') && showRetail(profile) && <RetailNav me={profile} />}
         <StaffBreadcrumbs />
-        <Outlet />
+        {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
         </CrumbProvider>
       </TourProvider>
     </StaffContext.Provider>

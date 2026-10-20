@@ -186,7 +186,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `UPDATE`; no table), so two-step sign-in is **optional by default on every database**, tenant administrators included, and the staging hand edit becomes
   redundant. A tenant administrator (`core.settings.manage`, no new permission) can require it for everyone (`require_mfa_all_staff`) or for chosen staff roles
   (`require_mfa_roles`) through `PATCH /settings`, with a grace period (`mfa_grace_days`, 0 to 90): turning it on, widening it, or sending a grace period sets
-  `mfa_enforce_from` to now plus the days (one deadline for the whole policy, never moved earlier), audited with before and after. `Accounts.mfaRequired`
+  `mfa_enforce_from` to the start of the day after now plus the days in Kampala (one deadline for the whole policy; it moves only when a grace period is sent, never by narrowing), audited with before and after; turning it off or narrowing it needs the proof of the admin reset of a sign-in and emails the administrators; after the deadline a session with no factor is not renewed. `Accounts.mfaRequired`
   keeps meaning "must have a factor to sign in now" (a flagged role, or a covered user once the deadline has passed), so sign-in, the first run, the sign-in
   after a reset and the refusal of a mailbox reset for a required user with no factor (ADR-042) are unchanged; during the grace period a covered user signs
   in and `GET /me` carries `mfa_due_by` and `two_step_policy` (`off`, `roles`, `everyone`). The PWA: Business set-up > Two-step sign-in

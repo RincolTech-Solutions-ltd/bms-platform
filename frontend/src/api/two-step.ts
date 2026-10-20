@@ -22,6 +22,10 @@ export class TwoStepError extends Error {
 const MESSAGES: Record<string, string | undefined> = {
   version_conflict: 'Someone else changed the settings while you were looking. Reload the page and choose again.',
   permission_denied: 'You are not allowed to change this. Ask an administrator.',
+  invalid_password: 'That password is not right.',
+  password_required: 'Type your own password to confirm.',
+  totp_required: 'Type the current code from your authenticator app to confirm.',
+  account_locked: 'Too many wrong tries. Wait 15 minutes and try again.',
   validation_failed: 'One of the roles you picked is not available. Reload the page and choose again.',
   invalid_mfa_code: 'That code is not right. Codes change every 30 seconds; try the next one.',
   mfa_already_enrolled: 'Two-step sign-in is already on for your account.',
@@ -48,28 +52,53 @@ async function sent<T>(call: Promise<T>): Promise<T> {
   }
 }
 
-/** The settings body for a choice. The grace period is sent only while something is required: it moves the deadline. */
-export function bodyOf(choice: Choice) {
+/** The proof of an administrator who relaxes the rule: the code from their authenticator, or their own password when they have none. */
+export type Proof = { totp_code?: string; password?: string };
+
+/** Whether the new choice asks more people than the current one does (a role added, or everyone, or something where nothing was). */
+export function widens(current: Choice, next: Choice): boolean {
+  if (next.policy === 'off') return false;
+  if (current.policy === 'off') return true;
+  if (next.policy === 'everyone') return current.policy !== 'everyone';
+  return current.policy === 'roles' && next.roles.some((r) => !current.roles.includes(r));
+}
+
+/** Whether the new choice asks fewer people than the current one does: off, everyone narrowed to roles, or a role dropped. */
+export function relaxes(current: Choice, next: Choice): boolean {
+  if (current.policy === 'off') return false;
+  if (next.policy === 'off') return true;
+  if (current.policy === 'everyone') return next.policy === 'roles';
+  return next.policy === 'roles' && current.roles.some((r) => !next.roles.includes(r));
+}
+
+/**
+ * The settings body for a choice. The grace period moves the deadline, so it is sent only when it is meant to: when the policy
+ * widens (new people need a date) or the administrator changed the grace period. Narrowing never sends it, so a date that has passed
+ * is not re-opened. A change that relaxes the rule carries the administrator's proof.
+ */
+export function bodyOf(choice: Choice, current: Choice, proof: Proof = {}) {
+  const sendGrace = choice.policy !== 'off' && (widens(current, choice) || choice.graceDays !== current.graceDays);
   return {
     require_mfa_all_staff: choice.policy === 'everyone',
     require_mfa_roles: choice.policy === 'roles' ? choice.roles : [],
-    ...(choice.policy === 'off' ? {} : { mfa_grace_days: choice.graceDays }),
+    ...(sendGrace ? { mfa_grace_days: choice.graceDays } : {}),
+    ...(relaxes(current, choice) ? proof : {}),
   };
 }
 
 export const twoStep = {
   settings: (): Promise<TenantSettings> => fetchSettings(),
 
-  async save(version: number, choice: Choice): Promise<TenantSettings> {
+  async save(version: number, choice: Choice, current: Choice, proof: Proof = {}): Promise<TenantSettings> {
     return unwrap(
-      await sent(api.PATCH('/api/v1/settings', { params: { header: { 'If-Match': `"${version}"` } }, body: bodyOf(choice) })),
+      await sent(api.PATCH('/api/v1/settings', { params: { header: { 'If-Match': `"${version}"` } }, body: bodyOf(choice, current, proof) })),
       'Could not save your choice.',
     );
   },
 
-  /** Starts the signed-in user's own set-up: a secret and a QR address, shown once. */
-  async start(): Promise<MfaEnrolment> {
-    return unwrap(await sent(api.POST('/api/v1/auth/staff/mfa/enrol', {})), 'Two-step sign-in could not start. Try again.');
+  /** Starts the signed-in user's own set-up with their own password: a secret and a QR address, shown once. */
+  async start(password: string): Promise<MfaEnrolment> {
+    return unwrap(await sent(api.POST('/api/v1/auth/staff/mfa/enrol', { body: { password } })), 'Two-step sign-in could not start. Try again.');
   },
 
   /** Turns it on with the first code and returns the ten recovery codes, shown once. */

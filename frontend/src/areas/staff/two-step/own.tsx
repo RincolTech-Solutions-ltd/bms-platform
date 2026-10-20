@@ -5,7 +5,7 @@ import type { MfaEnrolment } from '../../../api/client';
 import { twoStep } from '../../../api/two-step';
 import { ErrorLine, RecoveryCodes, TwoStepSetup } from '../../auth/steps';
 import { useStaff } from '../context';
-import { dateWords } from './state';
+import { deadlineWords } from './state';
 
 // Turn on your own two-step sign-in from inside the app (issue #348; ADR-046 decision 7). Until now only the first run of an invited
 // user and a forced enrolment could do it. Same three moves as the first run: start (a QR code and a key), type the first code, save the
@@ -15,14 +15,15 @@ type Step = { kind: 'start' } | { kind: 'code'; enrolment: MfaEnrolment } | { ki
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.');
 
-export function OwnTwoStep() {
+export function OwnTwoStep({ blocking = false }: { blocking?: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>({ kind: 'start' });
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const due = me.mfa_enabled ? null : dateWords(me.mfa_due_by);
+  const due = me.mfa_enabled ? null : deadlineWords(me.mfa_due_by);
 
   async function run(action: () => Promise<void>) {
     if (busy) return;
@@ -39,7 +40,9 @@ export function OwnTwoStep() {
 
   const start = () =>
     run(async () => {
-      setStep({ kind: 'code', enrolment: await twoStep.start() });
+      const enrolment = await twoStep.start(password);
+      setPassword('');
+      setStep({ kind: 'code', enrolment });
     });
 
   function confirm(e: FormEvent) {
@@ -48,7 +51,6 @@ export function OwnTwoStep() {
       const codes = await twoStep.confirm(code);
       setCode('');
       setStep({ kind: 'codes', codes });
-      await queryClient.invalidateQueries({ queryKey: ['me'] });
     });
   }
 
@@ -62,9 +64,14 @@ export function OwnTwoStep() {
       )}
       {step.kind === 'start' && !me.mfa_enabled && (
         <>
-          {due && (
+          {blocking && (
+            <p role="alert" className="alert alert-warning" data-tour="twostep-blocking">
+              Nothing else in the app opens until two-step sign-in is on for you.
+            </p>
+          )}
+          {!blocking && due && (
             <p role="status" className="alert alert-warning">
-              Your business asks you to set it up by {due}. After that day you cannot sign in without it.
+              Your business asks you to set it up by {due} (you can sign in until the end of that day). After that you cannot sign in without it.
             </p>
           )}
           <p>
@@ -72,13 +79,19 @@ export function OwnTwoStep() {
             password. It takes about two minutes.
           </p>
           <ErrorLine message={message} />
+          <label>
+            Your password, to confirm it is you
+            <input type="password" autoComplete="current-password" value={password} disabled={busy} onChange={(e) => setPassword(e.target.value)} />
+          </label>
           <p className="cluster">
-            <button type="button" className="btn-primary btn-lg" disabled={busy} onClick={() => void start()}>
+            <button type="button" className="btn-primary btn-lg" disabled={busy || password === ''} onClick={() => void start()}>
               {busy ? 'Starting' : 'Turn on two-step sign-in'}
             </button>
-            <Link to="/staff" className="btn-ghost">
-              Not now
-            </Link>
+            {!blocking && (
+              <Link to="/staff" className="btn-ghost">
+                Not now
+              </Link>
+            )}
           </p>
         </>
       )}
@@ -93,7 +106,15 @@ export function OwnTwoStep() {
           <p role="status" className="alert alert-success">
             Two-step sign-in is on.
           </p>
-          <RecoveryCodes codes={step.codes} doneLabel="Done" onDone={() => setStep({ kind: 'start' })} />
+          <RecoveryCodes
+            codes={step.codes}
+            doneLabel="Done"
+            onDone={() => {
+              setStep({ kind: 'start' });
+              // Only now does the app learn it is on: a blocked person must not lose this page before the codes are saved.
+              void queryClient.invalidateQueries({ queryKey: ['me'] });
+            }}
+          />
         </>
       )}
     </main>

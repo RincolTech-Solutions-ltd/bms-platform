@@ -13,4 +13,6 @@
 --
 -- One UPDATE on a seven-row reference table: no lock of note, expand-only in effect (the application reads the flag the same way).
 
+SET LOCAL lock_timeout = '5s';
+
 UPDATE roles SET mfa_required = false WHERE key = 'tenant_admin' AND mfa_required;

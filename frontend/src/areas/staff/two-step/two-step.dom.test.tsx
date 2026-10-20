@@ -26,7 +26,7 @@ vi.mock('../../../api/users', async (original) => {
   return { ...real, users: new Proxy({}, { get: (_t, name: string) => (...args: unknown[]) => ((usersApi as Record<string, (...a: unknown[]) => unknown>)[name] as (...a: unknown[]) => unknown)(...args) }) };
 });
 
-const { TwoStepError } = await import('../../../api/two-step');
+const { TwoStepError, bodyOf } = await import('../../../api/two-step');
 const { TwoStepPolicyScreen } = await import('./page');
 const { TwoStepNotices } = await import('./notices');
 const { OwnTwoStep } = await import('./own');
@@ -81,7 +81,7 @@ describe('the policy screen', () => {
   });
 
   it('reads the choice back in plain words before it sends anything, then saves once', async () => {
-    twoStepApi.save.mockResolvedValue({ ...OFF, version: 5, require_mfa_all_staff: true, mfa_grace_days: 14, mfa_enforce_from: '2026-11-03T09:00:00Z' });
+    twoStepApi.save.mockResolvedValue({ ...OFF, version: 5, require_mfa_all_staff: true, mfa_grace_days: 14, mfa_enforce_from: '2026-11-03T21:00:00Z' });
     shell();
     await waitFor(() => expect(radio(/Optional/).checked).toBe(true));
     fireEvent.click(radio(/Required for everyone/));
@@ -99,7 +99,8 @@ describe('the policy screen', () => {
     await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(1));
     expect(twoStepApi.save.mock.calls[0]?.[0]).toBe(4);
     expect(twoStepApi.save.mock.calls[0]?.[1]).toEqual({ policy: 'everyone', roles: [], graceDays: 14 });
-    expect(await screen.findByText('Saved. People who have not set it up have until 3 Nov 2026.')).toBeTruthy();
+    expect(twoStepApi.save.mock.calls[0]?.[2]).toEqual({ policy: 'off', roles: [], graceDays: 14 });
+    expect(await screen.findByText('Saved. People who have not set it up have until the end of 3 Nov 2026.')).toBeTruthy();
   });
 
   it('lets the grace period be none, and says so', async () => {
@@ -117,7 +118,7 @@ describe('the policy screen', () => {
   });
 
   it('needs at least one role when roles are chosen, and sends the ones ticked', async () => {
-    twoStepApi.save.mockResolvedValue({ ...OFF, version: 5, require_mfa_roles: ['cashier'], mfa_grace_days: 14, mfa_enforce_from: '2026-11-03T09:00:00Z' });
+    twoStepApi.save.mockResolvedValue({ ...OFF, version: 5, require_mfa_roles: ['cashier'], mfa_grace_days: 14, mfa_enforce_from: '2026-11-03T21:00:00Z' });
     shell();
     await waitFor(() => expect(radio(/Optional/).checked).toBe(true));
     fireEvent.click(radio(/Required for the roles I choose/));
@@ -154,10 +155,35 @@ describe('the policy screen', () => {
     fireEvent.click(radio(/Optional/));
     fireEvent.click(button('Review and save'));
     expect(screen.getByText(/Nobody will be required to use it/)).toBeTruthy();
-    fireEvent.click(button('Yes, make it optional'));
+    // Relaxing the rule needs the administrator's own proof: nothing is sent until it is typed.
+    const yes = button('Yes, make it optional');
+    expect(yes.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Your own password'), { target: { value: 'Test-Password-1' } });
+    expect(yes.disabled).toBe(false);
+    fireEvent.click(yes);
     await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(1));
     expect(twoStepApi.save.mock.calls[0]?.[1]).toMatchObject({ policy: 'off' });
+    expect(twoStepApi.save.mock.calls[0]?.[3]).toEqual({ password: 'Test-Password-1' });
     expect(await screen.findByText('Saved. Two-step sign-in is optional again.')).toBeTruthy();
+  });
+
+  it('narrowing keeps the deadline: the review says the date does not change, and no grace period is sent', async () => {
+    twoStepApi.settings.mockResolvedValue({ ...OFF, require_mfa_all_staff: true, mfa_grace_days: 14, mfa_enforce_from: '2026-10-01T21:00:00Z' });
+    twoStepApi.save.mockResolvedValue({ ...OFF, version: 5, require_mfa_roles: ['cashier'], mfa_grace_days: 14, mfa_enforce_from: '2026-10-01T21:00:00Z' });
+    shell();
+    await waitFor(() => expect(radio(/Required for everyone/).checked).toBe(true));
+    fireEvent.click(radio(/Required for the roles I choose/));
+    fireEvent.click(await screen.findByLabelText('Cashier'));
+    fireEvent.click(button('Review and save'));
+    expect(screen.getByText('The date already set does not change: the end of 1 Oct 2026.')).toBeTruthy();
+    expect(screen.queryByText(/Nobody is locked out before/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Your own password'), { target: { value: 'Test-Password-1' } });
+    fireEvent.click(button('Yes, save this'));
+    await waitFor(() => expect(twoStepApi.save).toHaveBeenCalledTimes(1));
+    // The real client turns this into a body with no mfa_grace_days (state.test.ts: bodyOf); here the screen hands it the saved choice.
+    expect(twoStepApi.save.mock.calls[0]?.[2]).toEqual({ policy: 'everyone', roles: [], graceDays: 14 });
+    expect(twoStepApi.save.mock.calls[0]?.[3]).toEqual({ password: 'Test-Password-1' });
+    expect(bodyOf(twoStepApi.save.mock.calls[0]?.[1], twoStepApi.save.mock.calls[0]?.[2], twoStepApi.save.mock.calls[0]?.[3])).not.toHaveProperty('mfa_grace_days');
   });
 
   it('shows a refusal in plain words and keeps the review open', async () => {
@@ -217,7 +243,7 @@ describe('the notices', () => {
   });
 
   it('reminds a covered person with the date on any page but their own set-up page', async () => {
-    const covered = admin({ permissions: [], two_step_policy: 'everyone', mfa_due_by: '2026-11-03T09:00:00Z' });
+    const covered = admin({ permissions: [], two_step_policy: 'everyone', mfa_due_by: '2026-11-03T21:00:00Z' });
     notices(covered, '/staff/retail/sale');
     expect(await screen.findByText(/set up two-step sign-in by 3 Nov 2026/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Set it up now' })).toBeTruthy();
@@ -231,13 +257,13 @@ describe('the notices', () => {
 });
 
 describe('your own set-up', () => {
-  function own(me: Partial<Me>) {
+  function own(me: Partial<Me>, blocking = false) {
     const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff/two-step'] }) });
     return render(
       <RouterContextProvider router={router}>
         <QueryClientProvider client={client()}>
           <StaffContext.Provider value={{ me: { ...mockMe('admin'), user_id: 'u-self', mfa_enabled: false, ...me } as Me, branch: null }}>
-            <OwnTwoStep />
+            <OwnTwoStep blocking={blocking} />
           </StaffContext.Provider>
         </QueryClientProvider>
       </RouterContextProvider>,
@@ -247,9 +273,13 @@ describe('your own set-up', () => {
   it('tells the date, starts, takes the first code and shows the recovery codes once', async () => {
     twoStepApi.start.mockResolvedValue({ secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/BMS%20test:person?secret=JBSWY3DPEHPK3PXP' });
     twoStepApi.confirm.mockResolvedValue(['AAAA-1111', 'BBBB-2222']);
-    own({ mfa_due_by: '2026-11-03T09:00:00Z' });
+    own({ mfa_due_by: '2026-11-03T21:00:00Z' });
     expect(screen.getByText(/Your business asks you to set it up by 3 Nov 2026/)).toBeTruthy();
+    // Starting asks for the person's own password first: nothing is sent without it.
+    expect(button('Turn on two-step sign-in').disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Your password, to confirm it is you'), { target: { value: 'Test-Password-1' } });
     fireEvent.click(button('Turn on two-step sign-in'));
+    await waitFor(() => expect(twoStepApi.start).toHaveBeenCalledWith('Test-Password-1'));
     const code = (await screen.findByLabelText('6 digit code from the app')) as HTMLInputElement;
     expect(button('Turn on two-step sign-in').disabled).toBe(true);
     fireEvent.change(code, { target: { value: '12a3456' } });
@@ -267,11 +297,18 @@ describe('your own set-up', () => {
     twoStepApi.start.mockResolvedValue({ secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/BMS%20test:person?secret=JBSWY3DPEHPK3PXP' });
     twoStepApi.confirm.mockRejectedValue(new TwoStepError('That code is not right. Codes change every 30 seconds; try the next one.', 422, 'invalid_mfa_code'));
     own({});
+    fireEvent.change(screen.getByLabelText('Your password, to confirm it is you'), { target: { value: 'Test-Password-1' } });
     fireEvent.click(button('Turn on two-step sign-in'));
     fireEvent.change(await screen.findByLabelText('6 digit code from the app'), { target: { value: '000000' } });
     fireEvent.click(button('Turn on two-step sign-in'));
     expect(await screen.findByText(/That code is not right/)).toBeTruthy();
     expect(button('Turn on two-step sign-in').disabled).toBe(false);
+  });
+
+  it('blocks a person who must set it up now: no way out, and the reason is in plain words', () => {
+    own({ mfa_required: true, mfa_enabled: false }, true);
+    expect(screen.getByText(/Nothing else in the app opens until two-step sign-in is on for you/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Not now' })).toBeNull();
   });
 
   it('says it is on for someone who already has it, and offers no second set-up', () => {

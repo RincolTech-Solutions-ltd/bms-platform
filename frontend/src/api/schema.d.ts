@@ -7427,6 +7427,8 @@ export interface components {
         /** @description mfa_token when enrolment is forced at sign-in; empty when signed in */
         MfaEnrolRequest: {
             mfa_token?: string;
+            /** @description A signed-in user starting their own set-up gives their current password; not needed with an mfa_token */
+            password?: string;
         };
         MfaEnrolment: {
             /** @description otpauth URI for a QR code; shown once */
@@ -13448,6 +13450,8 @@ export interface components {
              * @description Days a covered user without a second factor may keep signing in before it is required; 0 means at once. Sending it moves the deadline to now plus these days (ADR-046)
              */
             mfa_grace_days?: number;
+            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged */
+            password?: string;
             receipt_footer?: string;
             reports_enabled?: boolean;
             /** @description Require two-step sign-in of every staff user; the grace period applies (ADR-046) */
@@ -13457,6 +13461,8 @@ export interface components {
             setup_dismissed?: boolean;
             /** @description #RRGGBB, or an empty string to clear it; white or near-black text on it must reach contrast 4.5 (FR-TEN-08) */
             theme_primary?: string;
+            /** @description Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged */
+            totp_code?: string;
         };
         UpdateTenantSmsControlsRequest: {
             /** Format: int32 */

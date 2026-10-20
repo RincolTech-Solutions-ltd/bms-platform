@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.tenancy.internal;
 
+import com.rincoltech.bms.core.tenancy.PolicyChangeGuard;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,10 +40,12 @@ class SettingsController {
 
     private final SettingsService service;
     private final BrandingService branding;
+    private final PolicyChangeGuard guard;
 
-    SettingsController(SettingsService service, BrandingService branding) {
+    SettingsController(SettingsService service, BrandingService branding, PolicyChangeGuard guard) {
         this.service = service;
         this.branding = branding;
+        this.guard = guard;
     }
 
     /** Every key of chapter 6 table {@code tenant_settings}, with its default applied. */
@@ -134,7 +137,19 @@ class SettingsController {
             String themePrimary,
 
             Boolean setupDismissed,
-            Boolean reportsEnabled) {}
+            Boolean reportsEnabled,
+
+            @Size(max = 20)
+            @Schema(
+                    description =
+                            "Needed to turn two-step sign-in off or narrow it, from an administrator who has an authenticator: its current code (ADR-046). Never stored or logged")
+            String totpCode,
+
+            @Size(max = 200)
+            @Schema(
+                    description =
+                            "Needed to turn two-step sign-in off or narrow it, from an administrator with no authenticator: their own current password (ADR-046). Never stored or logged")
+            String password) {}
 
     @GetMapping
     @RequiresPermission("core.settings.read")
@@ -152,7 +167,18 @@ class SettingsController {
     ResponseEntity<SettingsResponse> update(
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody UpdateSettingsRequest request) {
+        // Relaxing the two-step rule needs the proof of the admin reset of a sign-in, before the transaction (ADR-046).
+        boolean relaxes = service.relaxesTwoStep(request);
+        if (relaxes) {
+            guard.requireProof(request.totpCode(), request.password());
+        }
         SettingsResponse settings = service.update(ifMatch, request);
+        if (relaxes) {
+            guard.notifyRelaxed(
+                    settings.requireMfaRoles().isEmpty() && !settings.requireMfaAllStaff()
+                            ? "two-step sign-in is now optional for everyone"
+                            : "two-step sign-in is now required of fewer people");
+        }
         return ResponseEntity.ok().eTag(String.valueOf(settings.version())).body(settings);
     }
 

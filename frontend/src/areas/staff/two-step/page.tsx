@@ -2,9 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { users } from '../../../api/users';
-import { type Choice, type Policy, twoStep } from '../../../api/two-step';
+import { type Choice, type Policy, relaxes, twoStep } from '../../../api/two-step';
 import { useStaff } from '../context';
-import { DEFAULT_GRACE, canManageTwoStep, choiceOf, dateWords, differs, graceChoices, policyOf, ready, reviewLines } from './state';
+import { DEFAULT_GRACE, canManageTwoStep, choiceOf, deadlineWords, differs, graceChoices, policyOf, ready, reviewLines } from './state';
 
 // Two-step sign-in (issue #348; ADR-046): who must use a code from their phone as well as their password. It is optional until an
 // administrator chooses otherwise. Three choices (nobody, chosen roles, everyone), a grace period, and a plain-words review that is read
@@ -27,6 +27,8 @@ export function TwoStepPolicyScreen() {
   const [choice, setChoice] = useState<Choice | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The proof of an administrator who relaxes the rule: a code from their authenticator, or their own password when they have none.
+  const [proof, setProof] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // One save at a time: a second tap before the first answer must not send a second request.
@@ -56,6 +58,7 @@ export function TwoStepPolicyScreen() {
     if (!choice) return;
     setReviewing(false);
     setNotice(null);
+    setProof('');
     setChoice({ ...choice, policy });
   }
 
@@ -67,19 +70,21 @@ export function TwoStepPolicyScreen() {
   }
 
   async function save() {
-    if (!choice || !saved || working.current) return;
+    if (!choice || !saved || !current || working.current) return;
     working.current = true;
     setBusy(true);
     setError(null);
     try {
-      const after = await twoStep.save(saved.version ?? 1, choice);
+      const asked = relaxes(current, choice) ? (me.mfa_enabled ? { totp_code: proof.trim() } : { password: proof }) : {};
+      const after = await twoStep.save(saved.version ?? 1, choice, current, asked);
+      setProof('');
       const now = policyOf(after);
-      const date = dateWords(after.mfa_enforce_from);
+      const date = deadlineWords(after.mfa_enforce_from);
       setNotice(
         now === 'off'
           ? 'Saved. Two-step sign-in is optional again.'
           : date
-            ? `Saved. People who have not set it up have until ${date}.`
+            ? `Saved. People who have not set it up have until the end of ${date}.`
             : 'Saved. People who have not set it up are asked at their next sign-in.',
       );
       setReviewing(false);
@@ -189,12 +194,25 @@ export function TwoStepPolicyScreen() {
             <strong>Please check this before you save.</strong>
           </p>
           <ul className="stack">
-            {reviewLines(choice, names, me, new Date()).map((line) => (
+            {reviewLines(choice, names, me, new Date(), current ? { choice: current, enforceFrom: saved?.mfa_enforce_from } : undefined).map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
+          {current && relaxes(current, choice) && (
+            <label>
+              {me.mfa_enabled ? 'The current code from your authenticator app' : 'Your own password'}
+              <input
+                type={me.mfa_enabled ? 'text' : 'password'}
+                inputMode={me.mfa_enabled ? 'numeric' : undefined}
+                autoComplete={me.mfa_enabled ? 'one-time-code' : 'current-password'}
+                value={proof}
+                disabled={busy}
+                onChange={(e) => setProof(e.target.value)}
+              />
+            </label>
+          )}
           <p className="cluster">
-            <button type="button" className="rt-primary" disabled={busy} onClick={() => void save()}>
+            <button type="button" className="rt-primary" disabled={busy || (current !== null && relaxes(current, choice) && proof.trim() === '')} onClick={() => void save()}>
               {busy ? 'Saving' : choice.policy === 'off' ? 'Yes, make it optional' : 'Yes, save this'}
             </button>
             <button type="button" className="btn-ghost" disabled={busy} onClick={() => setReviewing(false)}>

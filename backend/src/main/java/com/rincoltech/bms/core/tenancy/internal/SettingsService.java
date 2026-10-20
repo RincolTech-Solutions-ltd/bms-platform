@@ -14,7 +14,6 @@ import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.Versions;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -93,6 +92,9 @@ class SettingsService implements TenantSettings, ModuleSettings {
         validate(request);
         Map<String, Object> changes = mapper.convertValue(request, MAP);
         changes.values().removeIf(Objects::isNull);
+        // The proof of the administrator is not a setting: it is never stored, audited or echoed.
+        changes.remove("totp_code");
+        changes.remove("password");
         if (changes.get("theme_primary") instanceof String colour) {
             // An empty string clears the colour: back to the platform look.
             changes.put("theme_primary", colour.isEmpty() ? null : colour.toUpperCase(Locale.ROOT));
@@ -106,10 +108,35 @@ class SettingsService implements TenantSettings, ModuleSettings {
         return write(stored, changes);
     }
 
+    /** Whether this change turns the two-step requirement off or narrows it: it then needs the administrator's proof (ADR-046). */
+    @Transactional(readOnly = true)
+    boolean relaxesTwoStep(UpdateSettingsRequest request) {
+        Map<String, Object> stored = load(false).values();
+        Map<String, Object> merged = new TreeMap<>(stored);
+        if (request.requireMfaAllStaff() != null) {
+            merged.put("require_mfa_all_staff", request.requireMfaAllStaff());
+        }
+        if (request.requireMfaRoles() != null) {
+            merged.put("require_mfa_roles", List.copyOf(request.requireMfaRoles()));
+        }
+        TwoStepPolicy before = policyOf(stored);
+        TwoStepPolicy after = policyOf(merged);
+        if (before.off()) {
+            return false;
+        }
+        if (after.off()) {
+            return true;
+        }
+        return before.everyone()
+                ? !after.everyone()
+                : !after.everyone() && !after.roles().containsAll(before.roles());
+    }
+
     /**
-     * ADR-046 decision 3: one deadline for the whole two-step policy. Turning the policy on, widening who it covers, or sending a
-     * grace period sets {@code mfa_enforce_from} to now plus the grace days (cleared when the grace is 0, which means at once);
-     * turning it off clears it; any other change leaves it alone. Widening never moves the deadline earlier for anyone.
+     * ADR-046 decision 3: the deadline moves only when a grace period is sent, and is cleared when the policy is turned off. A grace
+     * of N days means people may sign in until the END of the day N days from today in the business's time zone, so the stored
+     * instant is the start of the day after (0 days clears it: at once). Narrowing, widening or any other save without a grace
+     * period leaves the deadline where it is.
      */
     private void placeTwoStepDeadline(Stored stored, Map<String, Object> changes) {
         if (!changes.containsKey("require_mfa_all_staff")
@@ -119,21 +146,24 @@ class SettingsService implements TenantSettings, ModuleSettings {
         }
         Map<String, Object> merged = new TreeMap<>(stored.values());
         merged.putAll(changes);
-        TwoStepPolicy before = policyOf(stored.values());
         TwoStepPolicy after = policyOf(merged);
         if (after.off()) {
             changes.put("mfa_enforce_from", null);
             return;
         }
-        boolean wider = after.everyone()
-                ? !before.everyone()
-                : !before.everyone() && !before.roles().containsAll(after.roles());
-        if (wider || changes.containsKey("mfa_grace_days")) {
+        if (changes.containsKey("mfa_grace_days")) {
             int days = after.graceDays() == null ? 0 : after.graceDays();
             changes.put(
-                    "mfa_enforce_from",
-                    days == 0 ? null : clock.now().plus(Duration.ofDays(days)).toString());
+                    "mfa_enforce_from", days == 0 ? null : deadlineAfter(days).toString());
         }
+    }
+
+    /** The first instant of the day after today plus {@code days}, in the business's time zone. */
+    Instant deadlineAfter(int days) {
+        return clock.today(BusinessClock.DEFAULT_ZONE)
+                .plusDays(days + 1L)
+                .atStartOfDay(BusinessClock.DEFAULT_ZONE)
+                .toInstant();
     }
 
     @SuppressWarnings("unchecked")

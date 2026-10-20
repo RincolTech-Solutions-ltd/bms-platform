@@ -9,6 +9,8 @@ import com.rincoltech.bms.testsupport.Api.Role;
 import com.rincoltech.bms.testsupport.Api.Session;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -63,10 +65,23 @@ class TwoStepPolicyIT extends IntegrationTest {
         return login.getBody().get("status").asString();
     }
 
+    /** Sends what the screen sends: only the keys given, plus the administrator's own password as the proof a relaxing change needs. */
     ResponseEntity<JsonNode> patch(Map<String, Object> body) {
+        Map<String, Object> withProof = new java.util.HashMap<>(body);
+        withProof.put("password", Api.PASSWORD);
+        return patchRaw(withProof);
+    }
+
+    ResponseEntity<JsonNode> patchRaw(Map<String, Object> body) {
         String etag =
                 api.get("/api/v1/settings", admin.accessToken()).getHeaders().getETag();
         return api.call(HttpMethod.PATCH, "/api/v1/settings", body, admin.accessToken(), Map.of("If-Match", etag));
+    }
+
+    /** The first instant of the day after today plus these days, in Kampala: "until the end of that day". */
+    static Instant endOfDayAfter(int days) {
+        ZoneId kampala = ZoneId.of("Africa/Kampala");
+        return LocalDate.now(kampala).plusDays(days + 1L).atStartOfDay(kampala).toInstant();
     }
 
     JsonNode settings() {
@@ -140,8 +155,9 @@ class TwoStepPolicyIT extends IntegrationTest {
         assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(on.getBody().get("mfa_grace_days").asInt()).isEqualTo(14);
         Instant deadline = Instant.parse(on.getBody().get("mfa_enforce_from").asString());
-        Instant expected = Instant.now().plus(Duration.ofDays(14));
-        assertThat(deadline).isBetween(expected.minusSeconds(120), expected.plusSeconds(120));
+        // "By 3 Nov" means the whole of 3 Nov in Kampala: the stored instant is the start of the day after.
+        assertThat(deadline).isEqualTo(endOfDayAfter(14));
+        assertThat(deadline.atZone(ZoneId.of("Africa/Kampala")).toLocalTime()).isEqualTo(java.time.LocalTime.MIDNIGHT);
         // Inside the grace period a covered user without a factor signs in as before and is told the date.
         Session inGrace = api.signIn(cashierId, cashier, Api.PASSWORD, null);
         JsonNode reminder = me(inGrace.accessToken());
@@ -187,37 +203,165 @@ class TwoStepPolicyIT extends IntegrationTest {
         assertThat(status(cashier)).isEqualTo("signed_in");
     }
 
-    /** ADR-046 decision 3: one deadline; widening restarts it for everyone covered, narrowing and other changes leave it alone. */
+    /** ADR-046 decision 3: the deadline moves only when a grace period is sent; narrowing, widening and other saves leave it. */
     @Test
-    void widenAndNarrowAndOffMoveTheDeadlineAsTheDecisionSays() {
+    void theDeadlineMovesOnlyWhenAGracePeriodIsSentAndOffClearsIt() {
         assertThat(patch(Map.of("require_mfa_roles", List.of("cashier"), "mfa_grace_days", 7))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        Instant first = Instant.parse(settings().get("mfa_enforce_from").asString());
-        Instant settled = Instant.now().plus(Duration.ofDays(3));
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(endOfDayAfter(7));
+        Instant settled = Instant.now().minus(Duration.ofDays(3));
         deadlineWas(settled);
 
-        // Narrowing, an unrelated change and the same roles again keep the deadline.
+        // The same roles, an unrelated change, and widening WITHOUT a grace period leave a passed date where it is.
         assertThat(patch(Map.of("require_mfa_roles", List.of("cashier"))).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(patch(Map.of("receipt_footer", "Thank you")).getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(settled);
-
-        // Widening to another role starts the stored grace again, from now.
         assertThat(patch(Map.of("require_mfa_roles", List.of("accountant", "cashier")))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        Instant widened = Instant.parse(settings().get("mfa_enforce_from").asString());
-        assertThat(widened).isAfter(settled).isAfterOrEqualTo(first);
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(settled);
 
-        // Narrowing back to one role leaves the new deadline; turning everything off clears it.
+        // Narrowing, as the screen sends it (roles only, no grace), does not re-open a passed deadline either.
         assertThat(patch(Map.of("require_mfa_roles", List.of("accountant"))).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
-        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(widened);
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(settled);
+
+        // An explicit grace period moves it, later or earlier, and 0 means at once.
+        assertThat(patch(Map.of("mfa_grace_days", 30)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(endOfDayAfter(30));
+        assertThat(patch(Map.of("mfa_grace_days", 7)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(endOfDayAfter(7));
+        assertThat(patch(Map.of("mfa_grace_days", 0)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(settings().get("mfa_enforce_from").isNull()).isTrue();
+
+        // Turning everything off clears it.
         assertThat(patch(Map.of("require_mfa_roles", List.of())).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(settings().get("mfa_enforce_from").isNull()).isTrue();
         assertThat(me(admin.accessToken()).get("two_step_policy").asString()).isEqualTo("off");
+    }
+
+    /** ADR-046 decision 6: turning it off or narrowing it needs the proof of the reset of a sign-in, and tells the administrators. */
+    @Test
+    void relaxingThePolicyNeedsTheAdminsProofAndEmailsTheAdministrators() {
+        assertThat(patch(Map.of("require_mfa_all_staff", true, "mfa_grace_days", 14))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        // Turning it off with no proof, or a wrong password, changes nothing.
+        ResponseEntity<JsonNode> none = patchRaw(Map.of("require_mfa_all_staff", false));
+        assertThat(none.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(none.getBody().get("code").asString()).isEqualTo("password_required");
+        ResponseEntity<JsonNode> wrong =
+                patchRaw(Map.of("require_mfa_all_staff", false, "password", "Not-The-Password-1"));
+        assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_password");
+        assertThat(settings().get("require_mfa_all_staff").asBoolean()).isTrue();
+        assertThat(relaxedMails()).isZero();
+
+        // Widening and raising need no proof.
+        assertThat(patchRaw(Map.of("mfa_grace_days", 30)).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Narrowing from everyone to chosen roles needs it, and so does dropping a role.
+        assertThat(patchRaw(Map.of("require_mfa_all_staff", false, "require_mfa_roles", List.of("cashier", "auditor")))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(patch(Map.of("require_mfa_all_staff", false, "require_mfa_roles", List.of("cashier", "auditor")))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(patchRaw(Map.of("require_mfa_roles", List.of("cashier"))).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(patch(Map.of("require_mfa_roles", List.of("cashier"))).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(patch(Map.of("require_mfa_roles", List.of())).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        // Each relaxation told the administrator, once, with no value in it.
+        assertThat(relaxedMails()).isEqualTo(3);
+        String params = TestDatabase.owner()
+                .sql("SELECT params::text FROM notification_outbox WHERE tenant_id = ? AND template_key = ? LIMIT 1")
+                .params(t.tenantId(), "identity.two_step_policy_weakened")
+                .query(String.class)
+                .single();
+        assertThat(params).contains("change").doesNotContain(Api.PASSWORD);
+    }
+
+    long relaxedMails() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM notification_outbox WHERE tenant_id = ? AND template_key = ?")
+                .params(t.tenantId(), "identity.two_step_policy_weakened")
+                .query(Long.class)
+                .single();
+    }
+
+    /** ADR-046 decision 3: a session with no second factor is not renewed once the person is required to have one. */
+    @Test
+    void aSessionIsNotRenewedAfterTheDeadlineAndThePersonIsSentToEnrolment() {
+        String cashier = Api.email("cashier");
+        UUID cashierId = Api.staff(t, cashier, new Role("cashier", t.headOffice()));
+        assertThat(patch(Map.of("require_mfa_all_staff", true, "mfa_grace_days", 14))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        Session inGrace = api.signIn(cashierId, cashier, Api.PASSWORD, null);
+        ResponseEntity<JsonNode> before = api.refresh(inGrace.refreshToken());
+        assertThat(before.getBody().get("status").asString()).isEqualTo("signed_in");
+        String next = api.refreshCookie(before);
+
+        deadlineWas(Instant.now().minusSeconds(60));
+
+        ResponseEntity<JsonNode> after = api.refresh(next);
+        assertThat(after.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(after.getBody().get("status").asString()).isEqualTo("mfa_enrolment_required");
+        assertThat(after.getBody().get("access_token").isNull()).isTrue();
+        assertThat(after.getHeaders().get("Set-Cookie")).isNull();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM auth_sessions WHERE user_id = ? AND revoked_at IS NULL")
+                        .param(cashierId)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        // The family is gone: the same cookie is not accepted again.
+        assertThat(api.refresh(next).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    /** ADR-046 decision 3: a person given a covered role after the deadline has no grace. */
+    @Test
+    void aRoleGivenAfterTheDeadlineHasNoGrace() {
+        String officer = Api.email("officer");
+        UUID officerId = Api.staff(t, officer, new Role("loan_officer", t.headOffice()));
+        Session session = api.signIn(officerId, officer, Api.PASSWORD, null);
+        assertThat(patch(Map.of("require_mfa_roles", List.of("cashier"), "mfa_grace_days", 14))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        deadlineWas(Instant.now().minusSeconds(60));
+        assertThat(api.refresh(session.refreshToken()).getBody().get("status").asString())
+                .as("not covered yet")
+                .isEqualTo("signed_in");
+
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)
+                        VALUES (?, ?, ?, 'cashier', ?, ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), officerId, t.headOffice(), officerId)
+                .update();
+
+        assertThat(status(officer)).isEqualTo("mfa_enrolment_required");
+    }
+
+    /** ADR-046 decision 7: starting your own set-up from a session asks for the password first. */
+    @Test
+    void ownSetUpFromASessionAsksForThePassword() {
+        ResponseEntity<JsonNode> none = api.post("/api/v1/auth/staff/mfa/enrol", Map.of(), admin.accessToken());
+        assertThat(none.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(none.getBody().get("code").asString()).isEqualTo("password_required");
+        ResponseEntity<JsonNode> wrong =
+                api.post("/api/v1/auth/staff/mfa/enrol", Map.of("password", "Not-The-Password-1"), admin.accessToken());
+        assertThat(wrong.getBody().get("code").asString()).isEqualTo("invalid_password");
+        ResponseEntity<JsonNode> ok =
+                api.post("/api/v1/auth/staff/mfa/enrol", Map.of("password", Api.PASSWORD), admin.accessToken());
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(ok.getBody().get("secret").asString()).isNotBlank();
     }
 
     /** The change is audited with before and after like every settings change, and only a settings manager may make it. */
