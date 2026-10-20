@@ -174,7 +174,14 @@ final class CatalogueApi {
                     description =
                             "Issue #342: the stock of this product summed over the branches the caller may read; sent only"
                                     + " by GET /retail/products/{id}, so the edit screen can warn before an item with stock is switched off")
-            String stockOnHand) {
+            String stockOnHand,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #342: in how many of the branches the caller may read the balance is not zero (a positive and a"
+                                    + " negative balance do not cancel); sent only by GET /retail/products/{id}")
+            Integer stockBranches) {
 
         /** A product with packs but no stock total, the shape every list row has. */
         Product(
@@ -213,6 +220,7 @@ final class CatalogueApi {
                     qty,
                     negative,
                     packs,
+                    null,
                     null);
         }
 
@@ -273,10 +281,11 @@ final class CatalogueApi {
                     qty,
                     negative,
                     packs,
-                    stockOnHand);
+                    stockOnHand,
+                    stockBranches);
         }
 
-        Product withStock(String total) {
+        Product withStock(String total, int branches) {
             return new Product(
                     id,
                     code,
@@ -295,7 +304,8 @@ final class CatalogueApi {
                     qty,
                     negative,
                     packs,
-                    total);
+                    total,
+                    branches);
         }
 
         Product withoutCost() {
@@ -317,7 +327,8 @@ final class CatalogueApi {
                     qty,
                     negative,
                     packs,
-                    stockOnHand);
+                    stockOnHand,
+                    stockBranches);
         }
     }
 

@@ -83,11 +83,10 @@ export function ProductCard({ product, showCost, canPrice, onEdit, onPrice }: {
   );
 }
 
-/** The plain warning shown while an item that still has stock is marked inactive (issue #342). */
-export function inactiveWarning(stockOnHand: string | undefined): string {
-  const qty = Number(stockOnHand ?? 0);
-  if (!Number.isFinite(qty) || qty === 0) return '';
-  return `This item still has ${stockOnHand} in stock. Inactive items cannot be sold, restocked or moved, so that stock stays put until you correct it on the Stock page or switch the item on again.`;
+/** The plain warning shown while an item that still has stock in a branch you can see is marked inactive (issue #342). */
+export function inactiveWarning(stockOnHand: string | undefined, branches: number | undefined): string {
+  if (!branches) return '';
+  return `This item still has stock in the branches you can see (${stockOnHand} in all). Inactive items cannot be sold, restocked or moved, so that stock stays put until you correct it on the Stock page or switch the item on again.`;
 }
 
 export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: Product; onSaved: (text: string) => void; onCancel: () => void; onOpen?: (id: string) => void }) {
@@ -102,7 +101,6 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
   const [unitId, setUnitId] = useState(product?.unit_id ?? '');
   const [active, setActive] = useState(product?.active !== false);
   const canManage = (me.permissions ?? []).includes('retail.catalogue.manage');
-  const onHand = Number(product?.stock_on_hand ?? 0);
   const [sell, setSell] = useState('');
   const [cost, setCost] = useState('0');
   const sellMinor = parseMinor(sell, RETAIL_CURRENCY);
@@ -184,8 +182,8 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
                 <input id="item-inactive" type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} /> Inactive
               </label>
               <p className="hint">An inactive item is not offered when selling, restocking or moving stock, and leaves the stock list unless you ask for inactive items. It is never deleted: its history and reports stay.</p>
-              {!active && onHand !== 0 && (
-                <p role="note" className="alert alert-warning">{inactiveWarning(product.stock_on_hand)}</p>
+              {!active && (product.stock_branches ?? 0) > 0 && (
+                <p role="note" className="alert alert-warning">{inactiveWarning(product.stock_on_hand, product.stock_branches)}</p>
               )}
             </>
           )}

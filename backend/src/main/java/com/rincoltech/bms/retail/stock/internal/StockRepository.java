@@ -137,7 +137,8 @@ class StockRepository {
 
     /**
      * Products with their quantity summed over {@code branchIds} (the caller's scope; never empty),
-     * ordered by code. An inactive product shows only while it holds a quantity in those branches.
+     * ordered by code. An inactive product is left out unless {@code includeInactive} (issue #342); the stock-by-location
+     * report passes {@code keepHeldInactive} so it still shows an inactive product while it holds a quantity there.
      */
     List<Search.Ranked<ProductTotal>> allBranches(
             List<UUID> branchIds,

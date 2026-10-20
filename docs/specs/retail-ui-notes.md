@@ -793,8 +793,8 @@ shows an action only to someone who may take it; the server decides again.
 An item that is no longer sold is switched off, never deleted.
 
 - **Items screen.** The edit form of an item shows an Inactive tick to a holder of `retail.catalogue.manage` (the server decides again), with a hint that it
-  is never deleted and that its history and reports stay. While it is ticked and the item still has stock, a plain warning says "This item still has 5.000
-  in stock. Inactive items cannot be sold, restocked or moved, ..." (`stock_on_hand` of `GET /retail/products/{id}`, `inactiveWarning`). The list badge and the
+  is never deleted and that its history and reports stay. While it is ticked and any branch you can see still holds a quantity (`stock_branches`, `stock_on_hand` of `GET /retail/products/{id}`), a plain warning
+  says "This item still has stock in the branches you can see ..." (`inactiveWarning`). The stock-take count sheet keeps an inactive item that holds stock (`countableStock`). The list badge and the
   filter say Inactive.
 - **Pickers and lists.** The sale, restock, usage and transfer pickers already ask for active items only. The Stock page has a Show inactive items tick
   (`include_inactive`, off by default) on the one branch and the All branches view; with it off an inactive item is not listed even while it holds stock.
