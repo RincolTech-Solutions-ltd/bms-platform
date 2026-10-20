@@ -8303,7 +8303,6 @@ export interface components {
             cost_visible?: boolean;
             currency?: string;
             period?: components["schemas"]["RetailControlsPeriod"];
-            /** @description The period of the same length that ends the day before the period starts */
             previous?: components["schemas"]["RetailControlsPeriod"];
             /**
              * Format: int32
@@ -8415,6 +8414,7 @@ export interface components {
             /** Format: date */
             to?: string;
         };
+        /** @description The period of the same length that ends the day before the period starts */
         RetailControlsPeriod: {
             /** Format: date */
             from?: string;

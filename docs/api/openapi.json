@@ -7088,8 +7088,7 @@
             "$ref" : "#/components/schemas/RetailControlsPeriod"
           },
           "previous" : {
-            "$ref" : "#/components/schemas/RetailControlsPeriod",
-            "description" : "The period of the same length that ends the day before the period starts"
+            "$ref" : "#/components/schemas/RetailControlsPeriod"
           },
           "within_minutes" : {
             "description" : "A sale cancelled within this many minutes of being entered is a quick cancel",
@@ -7296,6 +7295,7 @@
         }
       },
       "RetailControlsPeriod" : {
+        "description" : "The period of the same length that ends the day before the period starts",
         "properties" : {
           "from" : {
             "format" : "date",

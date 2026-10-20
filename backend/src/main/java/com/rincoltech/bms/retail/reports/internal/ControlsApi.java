@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.reports.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -48,9 +49,10 @@ final class ControlsApi {
             @Schema(
                     description =
                             "Events per 100 sales entered in the period, one decimal; absent when no sale was entered")
+            @JsonProperty("rate_per_100")
             String ratePer100,
 
-            @Schema(description = "The same for the previous period")
+            @Schema(description = "The same for the previous period") @JsonProperty("previous_rate_per_100")
             String previousRatePer100,
 
             @Schema(
@@ -75,7 +77,6 @@ final class ControlsApi {
             String currency,
             Period period,
 
-            @Schema(description = "The period of the same length that ends the day before the period starts")
             Period previous,
 
             @Schema(description = "A sale cancelled within this many minutes of being entered is a quick cancel")
@@ -112,6 +113,7 @@ final class ControlsApi {
             long salesCount,
 
             @Schema(description = "Events per 100 sales, one decimal; absent when the group entered no sale")
+            @JsonProperty("rate_per_100")
             String ratePer100) {}
 
     @Schema(name = "RetailControlsGroups")
@@ -188,9 +190,9 @@ final class ControlsApi {
             @Schema(description = "Sales entered by the user (or lines sold of the item) in that shop in the period")
             long outOf,
 
-            String ratePer100,
+            @JsonProperty("rate_per_100") String ratePer100,
 
-            @Schema(description = "The shop's own rate for the same thing")
+            @Schema(description = "The shop's own rate for the same thing") @JsonProperty("shop_rate_per_100")
             String shopRatePer100,
 
             @Schema(description = "How many times the shop's rate, one decimal")
