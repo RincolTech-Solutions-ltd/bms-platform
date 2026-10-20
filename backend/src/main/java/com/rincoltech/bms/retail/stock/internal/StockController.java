@@ -94,7 +94,8 @@ class StockController {
     @PostMapping("/stock/corrections")
     @RequiresPermission("retail.stocktake.commit")
     @Operation(
-            summary = "Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M",
+            summary =
+                    "Correct the quantity of an item at a branch with a reason; an adjustment that is not shrinkage (issue #351); M",
             operationId = "correctRetailStockQuantity")
     ResponseEntity<Correction> correct(
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,

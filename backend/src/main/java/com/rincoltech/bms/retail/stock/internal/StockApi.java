@@ -144,11 +144,17 @@ final class StockApi {
             @NotNull UUID branchId,
             @NotNull UUID productId,
 
-            @NotNull @PositiveOrZero @Digits(integer = 11, fraction = 3)
-            @Schema(type = "string", example = "12.500", description = "The quantity there should be, not the difference")
+            @NotNull
+            @PositiveOrZero
+            @Digits(integer = 11, fraction = 3)
+            @Schema(
+                    type = "string",
+                    example = "12.500",
+                    description = "The quantity there should be, not the difference")
             BigDecimal newQty,
 
-            @NotNull @Pattern(regexp = "entry_mistake|miscount")
+            @NotNull
+            @Pattern(regexp = "entry_mistake|miscount")
             @Schema(description = "entry_mistake (a restock or sale was entered wrongly) or miscount")
             String reasonCode,
 

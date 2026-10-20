@@ -400,7 +400,8 @@ class PurchasingService {
             afterCreated = after.at();
             afterId = after.id();
         }
-        List<Purchase> rows = repo.page(filter, from, to, supplierId, status, newestFirst, afterCreated, afterId, size + 1);
+        List<Purchase> rows =
+                repo.page(filter, from, to, supplierId, status, newestFirst, afterCreated, afterId, size + 1);
         boolean more = rows.size() > size;
         List<Purchase> items = more ? rows.subList(0, size) : rows;
         String next = more
@@ -442,12 +443,13 @@ class PurchasingService {
         Principal principal = CurrentPrincipal.require();
         String reason = request.reason().trim();
         if (reason.length() < MIN_REASON) {
-            throw ApiException.validation(List.of(new FieldProblem(
-                    "reason", "invalid", "Give a reason of at least " + MIN_REASON + " characters.")));
+            throw ApiException.validation(List.of(
+                    new FieldProblem("reason", "invalid", "Give a reason of at least " + MIN_REASON + " characters.")));
         }
         Purchase seen = repo.find(id).orElseThrow(ApiException::notFound);
         List<Recorded> moved = stock.bySource(PURCHASE, id);
-        List<UUID> touched = moved.stream().map(Recorded::branchId).distinct().sorted().toList();
+        List<UUID> touched =
+                moved.stream().map(Recorded::branchId).distinct().sorted().toList();
         if (touched.stream().noneMatch(b -> principal.may(PERMISSION, b))) {
             throw ApiException.notFound();
         }
@@ -517,7 +519,8 @@ class PurchasingService {
         for (UUID entry : repo.entriesOf(id)) {
             books.reverse(entry, today, seen.purchaseNo(), PURCHASE_VOID + ":" + entry);
         }
-        for (UUID productId : moved.stream().map(Recorded::productId).distinct().sorted().toList()) {
+        for (UUID productId :
+                moved.stream().map(Recorded::productId).distinct().sorted().toList()) {
             catalogue.revertPurchasePrices(productId, id, "Restock " + seen.purchaseNo() + " voided");
         }
         repo.insertVoid(id, today, reason, principal.userId());

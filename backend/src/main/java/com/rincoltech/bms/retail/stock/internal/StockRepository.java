@@ -295,11 +295,17 @@ class StockRepository {
             params.put("zone", zone);
         }
         if (afterCreated != null) {
-            sql.append(newestFirst ? " AND (occurred_at, id) < (:afterCreated, :afterId)" : " AND (occurred_at, id) > (:afterCreated, :afterId)");
+            sql.append(
+                    newestFirst
+                            ? " AND (occurred_at, id) < (:afterCreated, :afterId)"
+                            : " AND (occurred_at, id) > (:afterCreated, :afterId)");
             params.put("afterCreated", Timestamp.from(afterCreated));
             params.put("afterId", afterId);
         }
-        sql.append(newestFirst ? " ORDER BY occurred_at DESC, id DESC LIMIT :limit" : " ORDER BY occurred_at, id LIMIT :limit");
+        sql.append(
+                newestFirst
+                        ? " ORDER BY occurred_at DESC, id DESC LIMIT :limit"
+                        : " ORDER BY occurred_at, id LIMIT :limit");
         params.put("limit", limit);
         return jdbc.sql(sql.toString())
                 .params(params)
@@ -345,7 +351,18 @@ class StockRepository {
                             reason_code, note, unit_cost_minor, journal_entry_id, created_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """)
-                .params(id, branchId, productId, movementId, oldQty, newQty, reasonCode, note, unitCostMinor, journalEntryId, by)
+                .params(
+                        id,
+                        branchId,
+                        productId,
+                        movementId,
+                        oldQty,
+                        newQty,
+                        reasonCode,
+                        note,
+                        unitCostMinor,
+                        journalEntryId,
+                        by)
                 .update();
     }
 

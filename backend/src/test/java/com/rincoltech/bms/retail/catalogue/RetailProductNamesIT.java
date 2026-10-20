@@ -87,7 +87,8 @@ class RetailProductNamesIT extends IntegrationTest {
             assertThat(refused.getStatusCode()).as(again).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
             JsonNode body = refused.getBody();
             assertThat(body.get("code").asString()).isEqualTo("duplicate_product_name");
-            assertThat(body.get("detail").asString()).isEqualTo("This product already exists: Double Socket, 13A (NM-1).");
+            assertThat(body.get("detail").asString())
+                    .isEqualTo("This product already exists: Double Socket, 13A (NM-1).");
             assertThat(body.get("existing_id").asString()).isEqualTo(firstId.toString());
             assertThat(body.get("existing_code").asString()).isEqualTo("NM-1");
             assertThat(body.get("may_add_anyway").asBoolean()).isFalse();
@@ -139,15 +140,12 @@ class RetailProductNamesIT extends IntegrationTest {
     void anEditThatLeavesTheNameAloneIsNotBlockedByAnOlderDuplicate() {
         UUID a = RetailTestSupport.id(create("NM-1", "Test Lamp", metres, null, ADMIN));
         // A legacy duplicate that exists already (written as the owner, as an import would have).
-        TestDatabase.owner()
-                .sql("""
+        TestDatabase.owner().sql("""
                         INSERT INTO retail_products (id, tenant_id, code, description, category_id, unit_id, cost_minor,
                                                      sell_minor, currency, active)
                         SELECT gen_random_uuid(), tenant_id, 'NM-OLD', 'test  lamp', category_id, unit_id, 1, 2, currency, true
                           FROM retail_products WHERE id = ?
-                        """)
-                .param(a)
-                .update();
+                        """).param(a).update();
         UUID old = TestDatabase.owner()
                 .sql("SELECT id FROM retail_products WHERE tenant_id = ? AND code = 'NM-OLD'")
                 .param(t.tenantId())
@@ -173,7 +171,8 @@ class RetailProductNamesIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> tooShort = create("NM-2", "Test Bulb", metres, "no", ADMINISTRATOR);
         assertThat(tooShort.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(tooShort.getBody().get("errors").get(0).get("field").asString()).isEqualTo("duplicate_reason");
+        assertThat(tooShort.getBody().get("errors").get(0).get("field").asString())
+                .isEqualTo("duplicate_reason");
 
         ResponseEntity<JsonNode> added = create("NM-2", "Test Bulb", metres, " Other brand, same name ", ADMINISTRATOR);
         assertThat(added.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -186,8 +185,9 @@ class RetailProductNamesIT extends IntegrationTest {
                         .single())
                 .isEqualTo("Other brand, same name");
         assertThat(TestDatabase.owner()
-                        .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.created'"
-                                + " AND entity_id = ?")
+                        .sql(
+                                "SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.created'"
+                                        + " AND entity_id = ?")
                         .params(t.tenantId(), second)
                         .query(String.class)
                         .single())
@@ -212,8 +212,8 @@ class RetailProductNamesIT extends IntegrationTest {
         ResponseEntity<JsonNode> near = create("NM-3", "Double Soket 13A White", metres, null, ADMIN);
         assertThat(near.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
-        ResponseEntity<JsonNode> asked = api.get(
-                "/products/similar?description=Double Socket 13A Whit&unit_id=" + metres, ADMIN);
+        ResponseEntity<JsonNode> asked =
+                api.get("/products/similar?description=Double Socket 13A Whit&unit_id=" + metres, ADMIN);
         assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(asked.getBody().get("exact")).isEmpty();
         JsonNode similar = asked.getBody().get("similar");
@@ -221,16 +221,17 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(similar.get(0).get("distance").asInt()).isPositive();
         assertThat(similar.toString()).contains(first.toString()).doesNotContain("Hammer");
 
-        ResponseEntity<JsonNode> exact = api.get(
-                "/products/similar?description=double socket, 13a white&unit_id=" + metres, ADMIN);
+        ResponseEntity<JsonNode> exact =
+                api.get("/products/similar?description=double socket, 13a white&unit_id=" + metres, ADMIN);
         assertThat(exact.getBody().get("exact")).hasSize(1);
         assertThat(exact.getBody().get("exact").get(0).get("code").asString()).isEqualTo("NM-1");
 
         // The same name in another unit is not an exact match: it is shown as close, with distance 0.
-        ResponseEntity<JsonNode> otherUnit = api.get(
-                "/products/similar?description=double socket 13a white&unit_id=" + rolls, ADMIN);
+        ResponseEntity<JsonNode> otherUnit =
+                api.get("/products/similar?description=double socket 13a white&unit_id=" + rolls, ADMIN);
         assertThat(otherUnit.getBody().get("exact")).isEmpty();
-        assertThat(otherUnit.getBody().get("similar").get(0).get("distance").asInt()).isZero();
+        assertThat(otherUnit.getBody().get("similar").get(0).get("distance").asInt())
+                .isZero();
 
         // An item being edited never matches itself.
         ResponseEntity<JsonNode> self = api.get(
@@ -250,11 +251,16 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(moved.getStatusCode()).as("%s", moved.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(moved.getBody().get("category").asString()).isEqualTo("Test Lighting");
         String audit = TestDatabase.owner()
-                .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.updated' AND entity_id = ?")
+                .sql(
+                        "SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.updated' AND entity_id = ?")
                 .params(t.tenantId(), item)
                 .query(String.class)
                 .single();
-        assertThat(audit).contains("Test Wiring").contains("Test Lighting").contains(category.toString()).contains(lighting.toString());
+        assertThat(audit)
+                .contains("Test Wiring")
+                .contains("Test Lighting")
+                .contains(category.toString())
+                .contains(lighting.toString());
     }
 
     @Test
@@ -274,7 +280,9 @@ class RetailProductNamesIT extends IntegrationTest {
         assertThat(rows.get(1).get("outcome").asString()).isEqualTo("added");
         assertThat(rows.get(2).get("outcome").asString()).isEqualTo("skipped");
         assertThat(rows.get(2).get("message").asString()).contains("line 3");
-        assertThat(rows.get(3).get("outcome").asString()).as("another unit is another item").isEqualTo("added");
+        assertThat(rows.get(3).get("outcome").asString())
+                .as("another unit is another item")
+                .isEqualTo("added");
         assertThat(done.getBody().get("added").asInt()).isEqualTo(2);
         assertThat(done.getBody().get("skipped").asInt()).isEqualTo(2);
     }

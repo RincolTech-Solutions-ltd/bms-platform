@@ -294,9 +294,7 @@ class RlsIsolationIT {
         owner.sql("""
                         INSERT INTO retail_purchase_voids (id, tenant_id, purchase_id, voided_on, reason, voided_by)
                         VALUES (?, ?, ?, DATE '2026-01-16', 'Test void', ?)
-                        """)
-                .params(UUID.randomUUID(), t.tenantId(), purchase, user)
-                .update();
+                        """).params(UUID.randomUUID(), t.tenantId(), purchase, user).update();
         UUID usage = UUID.randomUUID();
         owner.sql("""
                         INSERT INTO retail_usage_reports (id, tenant_id, branch_id, kind, reason, occurred_on, currency,

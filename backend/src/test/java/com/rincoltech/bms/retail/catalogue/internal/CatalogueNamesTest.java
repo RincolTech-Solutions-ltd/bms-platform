@@ -21,7 +21,8 @@ class CatalogueNamesTest {
     void aShortNameAllowsNoDifferenceAndALongOneAllowsAFew() {
         assertThat(CatalogueService.allowedDistance("nail", "nails")).isEqualTo(1);
         assertThat(CatalogueService.allowedDistance("tap", "top")).isZero();
-        assertThat(CatalogueService.allowedDistance("double socket", "double soket")).isEqualTo(2);
+        assertThat(CatalogueService.allowedDistance("double socket", "double soket"))
+                .isEqualTo(2);
         assertThat(CatalogueService.allowedDistance("double socket 13a white", "double soket 13a white"))
                 .isEqualTo(3);
     }

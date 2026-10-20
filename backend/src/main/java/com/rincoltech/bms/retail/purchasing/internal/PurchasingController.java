@@ -102,7 +102,9 @@ class PurchasingController {
 
     @GetMapping("/purchases/{purchase_id}")
     @RequiresPermission("retail.purchase.create")
-    @Operation(summary = "One restock with its lines and, when voided, the void (issue #351)", operationId = "getRetailPurchase")
+    @Operation(
+            summary = "One restock with its lines and, when voided, the void (issue #351)",
+            operationId = "getRetailPurchase")
     Purchase get(@PathVariable("purchase_id") UUID id) {
         return service.get(id);
     }

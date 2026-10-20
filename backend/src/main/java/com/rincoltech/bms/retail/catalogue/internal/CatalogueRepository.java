@@ -174,7 +174,8 @@ class CatalogueRepository {
     // ---- Names (issue #352) ---------------------------------------------------------------
 
     /** A product found by its name key, for the duplicate refusal and the near-duplicate warning. */
-    record NameMatch(UUID id, String code, String description, UUID unitId, String unit, boolean active, String nameKey) {}
+    record NameMatch(
+            UUID id, String code, String description, UUID unitId, String unit, boolean active, String nameKey) {}
 
     private static final String SELECT_NAME = """
             SELECT p.id, p.code, p.description, p.unit_id, u.name AS unit, p.active, p.name_key
@@ -197,7 +198,8 @@ class CatalogueRepository {
      * moment cannot both pass the check. The key is the database's own, the one the generated column holds.
      */
     void lockName(String description) {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':' || bms_name_key(:d), 0))")
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':' || bms_name_key(:d), 0))")
                 .param("d", description)
                 .query(rs -> {});
     }
@@ -216,7 +218,8 @@ class CatalogueRepository {
     /** Every product's name key and unit (lower-cased), as {@code key + NAME_SEP + unit}, to its code: the import's duplicate check. */
     Map<String, String> productNames() {
         Map<String, String> out = new java.util.HashMap<>();
-        jdbc.sql("SELECT p.name_key, lower(btrim(u.name)) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
+        jdbc.sql(
+                        "SELECT p.name_key, lower(btrim(u.name)) AS unit, p.code FROM retail_products p JOIN retail_units u ON u.id = p.unit_id ORDER BY p.code")
                 .query((rs, n) -> {
                     out.putIfAbsent(rs.getString("name_key") + NAME_SEP + rs.getString("unit"), rs.getString("code"));
                     return 0;

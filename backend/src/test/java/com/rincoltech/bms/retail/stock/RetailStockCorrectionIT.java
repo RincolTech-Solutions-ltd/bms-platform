@@ -109,14 +109,11 @@ class RetailStockCorrectionIT extends IntegrationTest {
     }
 
     long account(String systemKey) {
-        return scalar(
-                """
+        return scalar("""
                         SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l
                           JOIN gl_accounts a ON a.id = l.account_id
                          WHERE l.tenant_id = ? AND a.system_key = ?
-                        """,
-                t.tenantId(),
-                systemKey);
+                        """, t.tenantId(), systemKey);
     }
 
     // ---- the correction ----------------------------------------------------------------------
@@ -125,7 +122,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
     void theAdministratorTypesTheRightQuantityAndTheOriginalRestockIsUntouched() {
         UUID restock = restock(hq, "10");
         String k = key();
-        ResponseEntity<JsonNode> done = correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
+        ResponseEntity<JsonNode> done =
+                correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
         assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.CREATED);
         JsonNode c = done.getBody();
         assertThat(c.get("old_qty").asString()).isEqualTo("10.000");
@@ -137,17 +135,16 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(stockAt(hq)).isEqualByComparingTo("6");
 
         // One adjustment for the difference, from its own source: not a stock-take, not usage.
-        assertThat(scalar(
-                        """
+        assertThat(scalar("""
                                 SELECT count(*) FROM retail_stock_movements
                                  WHERE tenant_id = ? AND kind = 'adjustment' AND source_type = 'retail.stock_correction'
                                    AND qty = -4 AND unit_cost_minor = 1000 AND note = 'Entry mistake: Typed ten, really six'
-                                """,
-                        t.tenantId()))
+                                """, t.tenantId())).isEqualTo(1);
+        assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId()))
                 .isEqualTo(1);
-        assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId())).isEqualTo(1);
         // Nothing deleted or edited: the restock and its movement are there as they were.
-        assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND id = ?", t.tenantId(), restock))
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND id = ?", t.tenantId(), restock))
                 .isEqualTo(1);
         assertThat(scalar(
                         "SELECT count(*) FROM retail_stock_movements WHERE tenant_id = ? AND source_id = ? AND kind = 'purchase' AND qty = 10",
@@ -156,13 +153,10 @@ class RetailStockCorrectionIT extends IntegrationTest {
                 .isEqualTo(1);
         // The books follow the shelf: inventory was 10,000 and is 6,000.
         assertThat(account("inventory")).isEqualTo(6_000);
-        assertThat(scalar(
-                        """
+        assertThat(scalar("""
                                 SELECT count(*) FROM journal_entries
                                  WHERE tenant_id = ? AND source_type = 'retail.stock_correction' AND memo = 'Stock correction'
-                                """,
-                        t.tenantId()))
-                .isEqualTo(1);
+                                """, t.tenantId())).isEqualTo(1);
         assertThat(scalar(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.stock.corrected' AND entity_id = ?",
                         t.tenantId(),
@@ -182,14 +176,16 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(last.get("correction").get("new_qty").asString()).isEqualTo("6.000");
         assertThat(history.get(0).has("correction")).isFalse();
         // Newest first, for the history on the stock page.
-        JsonNode newest = api.get("/stock/movements?product_id=" + product + "&branch_id=" + hq + "&newest_first=true", ADMIN)
+        JsonNode newest = api.get(
+                        "/stock/movements?product_id=" + product + "&branch_id=" + hq + "&newest_first=true", ADMIN)
                 .getBody()
                 .get("items");
         assertThat(newest.get(0).get("source_type").asString()).isEqualTo("retail.stock_correction");
         assertThat(newest.get(newest.size() - 1).get("kind").asString()).isEqualTo("purchase");
 
         // The same key replays the answer and does not correct twice.
-        ResponseEntity<JsonNode> replay = correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
+        ResponseEntity<JsonNode> replay =
+                correct(request(hq, "6", "entry_mistake", "Typed ten, really six"), ADMIN, "*", k);
         assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(replay.getHeaders().getFirst("Idempotent-Replayed")).isEqualTo("true");
         assertThat(replay.getBody().get("id").asString()).isEqualTo(c.get("id").asString());
@@ -219,7 +215,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
                 "/stocktakes",
                 Map.of("branch_id", hq, "lines", List.of(Map.of("product_id", other, "counted_qty", "4"))),
                 ADMIN);
-        assertThat(api.post("/stocktakes/" + RetailTestSupport.id(take) + "/commit", Map.of(), ADMIN).getStatusCode())
+        assertThat(api.post("/stocktakes/" + RetailTestSupport.id(take) + "/commit", Map.of(), ADMIN)
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         restock(hq, "10");
 
@@ -227,13 +224,15 @@ class RetailStockCorrectionIT extends IntegrationTest {
         JsonNode profitBefore = api.get("/reports/profit/daily", ADMIN).getBody();
         assertThat(shrinkageBefore.get("stocktake_loss_minor").asLong()).isEqualTo(400);
 
-        assertThat(correct(hq, "3", "entry_mistake", "Typed ten, really three").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(correct(hq, "3", "entry_mistake", "Typed ten, really three").getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
         assertThat(correct(hq, "12", "miscount", null).getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
         JsonNode shrinkageAfter = shrinkage();
         assertThat(shrinkageAfter).isEqualTo(shrinkageBefore);
         assertThat(shrinkageAfter.get("short_lines").asInt()).isEqualTo(1);
-        assertThat(shrinkageAfter.get("over_lines").asInt()).isEqualTo(shrinkageBefore.get("over_lines").asInt());
+        assertThat(shrinkageAfter.get("over_lines").asInt())
+                .isEqualTo(shrinkageBefore.get("over_lines").asInt());
         assertThat(shrinkageAfter.get("used_reports").asInt()).isZero();
         assertThat(shrinkageAfter.get("damaged_reports").asInt()).isZero();
         assertThat(api.get("/reports/profit/daily", ADMIN).getBody()).isEqualTo(profitBefore);
@@ -266,13 +265,15 @@ class RetailStockCorrectionIT extends IntegrationTest {
         unknown.put("product_id", UUID.randomUUID());
         assertThat(correct(unknown, ADMIN, "*", key()).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(stockAt(hq)).isEqualByComparingTo("4");
-        assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId())).isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_stock_corrections WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
     }
 
     @Test
     void thePermissionIsTheStocktakePermissionAtTheBranch() {
         restock(hq, "4");
-        assertThat(correct(request(hq, "2", "miscount", null), SALES, "*", key()).getStatusCode())
+        assertThat(correct(request(hq, "2", "miscount", null), SALES, "*", key())
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         // Held at the second branch only: the head office is out of reach.
         ResponseEntity<JsonNode> other = correct(request(hq, "2", "miscount", null), ADMIN, br2.toString(), key());
@@ -280,7 +281,8 @@ class RetailStockCorrectionIT extends IntegrationTest {
         assertThat(other.getStatusCode()).isNotEqualTo(HttpStatus.CREATED);
         assertThat(stockAt(hq)).isEqualByComparingTo("4");
         // Held at the head office, it works there.
-        assertThat(correct(request(hq, "2", "miscount", null), ADMIN, hq.toString(), key()).getStatusCode())
+        assertThat(correct(request(hq, "2", "miscount", null), ADMIN, hq.toString(), key())
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
     }
 
@@ -299,7 +301,10 @@ class RetailStockCorrectionIT extends IntegrationTest {
                 "*",
                 Map.of("Idempotency-Key", key()));
         assertThat(blind.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(theirs.get("/stock/movements?product_id=" + product, ADMIN).getBody().get("items")).isEmpty();
+        assertThat(theirs.get("/stock/movements?product_id=" + product, ADMIN)
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
         assertThat(stockAt(hq)).isEqualByComparingTo("3");
     }
 }

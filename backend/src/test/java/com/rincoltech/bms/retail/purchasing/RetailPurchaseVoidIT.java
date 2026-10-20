@@ -51,7 +51,8 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     static final String SETTINGS = "core.settings.manage";
     /** The administrator column, with the cash book and the supplier money side (the payables permission). */
-    static final String PAYER = ADMIN + ",retail.purchase.approve,retail.payable.manage,retail.cashbook.read," + SETTINGS;
+    static final String PAYER =
+            ADMIN + ",retail.purchase.approve,retail.payable.manage,retail.cashbook.read," + SETTINGS;
 
     @Autowired
     TestRestTemplate http;
@@ -87,9 +88,11 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         line.put("product_id", product);
         line.put("cost_minor", cost);
         line.put("sell_minor", sell);
-        line.put("qty_by_branch", qty.entrySet().stream()
-                .map(e -> Map.of("branch_id", e.getKey(), "qty", e.getValue()))
-                .toList());
+        line.put(
+                "qty_by_branch",
+                qty.entrySet().stream()
+                        .map(e -> Map.of("branch_id", e.getKey(), "qty", e.getValue()))
+                        .toList());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("purchased_on", on);
         body.put("payment_method", method);
@@ -130,16 +133,12 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     /** The net of an account over the lines of every entry the restock and its reversal posted. */
     long net(String systemKey, UUID purchase) {
-        return scalar(
-                """
+        return scalar("""
                         SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l
                           JOIN journal_entries e ON e.id = l.entry_id
                           JOIN gl_accounts a ON a.id = l.account_id
                          WHERE e.tenant_id = ? AND e.source_type = 'retail.purchase' AND e.source_id = ? AND a.system_key = ?
-                        """,
-                t.tenantId(),
-                purchase,
-                systemKey);
+                        """, t.tenantId(), purchase, systemKey);
     }
 
     void capability(String key, boolean on) {
@@ -180,16 +179,12 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         // Stock is back where it was, and every reversal points at the movement it undoes.
         assertThat(stockAt(hq)).isEqualByComparingTo("0");
         assertThat(stockAt(br2)).isEqualByComparingTo("0");
-        assertThat(scalar(
-                        """
+        assertThat(scalar("""
                                 SELECT count(*) FROM retail_stock_movements
                                  WHERE tenant_id = ? AND source_type = 'retail.purchase_void' AND source_id = ?
                                    AND kind = 'adjustment' AND qty < 0 AND reverses_movement_id IS NOT NULL
                                    AND note = 'Entered ten, there were only six'
-                                """,
-                        t.tenantId(),
-                        id))
-                .isEqualTo(2);
+                                """, t.tenantId(), id)).isEqualTo(2);
         // The journal: one reversal per branch entry, and the inventory and cash accounts net to nothing.
         assertThat(scalar(
                         "SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_id = ? AND reverses_entry_id IS NOT NULL",
@@ -202,15 +197,21 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         JsonNode p = product();
         assertThat(p.get("cost_minor").asLong()).isEqualTo(1_000);
         assertThat(p.get("sell_minor").asLong()).isEqualTo(1_500);
-        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN).getBody().get("items");
+        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN)
+                .getBody()
+                .get("items");
         JsonNode last = history.get(history.size() - 1);
         assertThat(last.get("source").asString()).isEqualTo("purchase");
         assertThat(last.get("new_cost_minor").asLong()).isEqualTo(1_000);
-        assertThat(last.get("reason").asString()).isEqualTo("Restock " + bought.get("purchase_no").asString() + " voided");
+        assertThat(last.get("reason").asString())
+                .isEqualTo("Restock " + bought.get("purchase_no").asString() + " voided");
         // Never deleted: the restock and the void are both still there, and the audit says who.
         assertThat(scalar("SELECT count(*) FROM retail_purchases WHERE tenant_id = ? AND id = ?", t.tenantId(), id))
                 .isEqualTo(1);
-        assertThat(scalar("SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ? AND purchase_id = ?", t.tenantId(), id))
+        assertThat(scalar(
+                        "SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ? AND purchase_id = ?",
+                        t.tenantId(),
+                        id))
                 .isEqualTo(1);
         assertThat(scalar(
                         "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.purchase.voided' AND entity_id = ?",
@@ -221,9 +222,12 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         // Read back and listed as voided; the filters and the order work.
         JsonNode one = api.get("/purchases/" + id, ADMIN).getBody();
         assertThat(one.get("status").asString()).isEqualTo("voided");
-        assertThat(api.get("/purchases?status=voided", ADMIN).getBody().get("items")).hasSize(1);
-        assertThat(api.get("/purchases?status=posted", ADMIN).getBody().get("items")).isEmpty();
-        assertThat(api.get("/purchases?status=other", ADMIN).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.get("/purchases?status=voided", ADMIN).getBody().get("items"))
+                .hasSize(1);
+        assertThat(api.get("/purchases?status=posted", ADMIN).getBody().get("items"))
+                .isEmpty();
+        assertThat(api.get("/purchases?status=other", ADMIN).getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
         // A second void is refused; the same key replays the first answer.
         ResponseEntity<JsonNode> again = voidIt(id, "Once more please");
@@ -237,30 +241,40 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     @Test
     void theRequestNeedsAKeyAReasonAndThePermission() {
-        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3")).get("id").asString());
+        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3"))
+                .get("id")
+                .asString());
         ResponseEntity<JsonNode> noKey = voidIt(id, "Typed the wrong number", ADMIN, "*", null);
         assertThat(noKey.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(noKey)).isEqualTo("idempotency_key_missing");
         assertThat(voidIt(id, "no").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        assertThat(voidIt(id, "Typed the wrong number", SALES, "*", key()).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(voidIt(UUID.randomUUID(), "Typed the wrong number").getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(voidIt(id, "Typed the wrong number", SALES, "*", key()).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(voidIt(UUID.randomUUID(), "Typed the wrong number").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(stockAt(hq)).isEqualByComparingTo("3");
-        assertThat(scalar("SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ?", t.tenantId())).isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
     }
 
     @Test
     void aBranchScopedManagerCannotVoidARestockThatTouchedAnotherBranch() {
-        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3", br2, "2")).get("id").asString());
+        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3", br2, "2"))
+                .get("id")
+                .asString());
         // Scope: only the head office. The restock also added stock at the second branch.
         ResponseEntity<JsonNode> partial = voidIt(id, "Typed the wrong number", ADMIN, hq.toString(), key());
         assertThat(partial.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(code(partial)).isEqualTo("permission_denied");
         // A branch that has nothing to do with it does not even see it.
-        UUID other = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "1")).get("id").asString());
+        UUID other = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "1"))
+                .get("id")
+                .asString());
         ResponseEntity<JsonNode> blind = voidIt(other, "Typed the wrong number", ADMIN, br2.toString(), key());
         assertThat(blind.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         // Scoped to both it works.
-        assertThat(voidIt(id, "Typed the wrong number", ADMIN, hq + "," + br2, key()).getStatusCode())
+        assertThat(voidIt(id, "Typed the wrong number", ADMIN, hq + "," + br2, key())
+                        .getStatusCode())
                 .isEqualTo(HttpStatus.OK);
     }
 
@@ -275,22 +289,30 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(code(refused)).isEqualTo("purchase_stock_moved");
         String words = refused.getBody().get("detail").asString();
-        assertThat(words).contains("Test Product PV-1").contains("added 10").contains("only 6").contains("Correct the quantity");
+        assertThat(words)
+                .contains("Test Product PV-1")
+                .contains("added 10")
+                .contains("only 6")
+                .contains("Correct the quantity");
 
         assertThat(stockAt(hq)).isEqualByComparingTo("6");
         assertThat(product().get("cost_minor").asLong()).isEqualTo(1_200);
-        assertThat(scalar("SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ?", t.tenantId())).isZero();
+        assertThat(scalar("SELECT count(*) FROM retail_purchase_voids WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
         assertThat(scalar(
                         "SELECT count(*) FROM journal_entries WHERE tenant_id = ? AND source_id = ? AND reverses_entry_id IS NOT NULL",
                         t.tenantId(),
                         id))
                 .isZero();
-        assertThat(api.get("/purchases/" + id, ADMIN).getBody().get("status").asString()).isEqualTo("posted");
+        assertThat(api.get("/purchases/" + id, ADMIN).getBody().get("status").asString())
+                .isEqualTo("posted");
     }
 
     @Test
     void aVoidWorksWhenEnoughStockIsLeftEvenIfSomeWasSold() {
-        UUID first = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "10")).get("id").asString());
+        UUID first = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "10"))
+                .get("id")
+                .asString());
         buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "10"));
         assertThat(api.sell(hq, "cash", product, "4").getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(stockAt(hq)).isEqualByComparingTo("16");
@@ -303,14 +325,19 @@ class RetailPurchaseVoidIT extends IntegrationTest {
         JsonNode bought = buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "10"));
         UUID id = UUID.fromString(bought.get("id").asString());
         ResponseEntity<JsonNode> edit = api.editPrices(
-                product, Map.of("cost_minor", 1_300, "sell_minor", 1_900, "reason", "Supplier raised the price"), ADMIN);
+                product,
+                Map.of("cost_minor", 1_300, "sell_minor", 1_900, "reason", "Supplier raised the price"),
+                ADMIN);
         assertThat(edit.getStatusCode()).as("%s", edit.getBody()).isEqualTo(HttpStatus.OK);
 
-        assertThat(voidIt(id, "Entered ten, there were only six").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(voidIt(id, "Entered ten, there were only six").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         JsonNode p = product();
         assertThat(p.get("cost_minor").asLong()).isEqualTo(1_300);
         assertThat(p.get("sell_minor").asLong()).isEqualTo(1_900);
-        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN).getBody().get("items");
+        JsonNode history = api.get("/products/" + product + "/price-history", ADMIN)
+                .getBody()
+                .get("items");
         JsonNode last = history.get(history.size() - 1);
         assertThat(last.get("old_cost_minor").asLong()).isEqualTo(1_300);
         assertThat(last.get("new_cost_minor").asLong()).isEqualTo(1_300);
@@ -319,9 +346,12 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     @Test
     void aVoidedCashRestockGivesItsCashBackOnTheDayOfTheVoid() {
-        UUID id = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "10")).get("id").asString());
+        UUID id = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "10"))
+                .get("id")
+                .asString());
         assertThat(cashPurchases(EARLIER)).isEqualTo(12_000);
-        assertThat(voidIt(id, "Entered ten, there were only six").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(voidIt(id, "Entered ten, there were only six").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
         // The day it was bought is not rewritten; the day of the void takes the cash back.
         assertThat(cashPurchases(EARLIER)).isEqualTo(12_000);
         assertThat(cashPurchases(TODAY)).isEqualTo(-12_000);
@@ -349,13 +379,23 @@ class RetailPurchaseVoidIT extends IntegrationTest {
     void aVoidedCreditRestockIsNoLongerOwedAndAPaidOneCannotBeVoidedUntilThePaymentIsReversed() {
         capability("purchasing", true);
         UUID supplier = supplier();
-        UUID unpaid = UUID.fromString(buy("credit", TODAY, 1_000, 1_500, supplier, Map.of(hq, "5")).get("id").asString());
-        assertThat(api.get("/suppliers/" + supplier + "/open-items", PAYER).getBody().get("items")).hasSize(1);
+        UUID unpaid = UUID.fromString(buy("credit", TODAY, 1_000, 1_500, supplier, Map.of(hq, "5"))
+                .get("id")
+                .asString());
+        assertThat(api.get("/suppliers/" + supplier + "/open-items", PAYER)
+                        .getBody()
+                        .get("items"))
+                .hasSize(1);
         assertThat(voidIt(unpaid, "Wrong supplier chosen").getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(api.get("/suppliers/" + supplier + "/open-items", PAYER).getBody().get("items")).isEmpty();
+        assertThat(api.get("/suppliers/" + supplier + "/open-items", PAYER)
+                        .getBody()
+                        .get("items"))
+                .isEmpty();
         assertThat(net("trade_creditors", unpaid)).isZero();
 
-        UUID paidFor = UUID.fromString(buy("credit", TODAY, 1_000, 1_500, supplier, Map.of(hq, "5")).get("id").asString());
+        UUID paidFor = UUID.fromString(buy("credit", TODAY, 1_000, 1_500, supplier, Map.of(hq, "5"))
+                .get("id")
+                .asString());
         Map<String, Object> payment = new LinkedHashMap<>();
         payment.put("supplier_id", supplier);
         payment.put("branch_id", hq);
@@ -381,8 +421,11 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     @Test
     void anImportedRestockCannotBeVoidedHere() {
-        UUID id = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "2")).get("id").asString());
-        // retail_purchases is append-only; the owner's maintenance escape hatch (as RetailReportsIT uses) marks it imported.
+        UUID id = UUID.fromString(buy("cash", EARLIER, 1_200, 1_800, null, Map.of(hq, "2"))
+                .get("id")
+                .asString());
+        // retail_purchases is append-only; the owner's maintenance escape hatch (as RetailReportsIT uses) marks it
+        // imported.
         TestDatabase.owner()
                 .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
                         + " UPDATE retail_purchases SET historical = true WHERE id = '" + id + "'; END $$")
@@ -396,7 +439,9 @@ class RetailPurchaseVoidIT extends IntegrationTest {
 
     @Test
     void anotherBusinessNeitherSeesNorVoidsTheRestock() {
-        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3")).get("id").asString());
+        UUID id = UUID.fromString(buy("cash", TODAY, 1_200, 1_800, null, Map.of(hq, "3"))
+                .get("id")
+                .asString());
         TestDatabase.Fixture other = TestDatabase.tenant("retail-pvoid-other", false, true);
         RetailTestSupport theirs = new RetailTestSupport(http, other);
         assertThat(theirs.get("/purchases/" + id, ADMIN).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);

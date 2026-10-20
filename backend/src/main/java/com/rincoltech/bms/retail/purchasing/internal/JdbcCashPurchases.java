@@ -47,8 +47,10 @@ class JdbcCashPurchases implements CashPurchases {
                     return 0;
                 })
                 .list();
-        // JUSTIFICATION-A3: the cash a voided cash restock gives back (issue #351) has to join the cash-out figure of this method.
-        // A voided cash restock gives its cash back on the day it was voided, valued as it was bought, so a closed day is never changed.
+        // JUSTIFICATION-A3: the cash a voided cash restock gives back (issue #351) has to join the cash-out figure of
+        // this method.
+        // A voided cash restock gives its cash back on the day it was voided, valued as it was bought, so a closed day
+        // is never changed.
         jdbc.sql("""
                         SELECT v.voided_on AS day, m.qty, m.unit_cost_minor
                           FROM retail_stock_movements m

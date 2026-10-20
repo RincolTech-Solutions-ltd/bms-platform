@@ -189,7 +189,8 @@ class ProductImportService {
             String categoryKey = category.toLowerCase(Locale.ROOT);
             String unitKey = unit.toLowerCase(Locale.ROOT);
             String packKey = packUnit.toLowerCase(Locale.ROOT);
-            // JUSTIFICATION-A3: the two duplicate-name skips of issue #352 sit beside the existing duplicate-code skips, in this loop.
+            // JUSTIFICATION-A3: the two duplicate-name skips of issue #352 sit beside the existing duplicate-code
+            // skips, in this loop.
             String nameKey = repo.nameKey(description.strip()) + CatalogueRepository.NAME_SEP + unitKey;
             String sameName = existingNames.get(nameKey);
             if (sameName != null) {
@@ -296,12 +297,14 @@ class ProductImportService {
         // through the screen at this moment queues behind the import (or the import behind them) and sees it.
         pending.stream().map(Pending::description).sorted().distinct().forEach(repo::lockName);
         for (Pending row : pending) {
-            if (repo.sameName(row.description(), null).stream().anyMatch(m -> m.unit().equalsIgnoreCase(row.unit()))) {
+            if (repo.sameName(row.description(), null).stream()
+                    .anyMatch(m -> m.unit().equalsIgnoreCase(row.unit()))) {
                 throw new ApiException(
                         HttpStatus.CONFLICT,
                         "import_conflict",
                         "Import conflict",
-                        "Another change added an item named " + row.description() + " while this file was being applied. Nothing was added. Run the check again and apply the file again.");
+                        "Another change added an item named " + row.description()
+                                + " while this file was being applied. Nothing was added. Run the check again and apply the file again.");
             }
         }
         Map<String, UUID> categoryIds = new HashMap<>(categories);

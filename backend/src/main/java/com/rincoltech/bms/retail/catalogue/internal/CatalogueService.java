@@ -21,10 +21,10 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PackRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceChange;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceEditRequest;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.PriceHistory;
-import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SimilarProduct;
-import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SimilarProducts;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Product;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.ProductPage;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SimilarProduct;
+import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.SimilarProducts;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.Unit;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UnitList;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.UnitRequest;
@@ -357,7 +357,9 @@ class CatalogueService {
         if (!before.categoryId().equals(after.categoryId())) {
             // Issue #351: a category correction is audited with the old and the new category by name as well as by id.
             was.put("category", before.category());
-            now.put("category", repo.category(after.categoryId()).map(Category::name).orElse(null));
+            now.put(
+                    "category",
+                    repo.category(after.categoryId()).map(Category::name).orElse(null));
         }
         if (!before.unitId().equals(after.unitId()) && repo.productHasPacks(id)) {
             throw ApiException.rule(
@@ -370,8 +372,10 @@ class CatalogueService {
                     "The unit cannot change while a price list has a price for the product: prices are per unit.");
         }
         String duplicateReason = null;
-        // A new name or unit settles the question again: the reason of an earlier add-anyway goes unless this one needs its own.
-        boolean nameChanged = !before.description().equals(after.description()) || !before.unitId().equals(after.unitId());
+        // A new name or unit settles the question again: the reason of an earlier add-anyway goes unless this one needs
+        // its own.
+        boolean nameChanged = !before.description().equals(after.description())
+                || !before.unitId().equals(after.unitId());
         if (nameChanged) {
             duplicateReason = acceptName(after.description(), after.unitId(), id, r.duplicateReason());
             if (duplicateReason != null) {
@@ -676,7 +680,8 @@ class CatalogueService {
             return false;
         }
         if (!history.getLast().id().equals(mine.getLast().id())) {
-            noteCostUnchanged(locked, purchaseId, reason + ". The prices were left as they are: they changed after the restock.");
+            noteCostUnchanged(
+                    locked, purchaseId, reason + ". The prices were left as they are: they changed after the restock.");
             return false;
         }
         PriceChange first = mine.getFirst();

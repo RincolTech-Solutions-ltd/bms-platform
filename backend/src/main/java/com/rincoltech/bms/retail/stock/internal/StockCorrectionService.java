@@ -100,7 +100,8 @@ class StockCorrectionService {
         }
         UUID id = UUID.randomUUID();
         String note = r.note() == null || r.note().isBlank() ? null : r.note().trim();
-        String words = ("entry_mistake".equals(r.reasonCode()) ? "Entry mistake" : "Miscount") + (note == null ? "" : ": " + note);
+        String words = ("entry_mistake".equals(r.reasonCode()) ? "Entry mistake" : "Miscount")
+                + (note == null ? "" : ": " + note);
         LocalDate today = clock.today(tenant.profile().timezone());
         long cost = product.costMinor();
         UUID movementId = ledger.record(
@@ -108,7 +109,8 @@ class StockCorrectionService {
                         List.of(new Movement(
                                 branch, product.id(), "adjustment", difference, cost, SOURCE, id, null, null, words)))
                 .getFirst();
-        // The value moves between inventory and the shrinkage account, as a stock-take's variance does; the app's reports
+        // The value moves between inventory and the shrinkage account, as a stock-take's variance does; the app's
+        // reports
         // read movements by source, so this entry is the only place a correction shares an account with a loss.
         long value = Quantities.value(difference.abs(), cost);
         Optional<PostedEntry> entry = books.post(new Posting(

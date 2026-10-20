@@ -168,7 +168,8 @@ class PurchasingRepository {
 
     /** Serialises two people voiding the same restock; held to the end of the transaction. */
     void lockPurchase(UUID purchaseId) {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':retail.purchase_void:' || CAST(:id AS text), 0))")
+        jdbc.sql(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(current_setting('app.tenant_id') || ':retail.purchase_void:' || CAST(:id AS text), 0))")
                 .param("id", purchaseId)
                 .query(rs -> {});
     }
@@ -185,7 +186,9 @@ class PurchasingRepository {
         jdbc.sql("""
                         INSERT INTO retail_purchase_voids (id, tenant_id, purchase_id, voided_on, reason, voided_by)
                         VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
-                        """).params(UUID.randomUUID(), purchaseId, Date.valueOf(on), reason, by).update();
+                        """)
+                .params(UUID.randomUUID(), purchaseId, Date.valueOf(on), reason, by)
+                .update();
     }
 
     /** Imported restocks have stock movements flagged historical and no journal entry; they are not voided here. */
@@ -257,11 +260,17 @@ class PurchasingRepository {
             sql.append(" AND v.id IS NULL");
         }
         if (afterCreated != null) {
-            sql.append(newestFirst ? " AND (p.created_at, p.id) < (:afterCreated, :afterId)" : " AND (p.created_at, p.id) > (:afterCreated, :afterId)");
+            sql.append(
+                    newestFirst
+                            ? " AND (p.created_at, p.id) < (:afterCreated, :afterId)"
+                            : " AND (p.created_at, p.id) > (:afterCreated, :afterId)");
             params.put("afterCreated", Timestamp.from(afterCreated));
             params.put("afterId", afterId);
         }
-        sql.append(newestFirst ? " ORDER BY p.created_at DESC, p.id DESC LIMIT :limit" : " ORDER BY p.created_at, p.id LIMIT :limit");
+        sql.append(
+                newestFirst
+                        ? " ORDER BY p.created_at DESC, p.id DESC LIMIT :limit"
+                        : " ORDER BY p.created_at, p.id LIMIT :limit");
         params.put("limit", limit);
         return withLines(
                 jdbc.sql(sql.toString())
