@@ -5653,6 +5653,8 @@ export interface components {
             is_head_office?: boolean;
             location?: string;
             name?: string;
+            /** @description false for a Store: it holds stock and takes transfers but does not sell (ADR-048) */
+            sells_goods?: boolean;
             /** @description active, or inactive for a closed branch (the owner's word is closed, ADR-041) */
             status?: string;
             /**
@@ -5816,6 +5818,8 @@ export interface components {
             code: string;
             location?: string;
             name: string;
+            /** @description false creates a Store: it holds stock but does not sell (ADR-048). Omitted means a shop. */
+            sells_goods?: boolean;
         };
         CreateCollateralRequest: {
             collateral_type: string;
@@ -7296,6 +7300,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             name?: string;
+            /** @description false for a Store, a branch that holds stock but does not sell: the sale form, the default selling branch and the till skip it; restock, goods receipt, transfer and stock-take forms include it (#366) */
+            sells_goods?: boolean;
             /** @description false for a branch that keeps no goods: sale, restock and transfer forms skip it (#329) */
             stocks_goods?: boolean;
         };
@@ -13279,6 +13285,8 @@ export interface components {
         UpdateBranchRequest: {
             location?: string;
             name?: string;
+            /** @description false marks a Store: it holds stock, receives purchases and takes transfers in and out, but a sale, a payment taken or a refund paid there is refused (422 branch_does_not_sell). A Store must keep goods (422 store_must_stock). Refused with branch_has_open_credit_sales while a credit sale made there still has a balance owing. */
+            sells_goods?: boolean;
             /** @description false marks a branch that keeps no goods (a head office): no sales, restocks, transfers or stock adjustments there (422 branch_not_stocking). Refused with branch_still_has_stock while goods or a transfer on its way remain. */
             stocks_goods?: boolean;
         };

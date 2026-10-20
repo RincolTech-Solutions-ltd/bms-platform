@@ -8,7 +8,7 @@ import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import { qtyString, showQty } from './maths';
 import { usePersistedDraft } from './idempotency';
-import { SALE_RETURN, branchesWhere, canUse, holdsAt } from './permissions';
+import { SALE_RETURN, branchesWhere, canUse, holdsAt, sellingBranches } from './permissions';
 import {
   DISPOSITION_WORDS, MONEY_METHODS, accountRefundAllowed, REASONS, REFUND_WORDS, backOf, blankReturn, blankRow, buildReturnRequest, lineUnit, plannedLines, refundPlan, remainingMilli,
   resolved, returnProblem, rowProblem, soldMilli, type Back, type Disposition, type MoneyMethod, type RefundChoice, type ReturnForm, type RowForm,
@@ -100,13 +100,15 @@ export function ReturnFormView({ sale, back, form: chosen, branches, busy, error
   sale: Sale;
   back: Back;
   form: ReturnForm;
-  branches: { id?: string; name?: string; code?: string }[];
+  branches: { id?: string; name?: string; code?: string; sells_goods?: boolean }[];
   busy?: boolean;
   error?: unknown;
   onChange: (form: ReturnForm) => void;
   onSubmit: () => void;
 }) {
   const form = resolved(sale, chosen);
+  // The refund is paid out of a till, and a store (ADR-048) has none.
+  const tills = sellingBranches(branches, undefined);
   const planned = plannedLines(sale, form, back);
   const total = planned.reduce((sum, p) => sum + p.creditMinor, 0);
   const plan = refundPlan(sale, total, form, back);
@@ -128,12 +130,12 @@ export function ReturnFormView({ sale, back, form: chosen, branches, busy, error
           ))}
         </select>
         {!accountRefundAllowed(sale) && <p className="hint">{accountWhy(sale)}</p>}
-        {plan.moneyMinor > 0 && branches.length > 1 && (
+        {plan.moneyMinor > 0 && tills.length > 1 && (
           <>
             <label htmlFor="refund-branch">Pay the money out of the till of</label>
             <select id="refund-branch" value={form.refundBranchId} onChange={(e) => onChange({ ...form, refundBranchId: e.target.value })}>
               <option value="">{sale.branch_id ? 'The usual branch' : 'Choose a branch'}</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
+              {tills.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
             </select>
           </>
         )}
