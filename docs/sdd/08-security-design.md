@@ -242,6 +242,7 @@ platform API and holds no tenant permissions.
 | `retail.payable.manage` | Y | | | | | | | |
 | `retail.purchase.approve` | Y | | | | | | | |
 | `retail.document.issue` | Y | | | | | | | |
+| `retail.controls.read` | Y | | | | | | | |
 
 The staff member and collateral screens (issue #280) offer an action only when the session holds its permission in the record's branch, from `permission_scopes`; the API remains the authority. An ID image is listed and opened only with `lending.members.verify_kyc`. No permission was added.
 
@@ -379,6 +380,14 @@ Notes:
   `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
+- `retail.controls.read` (issue #357, ADR-045, migration V93) opens the read-only Controls page: voids, returns, changed prices,
+  discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and ranks
+  them by a rate, so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
+  role. It is a read (not money-moving), scoped by branch like every retail permission: a holder sees only the shops of its scope,
+  and the figures it sees are sums over those shops only. Every value is a sale price; the one card judged against cost (sales
+  below cost) and its repeat patterns are sent only when the caller also holds `retail.profit.read` in every branch the figures
+  cover, and asking for that metric without it is 403. No cost field is ever returned. Imported history is neither an event nor a
+  sale in a rate.
 - `retail.price.below_cost` (issue #64, ADR-020 decision 5) lets a sale line be priced at or below
   the product's cost. It is in the catalogue (migration V13) but no default role holds it, not even
   the tenant admin: it is meant for a custom role, and roles are not yet tenant-editable, so today
