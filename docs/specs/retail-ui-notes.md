@@ -786,6 +786,20 @@ shows an action only to someone who may take it; the server decides again.
   `voidPurchase`, `correctStock` and `stockHistory` in memory, with the server's codes and words.
 - **Tests.** `catalogue-names.dom.test.tsx`, `restocks.dom.test.tsx`, `stock-correct.dom.test.tsx`, `tour/*`.
 
+## Inactive items (#342, ADR-045)
+
+An item that is no longer sold is switched off, never deleted.
+
+- **Items screen.** The edit form of an item shows an Inactive tick to a holder of `retail.catalogue.manage` (the server decides again), with a hint that it
+  is never deleted and that its history and reports stay. While it is ticked and the item still has stock, a plain warning says "This item still has 5.000
+  in stock. Inactive items cannot be sold, restocked or moved, ..." (`stock_on_hand` of `GET /retail/products/{id}`, `inactiveWarning`). The list badge and the
+  filter say Inactive.
+- **Pickers and lists.** The sale, restock, usage and transfer pickers already ask for active items only. The Stock page has a Show inactive items tick
+  (`include_inactive`, off by default) on the one branch and the All branches view; with it off an inactive item is not listed even while it holds stock.
+- **Refusals.** Through the API a sale, restock, purchase order line or transfer of an inactive item is 422 `product_inactive` in plain words.
+- **Tour.** `page-catalogue` is version 2 with an Items you stopped selling step.
+- **Tests.** `catalogue.test.tsx` (the warning, the lists), `RetailProductInactiveIT` (backend, CI only).
+
 ## Left to do
 
 - Analytics: export to PDF and Excel and the daily WhatsApp summary (#149 items 8), and the cash view per shop per day (item 5), which need the cash book.

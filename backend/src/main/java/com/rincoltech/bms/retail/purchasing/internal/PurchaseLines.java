@@ -73,6 +73,13 @@ class PurchaseLines {
             problems.add(new FieldProblem(field + ".product_id", "unknown_product", "No such product."));
             return null;
         }
+        if (!p.active()) {
+            problems.add(new FieldProblem(
+                    field + ".product_id",
+                    "product_inactive",
+                    "This item is inactive, so it cannot be restocked. Switch it on again on the Items screen first."));
+            return null;
+        }
         if (!p.currency().equals(tenant.profile().currency())) {
             problems.add(new FieldProblem(field + ".product_id", "currency_mismatch", "Priced in " + p.currency()));
             return null;

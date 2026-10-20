@@ -523,6 +523,16 @@ class CatalogueRepository {
     }
 
     /** Any stock movement of the product, or a balance that is not zero: its quantities are counted in its unit (issue #351). */
+    /** Issue #342: a product's balance in one branch (the stock module's table), for the edit screen's warning. */
+    record BranchBalance(UUID branchId, BigDecimal qty) {}
+
+    List<BranchBalance> stockBalances(UUID productId) {
+        return jdbc.sql("SELECT branch_id, qty FROM retail_stock_balances WHERE product_id = ? AND qty <> 0")
+                .param(productId)
+                .query((rs, n) -> new BranchBalance(rs.getObject("branch_id", UUID.class), rs.getBigDecimal("qty")))
+                .list();
+    }
+
     boolean productHasStock(UUID productId) {
         return jdbc.sql("""
                         SELECT EXISTS (SELECT 1 FROM retail_stock_movements WHERE product_id = ?)

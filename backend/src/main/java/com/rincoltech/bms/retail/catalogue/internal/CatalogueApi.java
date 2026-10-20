@@ -167,7 +167,54 @@ final class CatalogueApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "The pack sizes of the product; present only while the units capability is on")
-            List<Pack> packs) {
+            List<Pack> packs,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #342: the stock of this product summed over the branches the caller may read; sent only"
+                                    + " by GET /retail/products/{id}, so the edit screen can warn before an item with stock is switched off")
+            String stockOnHand) {
+
+        /** A product with packs but no stock total, the shape every list row has. */
+        Product(
+                UUID id,
+                String code,
+                String description,
+                UUID categoryId,
+                String category,
+                UUID unitId,
+                String unit,
+                long sellMinor,
+                Long costMinor,
+                String currency,
+                boolean active,
+                Instant createdAt,
+                Instant updatedAt,
+                int version,
+                String qty,
+                Boolean negative,
+                List<Pack> packs) {
+            this(
+                    id,
+                    code,
+                    description,
+                    categoryId,
+                    category,
+                    unitId,
+                    unit,
+                    sellMinor,
+                    costMinor,
+                    currency,
+                    active,
+                    createdAt,
+                    updatedAt,
+                    version,
+                    qty,
+                    negative,
+                    packs,
+                    null);
+        }
 
         /** A product without packs, the shape every read had before units of measure (ADR-033). */
         Product(
@@ -225,7 +272,30 @@ final class CatalogueApi {
                     version,
                     qty,
                     negative,
-                    packs);
+                    packs,
+                    stockOnHand);
+        }
+
+        Product withStock(String total) {
+            return new Product(
+                    id,
+                    code,
+                    description,
+                    categoryId,
+                    category,
+                    unitId,
+                    unit,
+                    sellMinor,
+                    costMinor,
+                    currency,
+                    active,
+                    createdAt,
+                    updatedAt,
+                    version,
+                    qty,
+                    negative,
+                    packs,
+                    total);
         }
 
         Product withoutCost() {
@@ -246,7 +316,8 @@ final class CatalogueApi {
                     version,
                     qty,
                     negative,
-                    packs);
+                    packs,
+                    stockOnHand);
         }
     }
 

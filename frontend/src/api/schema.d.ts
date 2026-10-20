@@ -10100,6 +10100,8 @@ export interface components {
             qty?: string;
             /** Format: int64 */
             sell_minor?: number;
+            /** @description Issue #342: the stock of this product summed over the branches the caller may read; sent only by GET /retail/products/{id}, so the edit screen can warn before an item with stock is switched off */
+            stock_on_hand?: string;
             unit?: string;
             /** Format: uuid */
             unit_id?: string;
@@ -21632,6 +21634,7 @@ export interface operations {
                 category_id?: string;
                 negative_only?: boolean;
                 stock_level?: string;
+                include_inactive?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -21660,6 +21663,7 @@ export interface operations {
                 negative_only?: boolean;
                 stock_level?: string;
                 include_closed?: boolean;
+                include_inactive?: boolean;
                 limit?: number;
                 cursor?: string;
             };

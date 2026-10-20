@@ -209,16 +209,18 @@ export function StockPage() {
   const [level, setLevel] = useState<StockLevel | ''>('');
   // Closed branches that still hold stock are left out of the whole-business list unless asked for (#329).
   const [showClosed, setShowClosed] = useState(false);
+  // An inactive item (issue #342) leaves the list unless asked for; its history and the reports keep it.
+  const [showInactive, setShowInactive] = useState(false);
   const categories = useQuery({ queryKey: ['retail', 'categories'], queryFn: () => retail.listCategories() });
   const one = useQuery({
-    queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level],
-    queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, signal }),
+    queryKey: ['retail', 'stock', branchId, query, categoryId, negativeOnly, level, showInactive],
+    queryFn: ({ signal }) => retail.listStock({ branchId: branchId ?? '', query, categoryId, negativeOnly, level: level || undefined, includeInactive: showInactive, signal }),
     enabled: !all && branchId !== null,
     placeholderData: keepPreviousData,
   });
   const many = useQuery({
-    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, negativeOnly, level, showClosed],
-    queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, negativeOnly, level: level || undefined, includeClosed: showClosed, signal }),
+    queryKey: ['retail', 'stock', 'all-branches', query, categoryId, negativeOnly, level, showClosed, showInactive],
+    queryFn: ({ signal }) => retail.listStockAllBranches({ query, categoryId, negativeOnly, level: level || undefined, includeClosed: showClosed, includeInactive: showInactive, signal }),
     enabled: all,
     placeholderData: keepPreviousData,
   });
@@ -227,7 +229,7 @@ export function StockPage() {
   const shown = all ? many.data?.items.length : one.data?.length;
   // The whole-business view is the stock "by location": a last crumb says so (components/breadcrumbs.tsx).
   useCrumbTail(all ? 'By location' : undefined);
-  const narrowing = { pending: result.isPlaceholderData, searching: query !== '', filterKey: [all ? 'all' : branchId, query, categoryId, negativeOnly, level].join('|') };
+  const narrowing = { pending: result.isPlaceholderData, searching: query !== '', filterKey: [all ? 'all' : branchId, query, categoryId, negativeOnly, level, showInactive].join('|') };
   return (
     <Gate screen="stock" title="Stock">
       <p className="branch-line">Branch: <strong>{all ? 'All branches' : name}</strong></p>
@@ -246,6 +248,10 @@ export function StockPage() {
       <label style={{ fontWeight: 400 }}>
         <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={negativeOnly} onChange={(e) => setNegativeOnly(e.target.checked)} />
         Show only negative stock
+      </label>
+      <label style={{ fontWeight: 400 }}>
+        <input type="checkbox" style={{ width: 'auto', minHeight: 24, marginRight: 8 }} checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+        Show inactive items
       </label>
       {all && (showClosed || (many.data?.closed_branches ?? 0) > 0) && (
         <label style={{ fontWeight: 400 }}>

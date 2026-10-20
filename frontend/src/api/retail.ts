@@ -328,7 +328,7 @@ export interface RetailApi {
   correctStock(body: StockCorrectionRequest, idempotencyKey: string): Promise<StockCorrection>;
   /** The stock history of an item at a branch, newest first (issue #351). */
   stockHistory(q: { productId: string; branchId: string; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<{ items: StockMovement[]; next_cursor?: string }>;
-  listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<StockRow[]>;
+  listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeInactive?: boolean; signal?: AbortSignal }): Promise<StockRow[]>;
   /** One page of sales, newest first, narrowed by the filters (#145). */
   listSales(q: SalesQuery): Promise<SalePage>;
   /** Groups of sales at one level of a chain (shop, year, month, salesperson, day, category, item) with the totals of each; `next_to` (time levels) or `next_offset` (the rest) continues (#328, #341). */
@@ -465,7 +465,7 @@ export interface RetailApi {
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   commitStocktake(id: string): Promise<Stocktake>;
   /** Every product with its balance in each branch the caller may read (#144). */
-  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;
+  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; includeInactive?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;
   /** One branch, or every branch in the caller's scope when `branchId` is absent (#144). */
   valuation(q: { branchId?: string; asOf?: string }): Promise<Valuation>;
   /** The branches in the caller's stock scope holding a quantity above zero of anything (#103). */
@@ -680,13 +680,13 @@ const realRetail: RetailApi = {
     return { items: page.items ?? [], ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}) };
   },
 
-  async listStock({ branchId, query, categoryId, negativeOnly, level, signal }) {
+  async listStock({ branchId, query, categoryId, negativeOnly, level, includeInactive, signal }) {
     const rows: StockRow[] = [];
     let cursor: string | undefined;
     do {
       const page = unwrap(
         await api.GET('/api/v1/retail/stock', {
-          params: { query: { branch_id: branchId, query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, limit: PAGE, cursor } },
+          params: { query: { branch_id: branchId, query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, include_inactive: includeInactive || undefined, limit: PAGE, cursor } },
           signal,
         }),
       );
@@ -696,7 +696,7 @@ const realRetail: RetailApi = {
     return rows;
   },
 
-  async listStockAllBranches({ query, categoryId, negativeOnly, level, includeClosed, signal }) {
+  async listStockAllBranches({ query, categoryId, negativeOnly, level, includeClosed, includeInactive, signal }) {
     const items: AllBranchesRow[] = [];
     let branches: StockBranch[] = [];
     let closedBranches = 0;
@@ -704,7 +704,7 @@ const realRetail: RetailApi = {
     do {
       const page = unwrap(
         await api.GET('/api/v1/retail/stock/all-branches', {
-          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, include_closed: includeClosed || undefined, limit: PAGE, cursor } },
+          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, include_closed: includeClosed || undefined, include_inactive: includeInactive || undefined, limit: PAGE, cursor } },
           signal,
         }),
       );

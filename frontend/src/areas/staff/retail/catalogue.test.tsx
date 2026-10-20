@@ -9,7 +9,7 @@ import { catalogueLinksFor } from './catalogue';
 import { ImportReport, NOT_UTF8, readCsvText } from './catalogue-import';
 import { NamedRow, usedText } from './catalogue-lists';
 import { PersonRow } from './catalogue-people';
-import { PriceForm, PriceHistory, ProductCard, ProductForm, belowCostHint, showWhen } from './catalogue-products';
+import { PriceForm, PriceHistory, ProductCard, ProductForm, belowCostHint, inactiveWarning, showWhen } from './catalogue-products';
 import { CATALOGUE_LINKS, canUse, screensFor } from './permissions';
 import { Gate } from './ui';
 
@@ -290,5 +290,25 @@ describe('importing items from a file', () => {
     const api = createMockRetail();
     await expect(api.importProducts(csv.replace('sell price', 'sell price,cost price'), true)).rejects.toMatchObject({ code: 'cost_not_allowed' });
     setMockProfitAccess(true);
+  });
+});
+
+describe('inactive items (issue #342)', () => {
+  it('warns in plain words only while stock is held', () => {
+    expect(inactiveWarning('0.000')).toBe('');
+    expect(inactiveWarning(undefined)).toBe('');
+    expect(inactiveWarning('5.000')).toContain('still has 5.000 in stock');
+  });
+
+  it('leaves an inactive item out of the stock lists unless asked', async () => {
+    const api = createMockRetail();
+    const branchId = (await api.listStockAllBranches({})).branches[0]?.id ?? '';
+    const [first] = await api.listStock({ branchId });
+    const p = (await api.listCatalogue({ query: first?.code ?? '' })).items?.[0];
+    await api.updateProduct(p?.id ?? '', p?.version ?? 1, { active: false });
+    expect((await api.listStock({ branchId })).some((r) => r.product_id === p?.id)).toBe(false);
+    expect((await api.listStock({ branchId, includeInactive: true })).some((r) => r.product_id === p?.id)).toBe(true);
+    expect((await api.listStockAllBranches({})).items.some((r) => r.product_id === p?.id)).toBe(false);
+    expect((await api.listProducts({})).some((r) => r.id === p?.id)).toBe(false);
   });
 });

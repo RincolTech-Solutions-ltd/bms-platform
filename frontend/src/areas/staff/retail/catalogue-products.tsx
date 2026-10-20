@@ -68,7 +68,7 @@ export function ProductCard({ product, showCost, canPrice, onEdit, onPrice }: {
   return (
     <li className="rt-card">
       <p>
-        <strong>{product.description}</strong> {product.active === false && <span className="badge badge-warning">Switched off</span>}
+        <strong>{product.description}</strong> {product.active === false && <span className="badge badge-warning">Inactive</span>}
       </p>
       <p className="hint">{product.code}, {product.category}, per {product.unit}</p>
       <p>
@@ -83,6 +83,13 @@ export function ProductCard({ product, showCost, canPrice, onEdit, onPrice }: {
   );
 }
 
+/** The plain warning shown while an item that still has stock is marked inactive (issue #342). */
+export function inactiveWarning(stockOnHand: string | undefined): string {
+  const qty = Number(stockOnHand ?? 0);
+  if (!Number.isFinite(qty) || qty === 0) return '';
+  return `This item still has ${stockOnHand} in stock. Inactive items cannot be sold, restocked or moved, so that stock stays put until you correct it on the Stock page or switch the item on again.`;
+}
+
 export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: Product; onSaved: (text: string) => void; onCancel: () => void; onOpen?: (id: string) => void }) {
   const { me } = useStaff();
   const profit = useProfitAccess();
@@ -94,6 +101,8 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
   const [categoryId, setCategoryId] = useState(product?.category_id ?? '');
   const [unitId, setUnitId] = useState(product?.unit_id ?? '');
   const [active, setActive] = useState(product?.active !== false);
+  const canManage = (me.permissions ?? []).includes('retail.catalogue.manage');
+  const onHand = Number(product?.stock_on_hand ?? 0);
   const [sell, setSell] = useState('');
   const [cost, setCost] = useState('0');
   const sellMinor = parseMinor(sell, RETAIL_CURRENCY);
@@ -169,9 +178,17 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
       </select>
       {product ? (
         <>
-          <label htmlFor="item-active">
-            <input id="item-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> On sale (clear this to switch the item off)
-          </label>
+          {canManage && (
+            <>
+              <label htmlFor="item-inactive">
+                <input id="item-inactive" type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} /> Inactive
+              </label>
+              <p className="hint">An inactive item is not offered when selling, restocking or moving stock, and leaves the stock list unless you ask for inactive items. It is never deleted: its history and reports stay.</p>
+              {!active && onHand !== 0 && (
+                <p role="note" className="alert alert-warning">{inactiveWarning(product.stock_on_hand)}</p>
+              )}
+            </>
+          )}
           <p className="hint">To change the price, use Change price on the list.</p>
           <PackEditor product={product} />
         </>
@@ -325,8 +342,8 @@ export function ProductList({ onEdit, onPrice, onAdd }: { onEdit: (id: string) =
           <label htmlFor="items-active">Show</label>
           <select id="items-active" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as 'active' | 'off' | 'all')}>
             <option value="active">On sale</option>
-            <option value="off">Switched off</option>
-            <option value="all">All items</option>
+            <option value="off">Inactive</option>
+            <option value="all">All items, active and inactive</option>
           </select>
         </div>
       </div>
