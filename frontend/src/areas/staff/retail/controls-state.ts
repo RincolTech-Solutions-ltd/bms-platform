@@ -8,14 +8,31 @@ import { parseChain } from './sales-chain-state';
 // "Sales cancelled", "Goods taken back", "per 100 sales". The page lists what happened and compares it with the period
 // before; it does not judge anyone, so there is no ranking and no colour for "bad".
 
-/** The levels of the grouping chain: the shop, the person, the day and the reason given. */
-export type ControlsLevel = 'branch' | 'user' | 'day' | 'reason';
+/**
+ * The levels of the grouping chain: the shop, the person whose sales they were, the day, the reason given, and the approver
+ * (who cancelled the sale or took the goods back). A cancelled sale is counted against the person who entered it, never against
+ * the approver, who has a level of their own and appears nowhere in the patterns.
+ */
+export type ControlsLevel = 'branch' | 'user' | 'day' | 'reason' | 'approver';
 
 /** The order a new user starts with. */
-export const CONTROLS_LEVELS: readonly ControlsLevel[] = ['branch', 'user', 'day', 'reason'];
+export const CONTROLS_LEVELS: readonly ControlsLevel[] = ['branch', 'user', 'day', 'reason', 'approver'];
 
-export const LEVEL_NAMES: Record<ControlsLevel, string> = { branch: 'Shop', user: 'Person', day: 'Day', reason: 'Reason' };
-export const LEVEL_PLURALS: Record<ControlsLevel, string> = { branch: 'shops', user: 'people', day: 'days', reason: 'reasons' };
+export const LEVEL_NAMES: Record<ControlsLevel, string> = { branch: 'Shop', user: 'Person', day: 'Day', reason: 'Reason', approver: 'Approver' };
+export const LEVEL_PLURALS: Record<ControlsLevel, string> = { branch: 'shops', user: 'people', day: 'days', reason: 'reasons', approver: 'approvers' };
+
+/** The kinds of thing that are lines of a sale: a person who approved them is not recorded, so the Approver level is left out. */
+const LINE_METRICS: readonly string[] = ['price_overrides', 'discounts', 'below_cost'];
+export const isLineMetric = (metric: string): boolean => LINE_METRICS.includes(metric);
+
+/** The chain as it is asked of the server for a kind of thing: no Approver level for the lines of a sale; never empty. */
+export function chainFor(metric: string, chain: readonly ControlsLevel[]): ControlsLevel[] {
+  const kept = isLineMetric(metric) ? chain.filter((l) => l !== 'approver') : [...chain];
+  return kept.length > 0 ? kept : ['branch'];
+}
+
+/** The one label for a person the server does not know. */
+export const UNKNOWN_PERSON = 'Unknown person';
 
 export type PeriodKind = 'today' | 'week' | 'month' | 'custom';
 
@@ -93,6 +110,7 @@ export const shareWords = (bp: number | undefined): string => (bp === undefined 
 export interface Narrow {
   branchId?: string;
   userId?: string;
+  approverId?: string;
   reason?: string;
   from?: string;
   to?: string;
@@ -103,15 +121,22 @@ export function selectGroup(sel: Narrow, level: ControlsLevel, group: Pick<Contr
   switch (level) {
     case 'branch': return { ...sel, branchId: group.key };
     case 'user': return { ...sel, userId: group.key };
+    case 'approver': return { ...sel, approverId: group.key };
     case 'reason': return { ...sel, reason: group.key };
     default: return { ...sel, from: group.day ?? group.key, to: group.day ?? group.key };
   }
 }
 
+/**
+ * Whether a group can be opened. A shop, a person or an approver the server could not name has an empty key, and opening it
+ * would ask for everybody's records, so it is shown and counted but not opened.
+ */
+export const canOpen = (level: ControlsLevel, g: Pick<ControlsGroup, 'key'>): boolean => level === 'reason' || level === 'day' || (g.key ?? '') !== '';
+
 /** The title of a group row: the shop, the person (with a word when deactivated), the reason or the day in words. */
 export function groupTitle(level: ControlsLevel, g: ControlsGroup): string {
-  const label = g.label ?? g.key ?? '';
-  if (level === 'user') return g.user_status === 'deactivated' ? `${label} (deactivated)` : g.user_status === 'invited' ? `${label} (not yet signed in)` : label;
+  const label = g.label ?? (level === 'user' || level === 'approver' ? UNKNOWN_PERSON : (g.key ?? ''));
+  if (level === 'user' || level === 'approver') return g.user_status === 'deactivated' ? `${label} (deactivated)` : g.user_status === 'invited' ? `${label} (not yet signed in)` : label;
   if (level === 'day') return dayWords(g.day ?? g.key ?? '');
   return label;
 }
@@ -126,11 +151,22 @@ export function dayWords(day: string): string {
   return `${WEEKDAYS[new Date(`${day}T00:00:00Z`).getUTCDay()] ?? ''} ${Number(d)} ${MONTHS[Number(m) - 1] ?? ''} ${y}`;
 }
 
-/** The one line under a group title: how many, worth how much, and the rate. `money` is the screen's formatter. */
-export function groupLine(g: ControlsGroup, noun: string, money: (minor: number) => string): string {
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The one line under a group title: how many (lines are counted with the sales they are in), worth how much, and the rate,
+ * which is always sales with such an event per 100 sales entered. An approver entered no sales to set a rate against.
+ * `money` is the screen's formatter.
+ */
+export function groupLine(g: ControlsGroup, metric: string, level: ControlsLevel, money: (minor: number) => string): string {
   const count = g.count ?? 0;
-  const parts = [`${count} ${count === 1 ? noun.replace(/s$/, '') : noun}`, money(g.value_minor ?? 0)];
-  parts.push(g.rate_per_100 === undefined ? 'no sales of their own to compare with' : `${g.rate_per_100} per 100 sales`);
+  const sales = g.sales_affected ?? 0;
+  const head = isLineMetric(metric)
+    ? `${plural(count, 'line', 'lines')} in ${plural(sales, 'sale', 'sales')}`
+    : metric === 'returns' ? plural(count, 'return', 'returns') : plural(count, 'sale', 'sales');
+  const parts = [head, money(g.value_minor ?? 0)];
+  if (g.rate_per_100 !== undefined) parts.push(`${g.rate_per_100} per 100 sales`);
+  else if (level !== 'approver') parts.push('no sales of their own to compare with');
   return parts.join(', ');
 }
 
@@ -140,35 +176,41 @@ export function whenWords(at: string | undefined): string {
   return Number.isNaN(t) ? '' : `${dayWords(businessToday(new Date(t)))}, ${clockTime(at)}`;
 }
 
-/** The person who did it, as a record shows them. */
+/** The person whose sale it was, as a record shows them. */
 export const whoWords = (r: Pick<ControlsRecord, 'user_name' | 'user_status'>): string => {
-  const name = r.user_name ?? 'Unknown person';
+  const name = r.user_name ?? UNKNOWN_PERSON;
   return r.user_status === 'deactivated' ? `${name} (deactivated)` : name;
 };
 
-const VERB: Record<string, string> = {
-  voided_sales: 'cancelled',
-  returns: 'took goods back on',
-  price_overrides: 'changed the price on',
-  below_cost: 'sold below cost on',
+/** "Cancelled by Test Admin One" or "Taken back by ..."; empty for a price or a cost, which have no approver. */
+export function approverWords(r: Pick<ControlsRecord, 'approver_id' | 'approver_name' | 'approver_status'>, metric: string): string {
+  if (!r.approver_id) return '';
+  const name = r.approver_name ?? UNKNOWN_PERSON;
+  return `${metric === 'returns' ? 'Taken back' : 'Cancelled'} by ${r.approver_status === 'deactivated' ? `${name} (deactivated)` : name}`;
+}
+
+const SALE_ENDING: Record<string, string> = {
+  voided_sales: 'were cancelled',
+  returns: 'had goods taken back',
+  price_overrides: 'had a price changed',
+  below_cost: 'were sold below cost',
 };
 
 /**
- * A repeat pattern in plain words. A person: "Test Seller One cancelled 5 of the 13 sales they entered at Head Office
- * (38.5 per 100). The shop's own is 14.0, so 2.8 times." An item: the lines of the item that were in such sales.
+ * A repeat pattern in plain words. A person is the one whose sales they were, never the one who cancelled them:
+ * "5 of the 13 sales Test Seller One entered at Head Office were cancelled (38.5 per 100). The shop's own is 14.0, so 2.8
+ * times." An item: the lines of the item that were on such sales.
  */
 export function patternSentence(p: ControlsPattern, shop: string): string {
-  const times = `${p.times}`;
-  const rest = `(${p.rate_per_100} per 100). The shop's own is ${p.shop_rate_per_100}, so ${times} times.`;
+  const rest = `(${p.rate_per_100} per 100). The shop's own is ${p.shop_rate_per_100}, so ${p.times} times.`;
   const count = p.count ?? 0;
   const outOf = p.out_of ?? 0;
-  const verb = VERB[p.metric ?? ''] ?? 'flagged';
   if (p.subject === 'user') {
-    const name = p.user_status === 'deactivated' ? `${p.name} (deactivated)` : (p.name ?? 'Someone');
-    return `${name} ${verb} ${count} of the ${outOf} sales they entered at ${shop} ${rest}`;
+    const name = p.user_status === 'deactivated' ? `${p.name} (deactivated)` : (p.name ?? UNKNOWN_PERSON);
+    return `${count} of the ${outOf} sales ${name} entered at ${shop} ${SALE_ENDING[p.metric ?? ''] ?? 'were flagged'} ${rest}`;
   }
-  const lines = p.metric === 'voided_sales' ? `${count} of the ${outOf} lines of ${p.name} sold at ${shop} were on cancelled sales` : `${count} of the ${outOf} lines of ${p.name} sold at ${shop} had ${p.metric === 'below_cost' ? 'a price under cost' : 'the price changed'}`;
-  return `${lines} ${rest}`;
+  const lines = p.metric === 'voided_sales' ? 'were on cancelled sales' : p.metric === 'below_cost' ? 'had a price under cost' : 'had the price changed';
+  return `${count} of the ${outOf} lines of ${p.name} sold at ${shop} ${lines} ${rest}`;
 }
 
 /** Where the person's chosen chain is kept: per user, never an email or a phone number. */
@@ -202,15 +244,15 @@ export const csvOf = (rows: (string | number | undefined)[][]): string => `${row
 /** The groups on screen as a CSV: the name, how many, the value, the sales entered and the rate. */
 export function groupsCsv(level: ControlsLevel, groups: ControlsGroup[]): string {
   return csvOf([
-    [LEVEL_NAMES[level], 'Count', 'Value', 'Sales entered', 'Per 100 sales'],
-    ...groups.map((g) => [groupTitle(level, g), g.count ?? 0, g.value_minor ?? 0, g.sales_count ?? 0, g.rate_per_100]),
+    [LEVEL_NAMES[level], 'Count', 'Sales with it', 'Value', 'Sales entered', 'Per 100 sales'],
+    ...groups.map((g) => [groupTitle(level, g), g.count ?? 0, g.sales_affected ?? 0, g.value_minor ?? 0, g.sales_count ?? 0, g.rate_per_100]),
   ]);
 }
 
 /** The records on screen as a CSV. */
-export function recordsCsv(records: ControlsRecord[]): string {
+export function recordsCsv(records: ControlsRecord[], metric: string): string {
   return csvOf([
-    ['Sale', 'Credit note', 'Time', 'Shop', 'Person', 'Reason', 'Item', 'Value'],
-    ...records.map((r) => [r.sale_no, r.reference, r.at, r.branch_name, whoWords(r), r.reason, r.item, r.value_minor ?? 0]),
+    ['Sale', 'Credit note', 'Time', 'Shop', 'Person (whose sale)', 'Approver', 'Reason', 'Item', 'Value'],
+    ...records.map((r) => [r.sale_no, r.reference, whenWords(r.at), r.branch_name, whoWords(r), approverWords(r, metric), r.reason, r.item, r.value_minor ?? 0]),
   ]);
 }

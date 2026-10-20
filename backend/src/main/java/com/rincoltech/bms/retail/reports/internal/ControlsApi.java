@@ -38,6 +38,9 @@ final class ControlsApi {
 
             long count,
 
+            @Schema(description = "Sales with such an event; a sale with two changed lines counts once")
+            long salesAffected,
+
             @Schema(
                     description =
                             "At sale prices; for discounts, the money given up against the price the system chose")
@@ -48,7 +51,8 @@ final class ControlsApi {
 
             @Schema(
                     description =
-                            "Events per 100 sales entered in the period, one decimal; absent when no sale was entered")
+                            "Sales with such an event per 100 sales entered in the period, one decimal; absent when no"
+                                    + " sale was entered")
             @JsonProperty("rate_per_100")
             String ratePer100,
 
@@ -104,6 +108,10 @@ final class ControlsApi {
 
             @Schema(description = "Day level only") LocalDate day,
             long count,
+
+            @Schema(description = "Sales with such an event; the rate is over these")
+            long salesAffected,
+
             long valueMinor,
 
             @Schema(
@@ -112,7 +120,10 @@ final class ControlsApi {
                                     + " over these")
             long salesCount,
 
-            @Schema(description = "Events per 100 sales, one decimal; absent when the group entered no sale")
+            @Schema(
+                    description =
+                            "Sales with such an event per 100 sales the group entered, one decimal; absent when it"
+                                    + " entered none")
             @JsonProperty("rate_per_100")
             String ratePer100) {}
 
@@ -151,10 +162,16 @@ final class ControlsApi {
             String branchName,
             UUID userId,
 
-            @Schema(description = "The person who did it; absent when unknown")
+            @Schema(description = "The person whose sale it was; absent when unknown")
             String userName,
 
             String userStatus,
+            UUID approverId,
+
+            @Schema(description = "Who cancelled the sale or took the goods back; absent for a price or a cost")
+            String approverName,
+
+            String approverStatus,
             String reason,
 
             @Schema(description = "Price changes, discounts and below cost only: the item")

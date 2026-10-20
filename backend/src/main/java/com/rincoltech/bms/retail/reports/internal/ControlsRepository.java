@@ -27,10 +27,10 @@ class ControlsRepository {
             List.of("voided_sales", "quick_cancels", "returns", "price_overrides", "discounts", "below_cost");
 
     /** The levels of the grouping chain. */
-    static final List<String> LEVELS = List.of("branch", "user", "day", "reason");
+    static final List<String> LEVELS = List.of("branch", "user", "day", "reason", "approver");
 
     private static final String COLUMNS = " AS metric, %s AS sale_id, %s AS sale_no, %s AS ref, %s AS branch_id,"
-            + " %s AS user_id, %s AS day, %s AS at, %s AS reason, %s AS value_minor, %s AS item";
+            + " %s AS user_id, %s AS day, %s AS at, %s AS reason, %s AS value_minor, %s AS item, %s AS approver_id";
 
     private final JdbcClient jdbc;
 
@@ -46,6 +46,7 @@ class ControlsRepository {
             List<UUID> branchIds,
             int withinMinutes,
             UUID userId,
+            UUID approverId,
             String reason) {}
 
     private static Map<String, Object> params(Window w) {
@@ -76,12 +77,13 @@ class ControlsRepository {
                                 "s.sale_no",
                                 "CAST(NULL AS text)",
                                 "s.branch_id",
-                                "s.voided_by",
+                                "s.created_by",
                                 "(s.voided_at AT TIME ZONE :tz)::date",
                                 "s.voided_at",
                                 "s.void_reason",
                                 "s.total_minor",
-                                "CAST(NULL AS text)")
+                                "CAST(NULL AS text)",
+                                "s.voided_by")
                         + saleVoid
                         + (metric.equals("quick_cancels")
                                 ? " AND s.voided_at <= s.created_at + make_interval(mins => :within)"
@@ -93,12 +95,13 @@ class ControlsRepository {
                                 "s.sale_no",
                                 "r.credit_note_no",
                                 "r.branch_id",
-                                "r.created_by",
+                                "s.created_by",
                                 "r.returned_on",
                                 "r.created_at",
                                 "r.note",
                                 "r.total_minor",
-                                "CAST(NULL AS text)")
+                                "CAST(NULL AS text)",
+                                "r.created_by")
                         + " FROM retail_sale_returns r JOIN retail_sales s ON s.tenant_id = r.tenant_id AND s.id ="
                         + " r.sale_id WHERE r.status = 'completed' AND r.returned_on >= :from AND r.returned_on <="
                         + " :to";
@@ -132,7 +135,8 @@ class ControlsRepository {
                 "s.created_at",
                 reason,
                 value,
-                "p.description");
+                "p.description",
+                "CAST(NULL AS uuid)");
     }
 
     /** The events of the metrics asked for, narrowed to the window's shop, person and reason. */
@@ -149,6 +153,10 @@ class ControlsRepository {
         if (w.userId() != null) {
             sql.append(" AND ev.user_id = :userId");
             params.put("userId", w.userId());
+        }
+        if (w.approverId() != null) {
+            sql.append(" AND ev.approver_id = :approverId");
+            params.put("approverId", w.approverId());
         }
         if (w.reason() != null) {
             sql.append(" AND lower(btrim(coalesce(ev.reason, ''))) = :reason");
@@ -183,33 +191,43 @@ class ControlsRepository {
         }
     }
 
-    record Count(String metric, long count, long valueMinor) {}
+    record Count(String metric, long count, long salesAffected, long valueMinor) {}
 
     /** Count and value of each metric asked for in the window (the cards). */
     List<Count> counts(List<String> metrics, Window w) {
         Map<String, Object> params = params(w);
-        String sql = "SELECT metric, count(*) AS n, coalesce(sum(value_minor), 0) AS v FROM ("
-                + filtered(metrics, w, params) + ") x GROUP BY metric";
+        String sql =
+                "SELECT metric, count(*) AS n, count(DISTINCT sale_id) AS a, coalesce(sum(value_minor), 0) AS v FROM ("
+                        + filtered(metrics, w, params) + ") x GROUP BY metric";
         return jdbc.sql(sql)
                 .params(params)
-                .query((rs, n) -> new Count(rs.getString("metric"), rs.getLong("n"), rs.getLong("v")))
+                .query((rs, n) -> new Count(rs.getString("metric"), rs.getLong("n"), rs.getLong("a"), rs.getLong("v")))
                 .list();
     }
 
     /** One group of one level: the key, its events and the sales entered by the same key. */
     record Cell(
-            String key, String label, String userStatus, LocalDate day, long count, long valueMinor, long salesCount) {}
+            String key,
+            String label,
+            String userStatus,
+            LocalDate day,
+            long count,
+            long salesAffected,
+            long valueMinor,
+            long salesCount) {}
 
     /**
      * The groups of one level for one metric, with the sales entered by the same shop, person or day for the rate (a
-     * reason has no sales of its own, so its rate is over all sales in the window). Day is newest first, the others by
-     * the number of events, then by key.
+     * reason has no sales of its own, so its rate is over all sales in the window; an approver has none and no rate).
+     * Day is newest first and reasons come by their count; shops, people and approvers come by name, never by count,
+     * so the list is not a league table.
      */
     List<Cell> groups(String metric, String level, Window w, int offset, int limit) {
         Map<String, Object> params = params(w);
         String key = switch (level) {
-            case "branch" -> "CAST(ev.branch_id AS text)";
-            case "user" -> "CAST(ev.user_id AS text)";
+            case "branch" -> "coalesce(CAST(ev.branch_id AS text), '')";
+            case "user" -> "coalesce(CAST(ev.user_id AS text), '')";
+            case "approver" -> "coalesce(CAST(ev.approver_id AS text), '')";
             case "day" -> "CAST(ev.day AS text)";
             default -> "lower(btrim(coalesce(ev.reason, '')))";
         };
@@ -219,6 +237,12 @@ class ControlsRepository {
             case "day" -> "CAST(s.sale_date AS text)";
             default -> "'all'";
         };
+        // An approver entered no sales of their own to set a rate against: the join below finds nothing.
+        String salesJoin = switch (level) {
+            case "reason" -> "'all'";
+            case "approver" -> "'-'";
+            default -> "g.k";
+        };
         // The sales behind a rate answer to the shop and the person above, never to the reason.
         Map<String, Object> salesParams = new LinkedHashMap<>();
         StringBuilder sales = new StringBuilder("SELECT " + salesKey + " AS k, count(*) AS n FROM retail_sales s"
@@ -227,25 +251,30 @@ class ControlsRepository {
         sales.append(" GROUP BY 1");
         params.putAll(salesParams);
         String names = switch (level) {
-            case "branch" -> " LEFT JOIN branches b ON b.id = CAST(g.k AS uuid)";
-            case "user" -> " LEFT JOIN users u ON u.id = CAST(g.k AS uuid)";
+            case "branch" -> " LEFT JOIN branches b ON b.id = CAST(NULLIF(g.k, '') AS uuid)";
+            case "user", "approver" -> " LEFT JOIN users u ON u.id = CAST(NULLIF(g.k, '') AS uuid)";
             default -> "";
         };
         String label = switch (level) {
             case "branch" -> "b.name";
-            case "user" -> "u.full_name";
+            case "user", "approver" -> "u.full_name";
             case "reason" -> "g.sample";
             default -> "g.k";
         };
-        String status = level.equals("user") ? "u.status" : "CAST(NULL AS text)";
-        String order = level.equals("day") ? "g.k DESC" : "g.n DESC, g.k";
-        String sql = "WITH g AS (SELECT " + key + " AS k, count(*) AS n, coalesce(sum(ev.value_minor), 0) AS v,"
+        String status = level.equals("user") || level.equals("approver") ? "u.status" : "CAST(NULL AS text)";
+        String order = switch (level) {
+            case "day" -> "g.k DESC";
+            case "reason" -> "g.n DESC, g.k";
+            default -> "lower(" + label + ") NULLS LAST, g.k";
+        };
+        String sql = "WITH g AS (SELECT " + key + " AS k, count(*) AS n, count(DISTINCT ev.sale_id) AS a,"
+                + " coalesce(sum(ev.value_minor), 0) AS v,"
                 + " min(btrim(ev.reason)) AS sample FROM (" + filtered(List.of(metric), w, params)
                 + ") ev GROUP BY 1), s AS (" + sales + ")"
-                + " SELECT g.k, " + label + " AS label, " + status + " AS user_status, g.n, g.v,"
+                + " SELECT g.k, " + label + " AS label, " + status + " AS user_status, g.n, g.a, g.v,"
                 + " coalesce(s.n, 0) AS sales_count FROM g"
                 + names
-                + " LEFT JOIN s ON s.k = " + (level.equals("reason") ? "'all'" : "g.k")
+                + " LEFT JOIN s ON s.k = " + salesJoin
                 + " ORDER BY " + order + " OFFSET :offset LIMIT :limit";
         params.put("offset", offset);
         params.put("limit", limit);
@@ -257,6 +286,7 @@ class ControlsRepository {
                         rs.getString("user_status"),
                         level.equals("day") ? LocalDate.parse(rs.getString("k")) : null,
                         rs.getLong("n"),
+                        rs.getLong("a"),
                         rs.getLong("v"),
                         rs.getLong("sales_count")))
                 .list();
@@ -273,6 +303,9 @@ class ControlsRepository {
             UUID userId,
             String userName,
             String userStatus,
+            UUID approverId,
+            String approverName,
+            String approverStatus,
             String reason,
             String item,
             long valueMinor) {}
@@ -280,9 +313,11 @@ class ControlsRepository {
     List<Event> events(String metric, Window w, int offset, int limit) {
         Map<String, Object> params = params(w);
         String sql = "SELECT ev.sale_id, ev.sale_no, ev.ref, ev.at, ev.branch_id, b.name AS branch_name, ev.user_id,"
-                + " u.full_name, u.status, ev.reason, ev.item, ev.value_minor FROM ("
+                + " u.full_name, u.status, ev.approver_id, ua.full_name AS approver_name, ua.status AS approver_status,"
+                + " ev.reason, ev.item, ev.value_minor FROM ("
                 + filtered(List.of(metric), w, params)
                 + ") ev LEFT JOIN branches b ON b.id = ev.branch_id LEFT JOIN users u ON u.id = ev.user_id"
+                + " LEFT JOIN users ua ON ua.id = ev.approver_id"
                 + " ORDER BY ev.at DESC, ev.sale_id DESC, ev.item OFFSET :offset LIMIT :limit";
         params.put("offset", offset);
         params.put("limit", limit);
@@ -298,6 +333,9 @@ class ControlsRepository {
                         rs.getObject("user_id", UUID.class),
                         rs.getString("full_name"),
                         rs.getString("status"),
+                        rs.getObject("approver_id", UUID.class),
+                        rs.getString("approver_name"),
+                        rs.getString("approver_status"),
                         rs.getString("reason"),
                         rs.getString("item"),
                         rs.getLong("value_minor")))
@@ -315,7 +353,11 @@ class ControlsRepository {
             long count,
             long sales) {}
 
-    /** Per shop and person: the events of each metric, with the sales the person entered in that shop. */
+    /**
+     * Per shop and person: the sales of the person with an event of each metric (a sale counts once, whatever its number of
+     * lines), with the sales the person entered in that shop. The person is the one whose sale it was, never the one who
+     * cancelled or took it back.
+     */
     List<PersonCell> personCells(List<String> metrics, Window w) {
         Map<String, Object> params = params(w);
         StringBuilder sales =
@@ -323,7 +365,8 @@ class ControlsRepository {
                         + " WHERE NOT s.historical AND s.sale_date >= :from AND s.sale_date <= :to");
         salesFilters(sales, params, w);
         sales.append(" GROUP BY 1, 2");
-        String sql = "WITH e AS (SELECT metric, branch_id, user_id, count(*) AS n FROM (" + filtered(metrics, w, params)
+        String sql = "WITH e AS (SELECT metric, branch_id, user_id, count(DISTINCT sale_id) AS n FROM ("
+                + filtered(metrics, w, params)
                 + ") x GROUP BY 1, 2, 3), s AS (" + sales + ")"
                 + " SELECT e.branch_id, b.name AS branch_name, e.user_id, u.full_name, u.status, e.metric, e.n,"
                 + " coalesce(s.n, 0) AS sales FROM e LEFT JOIN s ON s.branch_id = e.branch_id AND s.user_id = e.user_id"

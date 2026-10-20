@@ -416,8 +416,8 @@ Notes:
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
 - `retail.controls.read` (issue #357, ADR-045, migration V93) opens the read-only Controls page: voids, returns, changed prices,
-  discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and ranks
-  them by a rate, so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
+  discounts, sales below cost and sales cancelled at once, by shop, by named person, by day and by reason. It names staff and compares
+  them by a rate (a cancelled sale is credited to the person whose sale it was, the approver is shown apart and never ranked), so it is the tenant administrator's alone by default and a business gives it to an owner's or an auditor's custom
   role. It is a read (not money-moving), scoped by branch like every retail permission: a holder sees only the shops of its scope,
   and the figures it sees are sums over those shops only. Every value is a sale price; the one card judged against cost (sales
   below cost) and its repeat patterns are sent only when the caller also holds `retail.profit.read` in every branch the figures

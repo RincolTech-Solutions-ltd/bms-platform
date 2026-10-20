@@ -844,22 +844,26 @@ No migration beyond the permission; no write anywhere on the page.
   or 60 minutes.
 - **Cards.** One tappable card per kind of thing, in a fixed order: Sales cancelled, Cancelled at once, Goods taken back, Prices changed,
   Discounts given, and Sold below cost (only when the server sent it, that is for someone who may read profit in every shop shown; a line
-  of words says so otherwise). Each shows the count, what it is worth at sale prices, the rate ("2.5 per 100 sales"), the trend ("Up 3, from 5
+  of words says so otherwise). Each shows the count (for a price, a discount or a cost it says "3 lines in 2 sales, lines worth ..."), what it is worth at sale prices, the rate ("2.5 per 100 sales", always sales with such an event per 100 sales entered, so the units match), the trend ("Up 3, from 5
   in the 7 days before"; "None, and none in ...") and its share of the value of sales. A card whose capability is off and never counted says
   "Not switched on for this business, so nothing is recorded" instead of a calm zero. A card is a button: the chosen one sets the table below.
   No red or green: the page lists, it does not judge.
-- **Tables.** Under the cards, the chosen kind grouped by a chain of Shop, Person, Day and Reason, in the usual order, with the same Group
+- **Tables.** Under the cards, the chosen kind grouped by a chain of Shop, Person, Day, Reason and Approver, in the usual order, with the same Group
   by control as All sales (move, remove, add; kept per user in the browser; the shop level is left out when one shop is chosen at the top).
   Each line is a button with the count, the value and the rate; opening it shows the next level and, on the last, the individual records
   (sale number, time, person with "(deactivated)" when they are, shop, reason or "No reason recorded", item, amount) with Open sale, which
   shows the sale as the sales lists do and comes back to the same groups. A group that opens onto groups also offers Show the records here.
-  The path shows as a breadcrumb above the groups. Imported history is not counted.
+  The path shows as a breadcrumb above the groups. Imported history is not counted. **Person is whose sale it was**, also for a cancelled
+  sale or a return, so the cashier whose sales were cancelled carries the count and the administrator who cancelled them does not; the
+  administrator is the **Approver** level and the "Cancelled by ..." line of a record (the lines of a sale have no approver, so the level is
+  left out for them). Shops, people and approvers are listed by name, never by count or rate. A person the server cannot name reads Unknown
+  person, is counted and cannot be opened. Try again shows when the figures or the patterns could not be read.
 - **Rates.** "per 100 sales" is the count over the sales that person, shop or day entered, so a busy person and a quiet one can be compared;
   a person who entered none has none ("no sales of their own to compare with").
-- **Repeat patterns.** A strip under the tables in plain sentences: "Test Seller One cancelled 5 of the 13 sales they entered at Test Branch
-  Gayaza (38.5 per 100). The shop's own is 14.0, so 2.8 times." Only from 3 cases over 10 sales, and the page says it is a reason to look, not
-  a finding. An item reads "5 of the 20 lines of Test Cable 2m sold at ... were on cancelled sales".
-- **Export.** Export CSV under every list saves what is on screen (the groups, or the records, or the patterns) from the browser, so it can
+- **Repeat patterns.** A strip under the tables in plain sentences, by shop and name: "5 of the 13 sales Test Seller One entered at Test Branch
+  Gayaza were cancelled (38.5 per 100). The shop's own is 14.0, so 2.8 times." Only from 3 cases over 10 sales, and the page says it is a reason to look, not
+  a finding; the approver is never in it. An item reads "5 of the 20 lines of Test Cable 2m sold at ... were on cancelled sales".
+- **Export.** Export CSV under every list saves what is on screen (the groups, or the records with the time in words and the approver, or the patterns) from the browser, so it can
   never hold more than the person may see; a text that begins with `=`, `+`, `-` or `@` is written as plain text.
 - **Permission and branch.** `retail.controls.read` only; the sales list is a separate permission, so Open sale is offered only to someone who
   may also read sales. The server limits every figure to the shops of the permission's scope.

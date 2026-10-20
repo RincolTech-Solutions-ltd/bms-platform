@@ -8417,8 +8417,13 @@ export interface components {
             previous_rate_per_100?: string;
             /** Format: int64 */
             previous_value_minor?: number;
-            /** @description Events per 100 sales entered in the period, one decimal; absent when no sale was entered */
+            /** @description Sales with such an event per 100 sales entered in the period, one decimal; absent when no sale was entered */
             rate_per_100?: string;
+            /**
+             * Format: int64
+             * @description Sales with such an event; a sale with two changed lines counts once
+             */
+            sales_affected?: number;
             /**
              * Format: int32
              * @description The value over the completed sales of the period, in basis points; absent without sales
@@ -8444,8 +8449,13 @@ export interface components {
             key?: string;
             /** @description The branch, person or reason to show, or the day */
             label?: string;
-            /** @description Events per 100 sales, one decimal; absent when the group entered no sale */
+            /** @description Sales with such an event per 100 sales the group entered, one decimal; absent when it entered none */
             rate_per_100?: string;
+            /**
+             * Format: int64
+             * @description Sales with such an event; the rate is over these
+             */
+            sales_affected?: number;
             /**
              * Format: int64
              * @description Sales entered by the group (the shop, the person or the day) in the period; the rate is over these
@@ -8527,6 +8537,11 @@ export interface components {
             to?: string;
         };
         RetailControlsRecord: {
+            /** Format: uuid */
+            approver_id?: string;
+            /** @description Who cancelled the sale or took the goods back; absent for a price or a cost */
+            approver_name?: string;
+            approver_status?: string;
             /** Format: date-time */
             at?: string;
             /** Format: uuid */
@@ -8542,7 +8557,7 @@ export interface components {
             sale_no?: string;
             /** Format: uuid */
             user_id?: string;
-            /** @description The person who did it; absent when unknown */
+            /** @description The person whose sale it was; absent when unknown */
             user_name?: string;
             user_status?: string;
             /** Format: int64 */
@@ -18844,6 +18859,7 @@ export interface operations {
                 from?: string;
                 to?: string;
                 user_id?: string;
+                approver_id?: string;
                 reason?: string;
                 within_minutes?: number;
                 offset?: number;
@@ -18897,6 +18913,7 @@ export interface operations {
                 from?: string;
                 to?: string;
                 user_id?: string;
+                approver_id?: string;
                 reason?: string;
                 within_minutes?: number;
                 offset?: number;

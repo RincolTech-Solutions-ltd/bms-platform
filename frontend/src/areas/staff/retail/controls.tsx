@@ -7,8 +7,8 @@ import { SkeletonList } from '../../../components/states';
 import { useStaff } from '../context';
 import { DateRange, Choice, Empty, Section, rangeProblem } from './analytics-ui';
 import {
-  CONTROLS_LEVELS, LEVEL_NAMES, LEVEL_PLURALS, PERIODS, WITHIN_CHOICES, csvOf, daysIn, dayWords, groupLine, groupTitle, groupsCsv, orderedCards, patternSentence, periodRange, previousWords,
-  rateWords, readControlsChain, recordsCsv, selectGroup, shareWords, trendWords, whenWords, whoWords, wordsOf, writeControlsChain,
+  CONTROLS_LEVELS, LEVEL_NAMES, LEVEL_PLURALS, PERIODS, WITHIN_CHOICES, approverWords, canOpen, chainFor, csvOf, daysIn, dayWords, groupLine, groupTitle, groupsCsv, isLineMetric, orderedCards,
+  patternSentence, periodRange, previousWords, rateWords, readControlsChain, recordsCsv, selectGroup, shareWords, trendWords, whenWords, whoWords, wordsOf, writeControlsChain,
   type ControlsLevel, type Narrow, type PeriodKind,
 } from './controls-state';
 import { canUse } from './permissions';
@@ -49,6 +49,8 @@ interface Base {
 function Card({ card, selected, onPick, before, within }: { card: ControlsCard; selected: boolean; onPick: () => void; before: string; within: number }) {
   const words = wordsOf(card.metric as Metric);
   const count = card.count ?? 0;
+  const lines = isLineMetric(card.metric ?? '');
+  const sales = card.sales_affected ?? 0;
   return (
     <li>
       <button type="button" className="an-stat ctl-card" aria-pressed={selected} onClick={onPick} data-metric={card.metric}>
@@ -58,7 +60,7 @@ function Card({ card, selected, onPick, before, within }: { card: ControlsCard; 
           <span className="hint">Not switched on for this business, so nothing is recorded.</span>
         ) : (
           <>
-            <span className="hint">{count === 0 ? 'Nothing in these days' : `Worth ${money(card.value_minor ?? 0)}`}</span>
+            <span className="hint">{count === 0 ? 'Nothing in these days' : lines ? `${count} ${count === 1 ? 'line' : 'lines'} in ${sales} ${sales === 1 ? 'sale' : 'sales'}, lines worth ${money(card.value_minor ?? 0)}` : `Worth ${money(card.value_minor ?? 0)}`}</span>
             <span className="hint">{rateWords(card.rate_per_100)}</span>
             <span className="hint">{trendWords(count, card.previous_count ?? 0, before)}</span>
             {shareWords(card.share_of_sales_bp) && count > 0 && <span className="hint">{shareWords(card.share_of_sales_bp)}</span>}
@@ -100,7 +102,7 @@ interface Shared {
 }
 
 const rangeOf = (base: Base, sel: Narrow): ControlsNarrowedRange => ({
-  branchId: sel.branchId ?? base.branchId, from: sel.from ?? base.from, to: sel.to ?? base.to, withinMinutes: base.withinMinutes, userId: sel.userId, reason: sel.reason,
+  branchId: sel.branchId ?? base.branchId, from: sel.from ?? base.from, to: sel.to ?? base.to, withinMinutes: base.withinMinutes, userId: sel.userId, approverId: sel.approverId, reason: sel.reason,
 });
 
 function Records({ sel, base, metric, onOpenSale }: { sel: Narrow; base: Base; metric: Metric; onOpenSale?: (id: string) => void }) {
@@ -118,24 +120,24 @@ function Records({ sel, base, metric, onOpenSale }: { sel: Narrow; base: Base; m
   return (
     <>
       <ul className="rt-group-list ctl-records">
-        {records.map((r, i) => <RecordRow key={`${r.sale_id}-${r.item ?? ''}-${i}`} record={r} onOpenSale={onOpenSale} />)}
+        {records.map((r, i) => <RecordRow key={`${r.sale_id}-${r.item ?? ''}-${i}`} record={r} metric={metric} onOpenSale={onOpenSale} />)}
       </ul>
       {query.hasNextPage && (
         <button type="button" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? 'Loading' : 'Show more'}</button>
       )}
-      <ExportButton name={`controls-${metric}-records.csv`} text={recordsCsv(records)} />
+      <ExportButton name={`controls-${metric}-records.csv`} text={recordsCsv(records, metric)} />
     </>
   );
 }
 
-function RecordRow({ record: r, onOpenSale }: { record: ControlsRecord; onOpenSale?: (id: string) => void }) {
+function RecordRow({ record: r, metric, onOpenSale }: { record: ControlsRecord; metric: Metric; onOpenSale?: (id: string) => void }) {
   return (
     <li className="rt-group ctl-record">
       <div className="ctl-record-line">
         <span className="rt-group-title">{r.sale_no}{r.reference ? `, credit note ${r.reference}` : ''}</span>
         <span className="rt-group-total">{money(r.value_minor ?? 0)}</span>
       </div>
-      <span className="rt-group-meta">{whenWords(r.at)}. {whoWords(r)}{r.branch_name ? ` at ${r.branch_name}` : ''}.</span>
+      <span className="rt-group-meta">{whenWords(r.at)}. Sale by {whoWords(r)}{r.branch_name ? ` at ${r.branch_name}` : ''}.{approverWords(r, metric) ? ` ${approverWords(r, metric)}.` : ''}</span>
       <span className="rt-group-meta">{r.reason ? `Reason: ${r.reason}` : 'No reason recorded'}{r.item ? `. Item: ${r.item}` : ''}</span>
       {onOpenSale && r.sale_id && <button type="button" className="btn-sm" onClick={() => onOpenSale(r.sale_id as string)}>Open sale {r.sale_no}</button>}
     </li>
@@ -179,7 +181,6 @@ function LevelList({ index, sel, parent, root, ...shared }: Shared & { index: nu
 
 function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { index: number; level: ControlsLevel; group: ControlsGroup; sel: Narrow; parent: string }) {
   const { chain, open, toggle, metric, base, onOpenSale } = shared;
-  const words = wordsOf(metric);
   const key = group.key ?? '';
   const path = pathKey(parent, level, key);
   const title = groupTitle(level, group);
@@ -187,12 +188,24 @@ function GroupRow({ index, level, group, sel, parent, ...shared }: Shared & { in
   const here = selectGroup(sel, level, group);
   const last = index === chain.length - 1;
   const bodyId = `ctl-${path.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  if (!canOpen(level, group)) {
+    // Opening it would ask for everybody's records: it is shown and counted, not opened.
+    return (
+      <li className="rt-group">
+        <div className="rt-group-head">
+          <span className="rt-group-title">{title}</span>{' '}
+          <span className="rt-group-total">{group.count ?? 0}</span>{' '}
+          <span className="rt-group-meta">{groupLine(group, metric, level, money)}. The records are not listed because this one is not known.</span>
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="rt-group">
       <button type="button" className="rt-group-head" aria-expanded={isOpen} aria-controls={isOpen ? bodyId : undefined} onClick={() => toggle(path, title)}>
         <span className="rt-group-title">{title}</span>{' '}
         <span className="rt-group-total">{group.count ?? 0}</span>{' '}
-        <span className="rt-group-meta">{groupLine(group, words.noun, money)}</span>
+        <span className="rt-group-meta">{groupLine(group, metric, level, money)}</span>
       </button>
       {isOpen && (
         <div className="rt-group-body" id={bodyId}>
@@ -225,10 +238,11 @@ function Patterns({ base }: { base: Base }) {
   const query = useQuery({ queryKey: ['retail', 'controls', 'patterns', base.branchId, base.from, base.to], queryFn: ({ signal }) => retailControls.patterns(base, signal), placeholderData: keepPreviousData });
   const items = query.data?.items ?? [];
   return (
-    <Section title="Repeat patterns" hint={`Someone, or an item, whose rate is more than 2 times their shop's own. Only from ${query.data?.min_events ?? 3} cases over at least ${query.data?.min_out_of ?? 10} sales, so a small number never shouts. A pattern is a reason to look, not a finding.`}>
+    <Section title="Repeat patterns" hint={`Someone whose sales, or an item, come up more than 2 times as often as in their own shop. A person is whose sales they were, not who cancelled them. Only from ${query.data?.min_events ?? 3} cases over at least ${query.data?.min_out_of ?? 10} sales, so a small number never shouts. A pattern is a reason to look, not a finding. The list is by shop and name, not a ranking.`}>
       <div data-tour="controls-patterns">
         {query.isPending && <p className="loading">Loading</p>}
         <Problem error={query.error} />
+        {query.error && <button type="button" onClick={() => void query.refetch()}>Try again</button>}
         {query.data && items.length === 0 && <Empty>Nothing stands out in these days.</Empty>}
         {items.length > 0 && (
           <ul className="ctl-patterns">
@@ -264,7 +278,7 @@ export function ControlsPage() {
     placeholderData: keepPreviousData,
   });
   const chosen = metric !== 'below_cost' || summary.data?.cost_visible === true ? metric : 'voided_sales';
-  const shown = effectiveChain(chain, !all);
+  const shown = chainFor(chosen, effectiveChain(chain, !all));
   const setChain = (next: ControlsLevel[]) => {
     setChainState(next);
     writeControlsChain(chainUser(me), next);
@@ -294,10 +308,11 @@ export function ControlsPage() {
           <section aria-label="Figures" data-tour="controls-cards">
             {summary.isPending && ready && <SkeletonList label="Loading the figures" />}
             <Problem error={summary.error} />
+            {summary.error && <button type="button" onClick={() => void summary.refetch()}>Try again</button>}
             {summary.data && <ControlsCards data={summary.data} metric={chosen} onPick={(m) => { setMetric(m); setOpen(new Map()); }} within={within} />}
           </section>
 
-          <Section title={words.title} hint={`${words.what(within)} Tap a line to open it.`}>
+          <Section title={words.title} hint={`${words.what(within)}${isLineMetric(chosen) ? '' : ' Person is whose sale it was; Approver is who cancelled it or took the goods back.'} Tap a line to open it.`}>
             <div data-tour="controls-tables">
               <GroupBy chain={chain} levels={CONTROLS_LEVELS} names={LEVEL_NAMES} tour="controls-group-by" onChange={(next) => setChain(next)} />
               {shown.length > 0 && ready && (
@@ -310,7 +325,7 @@ export function ControlsPage() {
                   />
                 </div>
               )}
-              <p className="hint">A rate is the number per 100 sales the person, shop or day entered, so a busy person and a quiet one can be compared.</p>
+              <p className="hint">A rate is the sales with this per 100 sales the person, shop or day entered, so a busy person and a quiet one can be compared. The lists are by name, not a ranking.</p>
             </div>
           </Section>
 

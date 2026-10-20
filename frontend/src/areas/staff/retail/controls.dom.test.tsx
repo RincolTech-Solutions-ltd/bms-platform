@@ -44,7 +44,7 @@ const me = mockMe('admin');
 const GAYAZA = 'Test Branch Gayaza';
 
 const card = (metric: string, count: number, over: Record<string, unknown> = {}) => ({
-  metric, tracked: true, count, value_minor: count * 300, previous_count: 2, previous_value_minor: 600, rate_per_100: '12.5', previous_rate_per_100: '4.0', share_of_sales_bp: 125, ...over,
+  metric, tracked: true, count, sales_affected: count, value_minor: count * 300, previous_count: 2, previous_value_minor: 600, rate_per_100: '12.5', previous_rate_per_100: '4.0', share_of_sales_bp: 125, ...over,
 });
 
 const SUMMARY: ControlsSummary = {
@@ -53,13 +53,14 @@ const SUMMARY: ControlsSummary = {
   previous: { from: '2026-10-16', to: '2026-10-18', sales_count: 40, sales_minor: 12000 },
   within_minutes: 10,
   cost_visible: false,
-  cards: [card('voided_sales', 6), card('quick_cancels', 6), card('returns', 0, { tracked: false, previous_count: 0, previous_value_minor: 0 }), card('price_overrides', 3), card('discounts', 1)],
+  cards: [card('voided_sales', 6), card('quick_cancels', 6), card('returns', 0, { tracked: false, previous_count: 0, previous_value_minor: 0 }), card('price_overrides', 3, { sales_affected: 2, value_minor: 1600 }), card('discounts', 1)],
 };
 
-const group = (key: string, label: string, over: Record<string, unknown> = {}) => ({ key, label, count: 5, value_minor: 1500, sales_count: 18, rate_per_100: '27.8', ...over });
+const group = (key: string, label: string, over: Record<string, unknown> = {}) => ({ key, label, count: 5, sales_affected: 5, value_minor: 1500, sales_count: 18, rate_per_100: '27.8', ...over });
 const LEVELS: Record<string, ControlsGroups['items']> = {
   branch: [group('b1', GAYAZA, { count: 6, rate_per_100: '14.0' })],
-  user: [group('u1', 'Test Seller One', { user_status: 'active' }), group('u2', 'Test Seller Two', { user_status: 'deactivated', count: 1, value_minor: 300, rate_per_100: '3.3' })],
+  user: [group('u1', 'Test Seller One', { user_status: 'active' }), group('u2', 'Test Seller Two', { user_status: 'deactivated', count: 1, sales_affected: 1, value_minor: 300, rate_per_100: '3.3' })],
+  approver: [group('u9', 'Test Admin One', { user_status: 'active', count: 6, sales_affected: 6, sales_count: 0, rate_per_100: undefined })],
   day: [group('2026-10-19', '2026-10-19', { day: '2026-10-19' })],
   reason: [group('test wrong item', 'Test wrong item')],
 };
@@ -68,7 +69,7 @@ const answer = async (metric: Metric, chain: string[], level: string): Promise<C
   return { metric, group_by: chain.join(','), level, levels: chain, ...(next ? { next_level: next } : {}), currency: 'UGX', has_more: false, items: LEVELS[level] ?? [] };
 };
 
-const RECORD = { sale_id: 'sale-1', sale_no: 'S-0001', at: '2026-10-19T09:15:00Z', branch_id: 'b1', branch_name: GAYAZA, user_id: 'u1', user_name: 'Test Seller One', user_status: 'active', reason: 'Test wrong item', value_minor: 300 };
+const RECORD = { sale_id: 'sale-1', sale_no: 'S-0001', at: '2026-10-19T09:15:00Z', branch_id: 'b1', branch_name: GAYAZA, user_id: 'u1', user_name: 'Test Seller One', user_status: 'active', approver_id: 'u9', approver_name: 'Test Admin One', approver_status: 'active', reason: 'Test wrong item', value_minor: 300 };
 
 const sale = (): Sale => ({
   id: 'sale-1', sale_no: 'S-0001', branch_id: me.branches?.[0]?.id, sale_date: '2026-10-19', payment_method: 'cash', status: 'voided', void_reason: 'Test wrong item',
@@ -141,15 +142,17 @@ describe('the tables', () => {
     expect(two.textContent).toContain('1 sale');
     expect(two.textContent).toContain('3.3 per 100 sales');
     fireEvent.click(await head(/^Test Seller One/));
-    // The default chain is shop, person, day, reason: the day comes next.
+    // The default chain is shop, person, day, reason, approver: the day comes next.
     fireEvent.click(await head(/^Monday 19 October 2026/));
     fireEvent.click(await head(/^Test wrong item/));
+    fireEvent.click(await head(/^Test Admin One/));
     const row = (await screen.findByText('S-0001')).closest('li') as HTMLElement;
     expect(row.textContent).toContain('UGX 300');
-    expect(row.textContent).toContain('Test Seller One at Test Branch Gayaza');
+    expect(row.textContent).toContain('Sale by Test Seller One at Test Branch Gayaza');
+    expect(row.textContent).toContain('Cancelled by Test Admin One');
     expect(row.textContent).toContain('Reason: Test wrong item');
-    expect(groups).toHaveBeenLastCalledWith('voided_sales', ['branch', 'user', 'day', 'reason'], 'reason', expect.objectContaining({ branchId: 'b1', userId: 'u1', from: '2026-10-19', to: '2026-10-19' }), 0);
-    expect(records).toHaveBeenLastCalledWith('voided_sales', expect.objectContaining({ branchId: 'b1', userId: 'u1', reason: 'test wrong item' }), 0);
+    expect(groups).toHaveBeenLastCalledWith('voided_sales', ['branch', 'user', 'day', 'reason', 'approver'], 'approver', expect.objectContaining({ branchId: 'b1', userId: 'u1', from: '2026-10-19', to: '2026-10-19', reason: 'test wrong item' }), 0);
+    expect(records).toHaveBeenLastCalledWith('voided_sales', expect.objectContaining({ branchId: 'b1', userId: 'u1', approverId: 'u9', reason: 'test wrong item' }), 0);
     // The way back up is a breadcrumb.
     expect(screen.getByRole('navigation', { name: 'Where you are' }).textContent).toContain(GAYAZA);
   });
@@ -176,14 +179,54 @@ describe('the tables', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move Reason up' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Reason up' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move Reason up' }));
-    await waitFor(() => expect(groups).toHaveBeenLastCalledWith('voided_sales', ['reason', 'branch', 'user', 'day'], 'reason', expect.anything(), 0));
-    expect(JSON.parse(localStorage.getItem(`bms.controlsChain.${me.user_id}`) ?? '[]')).toEqual(['reason', 'branch', 'user', 'day']);
+    await waitFor(() => expect(groups).toHaveBeenLastCalledWith('voided_sales', ['reason', 'branch', 'user', 'day', 'approver'], 'reason', expect.anything(), 0));
+    expect(JSON.parse(localStorage.getItem(`bms.controlsChain.${me.user_id}`) ?? '[]')).toEqual(['reason', 'branch', 'user', 'day', 'approver']);
   });
 
   it('say so plainly when there is nothing', async () => {
     groups.mockImplementation(async (metric, chain, level) => ({ ...(await answer(metric, chain, level)), items: [] }));
     show();
     expect(await screen.findByText('No sales cancelled in these days.')).toBeTruthy();
+  });
+});
+
+describe('what the cards and rows do not hide', () => {
+  it('says lines are lines, in how many sales, and what the lines are worth', async () => {
+    show();
+    const changed = (await screen.findByText('Prices changed', { selector: '.an-stat-label' })).closest('button') as HTMLElement;
+    expect(changed.textContent).toContain('3 lines in 2 sales, lines worth UGX 1,600');
+  });
+
+  it('does not ask for the Approver level for the lines of a sale, which have no approver', async () => {
+    show();
+    await screen.findByText('Sales cancelled', { selector: '.an-stat-label' });
+    fireEvent.click((screen.getByText('Prices changed', { selector: '.an-stat-label' })).closest('button') as HTMLElement);
+    await waitFor(() => expect(groups).toHaveBeenLastCalledWith('price_overrides', ['branch', 'user', 'day', 'reason'], 'branch', expect.anything(), 0));
+  });
+
+  it('shows a person the server could not name but does not open it, so it never lists everybody', async () => {
+    groups.mockImplementation(async (metric, chain, level) => ({
+      ...(await answer(metric, chain, level)),
+      items: level === 'user' ? [group('', 'Unknown person', { count: 1, sales_affected: 1 })] : (LEVELS[level] ?? []),
+    }));
+    show();
+    fireEvent.click(await head(new RegExp(`^${GAYAZA}`)));
+    expect(await screen.findByText('Unknown person')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Unknown person/ })).toBeNull();
+    expect(screen.getByText(/The records are not listed because this one is not known/)).toBeTruthy();
+  });
+
+  it('offers Try again when the figures or the patterns could not be read', async () => {
+    summary.mockImplementationOnce(async () => { throw new Error('Test failure of the figures'); });
+    patterns.mockImplementationOnce(async () => { throw new Error('Test failure of the patterns'); });
+    show();
+    expect(await screen.findByText('Test failure of the figures')).toBeTruthy();
+    expect(await screen.findByText('Test failure of the patterns')).toBeTruthy();
+    const retries = await screen.findAllByRole('button', { name: 'Try again' });
+    expect(retries.length).toBeGreaterThanOrEqual(2);
+    for (const r of retries) fireEvent.click(r);
+    expect(await screen.findByText('Sales cancelled', { selector: '.an-stat-label' })).toBeTruthy();
+    expect(await screen.findByText('Nothing stands out in these days.')).toBeTruthy();
   });
 });
 
@@ -218,7 +261,7 @@ describe('the repeat patterns', () => {
       items: [{ subject: 'user', key: 'u1', name: 'Test Seller One', user_status: 'active', branch_id: 'b1', branch_name: GAYAZA, metric: 'voided_sales', count: 5, out_of: 13, rate_per_100: '38.5', shop_rate_per_100: '14.0', times: '2.8' }],
     }));
     show();
-    expect(await screen.findByText(`Test Seller One cancelled 5 of the 13 sales they entered at ${GAYAZA} (38.5 per 100). The shop's own is 14.0, so 2.8 times.`)).toBeTruthy();
+    expect(await screen.findByText(`5 of the 13 sales Test Seller One entered at ${GAYAZA} were cancelled (38.5 per 100). The shop's own is 14.0, so 2.8 times.`)).toBeTruthy();
   });
 });
 
@@ -233,8 +276,8 @@ describe('the CSV of what is on screen', () => {
     fireEvent.click(buttons[0] as HTMLElement);
     expect(blobs).toHaveLength(1);
     const text = await (blobs[0] as Blob).text();
-    expect(text).toContain('Person,Count,Value,Sales entered,Per 100 sales');
-    expect(text).toContain('Test Seller Two (deactivated),1,300,18,3.3');
+    expect(text).toContain('Person,Count,Sales with it,Value,Sales entered,Per 100 sales');
+    expect(text).toContain('Test Seller Two (deactivated),1,1,300,18,3.3');
   });
 });
 

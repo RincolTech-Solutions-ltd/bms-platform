@@ -29,7 +29,10 @@ export interface ControlsRange {
 
 /** What a group or a record list is narrowed to by the groups opened above it. */
 export interface ControlsNarrow {
+  /** The person whose sales they were. */
   userId?: string;
+  /** Who cancelled the sale or took the goods back. */
+  approverId?: string;
   reason?: string;
 }
 
@@ -57,7 +60,7 @@ export const retailControls = {
   ): Promise<ControlsGroups> {
     return unwrap(
       await api.GET('/api/v1/retail/controls/groups', {
-        params: { query: { metric, group_by: chain.join(','), level, ...common(range), user_id: range.userId, reason: range.reason, offset } },
+        params: { query: { metric, group_by: chain.join(','), level, ...common(range), user_id: range.userId, approver_id: range.approverId, reason: range.reason, offset } },
         signal,
       }),
     );
@@ -65,7 +68,7 @@ export const retailControls = {
   async records(metric: Metric, range: ControlsNarrowedRange, offset: number, signal?: AbortSignal): Promise<ControlsRecords> {
     return unwrap(
       await api.GET('/api/v1/retail/controls/records', {
-        params: { query: { metric, ...common(range), user_id: range.userId, reason: range.reason, offset } },
+        params: { query: { metric, ...common(range), user_id: range.userId, approver_id: range.approverId, reason: range.reason, offset } },
         signal,
       }),
     );

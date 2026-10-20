@@ -56,6 +56,9 @@ class ControlsService {
     static final int MIN_EVENTS = 3;
 
     static final int MIN_OUT_OF = 10;
+    /** The one label for a person the users table does not know, on the server and in the screen. */
+    static final String UNKNOWN_PERSON = "Unknown person";
+
     static final int MAX_PATTERNS = 20;
     static final BigDecimal TWICE = BigDecimal.valueOf(2);
 
@@ -96,25 +99,26 @@ class ControlsService {
             Period none = new Period(w.from(), w.to(), 0, 0);
             return new Summary(currency, none, new Period(prevFrom, prevTo, 0, 0), within, cost, List.of());
         }
-        ControlsRepository.Window now = window(w.from(), w.to(), filter, within, null, null);
-        ControlsRepository.Window before = window(prevFrom, prevTo, filter, within, null, null);
+        ControlsRepository.Window now = window(w.from(), w.to(), filter, within, null, null, null);
+        ControlsRepository.Window before = window(prevFrom, prevTo, filter, within, null, null, null);
         Sales salesNow = repo.sales(now);
         Sales salesBefore = repo.sales(before);
         Map<String, Count> countsNow = byMetric(repo.counts(metrics, now));
         Map<String, Count> countsBefore = byMetric(repo.counts(metrics, before));
         List<Card> cards = new ArrayList<>();
         for (String metric : metrics) {
-            Count a = countsNow.getOrDefault(metric, new Count(metric, 0, 0));
-            Count b = countsBefore.getOrDefault(metric, new Count(metric, 0, 0));
+            Count a = countsNow.getOrDefault(metric, new Count(metric, 0, 0, 0));
+            Count b = countsBefore.getOrDefault(metric, new Count(metric, 0, 0, 0));
             cards.add(new Card(
                     metric,
                     tracked(metric) || a.count() > 0 || b.count() > 0,
                     a.count(),
+                    a.salesAffected(),
                     a.valueMinor(),
                     b.count(),
                     b.valueMinor(),
-                    rate(a.count(), salesNow.count()),
-                    rate(b.count(), salesBefore.count()),
+                    rate(a.salesAffected(), salesNow.count()),
+                    rate(b.salesAffected(), salesBefore.count()),
                     shareBp(a.valueMinor(), salesNow.totalMinor())));
         }
         return new Summary(
@@ -135,6 +139,7 @@ class ControlsService {
             LocalDate from,
             LocalDate to,
             UUID userId,
+            UUID approverId,
             String reason,
             Integer withinParam,
             Integer offsetParam) {
@@ -164,6 +169,7 @@ class ControlsService {
                 filter,
                 within(withinParam),
                 userId,
+                approverId,
                 reason == null ? null : reason.toLowerCase(java.util.Locale.ROOT));
         List<Group> rows = repo.groups(metric, at, q, offset, GROUP_PAGE + 1).stream()
                 .map(c -> new Group(
@@ -172,9 +178,10 @@ class ControlsService {
                         c.userStatus(),
                         c.day(),
                         c.count(),
+                        c.salesAffected(),
                         c.valueMinor(),
                         c.salesCount(),
-                        rate(c.count(), c.salesCount())))
+                        rate(c.salesAffected(), c.salesCount())))
                 .toList();
         boolean more = rows.size() > GROUP_PAGE;
         return new Groups(
@@ -196,6 +203,7 @@ class ControlsService {
             LocalDate from,
             LocalDate to,
             UUID userId,
+            UUID approverId,
             String reason,
             Integer withinParam,
             Integer offsetParam) {
@@ -218,6 +226,7 @@ class ControlsService {
                 filter,
                 within(withinParam),
                 userId,
+                approverId,
                 reason == null ? null : reason.toLowerCase(java.util.Locale.ROOT));
         List<Event> events = repo.events(metric, q, offset, RECORD_PAGE + 1);
         boolean more = events.size() > RECORD_PAGE;
@@ -233,6 +242,9 @@ class ControlsService {
                                 e.userId(),
                                 e.userName(),
                                 e.userStatus(),
+                                e.approverId(),
+                                e.approverName(),
+                                e.approverStatus(),
                                 e.reason(),
                                 e.item(),
                                 e.valueMinor()))
@@ -241,8 +253,10 @@ class ControlsService {
     }
 
     /**
-     * People and items whose rate is more than twice the rate of their own shop, with at least {@link #MIN_EVENTS} events
-     * and {@link #MIN_OUT_OF} sales (or lines) behind it. A person's rate is over the sales they entered in that shop;
+     * People and items whose rate is more than twice the rate of their own shop, with at least {@link #MIN_EVENTS} sales
+     * with an event and {@link #MIN_OUT_OF} sales (or lines) behind it. A person is the one whose sales were cancelled,
+     * returned or repriced (never the one who cancelled them), and their rate is the sales with such an event over the
+     * sales they entered in that shop; the strip is ordered by shop and name, not by how far anyone stands out;
      * an item's is over the lines it sold there, by the date of the sale. The comparison is made on whole numbers
      * (events times the shop's sales against twice the shop's events times the person's), so no rounding decides it.
      */
@@ -256,7 +270,7 @@ class ControlsService {
             return new Patterns(w.from(), w.to(), MIN_EVENTS, MIN_OUT_OF, List.of());
         }
         boolean cost = AnalyticsSupport.profitVisible(principal, filter);
-        ControlsRepository.Window q = window(w.from(), w.to(), filter, DEFAULT_WITHIN_MINUTES, null, null);
+        ControlsRepository.Window q = window(w.from(), w.to(), filter, DEFAULT_WITHIN_MINUTES, null, null, null);
         List<Pattern> found = new ArrayList<>();
 
         List<String> personMetrics = new ArrayList<>(List.of("voided_sales", "returns", "price_overrides"));
@@ -276,7 +290,7 @@ class ControlsService {
                 found.add(new Pattern(
                         "user",
                         String.valueOf(c.userId()),
-                        c.userName() == null ? "Unknown user" : c.userName(),
+                        c.userName() == null ? UNKNOWN_PERSON : c.userName(),
                         c.userStatus(),
                         c.branchId(),
                         c.branchName(),
@@ -317,9 +331,12 @@ class ControlsService {
                         times(c.count(), c.lines(), t[0], t[1])));
             }
         }
-        found.sort(Comparator.comparing((Pattern p) -> new BigDecimal(p.times()))
-                .reversed()
-                .thenComparing(Pattern::count, Comparator.reverseOrder())
+        // By shop, then by name: a strip of things to look at, never a ranking of people by how far they stand out.
+        Comparator<String> byText = Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER);
+        found.sort(Comparator.comparing(Pattern::branchName, byText)
+                .thenComparing(Pattern::subject)
+                .thenComparing(Pattern::name, byText)
+                .thenComparing(Pattern::metric)
                 .thenComparing(Pattern::key));
         return new Patterns(
                 w.from(),
@@ -349,7 +366,7 @@ class ControlsService {
                 .toPlainString();
     }
 
-    /** Events per 100, one decimal, half up; null when there is nothing to divide by. */
+    /** Per 100, one decimal, half up; null when there is nothing to divide by. */
     static String rate(long count, long outOf) {
         if (outOf <= 0) {
             return null;
@@ -360,14 +377,15 @@ class ControlsService {
                 .toPlainString();
     }
 
+    /** The value over the total in basis points, half up; capped at the largest int so a huge value never blanks the summary. */
     static Integer shareBp(long value, long total) {
         if (total <= 0) {
             return null;
         }
-        return BigDecimal.valueOf(value)
+        BigDecimal bp = BigDecimal.valueOf(value)
                 .multiply(BigDecimal.valueOf(10_000))
-                .divide(BigDecimal.valueOf(total), 0, RoundingMode.HALF_UP)
-                .intValueExact();
+                .divide(BigDecimal.valueOf(total), 0, RoundingMode.HALF_UP);
+        return bp.compareTo(BigDecimal.valueOf(Integer.MAX_VALUE)) > 0 ? Integer.MAX_VALUE : bp.intValue();
     }
 
     /** Whether the capability a card depends on is on; the cards of the sales themselves always are. */
@@ -380,8 +398,9 @@ class ControlsService {
     }
 
     private ControlsRepository.Window window(
-            LocalDate from, LocalDate to, List<UUID> filter, int within, UUID userId, String reason) {
-        return new ControlsRepository.Window(from, to, tenant.profile().timezone(), filter, within, userId, reason);
+            LocalDate from, LocalDate to, List<UUID> filter, int within, UUID userId, UUID approverId, String reason) {
+        return new ControlsRepository.Window(
+                from, to, tenant.profile().timezone(), filter, within, userId, approverId, reason);
     }
 
     private static Map<String, Count> byMetric(List<Count> counts) {
@@ -427,7 +446,7 @@ class ControlsService {
         }
         if (!ok) {
             throw ApiException.validation(List.of(new FieldProblem(
-                    "group_by", "invalid", "group_by is a list of branch, user, day or reason, each once.")));
+                    "group_by", "invalid", "group_by is a list of branch, user, day, reason or approver, each once.")));
         }
         return chain;
     }
@@ -438,7 +457,7 @@ class ControlsService {
         }
         return switch (level) {
             case "branch" -> "Unknown shop";
-            case "user" -> "Unknown user";
+            case "user", "approver" -> UNKNOWN_PERSON;
             case "reason" -> "No reason recorded";
             default -> "";
         };

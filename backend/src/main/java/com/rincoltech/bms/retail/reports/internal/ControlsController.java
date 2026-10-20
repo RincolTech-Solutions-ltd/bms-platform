@@ -54,10 +54,12 @@ class ControlsController {
             @RequestParam(name = "from", required = false) LocalDate from,
             @RequestParam(name = "to", required = false) LocalDate to,
             @RequestParam(name = "user_id", required = false) UUID userId,
+            @RequestParam(name = "approver_id", required = false) UUID approverId,
             @RequestParam(name = "reason", required = false) String reason,
             @RequestParam(name = "within_minutes", required = false) Integer withinMinutes,
             @RequestParam(name = "offset", required = false) Integer offset) {
-        return service.groups(metric, groupBy, level, branchIds, from, to, userId, reason, withinMinutes, offset);
+        return service.groups(
+                metric, groupBy, level, branchIds, from, to, userId, approverId, reason, withinMinutes, offset);
     }
 
     @GetMapping("/records")
@@ -71,10 +73,11 @@ class ControlsController {
             @RequestParam(name = "from", required = false) LocalDate from,
             @RequestParam(name = "to", required = false) LocalDate to,
             @RequestParam(name = "user_id", required = false) UUID userId,
+            @RequestParam(name = "approver_id", required = false) UUID approverId,
             @RequestParam(name = "reason", required = false) String reason,
             @RequestParam(name = "within_minutes", required = false) Integer withinMinutes,
             @RequestParam(name = "offset", required = false) Integer offset) {
-        return service.records(metric, branchIds, from, to, userId, reason, withinMinutes, offset);
+        return service.records(metric, branchIds, from, to, userId, approverId, reason, withinMinutes, offset);
     }
 
     @GetMapping("/patterns")

@@ -7193,8 +7193,13 @@
             "type" : "integer"
           },
           "rate_per_100" : {
-            "description" : "Events per 100 sales entered in the period, one decimal; absent when no sale was entered",
+            "description" : "Sales with such an event per 100 sales entered in the period, one decimal; absent when no sale was entered",
             "type" : "string"
+          },
+          "sales_affected" : {
+            "description" : "Sales with such an event; a sale with two changed lines counts once",
+            "format" : "int64",
+            "type" : "integer"
           },
           "share_of_sales_bp" : {
             "description" : "The value over the completed sales of the period, in basis points; absent without sales",
@@ -7232,8 +7237,13 @@
             "type" : "string"
           },
           "rate_per_100" : {
-            "description" : "Events per 100 sales, one decimal; absent when the group entered no sale",
+            "description" : "Sales with such an event per 100 sales the group entered, one decimal; absent when it entered none",
             "type" : "string"
+          },
+          "sales_affected" : {
+            "description" : "Sales with such an event; the rate is over these",
+            "format" : "int64",
+            "type" : "integer"
           },
           "sales_count" : {
             "description" : "Sales entered by the group (the shop, the person or the day) in the period; the rate is over these",
@@ -7391,6 +7401,17 @@
       },
       "RetailControlsRecord" : {
         "properties" : {
+          "approver_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "approver_name" : {
+            "description" : "Who cancelled the sale or took the goods back; absent for a price or a cost",
+            "type" : "string"
+          },
+          "approver_status" : {
+            "type" : "string"
+          },
           "at" : {
             "format" : "date-time",
             "type" : "string"
@@ -7425,7 +7446,7 @@
             "type" : "string"
           },
           "user_name" : {
-            "description" : "The person who did it; absent when unknown",
+            "description" : "The person whose sale it was; absent when unknown",
             "type" : "string"
           },
           "user_status" : {
@@ -25264,6 +25285,14 @@
           }
         }, {
           "in" : "query",
+          "name" : "approver_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "reason",
           "required" : false,
           "schema" : {
@@ -25389,6 +25418,14 @@
         }, {
           "in" : "query",
           "name" : "user_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "approver_id",
           "required" : false,
           "schema" : {
             "format" : "uuid",

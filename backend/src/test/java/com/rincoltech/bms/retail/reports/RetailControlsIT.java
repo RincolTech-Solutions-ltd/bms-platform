@@ -6,6 +6,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,20 +21,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
  * The Controls page (issue #357, group 1; ADR-045). Fabricated shop, product B costs 100 and sells for 300. Head office has
- * two sellers: Test Seller One enters 10 sales there and voids 5 (3 "Test wrong item", 2 "Test customer left"); Test Seller
- * Two (deactivated) enters 30 and voids 1 ("Test wrong item"). Branch two has 5 sales by Seller One and no void. Seller One
- * also sells 3 lines below cost at head office (price 80 against a cost of 100) with the permission that allows it. So 48
- * sales were entered (head office 43), 6 voided at once; Seller One entered 18 (13 at head office), Seller Two 30.
+ * two sellers: Test Seller One enters 10 sales there, Test Seller Abel (deactivated) enters 30. Branch two has 5 sales by
+ * Seller One, and Seller One also sells 3 lines below cost at head office (price 80 against a cost of 100) with the
+ * permission that allows it. The administrator, Test Admin One, voids 5 of Seller One's sales (3 "Test wrong item", 2 "Test
+ * customer left") and 1 of Seller Abel's ("Test wrong item"): the voids are credited to the sellers whose sales they were,
+ * never to the administrator, who appears only as the approver. So 48 sales were entered (head office 43), 6 voided at
+ * once; Seller One entered 18 (13 at head office), Seller Abel 30.
  */
 class RetailControlsIT extends IntegrationTest {
 
     static final String CONTROLS = "retail.controls.read,retail.sale.read";
     static final String CONTROLS_AND_PROFIT = CONTROLS + ",retail.profit.read";
+    static final ZoneId KAMPALA = ZoneId.of("Africa/Kampala");
 
     @Autowired
     TestRestTemplate http;
@@ -38,15 +46,20 @@ class RetailControlsIT extends IntegrationTest {
     TestDatabase.Fixture t;
     RetailTestSupport one;
     RetailTestSupport two;
+    RetailTestSupport adm;
     UUID b;
+    /** The six voided sales, the first five Seller One's. */
+    List<UUID> voided = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
         t = TestDatabase.tenant("retail-controls", false, true);
         one = new RetailTestSupport(http, t);
         two = new RetailTestSupport(http, t);
+        adm = new RetailTestSupport(http, t);
         user(one.userId(), "Test Seller One", "active");
-        user(two.userId(), "Test Seller Two", "deactivated");
+        user(two.userId(), "Test Seller Abel", "deactivated");
+        user(adm.userId(), "Test Admin One", "active");
         b = one.product("CTL-B", 100, 300);
         one.stockUp(t.headOffice(), b, "500");
         one.stockUp(t.secondBranch(), b, "100");
@@ -62,9 +75,11 @@ class RetailControlsIT extends IntegrationTest {
             sell(one, t.secondBranch(), null);
         }
         for (int i = 0; i < 5; i++) {
-            void_(one, oneSales.get(i), i < 3 ? "Test wrong item" : "Test customer left");
+            void_(adm, oneSales.get(i), i < 3 ? "Test wrong item" : "Test customer left");
+            voided.add(oneSales.get(i));
         }
-        void_(two, twoSales.get(0), "Test wrong item");
+        void_(adm, twoSales.get(0), "Test wrong item");
+        voided.add(twoSales.get(0));
         for (int i = 0; i < 3; i++) {
             sell(one, t.headOffice(), 80L);
         }
@@ -105,10 +120,26 @@ class RetailControlsIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
     }
 
+    /** Changes a column the guard keeps still, as the owner role may for a restore (bms.allow_mutation). */
+    void owner(String sql) {
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true); " + sql + "; END $$")
+                .update();
+    }
+
     JsonNode get(String path, String permissions) {
-        ResponseEntity<JsonNode> r = one.call(HttpMethod.GET, "/controls" + path, null, permissions, "*", Map.of());
+        return get(path, permissions, Map.of());
+    }
+
+    JsonNode get(String path, String permissions, Map<String, String> extra) {
+        ResponseEntity<JsonNode> r = one.call(HttpMethod.GET, "/controls" + path, null, permissions, "*", extra);
         assertThat(r.getStatusCode()).as("%s %s", path, r.getBody()).isEqualTo(HttpStatus.OK);
         return r.getBody();
+    }
+
+    HttpStatusCode status(String path, String permissions, Map<String, String> extra) {
+        return one.call(HttpMethod.GET, "/controls" + path, null, permissions, "*", extra)
+                .getStatusCode();
     }
 
     static JsonNode card(JsonNode summary, String metric) {
@@ -120,6 +151,15 @@ class RetailControlsIT extends IntegrationTest {
         return null;
     }
 
+    static boolean has(JsonNode groups, String key) {
+        for (JsonNode g : groups.get("items")) {
+            if (g.get("key").asString().equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static JsonNode group(JsonNode groups, String key) {
         for (JsonNode g : groups.get("items")) {
             if (g.get("key").asString().equals(key)) {
@@ -129,6 +169,10 @@ class RetailControlsIT extends IntegrationTest {
         throw new AssertionError("no group " + key + " in " + groups);
     }
 
+    static Map<String, String> scopes(String scopes) {
+        return Map.of("X-Dev-Scopes", scopes);
+    }
+
     @Test
     void theCardsCountTheVoidsAndSetThemAgainstAllTheSalesOfThePeriod() {
         JsonNode s = get("/summary", CONTROLS);
@@ -136,6 +180,7 @@ class RetailControlsIT extends IntegrationTest {
         assertThat(s.get("period").get("sales_count").asLong()).isEqualTo(48);
         JsonNode voids = card(s, "voided_sales");
         assertThat(voids.get("count").asLong()).isEqualTo(6);
+        assertThat(voids.get("sales_affected").asLong()).isEqualTo(6);
         assertThat(voids.get("value_minor").asLong()).isEqualTo(1_800);
         assertThat(voids.get("rate_per_100").asString()).isEqualTo("12.5");
         assertThat(voids.get("previous_count").asLong()).isZero();
@@ -144,24 +189,88 @@ class RetailControlsIT extends IntegrationTest {
     }
 
     @Test
+    void aVoidAfterTheQuickWindowIsNotAQuickCancel() {
+        // The sale was entered an hour before it was voided: not within ten minutes, but within 120.
+        owner("UPDATE retail_sales SET created_at = created_at - interval '1 hour' WHERE id = '" + voided.getFirst()
+                + "'");
+        assertThat(card(get("/summary", CONTROLS), "voided_sales").get("count").asLong())
+                .isEqualTo(6);
+        assertThat(card(get("/summary", CONTROLS), "quick_cancels").get("count").asLong())
+                .isEqualTo(5);
+        assertThat(card(get("/summary?within_minutes=120", CONTROLS), "quick_cancels")
+                        .get("count")
+                        .asLong())
+                .isEqualTo(6);
+        JsonNode records = get("/records?metric=quick_cancels", CONTROLS);
+        assertThat(records.get("items")).hasSize(5);
+    }
+
+    @Test
+    void aVoidAtHalfPastElevenInKampalaLandsOnThatDay() {
+        LocalDate yesterday = LocalDate.now(KAMPALA).minusDays(1);
+        String at = LocalDateTime.of(yesterday, LocalTime.of(23, 30))
+                .atZone(KAMPALA)
+                .toOffsetDateTime()
+                .toString();
+        owner("UPDATE retail_sales SET voided_at = TIMESTAMPTZ '" + at + "' WHERE id = '" + voided.getFirst() + "'");
+        JsonNode thatDay = get("/summary?from=" + yesterday + "&to=" + yesterday, CONTROLS);
+        assertThat(card(thatDay, "voided_sales").get("count").asLong()).isEqualTo(1);
+        assertThat(card(thatDay, "voided_sales").get("value_minor").asLong()).isEqualTo(300);
+        LocalDate today = LocalDate.now(KAMPALA);
+        assertThat(card(get("/summary?from=" + today + "&to=" + today, CONTROLS), "voided_sales")
+                        .get("count")
+                        .asLong())
+                .isEqualTo(5);
+        JsonNode days = get("/groups?metric=voided_sales&group_by=day&from=" + yesterday + "&to=" + today, CONTROLS);
+        assertThat(group(days, yesterday.toString()).get("count").asLong()).isEqualTo(1);
+        assertThat(group(days, today.toString()).get("count").asLong()).isEqualTo(5);
+    }
+
+    @Test
     void salesBelowCostAreForThoseWhoMayReadProfitAndCarryNoCost() {
         JsonNode withProfit = get("/summary", CONTROLS_AND_PROFIT);
         assertThat(withProfit.get("cost_visible").asBoolean()).isTrue();
         JsonNode below = card(withProfit, "below_cost");
         assertThat(below.get("count").asLong()).isEqualTo(3);
+        assertThat(below.get("sales_affected").asLong()).isEqualTo(3);
         assertThat(below.get("value_minor").asLong()).isEqualTo(240);
 
         JsonNode without = get("/summary", CONTROLS);
         assertThat(without.get("cost_visible").asBoolean()).isFalse();
         assertThat(card(without, "below_cost")).isNull();
         assertThat(without.toString()).doesNotContain("cost_minor").doesNotContain("profit");
-        ResponseEntity<JsonNode> refused = one.call(
-                HttpMethod.GET, "/controls/groups?metric=below_cost&group_by=user", null, CONTROLS, "*", Map.of());
-        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(status("/groups?metric=below_cost&group_by=user", CONTROLS, Map.of()))
+                .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
-    void personsAreComparedByRateNotByCount() {
+    void profitReadAtOneShopOnlyIsNotEnoughForSalesBelowCost() {
+        // Controls at head office and branch two, profit at head office only: the figures cover both shops.
+        Map<String, String> partial = scopes("retail.controls.read=" + t.headOffice() + "," + t.secondBranch()
+                + ";retail.profit.read=" + t.headOffice());
+        JsonNode s = get("/summary", CONTROLS_AND_PROFIT, partial);
+        assertThat(s.get("cost_visible").asBoolean()).isFalse();
+        assertThat(card(s, "below_cost")).isNull();
+        assertThat(status("/groups?metric=below_cost&group_by=user", CONTROLS_AND_PROFIT, partial))
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(status("/records?metric=below_cost", CONTROLS_AND_PROFIT, partial))
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        for (JsonNode p : get("/patterns", CONTROLS_AND_PROFIT, partial).get("items")) {
+            assertThat(p.get("metric").asString()).isNotEqualTo("below_cost");
+        }
+        // Profit read at both shops: the card, the groups and the pattern appear.
+        Map<String, String> both = scopes("retail.controls.read=" + t.headOffice() + "," + t.secondBranch()
+                + ";retail.profit.read=" + t.headOffice() + "," + t.secondBranch());
+        assertThat(card(get("/summary", CONTROLS_AND_PROFIT, both), "below_cost")
+                        .get("count")
+                        .asLong())
+                .isEqualTo(3);
+        assertThat(status("/groups?metric=below_cost&group_by=user", CONTROLS_AND_PROFIT, both))
+                .isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void personsAreCreditedWithTheirOwnSalesAndComparedByRateNotByCount() {
         JsonNode users = get("/groups?metric=voided_sales&group_by=user", CONTROLS);
         JsonNode first = group(users, one.userId().toString());
         JsonNode second = group(users, two.userId().toString());
@@ -171,14 +280,42 @@ class RetailControlsIT extends IntegrationTest {
         // Seller One entered 10 + 5 + 3 sales; the rate is over the sales the person entered.
         assertThat(first.get("sales_count").asLong()).isEqualTo(18);
         assertThat(first.get("rate_per_100").asString()).isEqualTo("27.8");
-        assertThat(second.get("label").asString()).isEqualTo("Test Seller Two");
+        assertThat(second.get("label").asString()).isEqualTo("Test Seller Abel");
         assertThat(second.get("user_status").asString()).isEqualTo("deactivated");
         assertThat(second.get("count").asLong()).isEqualTo(1);
         assertThat(second.get("rate_per_100").asString()).isEqualTo("3.3");
+        // The administrator who cancelled them is not a row of the person level: the sellers carry the count.
+        assertThat(has(users, adm.userId().toString())).isFalse();
+        // People come by name, not by how many: Seller Abel (1) before Seller One (5).
+        assertThat(users.get("items").get(0).get("label").asString()).isEqualTo("Test Seller Abel");
     }
 
     @Test
-    void reasonsGroupByTheTextAndOpenOntoTheRecords() {
+    void theAdministratorWhoCancelledIsTheApproverAndHasNoRate() {
+        JsonNode approvers = get("/groups?metric=voided_sales&group_by=approver", CONTROLS);
+        JsonNode admin = group(approvers, adm.userId().toString());
+        assertThat(admin.get("label").asString()).isEqualTo("Test Admin One");
+        assertThat(admin.get("count").asLong()).isEqualTo(6);
+        assertThat(admin.has("rate_per_100")).isFalse();
+        assertThat(has(approvers, one.userId().toString())).isFalse();
+        // Narrowed to the approver, the person level still shows the two sellers.
+        JsonNode sellers = get(
+                "/groups?metric=voided_sales&group_by=approver,user&level=user&approver_id=" + adm.userId(), CONTROLS);
+        assertThat(sellers.get("items")).hasSize(2);
+    }
+
+    @Test
+    void personWithNoUserRowIsUnknownAndItsRecordsStaySeparate() {
+        RetailTestSupport ghost = new RetailTestSupport(http, t);
+        void_(adm, sell(ghost, t.headOffice(), null), "Test ghost sale");
+        JsonNode users = get("/groups?metric=voided_sales&group_by=user", CONTROLS);
+        JsonNode unknown = group(users, "");
+        assertThat(unknown.get("label").asString()).isEqualTo("Unknown person");
+        assertThat(unknown.get("count").asLong()).isEqualTo(1);
+    }
+
+    @Test
+    void reasonsGroupByTheTextAndOpenOntoTheRecordsWithBothPeople() {
         JsonNode reasons = get("/groups?metric=voided_sales&group_by=reason", CONTROLS);
         assertThat(group(reasons, "test wrong item").get("count").asLong()).isEqualTo(4);
         assertThat(group(reasons, "test customer left").get("count").asLong()).isEqualTo(2);
@@ -188,13 +325,15 @@ class RetailControlsIT extends IntegrationTest {
         assertThat(records.get("items")).hasSize(2);
         JsonNode first = records.get("items").get(0);
         assertThat(first.get("sale_no").asString()).isNotBlank();
+        // The person is the seller whose sale it was; the administrator is who cancelled it.
         assertThat(first.get("user_name").asString()).isEqualTo("Test Seller One");
+        assertThat(first.get("approver_name").asString()).isEqualTo("Test Admin One");
         assertThat(first.get("reason").asString()).isEqualTo("Test customer left");
         assertThat(first.get("value_minor").asLong()).isEqualTo(300);
     }
 
     @Test
-    void aChainNamesTheNextLevelAndTheShopComesFirst() {
+    void aChainNamesTheNextLevelAndShopsComeByName() {
         JsonNode shops = get("/groups?metric=voided_sales&group_by=branch,user,day", CONTROLS);
         assertThat(shops.get("level").asString()).isEqualTo("branch");
         assertThat(shops.get("next_level").asString()).isEqualTo("user");
@@ -210,41 +349,72 @@ class RetailControlsIT extends IntegrationTest {
     }
 
     @Test
-    void aPersonWhoseRateIsMoreThanTwiceTheShopsIsAPattern() {
-        JsonNode patterns = get("/patterns", CONTROLS);
+    void aSellerWhoseSalesWereCancelledMoreThanTwiceAsOftenAsTheShopsIsAPatternAndTheApproverIsNever() {
+        JsonNode patterns = get("/patterns", CONTROLS_AND_PROFIT);
         JsonNode found = null;
+        JsonNode belowCost = null;
         for (JsonNode p : patterns.get("items")) {
             if (p.get("subject").asString().equals("user")
                     && p.get("key").asString().equals(one.userId().toString())
-                    && p.get("metric").asString().equals("voided_sales")
                     && p.get("branch_id").asString().equals(t.headOffice().toString())) {
-                found = p;
+                if (p.get("metric").asString().equals("voided_sales")) {
+                    found = p;
+                } else if (p.get("metric").asString().equals("below_cost")) {
+                    belowCost = p;
+                }
             }
         }
         assertThat(found).as("%s", patterns).isNotNull();
-        // 5 voids over the 13 sales Seller One entered at head office (38.5 per 100) against 6 over 43 (14.0): 2.8
-        // times.
+        // 5 cancelled sales over the 13 sales Seller One entered at head office (38.5 per 100) against 6 over 43
+        // (14.0).
         assertThat(found.get("rate_per_100").asString()).isEqualTo("38.5");
         assertThat(found.get("shop_rate_per_100").asString()).isEqualTo("14.0");
         assertThat(found.get("times").asString()).isEqualTo("2.8");
-        // Seller Two voided once: below the minimum, never a pattern.
+        // 3 sales below cost over the same 13 against 3 over 43: a pattern for a profit reader.
+        assertThat(belowCost).isNotNull();
+        // Seller Abel had one sale cancelled: below the minimum, never a pattern. The administrator is never one.
         for (JsonNode p : patterns.get("items")) {
-            assertThat(p.get("key").asString()).isNotEqualTo(two.userId().toString());
+            assertThat(p.get("key").asString())
+                    .isNotEqualTo(two.userId().toString())
+                    .isNotEqualTo(adm.userId().toString());
+        }
+        // Without profit read the below-cost pattern is not sent.
+        for (JsonNode p : get("/patterns", CONTROLS).get("items")) {
+            assertThat(p.get("metric").asString()).isNotEqualTo("below_cost");
         }
     }
 
     @Test
-    void theBranchScopeNarrowsEveryFigure() {
-        ResponseEntity<JsonNode> r = one.call(
-                HttpMethod.GET,
-                "/controls/summary",
-                null,
-                CONTROLS,
-                "*",
-                Map.of("X-Dev-Scopes", "retail.controls.read=" + t.secondBranch()));
-        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
-        assertThat(r.getBody().get("period").get("sales_count").asLong()).isEqualTo(5);
-        assertThat(card(r.getBody(), "voided_sales").get("count").asLong()).isZero();
+    void theBranchScopeNarrowsEveryRoute() {
+        Map<String, String> branchTwo = scopes("retail.controls.read=" + t.secondBranch());
+        JsonNode s = get("/summary", CONTROLS, branchTwo);
+        assertThat(s.get("period").get("sales_count").asLong()).isEqualTo(5);
+        assertThat(card(s, "voided_sales").get("count").asLong()).isZero();
+        assertThat(get("/groups?metric=voided_sales&group_by=branch", CONTROLS, branchTwo)
+                        .get("items"))
+                .isEmpty();
+        assertThat(get("/records?metric=voided_sales", CONTROLS, branchTwo).get("items"))
+                .isEmpty();
+        assertThat(get("/patterns", CONTROLS, branchTwo).get("items")).isEmpty();
+        // Head office is outside the scope: asking for it gives nothing, never its figures.
+        String outside = "&branch_id=" + t.headOffice();
+        JsonNode none = get("/summary?within_minutes=10" + outside, CONTROLS, branchTwo);
+        assertThat(none.get("period").get("sales_count").asLong()).isZero();
+        assertThat(none.get("cards")).isEmpty();
+        assertThat(get("/groups?metric=voided_sales&group_by=user" + outside, CONTROLS, branchTwo)
+                        .get("items"))
+                .isEmpty();
+        assertThat(get("/records?metric=voided_sales" + outside, CONTROLS, branchTwo)
+                        .get("items"))
+                .isEmpty();
+        assertThat(get("/patterns?x=1" + outside, CONTROLS, branchTwo).get("items"))
+                .isEmpty();
+        // A scope of head office alone sees the voids there.
+        Map<String, String> headOffice = scopes("retail.controls.read=" + t.headOffice());
+        assertThat(card(get("/summary", CONTROLS, headOffice), "voided_sales")
+                        .get("count")
+                        .asLong())
+                .isEqualTo(6);
     }
 
     @Test
