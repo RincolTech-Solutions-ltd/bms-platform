@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute, useSearch } from '@tanstack/react-router';
+import { Link, createLazyRoute, useRouterState } from '@tanstack/react-router';
 import { useState } from 'react';
 import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -338,13 +338,13 @@ function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purch
   );
 }
 
-function Restock() {
+export function RestockPage() {
   const [done, setDone] = useState<{ purchase: Purchase; context: RestockContext } | null>(null);
   const [round, setRound] = useState(0);
-  const again = (useSearch({ strict: false }) as { again?: string }).again;
+  const again = (useRouterState({ select: (state) => state.location.search }) as { again?: string }).again;
   return (
     <Gate screen="restock" title="Restock">
-      <p><Link to="/staff/retail/restocks">Past restocks, to correct a mistake</Link></p>
+      <p data-tour="restock-past"><Link to="/staff/retail/restocks">Past restocks, to correct a mistake</Link></p>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
       ) : typeof again === 'string' && again !== '' ? (
@@ -356,4 +356,4 @@ function Restock() {
   );
 }
 
-export const Route = createLazyRoute('/staff/retail/restock')({ component: Restock });
+export const Route = createLazyRoute('/staff/retail/restock')({ component: RestockPage });

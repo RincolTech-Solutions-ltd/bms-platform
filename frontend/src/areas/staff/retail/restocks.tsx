@@ -101,7 +101,7 @@ export function RestockCard({ purchase, supplier, onDone }: { purchase: Purchase
   );
 }
 
-function RestocksPage() {
+export function RestocksPage() {
   const today = businessToday();
   const [from, setFrom] = useState(daysBefore(today, 60));
   const [to, setTo] = useState(today);
@@ -121,7 +121,7 @@ function RestocksPage() {
       <p><Link to="/staff/retail/restock">Back to Restock</Link></p>
       <p className="hint">Every restock is kept. If you entered one wrongly, open Correct this restock, then enter it again with the right quantity.</p>
       {message && <Success>{message}</Success>}
-      <div className="rt-row">
+      <div className="rt-row" data-tour="restocks-filters">
         <div>
           <label htmlFor="restocks-from">From</label>
           <input id="restocks-from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
@@ -142,7 +142,7 @@ function RestocksPage() {
       {page.isPending && <p className="loading">Loading</p>}
       <Problem error={page.error} />
       {page.data && items.length === 0 && <p className="empty-state">No restocks in these dates.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
+      <ul style={{ listStyle: 'none', padding: 0 }} data-tour="restocks-list">
         {items.map((p) => <RestockCard key={p.id} purchase={p} supplier={names.get(p.supplier_id)} onDone={setMessage} />)}
       </ul>
       {page.hasNextPage && <button type="button" onClick={() => void page.fetchNextPage()} disabled={page.isFetchingNextPage}>{page.isFetchingNextPage ? 'Loading' : 'Show older restocks'}</button>}

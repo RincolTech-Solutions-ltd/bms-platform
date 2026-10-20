@@ -243,6 +243,21 @@ class RetailProductNamesIT extends IntegrationTest {
     }
 
     @Test
+    void aCategoryCorrectionIsAuditedWithTheOldAndTheNewCategory() {
+        UUID item = RetailTestSupport.id(create("NM-1", "Test Lamp Holder", metres, null, ADMIN));
+        UUID lighting = api.category("Test Lighting");
+        ResponseEntity<JsonNode> moved = rename(item, Map.of("category_id", lighting), ADMIN);
+        assertThat(moved.getStatusCode()).as("%s", moved.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(moved.getBody().get("category").asString()).isEqualTo("Test Lighting");
+        String audit = TestDatabase.owner()
+                .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = 'retail.product.updated' AND entity_id = ?")
+                .params(t.tenantId(), item)
+                .query(String.class)
+                .single();
+        assertThat(audit).contains("Test Wiring").contains("Test Lighting").contains(category.toString()).contains(lighting.toString());
+    }
+
+    @Test
     void theCsvImportSkipsAndReportsARepeatedName() {
         String header = "code,description,category,unit,sell price";
         create("NM-1", "Test Pipe 20mm", metres, null, ADMIN);

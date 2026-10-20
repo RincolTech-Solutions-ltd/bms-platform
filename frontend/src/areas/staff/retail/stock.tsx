@@ -257,10 +257,12 @@ export function StockPage() {
       {result.isPending && (all || branchId !== null) && <SkeletonList label="Loading stock" />}
       <Problem error={result.error} />
       {shown === 0 && query && <NoResults term={query} onClear={search.clear} noun="items" />}
+      <div data-tour="stock-list">
       <SearchResults fetching={finding}>
         {!all && one.data && <StockTable rows={one.data} showCost={canProfit} correctable={mayCorrect(me, branchId) && branchId !== null ? { branchId } : undefined} {...narrowing} />}
         {all && many.data && (phone ? <AllBranchesList data={many.data} showCost={canProfit} {...narrowing} /> : <AllBranchesTable data={many.data} showCost={canProfit} {...narrowing} />)}
       </SearchResults>
+      </div>
     </Gate>
   );
 }

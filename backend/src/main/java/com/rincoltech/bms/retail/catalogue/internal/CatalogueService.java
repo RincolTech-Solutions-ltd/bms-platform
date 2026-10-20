@@ -354,6 +354,11 @@ class CatalogueService {
         if (now.isEmpty()) {
             return withPacks(visible(before));
         }
+        if (!before.categoryId().equals(after.categoryId())) {
+            // Issue #351: a category correction is audited with the old and the new category by name as well as by id.
+            was.put("category", before.category());
+            now.put("category", repo.category(after.categoryId()).map(Category::name).orElse(null));
+        }
         if (!before.unitId().equals(after.unitId()) && repo.productHasPacks(id)) {
             throw ApiException.rule(
                     "unit_in_use_by_pack",

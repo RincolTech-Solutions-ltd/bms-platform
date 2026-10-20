@@ -29,7 +29,7 @@ vi.mock('../../../api/retail', async (original) => {
 const { RetailError } = await import('../../../api/retail');
 const { retailMessage } = await import('../../../api/retail-errors');
 const { CorrectPanel, RestockCard } = await import('./restocks');
-const { redraftOf, unitHint, voidReasonOf } = await import('./restock-correct-state');
+const { chosenUnitHint, redraftOf, unitHint, voidReasonOf } = await import('./restock-correct-state');
 
 afterEach(() => {
   cleanup();
@@ -91,6 +91,10 @@ describe('the restock card', () => {
     expect(screen.getByText(/200 metre/)).toBeTruthy();
     expect(unitHint({ unit: 'roll', base_unit: 'roll' })).toBeNull();
     expect(unitHint({ base_unit: 'roll' })).toBeNull();
+    // The same words on the restock form, where the unit is the one chosen for the line.
+    expect(chosenUnitHint('metre', 'roll')).toBe('Entered in metre but this item is kept in roll? If that is wrong, correct this restock and enter it again in the right unit.');
+    expect(chosenUnitHint(undefined, 'roll')).toBeNull();
+    expect(chosenUnitHint('roll', 'roll')).toBeNull();
   });
 });
 
