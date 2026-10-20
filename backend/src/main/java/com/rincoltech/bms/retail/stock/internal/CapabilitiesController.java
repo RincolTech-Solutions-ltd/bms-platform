@@ -69,14 +69,18 @@ class CapabilitiesController {
                     allowableValues = {"on_sale", "on_payment"},
                     description =
                             "How credit sales count in the reports, the dashboard and the daily savings (ADR-043):"
-                                    + " on_sale (the default) counts them when they are made, on_payment only when the buyer pays")
+                                    + " on_sale (the default) counts them when they are made, on_payment only when the buyer pays."
+                                    + " One way: on_payment starts the business day after it is asked for and cannot be switched off"
+                                    + " once it has started (422 credit_rule_cannot_be_switched_off); until then asking for on_sale"
+                                    + " cancels it")
             String creditSaleRecognition,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Read only: the day the credit rule last changed (the tenant's business date): credit sales dated before"
-                                    + " it keep counting the way they did (ADR-043); absent while it never changed")
+                            "Read only: the first business day of the rule on_payment (the day after it was asked for), when it was"
+                                    + " chosen; it can lie in the future. Credit sales dated before it keep counting the way they did"
+                                    + " (ADR-043); absent while the rule was never chosen")
             LocalDate creditRecognitionEffectiveFrom,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)

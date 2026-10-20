@@ -53,7 +53,8 @@ final class WriteOffsApi {
             name = "RetailWriteOffOutcome",
             description =
                     "201 with the write-off when it was done; 202 with approval_id when it waits for a second administrator"
-                            + " (the unpaid amount reached the tenant's approval threshold for retail_sale_write_off)")
+                            + " (the unpaid amount reached the tenant's approval threshold for retail_sale_write_off, or, with no"
+                            + " threshold set, the business has two or more active administrators)")
     record WriteOffOutcome(
             boolean executed,
             @JsonInclude(JsonInclude.Include.NON_NULL) UUID approvalId,

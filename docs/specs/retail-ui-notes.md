@@ -417,7 +417,9 @@ The administrator's two screens for the trade capabilities, and the rule every c
 
 ## Credit sales: when they count (#340, ADR-043)
 
-- **Retail settings** gains one question under the features: "When does a credit sale count as income and profit?", two plain choices (When the sale is made, today's way and the default; When the buyer pays). A different choice is read back in words and confirmed before it is saved; the server audits it. The page tour has a step for it.
+- **Retail settings** gains one question under the features: "When does a credit sale count as income and profit?", two plain choices (When the sale is made, today's way and the default; When the buyer pays). A different choice is read back in words and confirmed before it is saved; the server audits it. The rule is one way: it starts the next day, a pending change can be cancelled by choosing the first answer, and once it has started the first choice is off and the page says "This rule cannot be switched off once it has started. Ask Rincol support." The page tour has a step for it (page tour version 3).
+- **Payment date.** On a credit sale the server marks `counted_when_paid` (dated from the first day of the rule); only then is the payment form's date fixed to today. A sale of the earlier era keeps a free date.
+- **Profit and home figures** say which rule applied on the last day they show and, when the rule has not started yet or started inside the period, one line with the day (`credit_recognition_starts_on`).
 - **Home cards** under "When the buyer pays": Sales today (everything sold, credit included, with the count), Cash and mobile money (money received today, payments on earlier credit sales included), On credit (what buyers still owe and how many sales, with a hint that it is not profit) and Profit today (from the money received). The 7 and 30 day tiles keep Sold and add Received. With the default the cards are exactly as before.
 - **Daily profit** under "When the buyer pays": Sales becomes Received, Sold is a column and a headline figure beside it, On credit now is a headline figure, and the profit line says it is from money received. The savings screens read the same profit.
 
@@ -736,9 +738,27 @@ again under the sale's lock; the screens only save a round trip and say each ref
 
 ## Write off a debt (#340, ADR-043)
 
-- **Write off** on an opened credit sale that still owes (`retail.credit.write_off` at the sale's branch; not on an imported, voided, paid or already written off sale). The form asks why the buyer will not pay (at least five characters), says in plain words that the amount is treated as lost, that the sale stays on record and reads Written off, that it leaves the owing and overdue lists and that it cannot be undone, and has one button, Write off, and one way back, Keep the debt. Above the business's approval limit the answer is "Sent to a second administrator to approve". The Idempotency-Key is kept with the draft like the payment form's.
+- **Write off** on an opened credit sale that still owes (`retail.credit.write_off` at the sale's branch; not on an imported, voided, paid or already written off sale). The form asks why the buyer will not pay (at least five characters), says in plain words that the amount is treated as lost, that the sale stays on record and reads Written off, that it leaves the owing and overdue lists and that it cannot be undone, and has one button, Write off, and one way back, Keep the debt. The answer is "Sent to a second administrator to approve" when the business has a limit and the debt reaches it, or, with no limit set, whenever two or more administrators count; a business with one administrator writes off at once, and the screen says it was done without a second person. The Idempotency-Key is kept with the draft like the payment form's.
 - The opened sale reads Written off with the day, the amount and the reason; a written off sale offers no payment, void or return. The customer statement lists the write-off as a credit. Daily profit shows a Debts written off column once there is one.
 - Tests: `write-off.dom.test.tsx`, `sale-actions-state` helpers; the mock answers with the server's rules.
+
+## Branches: close, reopen and keeps-no-goods (#329, ADR-041)
+
+- **Screen.** `/staff/setup/branches` (crumbs Home, Business set-up, Branches; a link in Business set-up for whoever holds `core.branches.read`). One card per
+  branch with its name and code, the badges Head office, Closed and Keeps no goods, a line in plain words, and for an administrator (`core.branches.manage`)
+  the actions: Close this branch (head office excluded), Mark as keeping no goods or Keeps goods again, and on a closed branch Reopen this branch. Closed branches
+  are hidden behind a Show closed branches box that states how many there are, and a closed branch that still holds stock says so in its row (items and value). Mark as keeping no goods asks for a confirmation in plain words first (goods left there can still be moved out); Keeps goods again is one tap. Progressive disclosure: Close opens a confirmation panel; if the server finds stock
+  or a transfer on the road it answers `branch_close_needs_reason` and the panel shows the server's words (with the stock value), asks "Why are you closing it?"
+  and enables Close it anyway only with a reason. Nothing is posted or written off. After any change `/me`, the branch list and the retail queries are read again,
+  so the pickers and the stock list follow. A reader sees the list and the line "Only an administrator can close or reopen a branch."
+- **Everywhere else.** The staff bar picker lists the open branches from `/me` and tags a branch that keeps no goods "(no stock)"; the staff area does not start on
+  it unless it is all the user has or the user chose it last (cash book). The sale, move-stock, stock-take and usage screens use `useStockingBranch` and
+  `BranchRequired stocking`: on a branch that keeps no goods they say so and offer the branches that do. The restock, purchase order and goods receipt forms, the move-stock
+  destination and the restock branch of a return list only branches that keep goods. The Stock page in All branches leaves closed branches out, says "N closed shops
+  with stock hidden. Show them" when some are, and marks a closed column "(closed)"; the stock-by-location report keeps them with a Closed badge.
+- **Tours.** The welcome tour is version 8 (a "Your branches" step for whoever may read branches); `page-branches` is the page tour.
+- **Tests.** `branches/state.test.ts` (the rules), `branches/branches.dom.test.tsx` (hidden then shown closed branches, the badge and reason, confirm once, the warning
+  and reason, refusals in plain words, reopen, the stocking switch, a reader sees no action), `retail/not-stocking.test.tsx`, `auth/branch.test.ts`, `tour/*`.
 
 ## Left to do
 

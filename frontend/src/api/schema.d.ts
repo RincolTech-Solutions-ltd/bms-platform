@@ -291,11 +291,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Rename a branch or change its location (FR-BR-01) */
+        /** Rename a branch, change its location or mark it as not stocking (FR-BR-01, ADR-041) */
         patch: operations["updateBranch"];
         trace?: never;
     };
-    "/api/v1/branches/{branch_id}/deactivate": {
+    "/api/v1/branches/{branch_id}/close": {
         parameters: {
             query?: never;
             header?: never;
@@ -304,8 +304,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Deactivate a branch (FR-BR-01) */
-        post: operations["deactivateBranch"];
+        /** Close a branch and keep its history (FR-BR-01, ADR-041); 422 branch_close_needs_reason while stock or transfers on their way remain and no reason is sent */
+        post: operations["closeBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/branches/{branch_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen a closed branch (FR-BR-01, ADR-041) */
+        post: operations["reopenBranch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4459,7 +4476,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every product with its balance in each branch the caller may read (#144) */
+        /** Every product with its balance in each open branch the caller may read (#144); closed branches only with include_closed (#329) */
         get: operations["listRetailStockAllBranches"];
         put?: never;
         post?: never;
@@ -5502,6 +5519,13 @@ export interface components {
             reason?: string;
         };
         Branch: {
+            /**
+             * Format: date-time
+             * @description when the branch was closed; null while it is open
+             */
+            closed_at?: string;
+            /** @description why it was closed, when it had to be confirmed; null otherwise */
+            closed_reason?: string;
             code?: string;
             /** Format: date-time */
             created_at?: string;
@@ -5510,7 +5534,20 @@ export interface components {
             is_head_office?: boolean;
             location?: string;
             name?: string;
+            /** @description active, or inactive for a closed branch (the owner's word is closed, ADR-041) */
             status?: string;
+            /**
+             * Format: int32
+             * @description items still on the shelves of a closed branch; null for an open branch or when none
+             */
+            stock_items?: number;
+            /**
+             * Format: int64
+             * @description their value at current cost, in minor units; null for an open branch or when none
+             */
+            stock_value_minor?: number;
+            /** @description false for a branch that keeps no goods, such as a head office (ADR-041) */
+            stocks_goods?: boolean;
             /** Format: date-time */
             updated_at?: string;
             /** Format: int32 */
@@ -5529,6 +5566,10 @@ export interface components {
             theme_primary?: string;
             /** @description #FFFFFF or #111111, the readable text colour on themePrimary; null with it */
             theme_text?: string;
+        };
+        /** @description The reason is required only when the branch still holds stock or has transfers on their way (422 branch_close_needs_reason says which). */
+        CloseBranchRequest: {
+            reason?: string;
         };
         Collateral: {
             /** Format: uuid */
@@ -7134,6 +7175,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             name?: string;
+            /** @description false for a branch that keeps no goods: sale, restock and transfer forms skip it (#329) */
+            stocks_goods?: boolean;
         };
         /** @description Per permission key, the branches it applies in */
         MePermissionScope: {
@@ -7794,6 +7837,11 @@ export interface components {
         };
         RetailAllBranchesStock: {
             branches?: components["schemas"]["RetailStockBranch"][];
+            /**
+             * Format: int32
+             * @description How many closed branches in the caller's scope still hold stock and are left out unless include_closed is true
+             */
+            closed_branches?: number;
             items?: components["schemas"]["RetailAllBranchesRow"][];
             /** @description A total at or below this is low stock; the same for every branch */
             low_stock_threshold?: string;
@@ -8000,11 +8048,11 @@ export interface components {
             branch_roles?: boolean;
             /**
              * Format: date
-             * @description Read only: the day the credit rule last changed (the tenant's business date): credit sales dated before it keep counting the way they did (ADR-043); absent while it never changed
+             * @description Read only: the first business day of the rule on_payment (the day after it was asked for), when it was chosen; it can lie in the future. Credit sales dated before it keep counting the way they did (ADR-043); absent while the rule was never chosen
              */
             credit_recognition_effective_from?: string;
             /**
-             * @description How credit sales count in the reports, the dashboard and the daily savings (ADR-043): on_sale (the default) counts them when they are made, on_payment only when the buyer pays
+             * @description How credit sales count in the reports, the dashboard and the daily savings (ADR-043): on_sale (the default) counts them when they are made, on_payment only when the buyer pays. One way: on_payment starts the business day after it is asked for and cannot be switched off once it has started (422 credit_rule_cannot_be_switched_off); until then asking for on_sale cancels it
              * @enum {string}
              */
             credit_sale_recognition?: "on_sale" | "on_payment";
@@ -8531,6 +8579,11 @@ export interface components {
             /** Format: int64 */
             cost_of_sales_minor?: number;
             /**
+             * Format: date
+             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force on the last day of the period
+             */
+            credit_recognition_starts_on?: string;
+            /**
              * @description How credit sales were counted (ADR-043): on_sale when they are made, on_payment when the buyer pays
              * @enum {string}
              */
@@ -8595,6 +8648,11 @@ export interface components {
             usage_cost_minor?: number;
         };
         RetailDashboard: {
+            /**
+             * Format: date
+             * @description The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition is the rule in force today
+             */
+            credit_recognition_starts_on?: string;
             /**
              * @description How credit sales are counted (ADR-043): on_sale when they are made, on_payment when the buyer pays
              * @enum {string}
@@ -9431,6 +9489,8 @@ export interface components {
         };
         /** @description A column of the report; ordered stores, shops, then both */
         RetailLocationBranch: {
+            /** @description A closed branch that still holds stock; its history stays in this report (#329) */
+            closed?: boolean;
             code?: string;
             head_office?: boolean;
             /** Format: uuid */
@@ -10586,6 +10646,8 @@ export interface components {
              * @description Present only with retail.profit.read
              */
             cost_total_minor?: number;
+            /** @description True for a credit sale counted when the buyer pays (its date is on or after the first day of the rule on_payment, ADR-043): its payments are dated the day they are entered */
+            counted_when_paid?: boolean;
             /** Format: date-time */
             created_at?: string;
             /** Format: uuid */
@@ -11176,6 +11238,8 @@ export interface components {
             sale_id?: string;
         };
         RetailStockBranch: {
+            /** @description A closed branch that still holds stock; shown only when include_closed is true */
+            closed?: boolean;
             code?: string;
             head_office?: boolean;
             /** Format: uuid */
@@ -12310,7 +12374,7 @@ export interface components {
             /** Format: date */
             written_off_on?: string;
         };
-        /** @description 201 with the write-off when it was done; 202 with approval_id when it waits for a second administrator (the unpaid amount reached the tenant's approval threshold for retail_sale_write_off) */
+        /** @description 201 with the write-off when it was done; 202 with approval_id when it waits for a second administrator (the unpaid amount reached the tenant's approval threshold for retail_sale_write_off, or, with no threshold set, the business has two or more active administrators) */
         RetailWriteOffOutcome: {
             /** Format: uuid */
             approval_id?: string;
@@ -13118,6 +13182,8 @@ export interface components {
         UpdateBranchRequest: {
             location?: string;
             name?: string;
+            /** @description false marks a branch that keeps no goods (a head office): no sales, restocks, transfers or stock adjustments there (422 branch_not_stocking). Refused with branch_still_has_stock while goods or a transfer on its way remain. */
+            stocks_goods?: boolean;
         };
         /** @description Omitted fields are unchanged */
         UpdateCollateralRequest: {
@@ -13761,10 +13827,40 @@ export interface operations {
             };
         };
     };
-    deactivateBranch: {
+    closeBranch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CloseBranchRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
+    reopenBranch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
             path: {
                 branch_id: string;
             };
@@ -21339,6 +21435,7 @@ export interface operations {
                 category_id?: string;
                 negative_only?: boolean;
                 stock_level?: string;
+                include_closed?: boolean;
                 limit?: number;
                 cursor?: string;
             };

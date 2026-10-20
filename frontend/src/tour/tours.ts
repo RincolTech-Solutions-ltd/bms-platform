@@ -84,9 +84,10 @@ export const adminWelcome: Tour = {
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
   // Version 7 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
-  // Version 8 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
-  // Version 9 adds the step on writing off a debt that will never be paid (issue #340).
-  version: 9,
+  // Version 8 adds the Branches step (issue #329): closing a branch and keeping its history.
+  // Version 9 adds the step on when a credit sale counts as profit (issue #340, ADR-043).
+  // Version 10 adds the step on writing off a debt that will never be paid (issue #340).
+  version: 10,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -133,6 +134,15 @@ export const adminWelcome: Tour = {
       needs: ['core.users.manage'],
       title: 'Add your staff',
       body: 'Tap Invite someone. Type the name and the phone, pick a role like Sales person or Cashier, and send them the link. They only see what their role allows.',
+    },
+    {
+      id: 'branches',
+      route: '/staff/setup/branches',
+      target: 'branches-list',
+      needs: ['core.branches.read'],
+      optional: true,
+      title: 'Your branches',
+      body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it later.',
     },
     {
       id: 'modules',
@@ -199,7 +209,7 @@ export const adminWelcome: Tour = {
       needs: ['retail.profit.read'],
       optional: true,
       title: 'When a credit sale counts as profit',
-      body: 'A credit sale can wait to count until the buyer pays. Then the home page shows Sold, Received and On credit apart. The daily savings use only the profit of money received. You choose this in Retail settings.',
+      body: 'A credit sale can wait to count until the buyer pays. Then the home page shows Sold, Received and On credit apart. The daily savings use only the profit of money received. You choose this in Retail settings, and it starts the next day and is not switched off again.',
     },
     {
       id: 'write-off',
@@ -651,7 +661,8 @@ export const stocktakePage: Tour = {
 export const retailSettingsPage: Tour = {
   id: 'page-retail-settings',
   // Version 2 adds the credit sale step (issue #340, ADR-043).
-  version: 2,
+  // Version 3 says in that step that the credit rule is one way: once it has started it is not switched off here.
+  version: 3,
   title: 'This page: retail settings',
   audience: isTenantAdmin,
   autoStart: false,
@@ -679,7 +690,7 @@ export const retailSettingsPage: Tour = {
       id: 'credit',
       target: 'retail-credit-recognition',
       title: 'When a credit sale counts',
-      body: 'Choose whether a credit sale counts as income and profit when it is made, or only when the buyer pays. Your daily savings follow this choice. You read the change before you confirm it.',
+      body: 'Choose whether a credit sale counts as income and profit when it is made, or only when the buyer pays. Your daily savings follow this choice. You read the change before you confirm it. Once "when the buyer pays" has started, it is not switched off here.',
     },
   ],
 };
@@ -738,6 +749,30 @@ export const usersPage: Tour = {
       optional: true,
       title: 'Who has joined',
       body: 'Invited means the person has not opened their link yet. On their card you can send a new link, change their roles, or deactivate them when they leave.',
+    },
+  ],
+};
+
+// The Branches page (issue #329): a page tour for whoever may read branches; closing and reopening need the manage permission.
+export const branchesPage: Tour = {
+  id: 'page-branches',
+  version: 1,
+  title: 'This page: branches',
+  audience: (me) => held(me, 'core.branches.read'),
+  autoStart: false,
+  page: '/staff/setup/branches',
+  steps: [
+    {
+      id: 'intro',
+      target: 'branches-intro',
+      title: 'Closing a branch keeps its history',
+      body: 'A closed branch keeps its sales and stock records for your reports. It only leaves the branch lists and the sale, restock and move-stock screens.',
+    },
+    {
+      id: 'list',
+      target: 'branches-list',
+      title: 'Your branches',
+      body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Goods left there can still be moved out. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
     },
   ],
 };
@@ -1272,5 +1307,5 @@ export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
 ];

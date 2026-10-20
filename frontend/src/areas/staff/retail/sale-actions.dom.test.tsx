@@ -89,6 +89,19 @@ describe('recording a payment', () => {
     expect(screen.getByTestId('imported-note').textContent).toBe('Imported from the old records; record this payment with your accountant.');
   });
 
+  it('locks the date to today only for a sale the server says is counted when the buyer pays', () => {
+    screenOf(admin, <PaySaleAction sale={{ ...credit, counted_when_paid: true }} today={today} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    expect(screen.getByTestId('pay-today-only').textContent).toMatch(/dated today/);
+    expect((screen.getByLabelText('Date received') as HTMLInputElement).readOnly).toBe(true);
+    cleanup();
+    // A sale of the earlier era keeps the old freedom, whatever the rule is now.
+    screenOf(admin, <PaySaleAction sale={{ ...credit, counted_when_paid: false }} today={today} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
+    expect(screen.queryByTestId('pay-today-only')).toBeNull();
+    expect((screen.getByLabelText('Date received') as HTMLInputElement).readOnly).toBe(false);
+  });
+
   it('starts with the balance and refuses an amount above it, nothing, or a date outside the sale and today', () => {
     screenOf(admin, <PaySaleAction sale={credit} today={today} />);
     fireEvent.click(screen.getByRole('button', { name: 'Record payment' }));
