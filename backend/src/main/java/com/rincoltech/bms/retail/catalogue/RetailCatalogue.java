@@ -62,6 +62,18 @@ public interface RetailCatalogue {
     void noteCostNotApplied(UUID productId, UUID sourceId, String reason);
 
     /**
+     * Issue #351, ADR-044: a voided restock gives back the prices it set, in the caller's transaction, but only while it is
+     * still the product's latest price event (no later restock, manual change, landed cost or credit has moved them). The
+     * cost and the selling price go back to what they were before the restock's first change to this product, with a
+     * {@code purchase} history row that names the restock and says why. When a later event moved them, nothing changes and
+     * a history row with the same prices on both sides says the restock was voided without moving them. Nothing is written
+     * when the restock changed no price of this product.
+     *
+     * @return true when the prices went back
+     */
+    boolean revertPurchasePrices(UUID productId, UUID purchaseId, String reason);
+
+    /**
      * The one normal form of a product code, for the API and the importer alike (review F9):
      * {@code strip()} and the no-break spaces it keeps are removed at the ends (a no-break space pasted from a
      * spreadsheet), then NFKC folds compatibility forms (full-width letters and digits). A code that

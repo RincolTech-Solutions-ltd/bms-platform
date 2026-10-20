@@ -148,6 +148,7 @@ export type ResolvedLine = S['RetailPriceResolveLine'];
 export type ResolveRequest = S['RetailPriceResolveRequest'];
 export type PurchaseRequest = S['RetailPurchaseRequest'];
 export type Purchase = S['RetailPurchase'];
+export type PurchasePage = S['RetailPurchasePage'];
 /** `unit*` are present only for a line entered in a pack; `cost_minor` and `qty_total` are always per base unit. */
 export type PurchaseLine = S['RetailPurchaseLine'];
 export type UsageRequest = S['RetailUsageRequest'];
@@ -446,6 +447,11 @@ export interface RetailApi {
   updateCustomer(id: string, version: number, body: { name?: string; contact?: string }): Promise<Customer>;
   createSale(body: SaleRequest, idempotencyKey: string): Promise<Sale>;
   createPurchase(body: PurchaseRequest, idempotencyKey: string): Promise<Purchase>;
+  /** The restocks (retail.purchase.create), a voided one included and marked; newest first with the filters of the past restocks screen (issue #351). */
+  listPurchases(q: { from?: string; to?: string; status?: 'posted' | 'voided'; cursor?: string; limit?: number; signal?: AbortSignal }): Promise<PurchasePage>;
+  getPurchase(id: string): Promise<Purchase>;
+  /** Voids a restock by reversal, once (retail.purchase.create at every branch it touched); takes the Idempotency-Key of its form. */
+  voidPurchase(id: string, reason: string, idempotencyKey: string): Promise<Purchase>;
   createUsage(body: UsageRequest, idempotencyKey: string): Promise<Usage>;
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   commitStocktake(id: string): Promise<Stocktake>;
@@ -1054,6 +1060,23 @@ const realRetail: RetailApi = {
 
   async createPurchase(body, key) {
     return unwrap(await api.POST('/api/v1/retail/purchases', { body, params: { header: { 'Idempotency-Key': key } } }));
+  },
+
+  async listPurchases({ from, to, status, cursor, limit, signal }) {
+    return unwrap(
+      await api.GET('/api/v1/retail/purchases', {
+        params: { query: { newest_first: true, ...(from ? { from } : {}), ...(to ? { to } : {}), ...(status ? { status } : {}), ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) } },
+        signal,
+      }),
+    );
+  },
+
+  async getPurchase(id) {
+    return unwrap(await api.GET('/api/v1/retail/purchases/{purchase_id}', { params: { path: { purchase_id: id } } }));
+  },
+
+  async voidPurchase(id, reason, key) {
+    return unwrap(await api.POST('/api/v1/retail/purchases/{purchase_id}/void', { params: { path: { purchase_id: id }, header: { 'Idempotency-Key': key } }, body: { reason } }));
   },
 
   async createUsage(body, key) {

@@ -10424,6 +10424,10 @@
             "format" : "date",
             "type" : "string"
           },
+          "status" : {
+            "description" : "posted, or voided once corrected by a void (issue #351); a voided restock is never deleted",
+            "type" : "string"
+          },
           "supplier_id" : {
             "format" : "uuid",
             "type" : "string"
@@ -10431,11 +10435,31 @@
           "total_minor" : {
             "format" : "int64",
             "type" : "integer"
+          },
+          "void_reason" : {
+            "type" : "string"
+          },
+          "voided_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "voided_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "voided_on" : {
+            "description" : "The business date of the void, the day the cash book gives the cash back",
+            "format" : "date",
+            "type" : "string"
           }
         }
       },
       "RetailPurchaseLine" : {
         "properties" : {
+          "base_unit" : {
+            "description" : "The unit the item is usually kept in (issue #351), to tell a line entered in another unit",
+            "type" : "string"
+          },
           "code" : {
             "type" : "string"
           },
@@ -10897,6 +10921,16 @@
           }
         },
         "required" : [ "lines", "payment_method", "purchased_on" ]
+      },
+      "RetailPurchaseVoidRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
       },
       "RetailPurchasingSettings" : {
         "properties" : {
@@ -27386,6 +27420,21 @@
           }
         }, {
           "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "newest_first",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
           "name" : "limit",
           "required" : false,
           "schema" : {
@@ -27448,6 +27497,79 @@
           }
         },
         "summary" : "Record a restock: prices, history, movements and journals in one transaction (FR-RET-06); M",
+        "tags" : [ "retail-purchasing" ]
+      }
+    },
+    "/api/v1/retail/purchases/{purchase_id}" : {
+      "get" : {
+        "operationId" : "getRetailPurchase",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "purchase_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPurchase"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "One restock with its lines and, when voided, the void (issue #351)",
+        "tags" : [ "retail-purchasing" ]
+      }
+    },
+    "/api/v1/retail/purchases/{purchase_id}/void" : {
+      "post" : {
+        "operationId" : "voidRetailPurchase",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "purchase_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailPurchaseVoidRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailPurchase"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Void a restock as a whole by reversal, once; refused when its stock has moved (issue #351); M",
         "tags" : [ "retail-purchasing" ]
       }
     },

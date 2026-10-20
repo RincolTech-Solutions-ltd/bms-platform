@@ -3815,6 +3815,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/purchases/{purchase_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One restock with its lines and, when voided, the void (issue #351) */
+        get: operations["getRetailPurchase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/purchases/{purchase_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void a restock as a whole by reversal, once; refused when its stock has moved (issue #351); M */
+        post: operations["voidRetailPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/purchasing/settings": {
         parameters: {
             query?: never;
@@ -10007,12 +10041,26 @@ export interface components {
             purchase_no?: string;
             /** Format: date */
             purchased_on?: string;
+            /** @description posted, or voided once corrected by a void (issue #351); a voided restock is never deleted */
+            status?: string;
             /** Format: uuid */
             supplier_id?: string;
             /** Format: int64 */
             total_minor?: number;
+            void_reason?: string;
+            /** Format: date-time */
+            voided_at?: string;
+            /** Format: uuid */
+            voided_by?: string;
+            /**
+             * Format: date
+             * @description The business date of the void, the day the cash book gives the cash back
+             */
+            voided_on?: string;
         };
         RetailPurchaseLine: {
+            /** @description The unit the item is usually kept in (issue #351), to tell a line entered in another unit */
+            base_unit?: string;
             code?: string;
             /**
              * Format: int64
@@ -10253,6 +10301,9 @@ export interface components {
              * @description Required for a credit purchase
              */
             supplier_id?: string;
+        };
+        RetailPurchaseVoidRequest: {
+            reason: string;
         };
         RetailPurchasingSettings: {
             /**
@@ -20096,6 +20147,8 @@ export interface operations {
                 from?: string;
                 to?: string;
                 supplier_id?: string;
+                status?: string;
+                newest_first?: boolean;
                 limit?: number;
                 cursor?: string;
             };
@@ -20128,6 +20181,56 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RetailPurchaseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
+    getRetailPurchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailPurchase"];
+                };
+            };
+        };
+    };
+    voidRetailPurchase: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                purchase_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailPurchaseVoidRequest"];
             };
         };
         responses: {

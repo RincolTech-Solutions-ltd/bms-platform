@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute } from '@tanstack/react-router';
+import { Link, createLazyRoute, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
@@ -9,6 +9,7 @@ import { parseMinor } from '../../../components/money';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { lineTotalMinor, parseQty, qtyString, showQty } from './maths';
+import { chosenUnitHint, redraftOf } from './restock-correct-state';
 import { CategoryLabel, Gate, Note, Problem, money, useProfitAccess } from './ui';
 import { UNITS, capabilityOn } from './permissions';
 import { activePacks, baseCostMinor, baseQtyMilli, chosenPack, packPriceMinor } from './units-state';
@@ -83,7 +84,7 @@ const METHODS: { value: PurchasePayment; label: string }[] = [
 ];
 
 /** What the restock form keeps with its key in this tab until saved or cleared (#77). */
-interface RestockDraft {
+export interface RestockDraft {
   supplierId: string;
   newSupplier: string;
   purchasedOn: string;
@@ -102,12 +103,13 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
   return all.filter((s) => s.active !== false || s.id === chosenId);
 }
 
-export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: RestockContext) => void }) {
+export function RestockForm({ onSaved, draftName, initial }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft }) {
   const { me, branch } = useStaff();
   const canProfit = useProfitAccess();
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
-  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(`restock:${me.user_id ?? ''}`, {
+  // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
+  const { key, draft, setDraft, finish, discard } = usePersistedDraft<RestockDraft>(draftName ?? `restock:${me.user_id ?? ''}`, initial ?? {
     supplierId: '', newSupplier: '', purchasedOn: businessToday(), method: 'cash', lines: [],
   });
   const { supplierId, newSupplier, purchasedOn, method, lines } = draft;
@@ -216,6 +218,7 @@ export function RestockForm({ onSaved }: { onSaved?: (p: Purchase, context: Rest
                 </select>
               </div>
             )}
+            {pack && chosenUnitHint(pack.unit, l.product.unit) && <p className="hint" data-testid="unit-hint">{chosenUnitHint(pack.unit, l.product.unit)}</p>}
             <div className="rt-row">
               <div>
                 <label htmlFor={`cost-${i}`}>Cost each{pack ? ` (per ${pack.unit})` : ''}</label>
@@ -308,13 +311,44 @@ export function RestockSaved({ purchase, context, onNew }: { purchase: Purchase;
   );
 }
 
+/**
+ * A voided restock entered again (issue #351): the form opens with its lines, supplier, date and payment, in a draft of its own, and
+ * a line says which restock it replaces. Nothing is saved until the person saves it.
+ */
+function Again({ purchaseId, onSaved }: { purchaseId: string; onSaved: (p: Purchase, context: RestockContext) => void }) {
+  const { me } = useStaff();
+  const loaded = useQuery({
+    queryKey: ['retail', 'restock-again', purchaseId],
+    queryFn: async () => {
+      const purchase = await retail.getPurchase(purchaseId);
+      const products = await Promise.all((purchase.lines ?? []).map((l) => retail.getProduct(l.product_id ?? '')));
+      return { purchase, draft: redraftOf(purchase, products) };
+    },
+    gcTime: 0,
+  });
+  if (loaded.isPending) return <p className="loading">Loading</p>;
+  if (!loaded.data) return <Problem error={loaded.error} />;
+  return (
+    <>
+      <Note>
+        You are entering restock {loaded.data.purchase.purchase_no} again{loaded.data.purchase.status === 'voided' ? ', which you voided' : ''}. Check each quantity, unit and price, then save.
+      </Note>
+      <RestockForm draftName={`restock-again:${me.user_id ?? ''}:${purchaseId}`} initial={loaded.data.draft} onSaved={onSaved} />
+    </>
+  );
+}
+
 function Restock() {
   const [done, setDone] = useState<{ purchase: Purchase; context: RestockContext } | null>(null);
   const [round, setRound] = useState(0);
+  const again = (useSearch({ strict: false }) as { again?: string }).again;
   return (
     <Gate screen="restock" title="Restock">
+      <p><Link to="/staff/retail/restocks">Past restocks, to correct a mistake</Link></p>
       {done ? (
         <RestockSaved purchase={done.purchase} context={done.context} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
+      ) : typeof again === 'string' && again !== '' ? (
+        <Again purchaseId={again} onSaved={(purchase, context) => setDone({ purchase, context })} />
       ) : (
         <RestockForm key={round} onSaved={(purchase, context) => setDone({ purchase, context })} />
       )}

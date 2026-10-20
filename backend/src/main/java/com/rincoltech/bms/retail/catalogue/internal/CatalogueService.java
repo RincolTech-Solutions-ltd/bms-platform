@@ -651,6 +651,31 @@ class CatalogueService {
     }
 
     /**
+     * A voided restock (issue #351) gives back the prices it set while it is still the product's latest price event; see
+     * {@link RetailCatalogue#revertPurchasePrices}. The product is already locked by the caller.
+     */
+    boolean revertPurchasePrices(Product locked, UUID purchaseId, String reason) {
+        List<PriceChange> history = repo.history(locked.id());
+        List<PriceChange> mine = history.stream()
+                .filter(h -> "purchase".equals(h.source())
+                        && purchaseId.equals(h.sourceId())
+                        && h.oldCostMinor() != null
+                        && h.oldSellMinor() != null
+                        && (!h.oldCostMinor().equals(h.newCostMinor()) || h.oldSellMinor() != h.newSellMinor()))
+                .toList();
+        if (mine.isEmpty()) {
+            return false;
+        }
+        if (!history.getLast().id().equals(mine.getLast().id())) {
+            noteCostUnchanged(locked, purchaseId, reason + ". The prices were left as they are: they changed after the restock.");
+            return false;
+        }
+        PriceChange first = mine.getFirst();
+        changePrices(locked, first.oldCostMinor(), first.oldSellMinor(), "purchase", purchaseId, reason);
+        return true;
+    }
+
+    /**
      * A history row that changes nothing (the cost and the sell price are the same on both sides) to say why a landed cost or a
      * supplier credit left the cost alone (ADR-033, issue #199). The product row is not touched, so its version stays and a
      * person editing it meanwhile is not told it changed; there is no price audit row, as no price changed.

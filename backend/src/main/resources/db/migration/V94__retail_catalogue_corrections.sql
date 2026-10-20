@@ -43,3 +43,58 @@ CREATE INDEX retail_products_name_key ON retail_products (tenant_id, name_key);
 
 ALTER TABLE retail_products
     ADD COLUMN duplicate_reason varchar(300) CHECK (duplicate_reason IS NULL OR btrim(duplicate_reason) <> '');
+
+-- ---------------------------------------------------------------------------------------------
+-- 3. A restock voided (#351). retail_purchases is append-only, so a void is a row of its own, at most one per restock
+-- (the unique key is also the guard against two voids at once). The stock reversals are adjustment movements of source type
+-- retail.purchase_void and the journal reversals are the ledger's; this row says who, when, why. voided_on is the business
+-- date the cash book gives the cash back on.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE TABLE retail_purchase_voids (
+    id          uuid         NOT NULL PRIMARY KEY,
+    tenant_id   uuid         NOT NULL REFERENCES tenants (id),
+    created_at  timestamptz  NOT NULL DEFAULT now(),
+    purchase_id uuid         NOT NULL,
+    voided_on   date         NOT NULL,
+    reason      varchar(300) NOT NULL CHECK (btrim(reason) <> ''),
+    voided_by   uuid         NOT NULL,
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, purchase_id),
+    FOREIGN KEY (tenant_id, purchase_id) REFERENCES retail_purchases (tenant_id, id)
+);
+SELECT bms_apply_tenant_rls('retail_purchase_voids');
+SELECT bms_grant_app('retail_purchase_voids', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_purchase_voids');
+
+-- ---------------------------------------------------------------------------------------------
+-- 4. A quantity corrected on the stock list (#351). One row per correction, next to its adjustment movement (source type
+-- retail.stock_correction) and its journal entry: the old and the new quantity, why, who and when. Append-only, so the
+-- history of a product's stock shows every correction for good.
+-- ---------------------------------------------------------------------------------------------
+
+CREATE TABLE retail_stock_corrections (
+    id               uuid          NOT NULL PRIMARY KEY,
+    tenant_id        uuid          NOT NULL REFERENCES tenants (id),
+    created_at       timestamptz   NOT NULL DEFAULT now(),
+    branch_id        uuid          NOT NULL,
+    product_id       uuid          NOT NULL,
+    movement_id      uuid          NOT NULL,
+    old_qty          numeric(14,3) NOT NULL,
+    new_qty          numeric(14,3) NOT NULL CHECK (new_qty >= 0 AND new_qty <> old_qty),
+    reason_code      text          NOT NULL CHECK (reason_code IN ('entry_mistake', 'miscount')),
+    note             varchar(300),
+    unit_cost_minor  bigint        NOT NULL CHECK (unit_cost_minor >= 0),
+    journal_entry_id uuid,
+    created_by       uuid          NOT NULL,
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, movement_id),
+    FOREIGN KEY (tenant_id, branch_id) REFERENCES branches (tenant_id, id),
+    FOREIGN KEY (tenant_id, product_id) REFERENCES retail_products (tenant_id, id),
+    FOREIGN KEY (tenant_id, movement_id) REFERENCES retail_stock_movements (tenant_id, id),
+    FOREIGN KEY (tenant_id, journal_entry_id) REFERENCES journal_entries (tenant_id, id)
+);
+CREATE INDEX retail_stock_corrections_product ON retail_stock_corrections (tenant_id, product_id, branch_id, created_at);
+SELECT bms_apply_tenant_rls('retail_stock_corrections');
+SELECT bms_grant_app('retail_stock_corrections', 'SELECT, INSERT');
+SELECT bms_make_append_only('retail_stock_corrections');
