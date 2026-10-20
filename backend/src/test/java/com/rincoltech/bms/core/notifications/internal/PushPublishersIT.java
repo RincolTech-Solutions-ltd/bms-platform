@@ -69,7 +69,7 @@ class PushPublishersIT extends IntegrationTest {
         dave = Api.staff(t, Api.email("pub-dave"), new Role("tenant_admin", null));
         device(makerId);
         device(alice);
-        // Dave holds the permission but has no device, so he is never a recipient.
+        // Dave holds the permission but has no device, so he is never a recipient unless a test gives him one.
     }
 
     // ---- Helpers ---------------------------------------------------------------------------------
@@ -91,6 +91,25 @@ class PushPublishersIT extends IntegrationTest {
                         "A".repeat(87),
                         "A".repeat(22))
                 .update();
+    }
+
+    /**
+     * The person the retail routes act as (the {@code X-Dev-User-Id} of {@link RetailTestSupport}) made a real tenant admin
+     * with a device, so a test can prove the publisher leaves the actor out rather than finding nobody to leave out.
+     */
+    UUID retailActorWithADevice() {
+        UUID actor = retail.userId();
+        var owner = TestDatabase.owner();
+        owner.sql(
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', ?, ?, 'active')")
+                .params(actor, t.tenantId(), "Test Staff pub-actor", Api.email("pub-actor"))
+                .update();
+        owner.sql("""
+                        INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)
+                        VALUES (?, ?, ?, 'tenant_admin', NULL, ?)
+                        """).params(UUID.randomUUID(), t.tenantId(), actor, actor).update();
+        device(actor);
+        return actor;
     }
 
     long devices(UUID user) {
@@ -175,6 +194,7 @@ class PushPublishersIT extends IntegrationTest {
         patchOk(Map.of("approval_thresholds_minor", Map.of("retail_sale_write_off", 1_000)));
         // From nothing to a first amount is a raise from zero: it is told, so this first call already queued a row.
         List<String> first = told("core.approval_policy_weakened");
+        assertThat(first).isNotEmpty();
         patchOk(Map.of("approval_thresholds_minor", Map.of("retail_sale_write_off", 500)));
         assertThat(told("core.approval_policy_weakened")).hasSameSizeAs(first);
         patchOk(Map.of("approval_thresholds_minor", Map.of("retail_sale_write_off", 9_000)));
@@ -250,6 +270,9 @@ class PushPublishersIT extends IntegrationTest {
         UUID elsewhere = Api.staff(t, Api.email("pub-elsewhere"), new Role("tenant_admin", t.headOffice()));
         device(scoped);
         device(elsewhere);
+        device(dave);
+        // The dispatcher is a tenant admin with a device too: only the publisher's exclusion keeps them off the list.
+        UUID dispatcher = retailActorWithADevice();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("from_branch_id", t.headOffice());
         body.put("to_branch_id", t.secondBranch());
@@ -258,8 +281,8 @@ class PushPublishersIT extends IntegrationTest {
                 "/transfers", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
         List<String> told = told("retail.transfer_dispatched");
-        assertThat(told).contains("user:" + scoped, "user:" + alice, "user:" + makerId);
-        assertThat(told).doesNotContain("user:" + elsewhere, "user:" + dave);
+        assertThat(told).contains("user:" + scoped, "user:" + alice, "user:" + makerId, "user:" + dave);
+        assertThat(told).doesNotContain("user:" + dispatcher, "user:" + elsewhere);
     }
 
     Map<String, String> etagOfCapabilities() {
@@ -293,7 +316,7 @@ class PushPublishersIT extends IntegrationTest {
                 ref,
                 new PushNotice.Holders("retail.stock.transfer", t.secondBranch(), makerId),
                 Map.of("action_label", "Test action", "path", "/staff/approvals")));
-        assertThat(told("core.approval_waiting")).doesNotContain("user:" + scoped);
+        assertThat(told("core.approval_waiting")).contains("user:" + alice).doesNotContain("user:" + scoped);
     }
 
     // ---- Deactivation ------------------------------------------------------------------------------
