@@ -8510,7 +8510,6 @@ export interface components {
             /** Format: date */
             to?: string;
         };
-        /** @description The period of the same length that ends the day before the period starts */
         RetailControlsPeriod: {
             /** Format: date */
             from?: string;

@@ -7368,7 +7368,6 @@
         }
       },
       "RetailControlsPeriod" : {
-        "description" : "The period of the same length that ends the day before the period starts",
         "properties" : {
           "from" : {
             "format" : "date",
