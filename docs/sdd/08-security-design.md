@@ -341,10 +341,10 @@ Notes:
   branch-bound row the permission must cover that row's branch (`principal.may`, ADR-017), so a
   user with profit read at branch A only sees no cost on branch B's stock, movements, sales or
   valuation (review F5); tenant-wide products and price history need it in any branch. The sales
-  summary (`GET /retail/sales/summary`, issue #328) is a sum, so its `profit_minor` is offered only when the caller holds
+  summary (`GET /retail/sales/summary`, issues #328 and #341) is a sum at every level of its grouping chain (shop, year, month, salesperson, day, category, item), so its `profit_minor` is offered only when the caller holds
   `retail.profit.read` in every branch the figures cover (the requested branches within the `retail.sale.read` scope, or
   every branch when none were asked for and the scope is all of them) and is absent otherwise: a profit summed over some
-  branches whose profit the caller may not read would otherwise read as the whole. It needs no new permission.
+  branches whose profit the caller may not read would otherwise read as the whole; a caller who holds `retail.profit.read` at one branch only sees the profit of a level only after choosing that branch, and sees it at no level while the shop level lists the others. The salesperson level shows the name of the user who made each sale (from `users`, a deactivated user included) and ranks colleagues by what they sold, so it is management information: it is available only to a caller who holds `retail.profit.read` in every branch the figures cover (the permission the matrix already uses for the retail margins and analysis, and the rule of `profit_minor`), so a manager with profit read at branch A only can rank sellers at A (`branch_id=A`) and not at B or across both; any other caller gets 403 `permission_denied` for the `seller` level or the `seller_id` filter of the summary, `available_levels` leaves `seller` out, and the PWA hides it from Group by and from the default chain. The sales list is no way round it: its `seller_id` filter has the same rule (403), and a row or a sale carries `created_by` and `voided_by` only for a caller who holds `retail.profit.read` at that sale's branch, or when the id is the caller's own, else they are null, so a cashier cannot group the list by person and sum a colleague's takings. It needs no new permission.
   The sales role holds no `core.*` permission; the PWA reads the user's branches from `/me`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
@@ -459,6 +459,8 @@ reference and the link), so the form cannot relay someone's words from the platf
 operator's verification as the real gate, so nothing is provisioned for a stranger. The applicant link is 256 random bits, stored as SHA-256
 only, valid 7 days, replaced by every new email, carried in the URL fragment and sent in a request
 body, and compared digest to digest in constant time after the indexed lookup.
+
+`core.branches.manage` covers every branch change: create, rename, close, reopen and the stocking switch (FR-BR-01, FR-BR-07, FR-BR-08, issue #329, ADR-041). No permission was added for closing: only the tenant admin closes a branch, and the call is scoped to the caller's branches like the other branch routes (a branch outside the scope is 404). The retail refusal `branch_not_stocking` is not a permission: it applies to every caller, administrators included.
 
 ### 8.3.3 Enforcement
 

@@ -83,7 +83,9 @@ export const adminWelcome: Tour = {
   id: 'admin-welcome',
   // Version 5 adds the credit payment and void steps (issues #326, #327), so whoever finished version 4 sees them once.
   // Version 6 words the payment step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
-  version: 6,
+  // Version 7 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
+  // Version 8 adds the Branches step (issue #329): closing a branch and keeping its history.
+  version: 8,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -130,6 +132,15 @@ export const adminWelcome: Tour = {
       needs: ['core.users.manage'],
       title: 'Add your staff',
       body: 'Tap Invite someone. Type the name and the phone, pick a role like Sales person or Cashier, and send them the link. They only see what their role allows.',
+    },
+    {
+      id: 'branches',
+      route: '/staff/setup/branches',
+      target: 'branches-list',
+      needs: ['core.branches.read'],
+      optional: true,
+      title: 'Your branches',
+      body: 'Close a shop you no longer use. Its sales and stock records stay for your reports, and it leaves the branch lists. You can reopen it later.',
     },
     {
       id: 'modules',
@@ -189,6 +200,16 @@ export const adminWelcome: Tour = {
       body: 'Open Credit sales and pick Still owing to see every debt, or open the day of the sale. Then tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
     },
     {
+      id: 'sales-grouping',
+      route: '/staff/retail',
+      target: 'retail-salesHistory',
+      module: 'retail',
+      needs: ['retail.sale.read'],
+      optional: true,
+      title: 'Your sales, your way',
+      body: 'Open All sales. Tap Group by to choose the order: shop, year, month, salesperson, day, category and item. Tap a line to open it. Every line shows its total.',
+    },
+    {
       id: 'void-sale',
       route: '/staff/retail',
       target: 'retail-salesHistory',
@@ -235,7 +256,8 @@ export const retailSales: Tour = {
   id: 'retail-sales',
   // Version 3 adds the credit payment step (issue #326), so whoever finished version 2 sees it once.
   // Version 4 words that step for the grouped lists (issue #328): the sales sit under a day, or in Still owing.
-  version: 4,
+  // Version 5 adds the Group by step (issue #341): the sales lists open from the shop down to the items.
+  version: 5,
   title: 'Selling tour',
   audience: isSeller,
   autoStart: true,
@@ -290,6 +312,16 @@ export const retailSales: Tour = {
       optional: true,
       title: 'When a buyer pays what they owe',
       body: 'Open Credit sales and pick Still owing to see every debt, or open the day of the sale. Then tap Record payment. A part payment is fine. If they pay it all, tap Mark as fully paid.',
+    },
+    {
+      id: 'sales-grouping',
+      route: '/staff/retail',
+      target: 'retail-salesHistory',
+      module: 'retail',
+      needs: ['retail.sale.read'],
+      optional: true,
+      title: 'Your sales, your way',
+      body: 'Open All sales. Tap Group by to choose the order: shop, year, month, salesperson, day, category and item. Tap a line to open it. Every line shows its total.',
     },
     {
       id: 'stock',
@@ -418,37 +450,49 @@ export const stockPage: Tour = {
 };
 
 // JUSTIFICATION-A3: two page tours of the same shape as stockPage, one per grouped list (issue #328); no existing tour covers these pages.
-// The All sales and Credit sales lists grouped by year, month and day (issue #328).
+// The All sales and Credit sales lists grouped by a chain of levels (issues #328, #341).
 const salesGroupsStep: TourStep = {
   id: 'groups',
   target: 'sales-groups',
   module: 'retail',
-  title: 'Years, months and days',
-  body: 'Tap a line to open it. Each line shows what was sold, how many sales, and how they were paid. Profit shows if you may see it. Tap a day to see its sales one by one.',
+  title: 'Open a line',
+  body: 'Tap a line to open it. Each line shows what was sold, how many sales, and how they were paid. Profit shows if you may see it. The way you came shows above the list; tap a place in it to go back. Tap a day to see its sales one by one.',
+};
+
+const groupByStep: TourStep = {
+  id: 'group-by',
+  target: 'sales-group-by',
+  module: 'retail',
+  title: 'Group by',
+  body: 'Choose how the sales are grouped: shop, year, month, salesperson, day, category and item. Move a line up or down, or take it out. We remember your choice.',
 };
 
 export const salesPage: Tour = {
   id: 'page-sales',
-  version: 1,
+  // Version 2 adds the Group by step (issue #341).
+  version: 2,
   title: 'This page: all sales',
   audience: (me) => held(me, 'retail.sale.read'),
   autoStart: false,
   page: '/staff/retail/sales',
   steps: [
-    { id: 'range', target: 'sales-range', module: 'retail', title: 'Pick the days', body: 'Choose the first and the last day to look at. The sales under it are grouped by year, month and day.' },
+    { id: 'range', target: 'sales-range', module: 'retail', title: 'Pick the days', body: 'Choose the first and the last day to look at. The sales under it are grouped the way you choose below.' },
+    groupByStep,
     salesGroupsStep,
   ],
 };
 
 export const creditSalesPage: Tour = {
   id: 'page-credit-sales',
-  version: 1,
+  // Version 2 adds the Group by step (issue #341).
+  version: 2,
   title: 'This page: credit sales',
   audience: (me) => held(me, 'retail.sale.read'),
   autoStart: false,
   page: '/staff/retail/credit-sales',
   steps: [
     { id: 'owing', target: 'credit-owing', module: 'retail', title: 'Who still owes', body: 'Choose Still owing, Overdue or Paid to narrow the list.' },
+    groupByStep,
     salesGroupsStep,
   ],
 };
@@ -675,6 +719,30 @@ export const usersPage: Tour = {
       optional: true,
       title: 'Who has joined',
       body: 'Invited means the person has not opened their link yet. On their card you can send a new link, change their roles, or deactivate them when they leave.',
+    },
+  ],
+};
+
+// The Branches page (issue #329): a page tour for whoever may read branches; closing and reopening need the manage permission.
+export const branchesPage: Tour = {
+  id: 'page-branches',
+  version: 1,
+  title: 'This page: branches',
+  audience: (me) => held(me, 'core.branches.read'),
+  autoStart: false,
+  page: '/staff/setup/branches',
+  steps: [
+    {
+      id: 'intro',
+      target: 'branches-intro',
+      title: 'Closing a branch keeps its history',
+      body: 'A closed branch keeps its sales and stock records for your reports. It only leaves the branch lists and the sale, restock and move-stock screens.',
+    },
+    {
+      id: 'list',
+      target: 'branches-list',
+      title: 'Your branches',
+      body: 'Each card is a branch. Tap Close this branch for a shop you no longer use. Tap Mark as keeping no goods for a head office with no stock. Goods left there can still be moved out. Closed branches are hidden. Tick Show closed branches to see them, then tap Reopen to bring one back.',
     },
   ],
 };
@@ -1209,5 +1277,5 @@ export const TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, ...CUSTOMER_TOURS,
 ];

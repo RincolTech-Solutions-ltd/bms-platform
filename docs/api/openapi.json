@@ -670,6 +670,15 @@
       },
       "Branch" : {
         "properties" : {
+          "closed_at" : {
+            "description" : "when the branch was closed; null while it is open",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "closed_reason" : {
+            "description" : "why it was closed, when it had to be confirmed; null otherwise",
+            "type" : "string"
+          },
           "code" : {
             "type" : "string"
           },
@@ -691,7 +700,22 @@
             "type" : "string"
           },
           "status" : {
+            "description" : "active, or inactive for a closed branch (the owner's word is closed, ADR-041)",
             "type" : "string"
+          },
+          "stock_items" : {
+            "description" : "items still on the shelves of a closed branch; null for an open branch or when none",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "stock_value_minor" : {
+            "description" : "their value at current cost, in minor units; null for an open branch or when none",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "stocks_goods" : {
+            "description" : "false for a branch that keeps no goods, such as a head office (ADR-041)",
+            "type" : "boolean"
           },
           "updated_at" : {
             "format" : "date-time",
@@ -736,6 +760,16 @@
           },
           "theme_text" : {
             "description" : "#FFFFFF or #111111, the readable text colour on themePrimary; null with it",
+            "type" : "string"
+          }
+        }
+      },
+      "CloseBranchRequest" : {
+        "description" : "The reason is required only when the branch still holds stock or has transfers on their way (422 branch_close_needs_reason says which).",
+        "properties" : {
+          "reason" : {
+            "maxLength" : 500,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -4663,6 +4697,10 @@
           },
           "name" : {
             "type" : "string"
+          },
+          "stocks_goods" : {
+            "description" : "false for a branch that keeps no goods: sale, restock and transfer forms skip it (#329)",
+            "type" : "boolean"
           }
         }
       },
@@ -6282,6 +6320,11 @@
               "$ref" : "#/components/schemas/RetailStockBranch"
             },
             "type" : "array"
+          },
+          "closed_branches" : {
+            "description" : "How many closed branches in the caller's scope still hold stock and are left out unless include_closed is true",
+            "format" : "int32",
+            "type" : "integer"
           },
           "items" : {
             "items" : {
@@ -9248,6 +9291,10 @@
       "RetailLocationBranch" : {
         "description" : "A column of the report; ordered stores, shops, then both",
         "properties" : {
+          "closed" : {
+            "description" : "A closed branch that still holds stock; its history stays in this report (#329)",
+            "type" : "boolean"
+          },
           "code" : {
             "type" : "string"
           },
@@ -12122,15 +12169,24 @@
       },
       "RetailSalesSummary" : {
         "properties" : {
+          "available_levels" : {
+            "description" : "Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope",
+            "items" : {
+              "description" : "Every level group_by accepts from this caller; seller needs retail.profit.read in some branch in scope",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
           "currency" : {
             "description" : "The tenant's currency; a retail tenant keeps its books in one currency",
             "type" : "string"
           },
           "group_by" : {
+            "description" : "The level these groups are: one of available_levels",
             "type" : "string"
           },
           "has_more" : {
-            "description" : "True when older periods remain: ask again with to = next_to",
+            "description" : "True when more groups remain: next_to (year, month, day) or next_offset (the rest)",
             "type" : "boolean"
           },
           "items" : {
@@ -12139,8 +12195,25 @@
             },
             "type" : "array"
           },
+          "levels" : {
+            "description" : "The chain the request asked for, in order",
+            "items" : {
+              "description" : "The chain the request asked for, in order",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "next_level" : {
+            "description" : "The level under this one in the chain; absent at the end of the chain",
+            "type" : "string"
+          },
+          "next_offset" : {
+            "description" : "Branch, seller, category and item: ask again with offset = next_offset",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "next_to" : {
-            "description" : "The day before the oldest period shown",
+            "description" : "Year, month and day: the day before the oldest period shown; ask again with to = next_to",
             "format" : "date",
             "type" : "string"
           }
@@ -12152,12 +12225,20 @@
             "$ref" : "#/components/schemas/RetailSalesSummaryMethods"
           },
           "from" : {
-            "description" : "First calendar day of the period; not narrowed by the from filter of the request",
+            "description" : "First calendar day of the period; year, month and day only; not narrowed by the from filter",
             "format" : "date",
             "type" : "string"
           },
+          "key" : {
+            "description" : "What the group is: a branch id, a user id, a category id, a product id, or the period (2026, 2026-10 or 2026-10-19); pass it back as the matching filter of the next level",
+            "type" : "string"
+          },
+          "label" : {
+            "description" : "What to show: the branch, person, category or item name, or the period key",
+            "type" : "string"
+          },
           "period" : {
-            "description" : "2026, 2026-10 or 2026-10-19, by group_by",
+            "description" : "2026, 2026-10 or 2026-10-19; year, month and day only",
             "type" : "string"
           },
           "profit_minor" : {
@@ -12165,23 +12246,27 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "quantity" : {
+            "description" : "Units sold, in base units; item level only",
+            "type" : "string"
+          },
           "sales_count" : {
-            "description" : "Completed sales; voided sales are not counted",
+            "description" : "Completed sales; voided sales are not counted. Under a category or an item: the completed sales that have a line in it",
             "format" : "int64",
             "type" : "integer"
           },
           "to" : {
-            "description" : "Last calendar day of the period; not narrowed by the to filter of the request",
+            "description" : "Last calendar day of the period; year, month and day only; not narrowed by the to filter",
             "format" : "date",
             "type" : "string"
           },
           "total_minor" : {
-            "description" : "Total of the completed sales",
+            "description" : "Total of the completed sales. Under a category or an item: the total of its lines",
             "format" : "int64",
             "type" : "integer"
           },
           "voided_count" : {
-            "description" : "Voided sales in the period, kept out of every other figure",
+            "description" : "Voided sales in the group, kept out of every other figure",
             "format" : "int64",
             "type" : "integer"
           }
@@ -12537,6 +12622,10 @@
       },
       "RetailStockBranch" : {
         "properties" : {
+          "closed" : {
+            "description" : "A closed branch that still holds stock; shown only when include_closed is true",
+            "type" : "boolean"
+          },
           "code" : {
             "type" : "string"
           },
@@ -16521,6 +16610,10 @@
             "maxLength" : 200,
             "minLength" : 1,
             "type" : "string"
+          },
+          "stocks_goods" : {
+            "description" : "false marks a branch that keeps no goods (a head office): no sales, restocks, transfers or stock adjustments there (422 branch_not_stocking). Refused with branch_still_has_stock while goods or a transfer on its way remain.",
+            "type" : "boolean"
           }
         }
       },
@@ -17714,19 +17807,70 @@
             "description" : "OK"
           }
         },
-        "summary" : "Rename a branch or change its location (FR-BR-01)",
+        "summary" : "Rename a branch, change its location or mark it as not stocking (FR-BR-01, ADR-041)",
         "tags" : [ "branches" ]
       }
     },
-    "/api/v1/branches/{branch_id}/deactivate" : {
+    "/api/v1/branches/{branch_id}/close" : {
       "post" : {
-        "operationId" : "deactivateBranch",
+        "operationId" : "closeBranch",
         "parameters" : [ {
           "in" : "path",
           "name" : "branch_id",
           "required" : true,
           "schema" : {
             "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CloseBranchRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Close a branch and keep its history (FR-BR-01, ADR-041); 422 branch_close_needs_reason while stock or transfers on their way remain and no reason is sent",
+        "tags" : [ "branches" ]
+      }
+    },
+    "/api/v1/branches/{branch_id}/reopen" : {
+      "post" : {
+        "operationId" : "reopenBranch",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
             "type" : "string"
           }
         } ],
@@ -17742,7 +17886,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Deactivate a branch (FR-BR-01)",
+        "summary" : "Reopen a closed branch (FR-BR-01, ADR-041)",
         "tags" : [ "branches" ]
       }
     },
@@ -28767,6 +28911,22 @@
           }
         }, {
           "in" : "query",
+          "name" : "seller_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "category_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "newest_first",
           "required" : false,
           "schema" : {
@@ -28852,6 +29012,13 @@
           }
         }, {
           "in" : "query",
+          "name" : "level",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "branch_id",
           "required" : false,
           "schema" : {
@@ -28914,6 +29081,38 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "in" : "query",
+          "name" : "seller_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "category_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "item_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "offset",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -28927,7 +29126,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Sales grouped by year, month or day with a summary per group (issue #328)",
+        "summary" : "Sales grouped by a chain of levels with a summary per group (issues #328, #341)",
         "tags" : [ "retail-sales" ]
       }
     },
@@ -29561,6 +29760,14 @@
           }
         }, {
           "in" : "query",
+          "name" : "include_closed",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "query",
           "name" : "limit",
           "required" : false,
           "schema" : {
@@ -29587,7 +29794,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Every product with its balance in each branch the caller may read (#144)",
+        "summary" : "Every product with its balance in each open branch the caller may read (#144); closed branches only with include_closed (#329)",
         "tags" : [ "retail-stock" ]
       }
     },

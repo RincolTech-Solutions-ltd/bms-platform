@@ -150,7 +150,7 @@ class SalesService {
 
     /** FR-RET-04, FR-RET-05, FR-RET-11. */
     Sale record(SaleRequest r) {
-        UUID branch = branches.resolve("retail.sale.create", r.branchId());
+        UUID branch = branches.resolveStocking("retail.sale.create", r.branchId());
         // ADR-033: a store never sells; with branch_roles off every branch acts as both.
         roles.requireMaySell(branch);
         LocalDate today = clock.today(tenant.profile().timezone());
@@ -495,7 +495,7 @@ class SalesService {
     @Transactional(readOnly = true)
     Resolution resolve(ResolveRequest r) {
         capabilities.require(RetailCapabilities.PRICE_LISTS);
-        UUID branch = branches.resolve("retail.sale.create", r.branchId());
+        UUID branch = branches.resolveStocking("retail.sale.create", r.branchId());
         // The same refusal as the sale: a store never sells, so it is not priced either (ADR-033).
         roles.requireMaySell(branch);
         LocalDate today = clock.today(tenant.profile().timezone());
@@ -616,6 +616,8 @@ class SalesService {
             String buyer,
             String status,
             String owing,
+            UUID sellerId,
+            UUID categoryId,
             boolean newestFirst,
             Integer limit,
             String cursor) {
@@ -633,6 +635,14 @@ class SalesService {
         }
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter("retail.sale.read", branchIds);
+        if (sellerId != null && !SalesSummaryService.profitVisible(principal, filter)) {
+            // A person's takings are management information, as in the salesperson level of the summary.
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "Listing a salesperson's sales is for people who may read profit in every branch shown.");
+        }
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Instant afterCreated = null;
         UUID afterId = null;
@@ -665,6 +675,8 @@ class SalesService {
                 status,
                 owing,
                 today,
+                sellerId,
+                categoryId,
                 newestFirst,
                 afterCreated,
                 afterId,
@@ -972,7 +984,12 @@ class SalesService {
      * and the way each line was priced are left out (issue #195), so the capability off reads exactly as before.
      */
     Sale visible(Sale s) {
-        boolean hideCost = !CurrentPrincipal.require().may("retail.profit.read", s.branchId());
+        Principal principal = CurrentPrincipal.require();
+        boolean hideCost = !principal.may("retail.profit.read", s.branchId());
+        // Who made or voided a sale is shown to those who may read profit there, and to the person themselves.
+        UUID createdBy =
+                hideCost && !java.util.Objects.equals(principal.userId(), s.createdBy()) ? null : s.createdBy();
+        UUID voidedBy = hideCost && !java.util.Objects.equals(principal.userId(), s.voidedBy()) ? null : s.voidedBy();
         boolean hidePricing = !pricing.on();
         if (!hideCost && !hidePricing) {
             return s;
@@ -1017,9 +1034,9 @@ class SalesService {
                         .toList(),
                 s.historical(),
                 s.createdAt(),
-                s.createdBy(),
+                createdBy,
                 s.voidedAt(),
-                s.voidedBy(),
+                voidedBy,
                 s.voidReason(),
                 s.version());
     }

@@ -417,7 +417,10 @@ after values. Older logos stay in `documents` (rows are never deleted).
 
 (std) `code varchar(10) NOT NULL` (`CHECK (code ~ '^[A-Z0-9]{2,10}$')`),
 `name text NOT NULL`, `location text`, `is_head_office boolean NOT NULL DEFAULT false`,
-`status text NOT NULL` [`active`, `inactive`].
+`status text NOT NULL` [`active`, `inactive`; `inactive` is what the owner calls closed, ADR-041],
+`stocks_goods boolean NOT NULL DEFAULT true` (false: the branch keeps no goods and retail refuses sales, restocks, transfers and
+stock adjustments there), `closed_at timestamptz`, `closed_reason text` (set by closing, cleared by reopening; migration V61,
+issue #329).
 `UNIQUE (tenant_id, code)`; partial unique index
 `ON branches (tenant_id) WHERE is_head_office` (exactly one head office). FR-BR-01.
 
@@ -1792,6 +1795,8 @@ reading is tenant-bound by RLS and the tenant's own sales. A covering index (ten
 payment method, total and cost) would make the year query an index-only scan; it is a follow-up, not part of issue #328
 (it needs a migration number, which is not picked here). All figures are in the tenant's one currency (`tenant.profile().currency()`):
 a retail tenant keeps its books in one currency, so the sums do not group by it.
+
+The grouping chain (issue #341, no migration) adds five levels to that one endpoint. Shop and salesperson group `retail_sales` by `branch_id` and `created_by` and take the names from `branches` and `users` in the same statement (`created_by` has no foreign key, so a user row that is missing reads Unknown; a deactivated user keeps `full_name`). Product category and item group the sale lines: `retail_sale_lines` joined to `retail_sales` on `(tenant_id, sale_id)` (index `retail_sale_lines_by_sale` on `(tenant_id, sale_id)` including `line_total_minor` and `line_cost_minor`, so the money columns come without the heap; `qty` and `product_id` are not included, so the item level and a `product_id` filter over lines read the heap), and for a category to `retail_products` for `category_id`; the figures are the lines' `line_total_minor`, `line_total_minor - line_cost_minor` and `qty`, so a category or an item is summed over its own lines, and a sale with lines in two categories is counted once in each (its `sales_count` is a distinct count). The non-time levels are ordered by total with `OFFSET` and `LIMIT` (50 groups, 100 shops), a bound on the response and not on the work. A covering index for the line levels, like the one named above for the year query, is a follow-up that needs a migration number, which is not picked here.
 
 The trigger `retail_sales_guard_update` (V14, review F10) lets an UPDATE change only `paid_minor`
 (upwards), the void columns (once, `completed` to `voided`), `updated_at`, `version` and the two

@@ -17,7 +17,7 @@ export type Pack = S['RetailPack'];
 export type StockRow = S['RetailStockRow'];
 export type AllBranchesRow = S['RetailAllBranchesRow'];
 export type StockBranch = S['RetailStockBranch'];
-export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[] };
+export type AllBranchesStock = { branches: StockBranch[]; items: AllBranchesRow[]; closed_branches?: number };
 export type BranchRole = S['RetailBranchRole'];
 export type RetailCapabilities = S['RetailCapabilities'];
 export type CapabilityChange = S['UpdateRetailCapabilitiesRequest'];
@@ -230,6 +230,10 @@ export interface SalesQuery {
   buyer?: string;
   paymentMethod?: SalePayment;
   productId?: string;
+  /** Sales made by this user (the chain's salesperson, issue #341). */
+  sellerId?: string;
+  /** Sales with a line in this product category. */
+  categoryId?: string;
   status?: 'completed' | 'voided';
   /** Credit sales only: still owing, overdue, or fully paid. Filtered on the server, across every page. */
   owing?: 'owing' | 'overdue' | 'paid';
@@ -237,22 +241,35 @@ export interface SalesQuery {
 }
 
 /** The query string of a sales list: newest first, 50 a page, empty filters left out. */
-export function salesParams({ branchId, from, to, buyer, paymentMethod, productId, status, owing, cursor }: SalesQuery) {
+export function salesParams({ branchId, from, to, buyer, paymentMethod, productId, sellerId, categoryId, status, owing, cursor }: SalesQuery) {
   return {
     branch_id: branchId ? [branchId] : undefined, from: from || undefined, to: to || undefined, buyer: buyer || undefined,
-    payment_method: paymentMethod, product_id: productId || undefined, status, owing, newest_first: true, limit: 50, cursor,
+    payment_method: paymentMethod, product_id: productId || undefined, seller_id: sellerId || undefined, category_id: categoryId || undefined,
+    status, owing, newest_first: true, limit: 50, cursor,
   };
 }
 
+/** The levels a sales summary can group by (issue #341). */
+export type SummaryLevel = 'branch' | 'year' | 'month' | 'seller' | 'day' | 'category' | 'item';
+
 export interface SalesSummaryQuery extends Omit<SalesQuery, 'cursor' | 'status'> {
-  level: 'year' | 'month' | 'day';
+  /** The level whose groups are asked for. */
+  level: SummaryLevel;
+  /** The whole chain, in order, so the answer can say which level comes next; absent means the level alone. */
+  chain?: SummaryLevel[];
+  /** Item chosen above (the item's own lines, not every sale holding it). */
+  itemId?: string;
+  /** The rest of a level that was cut off at its bound (every level but year, month and day). */
+  offset?: number;
 }
 
-/** The query string of a sales summary: the list's filters (no status, no paging) and the level. */
-export function salesSummaryParams({ level, branchId, from, to, buyer, paymentMethod, productId, owing }: SalesSummaryQuery) {
+/** The query string of a sales summary: the list's filters (no status, no paging), the chain and the level. */
+export function salesSummaryParams({ level, chain, branchId, from, to, buyer, paymentMethod, productId, sellerId, categoryId, itemId, offset, owing }: SalesSummaryQuery) {
   return {
-    group_by: level, branch_id: branchId ? [branchId] : undefined, from: from || undefined, to: to || undefined, buyer: buyer || undefined,
+    group_by: (chain ?? [level]).join(','), level: chain ? level : undefined,
+    branch_id: branchId ? [branchId] : undefined, from: from || undefined, to: to || undefined, buyer: buyer || undefined,
     payment_method: paymentMethod, product_id: productId || undefined, owing,
+    seller_id: sellerId || undefined, category_id: categoryId || undefined, item_id: itemId || undefined, offset: offset || undefined,
   };
 }
 
@@ -299,7 +316,7 @@ export interface RetailApi {
   listStock(q: { branchId: string; query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<StockRow[]>;
   /** One page of sales, newest first, narrowed by the filters (#145). */
   listSales(q: SalesQuery): Promise<SalePage>;
-  /** Groups of sales by year, month or day with the totals of each, newest first; `next_to` continues into older periods (#328). */
+  /** Groups of sales at one level of a chain (shop, year, month, salesperson, day, category, item) with the totals of each; `next_to` (time levels) or `next_offset` (the rest) continues (#328, #341). */
   salesSummary(q: SalesSummaryQuery): Promise<SalesSummary>;
   getSale(id: string): Promise<Sale>;
   /** A payment, partial allowed, against a credit sale (retail.sale.create at the branch); takes the Idempotency-Key of its form. */
@@ -428,7 +445,7 @@ export interface RetailApi {
   createStocktake(body: StocktakeRequest): Promise<Stocktake>;
   commitStocktake(id: string): Promise<Stocktake>;
   /** Every product with its balance in each branch the caller may read (#144). */
-  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; signal?: AbortSignal }): Promise<AllBranchesStock>;
+  listStockAllBranches(q: { query?: string; categoryId?: string; negativeOnly?: boolean; level?: StockLevel; includeClosed?: boolean; signal?: AbortSignal }): Promise<AllBranchesStock>;
   /** One branch, or every branch in the caller's scope when `branchId` is absent (#144). */
   valuation(q: { branchId?: string; asOf?: string }): Promise<Valuation>;
   /** The branches in the caller's stock scope holding a quantity above zero of anything (#103). */
@@ -639,22 +656,24 @@ const realRetail: RetailApi = {
     return rows;
   },
 
-  async listStockAllBranches({ query, categoryId, negativeOnly, level, signal }) {
+  async listStockAllBranches({ query, categoryId, negativeOnly, level, includeClosed, signal }) {
     const items: AllBranchesRow[] = [];
     let branches: StockBranch[] = [];
+    let closedBranches = 0;
     let cursor: string | undefined;
     do {
       const page = unwrap(
         await api.GET('/api/v1/retail/stock/all-branches', {
-          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, limit: PAGE, cursor } },
+          params: { query: { query: query || undefined, category_id: categoryId || undefined, negative_only: negativeOnly || undefined, stock_level: level, include_closed: includeClosed || undefined, limit: PAGE, cursor } },
           signal,
         }),
       );
       branches = page.branches ?? branches;
+      closedBranches = page.closed_branches ?? closedBranches;
       items.push(...(page.items ?? []));
       cursor = page.next_cursor;
     } while (cursor);
-    return { branches, items };
+    return { branches, items, closed_branches: closedBranches };
   },
 
   async listSales(q) {

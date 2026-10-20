@@ -54,6 +54,11 @@ const staffSetupRoute = createRoute({ getParentRoute: () => staffRoute, path: '/
   import('../areas/staff/setup').then((m) => m.Route),
 );
 
+// Branches: close or reopen one, mark a head office as keeping no goods (issue #329). Under Business set-up in the trail.
+const staffBranchesRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/branches', staticData: { crumb: 'Branches' } }).lazy(() =>
+  import('../areas/staff/branches/page').then((m) => m.Route),
+);
+
 const staffRetailRoute = createRoute({ getParentRoute: () => staffRoute, path: '/retail', component: Outlet, staticData: { crumb: 'Retail' } });
 
 const retailScreen = <P extends string>(path: P, crumb?: string) => createRoute({ getParentRoute: () => staffRetailRoute, path, staticData: { crumb } });
@@ -250,7 +255,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
