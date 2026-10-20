@@ -415,6 +415,14 @@ The administrator's two screens for the trade capabilities, and the rule every c
   capability on, after the first-run tour; a dismissal is for good and a new version shows once more. The Retail
   settings page has a page tour in Help. Built: the branch roles tour.
 
+## Credit sales: when they count (#340, ADR-043)
+
+- **Retail settings** gains one question under the features: "When does a credit sale count as income and profit?", two plain choices (When the sale is made, today's way and the default; When the buyer pays). A different choice is read back in words and confirmed before it is saved; the server audits it. The rule is one way: it starts the next day, a pending change can be cancelled by choosing the first answer, and once it has started the first choice is off and the page says "This rule cannot be switched off once it has started. Ask Rincol support." The page tour has a step for it (page tour version 3).
+- **Payment date.** On a credit sale the server marks `counted_when_paid` (the later of its date and the day it was entered is on or after the first day of the rule); only then is the payment form's date fixed to today, and the date sent is always today, whatever a stored draft holds. A payment on account is dated today in the same way when any open sale it would pay is marked. A sale entered and dated before the start keeps a free date.
+- **Profit and home figures** read the when-paid way once the rule has started and a report holds a day from the start on or a credit sale counted when the buyer pays; a report of earlier days keeps the plain layout, exactly as before. Received is the money recorded as collected on the day it was entered, by any method: sales paid at the sale and every payment recorded on a credit sale, old ones and imported ones included (not a claim that it equals the drawer). The credit profit tile leaves imported credit sales out. The report table has a Received column beside "Counted for profit", and a tile "Net credit profit counted at the sale" (from credit made before the rule started, after returns; in the profit, not taken off Received) when there is one. They say when the rule starts in one line (`credit_recognition_starts_on`).
+- **Home cards** under "When the buyer pays": Sales today (everything sold, credit included, with the count), Money collected (money recorded as collected today by any method, less money paid back, payments on earlier and imported credit sales included), On credit (what buyers still owe and how many sales, with a hint that it is not profit) and Profit today (from the money received). The 7 and 30 day tiles keep Sold and add Received. With the default the cards are exactly as before.
+- **Daily profit** under "When the buyer pays": Received (the cash) and "Counted for profit" are two columns, Sold is a column and a headline figure beside them, On credit now is a headline figure, and the profit line says it is from money received when nothing was counted at the sale. The savings screens read the same profit.
+
 ## Trade screens (#193, ADR-033)
 
 Two screens and a changed one, all behind a tenant capability that `/me` lists as `module_capabilities.retail`;
@@ -730,6 +738,12 @@ again under the sale's lock; the screens only save a round trip and say each ref
   `VITE_RETAIL_MOCK` and the tests. Tests: `sale-actions-state.test.ts` (the rules), `sale-actions.dom.test.tsx` (who sees what, validation, double submit,
   retry with the same key, error words, a moved-on balance, key reuse), `sales-wiring.dom.test.tsx` (the lists and the opened sale on the mock show the buttons and a payment refreshes the list), `screens.test.tsx` and `analytics.test.tsx` (Price and Cost order and words).
 
+## Write off a debt (#340, ADR-043)
+
+- **Write off** on an opened credit sale that still owes (`retail.credit.write_off` at the sale's branch; not on an imported, voided, paid or already written off sale). The form asks why the buyer will not pay (at least five characters), says in plain words that the amount is treated as lost, that the sale stays on record and reads Written off, that it leaves the owing and overdue lists and that it cannot be undone, and has one button, Write off, and one way back, Keep the debt. The answer is "Sent to a second administrator to approve" when the business has a limit and the debt reaches it, or, with no limit set, whenever two or more administrators count; a business with one administrator writes off at once, and the screen says it was done without a second person. The Idempotency-Key is kept with the draft like the payment form's.
+- The opened sale reads Written off with the day, the amount and the reason; a written off sale offers no payment, void or return. The customer statement lists the write-off as a credit. Daily profit shows a Debts written off column once there is one.
+- Tests: `write-off.dom.test.tsx`, `sale-actions-state` helpers; the mock answers with the server's rules.
+
 ## Branches: close, reopen and keeps-no-goods (#329, ADR-041)
 
 - **Screen.** `/staff/setup/branches` (crumbs Home, Business set-up, Branches; a link in Business set-up for whoever holds `core.branches.read`). One card per
@@ -787,6 +801,20 @@ shows an action only to someone who may take it; the server decides again.
 - **Mock.** `api/retail-mock.ts` implements `similarProducts`, the duplicate refusal (`sameNameCheck`), `listPurchases`, `getPurchase`,
   `voidPurchase`, `correctStock` and `stockHistory` in memory, with the server's codes and words.
 - **Tests.** `catalogue-names.dom.test.tsx`, `restocks.dom.test.tsx`, `stock-correct.dom.test.tsx`, `tour/*`.
+
+## Inactive items (#342, ADR-045)
+
+An item that is no longer sold is switched off, never deleted.
+
+- **Items screen.** The edit form of an item shows an Inactive tick to a holder of `retail.catalogue.manage` (the server decides again), with a hint that it
+  is never deleted and that its history and reports stay. While it is ticked and any branch you can see still holds a quantity (`stock_branches`, `stock_on_hand` of `GET /retail/products/{id}`), a plain warning
+  says "This item still has stock in the branches you can see ..." (`inactiveWarning`). The stock-take count sheet keeps an inactive item that holds stock (`countableStock`). The list badge and the
+  filter say Inactive.
+- **Pickers and lists.** The sale, restock, usage and transfer pickers already ask for active items only. The Stock page has a Show inactive items tick
+  (`include_inactive`, off by default) on the one branch and the All branches view; with it off an inactive item is not listed even while it holds stock.
+- **Refusals.** Through the API a sale, restock, purchase order line or transfer of an inactive item is 422 `product_inactive` in plain words.
+- **Tour.** `page-catalogue` is version 2 with an Items you stopped selling step.
+- **Tests.** `catalogue.test.tsx` (the warning, the lists), `RetailProductInactiveIT` (backend, CI only).
 
 ## Left to do
 
