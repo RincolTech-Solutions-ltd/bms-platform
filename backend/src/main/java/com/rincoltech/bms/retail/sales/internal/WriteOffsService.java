@@ -2,14 +2,19 @@ package com.rincoltech.bms.retail.sales.internal;
 
 import com.rincoltech.bms.core.approvals.Approvals;
 import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOff;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffOutcome;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffRequest;
+import com.rincoltech.bms.retail.sales.internal.WriteOffsRepository.Admin;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
 import java.util.List;
 import java.util.Map;
@@ -28,18 +33,30 @@ class WriteOffsService {
 
     static final String PATH = "/api/v1/retail/sales/";
 
+    /** How long an administrator who left, or was removed, still counts for the second-person rule (ADR-043). */
+    static final java.time.Duration ADMIN_MEMORY = java.time.Duration.ofDays(30);
+
     private final WriteOffsServicer servicer;
     private final Idempotency idempotency;
     private final Approvals approvals;
     private final TenantSettings settings;
     private final WriteOffsRepository repo;
+    private final Outbox outbox;
+    private final CurrentTenant tenant;
+    private final BusinessClock clock;
 
     WriteOffsService(
             WriteOffsServicer servicer,
             Idempotency idempotency,
             Approvals approvals,
             TenantSettings settings,
-            WriteOffsRepository repo) {
+            WriteOffsRepository repo,
+            Outbox outbox,
+            CurrentTenant tenant,
+            BusinessClock clock) {
+        this.outbox = outbox;
+        this.tenant = tenant;
+        this.clock = clock;
         this.repo = repo;
         this.servicer = servicer;
         this.idempotency = idempotency;
@@ -68,15 +85,15 @@ class WriteOffsService {
         // says so. A
         // positive threshold, set in the business settings, replaces the default: only a debt at or above it needs a
         // second person.
+        List<Admin> admins = List.of();
         boolean onlyAdministrator = false;
         boolean ask;
         if (threshold > 0) {
             ask = plan.unpaidMinor() >= threshold;
-        } else if (repo.activeAdmins() >= 2) {
-            ask = true;
         } else {
-            ask = false;
-            onlyAdministrator = true;
+            admins = repo.recentAdmins(clock.now().minus(ADMIN_MEMORY));
+            ask = admins.size() >= 2;
+            onlyAdministrator = !ask;
         }
         if (ask) {
             Approvals.Outcome o = approvals.request(new ActionRequest(
@@ -89,9 +106,28 @@ class WriteOffsService {
                     Map.of(SaleWriteOffAction.REASON, r.reason().trim())));
             return new WriteOffOutcome(false, o.approvalId(), null);
         }
-        return new WriteOffOutcome(
-                true,
+        WriteOff written = servicer.record(
+                plan,
+                r.reason(),
+                CurrentPrincipal.require().userId(),
                 null,
-                servicer.record(plan, r.reason(), CurrentPrincipal.require().userId(), null, null, onlyAdministrator));
+                null,
+                onlyAdministrator ? Integer.valueOf(admins.size()) : null);
+        if (onlyAdministrator) {
+            // Done alone: every administrator of the last 30 days is told by email, and the audit row says how many
+            // (ADR-043).
+            String business = tenant.profile().name();
+            for (Admin a : admins) {
+                if (a.email() != null) {
+                    outbox.enqueue(new Outbox.Message(
+                            Outbox.EMAIL,
+                            a.email(),
+                            "retail.write_off_alone",
+                            Map.of("business_name", business),
+                            "retail.write_off_alone:" + written.id() + ":" + a.userId()));
+                }
+            }
+        }
+        return new WriteOffOutcome(true, null, written);
     }
 }

@@ -19,6 +19,11 @@
 -- and not a scan. CREATE INDEX (not CONCURRENTLY, which Flyway cannot run inside this transaction) takes a SHARE lock on
 -- retail_sale_payments while it builds: reads go on, payments wait for the build, which on a table of this size is short. The chart
 -- seed comes first and touches only gl_accounts.
+--
+-- The first statement below sets lock_timeout to five seconds (as V26, V48, V49 and V59 do): if a lock cannot be had at once the
+-- migration fails and is retried, rather than every writer on the table queueing behind it. SET LOCAL lasts to the commit.
+
+SET LOCAL lock_timeout = '5s';
 
 CREATE OR REPLACE FUNCTION bms_seed_retail_chart(p_tenant_id uuid) RETURNS integer
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$

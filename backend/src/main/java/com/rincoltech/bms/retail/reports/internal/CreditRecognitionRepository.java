@@ -35,7 +35,10 @@ class CreditRecognitionRepository {
      * payment dated last Monday and entered on Wednesday is Wednesday's money and no day already reported is ever rewritten. It
      * belongs to the branch that took it: the receiving branch of a payment on account, else the sale's. A reversal sits on the
      * day it was reversed, at the receiving branch; a return on its own day, at the branch the refund left from when money was
-     * paid out (that till lost the cash, so it takes back the profit), else at the sale's branch; a voided return drops out.
+     * paid out (that till lost the cash, so it takes back the profit); a return credited to the buyer's balance (no cash out) is
+     * spread by {@link CreditRecognition#deltas} over the branches that took the sale's payments. A voided return drops out.
+     * One row per event, in the order they were entered within a day (the moment, then the id), never in the order of branch ids,
+     * so the figures of a till or a shop do not depend on random ids.
      * The sales to read are picked first, from the payments of the window (a range of moments on an indexed column) and the
      * reversals and returns of its days, then only their events up to the end of the window are read.
      */
@@ -63,6 +66,7 @@ class CreditRecognitionRepository {
                         + " WHERE r.status = 'completed' AND r.returned_on BETWEEN :from AND :to"
                         + "), e AS ("
                         + " SELECT p.sale_id, " + paidDay + " AS d, coalesce(ap.branch_id, s1.branch_id) AS br,"
+                        + " p.created_at AS ev_at, p.id AS eid,"
                         + " p.amount_minor AS pay, CAST(0 AS bigint) AS rv, CAST(0 AS bigint) AS rc, CAST(0 AS bigint) AS rf"
                         + " FROM retail_sale_payments p"
                         + " JOIN retail_sales s1 ON s1.tenant_id = p.tenant_id AND s1.id = p.sale_id"
@@ -70,24 +74,24 @@ class CreditRecognitionRepository {
                         + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
                         + " WHERE p.sale_id IN (SELECT sale_id FROM active) AND p.created_at < :toTs"
                         + " UNION ALL"
-                        + " SELECT al.sale_id, ap.reversed_on, ap.branch_id, -al.amount_minor, CAST(0 AS bigint), CAST(0 AS bigint),"
-                        + " CAST(0 AS bigint)"
+                        + " SELECT al.sale_id, ap.reversed_on, ap.branch_id, ap.reversed_at, al.id,"
+                        + " -al.amount_minor, CAST(0 AS bigint), CAST(0 AS bigint), CAST(0 AS bigint)"
                         + " FROM retail_account_payments ap"
                         + " JOIN retail_account_payment_allocations al ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id"
                         + " WHERE ap.status = 'reversed' AND al.sale_id IN (SELECT sale_id FROM active) AND ap.reversed_on <= :to"
                         + " UNION ALL"
                         + " SELECT r.sale_id, r.returned_on, CASE WHEN r.refund_minor > 0 THEN r.refund_branch_id ELSE r.branch_id END,"
+                        + " r.created_at, r.id,"
                         + " CAST(0 AS bigint), r.total_minor, r.cost_minor, r.refund_minor"
                         + " FROM retail_sale_returns r"
                         + " WHERE r.status = 'completed' AND r.sale_id IN (SELECT sale_id FROM active) AND r.returned_on <= :to"
                         + ")"
                         + " SELECT s.id AS sale_id, e.br AS branch_id, s.total_minor, s.cost_total_minor, e.d,"
-                        + " sum(e.pay) AS pay, sum(e.rv) AS rv, sum(e.rc) AS rc, sum(e.rf) AS rf"
+                        + " e.pay AS pay, e.rv AS rv, e.rc AS rc, e.rf AS rf"
                         + " FROM e JOIN retail_sales s ON s.id = e.sale_id"
                         + " WHERE s.payment_method = 'credit' AND s.status = 'completed' AND NOT s.historical AND "
                         + inPeriod
-                        + " GROUP BY s.id, e.br, s.total_minor, s.cost_total_minor, e.d"
-                        + " ORDER BY s.id, e.d, e.br")
+                        + " ORDER BY s.id, e.d, e.ev_at, e.eid")
                 .params(params)
                 .query((rs, n) -> new CreditRecognition.Event(
                         rs.getObject("sale_id", UUID.class),

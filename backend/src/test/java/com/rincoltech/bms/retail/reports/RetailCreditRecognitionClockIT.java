@@ -71,9 +71,7 @@ class RetailCreditRecognitionClockIT extends IntegrationTest {
                 .as("the day after the business day, not after the UTC day")
                 .isEqualTo("2026-10-09");
         TestDatabase.owner()
-                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(settings,"
-                        + " '{module_groups,retail,credit_recognition_changes}',"
-                        + " '[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"}]'::jsonb),"
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(settings,"
                         + " '{module_groups,retail,credit_recognition_effective_from}', '\"1970-01-01\"'::jsonb)"
                         + " WHERE tenant_id = ?")
                 .param(t.tenantId())
@@ -110,5 +108,36 @@ class RetailCreditRecognitionClockIT extends IntegrationTest {
                         .single())
                 .as("entered at the business clock's moment, not the database's")
                 .startsWith("2026-10-07 22:30:00");
+    }
+
+    @Test
+    void theDayTheRuleStartsIsStoredAsADateSoChangingTheTimeZoneDoesNotMoveIt() {
+        TestDatabase.Fixture t = TestDatabase.tenant("retail-crz", false, true);
+        RetailTestSupport api = new RetailTestSupport(http, t);
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> on = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("credit_sale_recognition", "on_payment"),
+                "core.settings.manage",
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(on.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(on.getBody().get("credit_recognition_effective_from").asString())
+                .isEqualTo("2026-10-09");
+
+        // The business later moves to a zone where this instant is still the evening of the 7th.
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET timezone = 'America/Los_Angeles' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+        assertThat(api.get("/settings/capabilities", "core.settings.manage")
+                        .getBody()
+                        .get("credit_recognition_effective_from")
+                        .asString())
+                .as("one stored date: no instant is re-read in another zone")
+                .isEqualTo("2026-10-09");
     }
 }

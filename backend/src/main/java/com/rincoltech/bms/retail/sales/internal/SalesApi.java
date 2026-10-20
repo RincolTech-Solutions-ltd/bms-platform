@@ -189,7 +189,13 @@ final class SalesApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(description = "Present when the unpaid part of this credit sale was written off (ADR-043)")
-            WriteOffInfo writeOff) {}
+            WriteOffInfo writeOff,
+
+            @Schema(
+                    description =
+                            "True for a credit sale counted when the buyer pays (its date is on or after the first day of the rule"
+                                    + " on_payment, ADR-043): its payments are dated the day they are entered")
+            boolean countedWhenPaid) {}
 
     @Schema(name = "RetailSaleWriteOffInfo", description = "A credit sale whose unpaid part was written off as a loss")
     record WriteOffInfo(LocalDate writtenOffOn, long unpaidMinor, String reason) {}

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RetailError, retail, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { CREDIT_WRITE_OFF, SALE_VOID, capabilityOn, holdsAt } from './permissions';
+import { CREDIT_WRITE_OFF, SALE_VOID, holdsAt } from './permissions';
 import {
   IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, paidWords, payFailureWords, payProblem,
   saleMovedOn, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
@@ -98,7 +98,7 @@ function PayPanel({ sale, today, full, onDone }: { sale: Sale; today: string; fu
       today={today}
       form={draft}
       full={full}
-      todayOnly={capabilityOn(me, 'retail', 'credit_on_payment')}
+      todayOnly={sale.counted_when_paid === true}
       busy={send.isPending}
       error={payFailureWords(send.error, full)}
       onChange={setDraft}

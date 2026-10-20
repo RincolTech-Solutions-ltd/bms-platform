@@ -95,49 +95,41 @@ class RetailCapabilityGroupTest {
     }
 
     @Test
-    void aChangeOfTheCreditRuleRecordsTheDayItCountsFromAndKeepsEveryEarlierChange() {
+    void switchingOnRecordsTheDayItCountsFromAndReadingAgainChangesNothing() {
         Map<String, Object> on = group.normalise(
                 Map.of(),
                 Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "2026-10-20"));
-        assertThat(on.get("credit_recognition_changes"))
-                .isEqualTo(java.util.List.of(Map.of("from", "2026-10-20", "mode", "on_payment")));
         assertThat(on.get("credit_recognition_effective_from")).isEqualTo("2026-10-20");
+        assertThat(on).doesNotContainKey("credit_recognition_changes");
         assertThat(group.enabledCapabilities(on)).contains("credit_on_payment");
-
-        Map<String, Object> back = group.normalise(
-                on, Map.of("credit_sale_recognition", "on_sale", "credit_recognition_effective_from", "2026-11-02"));
-        assertThat(back.get("credit_recognition_changes"))
-                .isEqualTo(java.util.List.of(
-                        Map.of("from", "2026-10-20", "mode", "on_payment"),
-                        Map.of("from", "2026-11-02", "mode", "on_sale")));
-        assertThat(back.get("credit_recognition_effective_from")).isEqualTo("2026-11-02");
-        assertThat(group.enabledCapabilities(back)).doesNotContain("credit_on_payment");
-        // Reading it again changes nothing, and a profile change leaves the history alone.
-        assertThat(group.normalise(back, Map.of())).isEqualTo(back);
-        assertThat(group.normalise(back, Map.of("profile", "trade")).get("credit_recognition_changes"))
-                .isEqualTo(back.get("credit_recognition_changes"));
+        // Reading it again changes nothing, and a profile or flag change leaves the day alone.
+        assertThat(group.normalise(on, Map.of())).isEqualTo(on);
+        assertThat(group.normalise(on, Map.of("profile", "trade")).get("credit_recognition_effective_from"))
+                .isEqualTo("2026-10-20");
+        // Asking for on_payment again while it is on does not move the day.
+        assertThat(group.normalise(on, Map.of("credit_sale_recognition", "on_payment"))
+                        .get("credit_recognition_effective_from"))
+                .isEqualTo("2026-10-20");
     }
 
     @Test
-    void aChangeBackOnTheSameDayLeavesNoTraceAndTheLastWordWins() {
+    void cancellingBeforeTheDayHasComeClearsItAndNothingElseGoesBack() {
         Map<String, Object> on = group.normalise(
                 Map.of(),
                 Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "2026-10-20"));
-        Map<String, Object> back = group.normalise(
-                on, Map.of("credit_sale_recognition", "on_sale", "credit_recognition_effective_from", "2026-10-20"));
+        Map<String, Object> back = group.normalise(on, Map.of("credit_sale_recognition", "on_sale"));
         assertThat(back.get("credit_sale_recognition")).isEqualTo("on_sale");
-        assertThat((java.util.List<?>) back.get("credit_recognition_changes")).isEmpty();
         assertThat(back).doesNotContainKey("credit_recognition_effective_from");
+        assertThat(group.enabledCapabilities(back)).doesNotContain("credit_on_payment");
     }
 
     @Test
-    void theEffectiveDateMustBeADateAndAChangeWithoutOneCountsFromTheBeginning() {
+    void theEffectiveDateMustBeADateAndASwitchWithoutOneCountsFromTheBeginning() {
         assertThatThrownBy(() -> group.normalise(
                         Map.of(),
                         Map.of("credit_sale_recognition", "on_payment", "credit_recognition_effective_from", "soon")))
                 .isInstanceOf(ApiException.class);
         Map<String, Object> g = group.normalise(Map.of(), Map.of("credit_sale_recognition", "on_payment"));
-        assertThat(g.get("credit_recognition_changes"))
-                .isEqualTo(java.util.List.of(Map.of("from", "1970-01-01", "mode", "on_payment")));
+        assertThat(g.get("credit_recognition_effective_from")).isEqualTo("1970-01-01");
     }
 }

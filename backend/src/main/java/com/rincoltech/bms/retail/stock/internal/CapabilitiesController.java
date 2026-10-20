@@ -3,6 +3,7 @@ package com.rincoltech.bms.retail.stock.internal;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.kernel.Versions;
@@ -127,11 +128,23 @@ class CapabilitiesController {
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
-        if (r.creditSaleRecognition() != null && !r.creditSaleRecognition().equals(capabilities.creditRecognition())) {
-            // A change of the rule counts from the NEXT business day: the sales and savings of today are already made,
-            // and credit
-            // sales dated earlier keep counting the way they did (ADR-043). Asked for again the same day, it replaces
-            // the pending one.
+        String asked = r.creditSaleRecognition();
+        String now = capabilities.creditRecognition();
+        if (asked != null && asked.equals(RetailCapabilities.ON_SALE) && now.equals(RetailCapabilities.ON_PAYMENT)) {
+            // One way (ADR-043): "when the buyer pays" is switched on once. Only a change that has not taken effect yet
+            // can be
+            // cancelled, and that is the same day it was asked for; after that the operator reverts it (runbook).
+            LocalDate starts = capabilities.creditRecognitionEffectiveFrom();
+            if (starts == null || !starts.isAfter(clock.today(tenant.profile().timezone()))) {
+                throw ApiException.rule(
+                        "credit_rule_cannot_be_switched_off",
+                        "This rule cannot be switched off once it has started. Ask Rincol support.");
+            }
+        }
+        if (asked != null && asked.equals(RetailCapabilities.ON_PAYMENT) && now.equals(RetailCapabilities.ON_SALE)) {
+            // The rule counts from the NEXT business day: the sales and savings of today are already made, and credit
+            // sales dated
+            // earlier keep counting the way they did (ADR-043).
             proposed.put(
                     "credit_recognition_effective_from",
                     clock.today(tenant.profile().timezone()).plusDays(1).toString());

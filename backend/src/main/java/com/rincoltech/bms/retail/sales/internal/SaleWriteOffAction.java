@@ -61,6 +61,6 @@ class SaleWriteOffAction implements ApprovalAction {
     @Override
     public void execute(Execution e) {
         Plan plan = servicer.plan(e.subjectId());
-        servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), false);
+        servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), null);
     }
 }

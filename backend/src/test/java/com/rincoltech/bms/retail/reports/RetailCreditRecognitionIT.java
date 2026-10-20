@@ -88,18 +88,17 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     /** A rule that has stood since before any sale of the test, as for a tenant that switched long ago. */
     void onPaymentFromTheStart() {
         onPayment();
-        history("on_payment", "[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"}]", "1970-01-01");
+        settle("1970-01-01");
     }
 
-    /** Writes the rule and its history as the settings row holds them (the real route only ever appends today's change). */
-    void history(String mode, String changesJson, String effectiveFrom) {
+    /** Writes the day the rule counts from as the settings row holds it (the real route only ever names tomorrow). */
+    void settle(String effectiveFrom) {
         TestDatabase.owner()
-                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(jsonb_set(settings,"
-                        + " '{module_groups,retail,credit_sale_recognition}', CAST(? AS jsonb)),"
-                        + " '{module_groups,retail,credit_recognition_changes}', CAST(? AS jsonb)),"
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_sale_recognition}', '\"on_payment\"'),"
                         + " '{module_groups,retail,credit_recognition_effective_from}', CAST(? AS jsonb))"
                         + " WHERE tenant_id = ?")
-                .params("\"" + mode + "\"", changesJson, "\"" + effectiveFrom + "\"", t.tenantId())
+                .params("\"" + effectiveFrom + "\"", t.tenantId())
                 .update();
     }
 
@@ -610,29 +609,118 @@ class RetailCreditRecognitionIT extends IntegrationTest {
     }
 
     @Test
-    void switchingBackLeavesTheSalesOfTheOtherEraAsTheyWere() {
-        // The rule stood from the start and was given up today: a sale made while it stood keeps counting as the money
-        // comes in.
-        history(
-                "on_sale",
-                "[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"},{\"from\":\"" + today()
-                        + "\",\"mode\":\"on_sale\"}]",
-                today().toString());
-        UUID made = creditSale(hq, 3, ago(3));
-        pay(made, 3_000, ago(1));
-        JsonNode report = profit(ago(3), today());
-        assertThat(field(row(report, hq, ago(3)), "profit_minor"))
-                .as("not counted at the sale")
-                .isZero();
-        assertThat(field(row(report, hq, ago(1)), "profit_minor"))
-                .as("counted when the money came in")
-                .isEqualTo(1_200);
-        // A sale dated today is counted at the sale again, and a payment on it adds nothing.
-        UUID fresh = creditSale(hq, 1, today());
-        payEnteredToday(fresh, 1_000, today());
-        JsonNode after = profit(ago(3), today());
-        assertThat(field(row(after, hq, today()), "profit_minor")).isEqualTo(400);
-        assertThat(after.get("profit_minor").asLong()).isEqualTo(1_600);
+    void onceStartedTheRuleCannotBeSwitchedOffAndNothingChanges() {
+        onPaymentFromTheStart();
+        ResponseEntity<JsonNode> refused = change(Map.of("credit_sale_recognition", "on_sale"), SETTINGS);
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString())
+                .contains("credit_rule_cannot_be_switched_off")
+                .contains("This rule cannot be switched off once it has started. Ask Rincol support.");
+        JsonNode g = api.get("/settings/capabilities", SETTINGS).getBody();
+        assertThat(g.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(g.get("credit_recognition_effective_from").asString()).isEqualTo("1970-01-01");
+        // Asking for the rule again while it stands is harmless and does not move the day.
+        capability(Map.of("credit_sale_recognition", "on_payment"));
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("credit_recognition_effective_from")
+                        .asString())
+                .isEqualTo("1970-01-01");
+    }
+
+    @Test
+    void aSwitchThatHasNotStartedYetCanStillBeCancelled() {
+        onPayment();
+        capability(Map.of("credit_sale_recognition", "on_sale"));
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("credit_sale_recognition")
+                        .asString())
+                .isEqualTo("on_sale");
+        // Once the day has come (here: it started yesterday) the same request is refused.
+        onPayment();
+        settle(ago(1).toString());
+        assertThat(change(Map.of("credit_sale_recognition", "on_sale"), SETTINGS)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void theSaleSaysWhetherItsPaymentsMustBeDatedToday() {
+        onPayment();
+        settle(ago(2).toString());
+        UUID before = creditSale(hq, 2, ago(5));
+        UUID after = creditSale(hq, 2, ago(1));
+        assertThat(api.get("/sales/" + before, ADMIN)
+                        .getBody()
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .as("dated before the rule started: paid as it always was")
+                .isFalse();
+        assertThat(api.get("/sales/" + after, ADMIN)
+                        .getBody()
+                        .get("counted_when_paid")
+                        .asBoolean())
+                .isTrue();
+        assertThat(payRaw(before, 500, ago(3)).getStatusCode())
+                .as("a sale of the earlier era may still be paid on an earlier date")
+                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> refused = payRaw(after, 500, ago(1));
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(refused.getBody().toString()).contains("backdated_payment");
+    }
+
+    @Test
+    void aReportReadsTheRuleOfTheDayItEndsOnAndSaysWhenTheRuleStarts() {
+        onPayment();
+        settle(ago(3).toString());
+        JsonNode earlier = profit(ago(6), ago(4));
+        assertThat(earlier.get("credit_sale_recognition").asString())
+                .as("the rule had not started on the last day read")
+                .isEqualTo("on_sale");
+        assertThat(earlier.get("credit_recognition_starts_on").asString()).isEqualTo(ago(3).toString());
+        assertThat(profit(ago(6), today()).get("credit_sale_recognition").asString())
+                .isEqualTo("on_payment");
+        // Chosen today, it starts tomorrow: today's report is still on_sale and names tomorrow.
+        settle(today().plusDays(1).toString());
+        JsonNode now = profit(today(), today());
+        assertThat(now.get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+        assertThat(now.get("credit_recognition_starts_on").asString())
+                .isEqualTo(today().plusDays(1).toString());
+        assertThat(dashboard().get("credit_sale_recognition").asString()).isEqualTo("on_sale");
+    }
+
+    @Test
+    void aReturnCreditedToTheBalanceIsSpreadOverTheTillsThatTookTheMoney() {
+        capability(Map.of("customer_accounts", true));
+        onPaymentFromTheStart();
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 12"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(1).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "4")));
+        UUID sale = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        for (Object[] take : new Object[][] {{br2, 1_500}, {hq, 2_000}}) {
+            ResponseEntity<JsonNode> receipt = api.postKeyed(
+                    "/customers/" + buyer + "/payments",
+                    Map.of("branch_id", take[0], "amount_minor", take[1], "method", "cash"),
+                    ADMIN,
+                    "*",
+                    UUID.randomUUID().toString());
+            assertThat(receipt.getStatusCode()).as("%s", receipt.getBody()).isEqualTo(HttpStatus.CREATED);
+        }
+        giveBack(sale, "1", "account");
+
+        JsonNode report = profit(ago(1), today());
+        // 3,500 paid of 4,000; one of four pieces went back for credit, so the sale is worth 3,000 and its profit
+        // 1,200. The
+        // 500 of sales and 300 of cost taken back are shared 2,000 : 1,500, the larger share taking the odd unit.
+        assertThat(report.get("profit_minor").asLong()).isEqualTo(1_200);
+        assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(686);
+        assertThat(field(row(report, br2, today()), "profit_minor")).isEqualTo(514);
     }
 
     @Test

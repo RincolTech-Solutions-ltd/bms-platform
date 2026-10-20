@@ -42,9 +42,14 @@ class ProfitFigures {
         return !periods().isEmpty();
     }
 
-    /** The rule as it stands now, {@code on_sale} or {@code on_payment}. */
-    String mode() {
-        return capabilities.creditRecognition();
+    /** The rule in force on {@code day}: {@code on_payment} once its first business day has come, else {@code on_sale}. */
+    String modeOn(java.time.LocalDate day) {
+        return capabilities.creditRecognitionOn(day);
+    }
+
+    /** The first business day of the rule {@code on_payment}, or null when it was never chosen (it may lie in the future). */
+    java.time.LocalDate startsOn() {
+        return periods().from();
     }
 
     /**

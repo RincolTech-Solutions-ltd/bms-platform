@@ -379,7 +379,8 @@ class SalesRepository {
                 s.voidedBy(),
                 s.voidReason(),
                 s.version(),
-                s.writeOff());
+                s.writeOff(),
+                s.countedWhenPaid());
     }
 
     private static Sale header(ResultSet rs) throws SQLException {
@@ -420,7 +421,8 @@ class SalesRepository {
                         : new WriteOffInfo(
                                 rs.getDate("written_off_on").toLocalDate(),
                                 rs.getLong("written_off_unpaid_minor"),
-                                rs.getString("written_off_reason")));
+                                rs.getString("written_off_reason")),
+                false);
     }
 
     // ---- Payments --------------------------------------------------------------------------

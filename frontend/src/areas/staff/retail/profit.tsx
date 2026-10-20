@@ -255,6 +255,13 @@ export function ProfitTable({ report, nameOf }: { report: DailyProfit; nameOf?: 
       )}
       <FiguresTable label="Day" onPayment={onPayment} rows={days} />
       {onPayment && <p className="hint">A credit sale counts on the day the buyer pays, with its share of the profit. A part payment gives part of the profit. Savings use this profit.</p>}
+      {report.credit_recognition_starts_on && (
+        <p className="hint" data-testid="credit-starts-on">
+          {onPayment
+            ? `Credit sales dated before ${report.credit_recognition_starts_on} count as they did, on the day of the sale.`
+            : `From ${report.credit_recognition_starts_on}, credit sales will count when the buyer pays.`}
+        </p>
+      )}
       <p className="hint">Usage and damage reports count here. A debt written off is a loss on the day it was written off. The stock-take difference is the value of what a count found missing (a minus) or extra (a plus), at cost, on the day the count was committed.</p>
     </>
   );

@@ -132,5 +132,11 @@ final class DashboardApi {
             Long last7ReceivedMinor,
 
             @Schema(description = "Only with on_payment: money collected in the last 30 days")
-            Long last30ReceivedMinor) {}
+            Long last30ReceivedMinor,
+
+            @Schema(
+                    description =
+                            "The first business day of the rule on_payment, when it was chosen; it can lie in the future."
+                                    + " credit_sale_recognition is the rule in force today")
+            LocalDate creditRecognitionStartsOn) {}
 }

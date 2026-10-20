@@ -4,7 +4,7 @@ import { renderToString as render } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Dashboard } from '../../../api/retail-analytics';
 import type { DailyProfit } from '../../../api/retail';
-import { CreditRecognitionSetting, RECOGNITION_CHOICES, recognitionOf, recognitionSentences, startDay } from './credit-recognition';
+import { CANNOT_SWITCH_OFF, CreditRecognitionSetting, RECOGNITION_CHOICES, recognitionOf, recognitionSentences, ruleStarted, startDay } from './credit-recognition';
 import { DashboardView } from './dashboard';
 import { ProfitTable } from './profit';
 
@@ -56,9 +56,9 @@ describe('the setting', () => {
     expect(toPayment).toContain('Credit sales dated before 2026-10-20 keep counting the way they did');
     expect(toPayment).toContain('Stock still goes down');
     expect(toPayment).toContain('Savings already saved are not changed');
+    expect(toPayment).toContain('cannot be switched off');
     const back = recognitionSentences('on_payment', 'on_sale', '2026-10-25').join(' ');
-    expect(back).toContain('From 2026-10-25 (tomorrow) on');
-    expect(back).toContain('still count as the money comes in');
+    expect(back).toContain('cancels the change before it starts');
     expect(`${toPayment} ${RECOGNITION_CHOICES.map((c) => c.hint).join(' ')}`).not.toMatch(/[\u2013\u2014]/);
   });
 
@@ -94,6 +94,29 @@ describe('the setting', () => {
       </QueryClientProvider>,
     );
     expect(future).toContain('This rule will stand from 2999-01-01');
+  });
+
+  it('is one way: once started the other choice is off and there is nothing to review', () => {
+    expect(CANNOT_SWITCH_OFF).toBe('This rule cannot be switched off once it has started. Ask Rincol support.');
+    expect(ruleStarted({ credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, '2026-10-20')).toBe(true);
+    expect(ruleStarted({ credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-21' }, '2026-10-20')).toBe(false);
+    expect(ruleStarted({ credit_sale_recognition: 'on_sale' }, '2026-10-20')).toBe(false);
+    const started = renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
+      </QueryClientProvider>,
+    );
+    expect(started).toContain(CANNOT_SWITCH_OFF);
+    expect(started).toMatch(/<input[^>]*disabled=""[^>]*\/><span><strong>When the sale is made/);
+    expect(started).not.toContain('Review change');
+    const pending = renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2999-01-01' }, version: 2 }} />
+      </QueryClientProvider>,
+    );
+    expect(pending).not.toContain(CANNOT_SWITCH_OFF);
+    expect(pending).toContain('you can cancel it');
+    expect(pending).toContain('Review change');
   });
 
   it('starts on the buyer pays choice when that is saved', () => {

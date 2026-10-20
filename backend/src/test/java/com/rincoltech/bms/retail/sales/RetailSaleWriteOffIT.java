@@ -110,9 +110,7 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     void fromTheStart() {
         setting(Map.of("credit_sale_recognition", "on_payment"));
         TestDatabase.owner()
-                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(settings,"
-                        + " '{module_groups,retail,credit_recognition_changes}',"
-                        + " '[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"}]'::jsonb),"
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(settings,"
                         + " '{module_groups,retail,credit_recognition_effective_from}', '\"1970-01-01\"'::jsonb)"
                         + " WHERE tenant_id = ?")
                 .param(t.tenantId())
@@ -552,18 +550,46 @@ class RetailSaleWriteOffIT extends IntegrationTest {
 
     void activeAdmins(int n) {
         for (int i = 0; i < n; i++) {
-            UUID user = UUID.randomUUID();
-            TestDatabase.owner()
-                    .sql("INSERT INTO users (id, tenant_id, kind, full_name, phone_e164, status)"
-                            + " VALUES (?, ?, 'staff', ?, ?, 'active')")
-                    .params(user, t.tenantId(), "Test Admin 0" + i, "+25670000010" + i)
-                    .update();
-            TestDatabase.owner()
-                    .sql("INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, granted_by)"
-                            + " VALUES (?, ?, ?, 'tenant_admin', ?)")
-                    .params(UUID.randomUUID(), t.tenantId(), user, user)
-                    .update();
+            admin(i, "active", null, null);
         }
+    }
+
+    /**
+     * One tenant administrator with an email. {@code status} is the user's, {@code daysSinceChange} how long ago the user was last
+     * changed (a deactivation), {@code lockedDays} a lock that many days ahead, both null for none.
+     */
+    UUID admin(int i, String status, Integer daysSinceChange, Integer lockedDays) {
+        UUID user = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        TestDatabase.owner()
+                .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status, updated_at, locked_until)"
+                        + " VALUES (?, ?, 'staff', ?, ?, ?, ?, ?)")
+                .params(
+                        user,
+                        t.tenantId(),
+                        "Test Admin 0" + i,
+                        "test.admin" + i + "." + user + "@example.invalid",
+                        status,
+                        java.sql.Timestamp.from(
+                                now.minus(java.time.Duration.ofDays(daysSinceChange == null ? 0 : daysSinceChange))),
+                        lockedDays == null
+                                ? null
+                                : java.sql.Timestamp.from(now.plus(java.time.Duration.ofDays(lockedDays))))
+                .update();
+        TestDatabase.owner()
+                .sql("INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, granted_by)"
+                        + " VALUES (?, ?, ?, 'tenant_admin', ?)")
+                .params(UUID.randomUUID(), t.tenantId(), user, user)
+                .update();
+        return user;
+    }
+
+    long told(JsonNode writeOff) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM notification_outbox WHERE idempotency_key LIKE ?")
+                .param("retail.write_off_alone:" + writeOff.get("id").asString() + ":%")
+                .query(Long.class)
+                .single();
     }
 
     @Test
@@ -597,6 +623,65 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.sale.written_off'"
                                 + " AND data::text LIKE '%only_one_active_administrator%'")
+                        .param(t.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void anAdministratorDeactivatedWithinThirtyDaysStillCountsSoItCannotBeDoneAlone() {
+        admin(0, "active", null, null);
+        admin(1, "deactivated", 5, null);
+        UUID s = creditSale(1, 1);
+        assertThat(writeOff(s, "Buyer left town", MANAGER).getStatusCode())
+                .as("the second administrator left five days ago and still counts")
+                .isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void anAdministratorWhoseRoleWasRevokedWithinThirtyDaysStillCounts() {
+        admin(0, "active", null, null);
+        UUID gone = admin(1, "active", null, null);
+        TestDatabase.owner()
+                .sql("UPDATE user_role_assignments SET revoked_at = now() - interval '3 days', revoked_by = ?"
+                        + " WHERE user_id = ?")
+                .params(gone, gone)
+                .update();
+        UUID s = creditSale(1, 1);
+        assertThat(writeOff(s, "Buyer left town", MANAGER).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void aLockedAdministratorCountsAsActive() {
+        admin(0, "active", null, null);
+        admin(1, "active", null, 1);
+        UUID s = creditSale(1, 1);
+        assertThat(writeOff(s, "Buyer left town", MANAGER).getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    }
+
+    @Test
+    void anAdministratorGoneForMoreThanThirtyDaysNoLongerCountsAndIsNotToldAlone() {
+        admin(0, "active", null, null);
+        admin(1, "deactivated", 40, null);
+        UUID s = creditSale(1, 1);
+        JsonNode w = writeOffOk(s);
+        assertThat(told(w))
+                .as("only the one administrator who is still counted")
+                .isEqualTo(1);
+    }
+
+    @Test
+    void writingOffAloneTellsEveryAdministratorOfTheLastThirtyDaysAndTheAuditRowCountsThem() {
+        // Alone means no second administrator counted, so the one who counts is the one told; the audit row records how
+        // many.
+        admin(0, "active", null, null);
+        UUID s = creditSale(1, 1);
+        JsonNode w = writeOffOk(s);
+        assertThat(told(w)).isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.sale.written_off'"
+                                + " AND data::text LIKE '%notified_admins%'")
                         .param(t.tenantId())
                         .query(Long.class)
                         .single())

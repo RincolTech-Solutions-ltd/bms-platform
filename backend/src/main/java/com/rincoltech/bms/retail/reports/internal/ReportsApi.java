@@ -168,5 +168,12 @@ final class ReportsApi {
                     description =
                             "Present only with on_payment: what buyers still owe on credit sales now, all dates (On credit);"
                                     + " not part of the period")
-            Long onCreditMinor) {}
+            Long onCreditMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "The first business day of the rule on_payment, when it was chosen; it can lie in the future. credit_sale_recognition"
+                                    + " is the rule in force on the last day of the period")
+            LocalDate creditRecognitionStartsOn) {}
 }

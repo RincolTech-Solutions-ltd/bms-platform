@@ -153,4 +153,53 @@ class CreditRecognitionTest {
         assertThat(rows.get(0).sales()).isEqualTo(2_000);
         assertThat(rows.get(0).costOfSales()).isEqualTo(1_100);
     }
+
+    @Test
+    void aReturnCreditedToTheBalanceIsSpreadOverTheBranchesThatTookTheMoney() {
+        UUID other = UUID.fromString("00000000-0000-4000-8000-0000000000b2");
+        Event first = new Event(SALE, BRANCH, 3_000, 1_800, D1, 1_500, 0, 0, 0);
+        Event second = new Event(SALE, other, 3_000, 1_800, D1, 500, 0, 0, 0);
+        // Goods worth 1,000 that cost 900 come back and are credited to the unpaid balance: no cash goes out.
+        Event credit = new Event(SALE, BRANCH, 3_000, 1_800, D2, 0, 1_000, 900, 0);
+        List<DayFigures> rows = CreditRecognition.deltas(List.of(first, second, credit), D2, D2);
+        assertThat(rows).hasSize(2);
+        assertThat(profit(rows.stream().filter(r -> r.branchId().equals(BRANCH)).toList()))
+                .isEqualTo(225);
+        assertThat(profit(rows.stream().filter(r -> r.branchId().equals(other)).toList()))
+                .isEqualTo(75);
+        assertThat(profit(rows)).as("the whole change, once").isEqualTo(300);
+    }
+
+    @Test
+    void theSharesOfASpreadAlwaysAddUpToTheAmount() {
+        UUID a = UUID.fromString("00000000-0000-4000-8000-0000000000c1");
+        UUID b = UUID.fromString("00000000-0000-4000-8000-0000000000c2");
+        UUID c = UUID.fromString("00000000-0000-4000-8000-0000000000c3");
+        List<java.util.Map.Entry<UUID, Long>> w =
+                List.of(java.util.Map.entry(a, 1L), java.util.Map.entry(b, 1L), java.util.Map.entry(c, 1L));
+        assertThat(java.util.Arrays.stream(CreditRecognition.spread(100, w, 3)).sum())
+                .isEqualTo(100);
+        assertThat(java.util.Arrays.stream(CreditRecognition.spread(-100, w, 3)).sum())
+                .isEqualTo(-100);
+    }
+
+    @Test
+    void theResultDoesNotDependOnTheOrderOfTheBranchIds() {
+        UUID low = UUID.fromString("00000000-0000-4000-8000-000000000001");
+        UUID high = UUID.fromString("ffffffff-ffff-4fff-8fff-ffffffffffff");
+        // The same day, entered in this order: a payment at X, a payment at Y, then a cash refund from Y.
+        for (UUID[] ids : new UUID[][] {{low, high}, {high, low}}) {
+            UUID x = ids[0];
+            UUID y = ids[1];
+            List<Event> events = List.of(
+                    new Event(SALE, x, 3_000, 1_800, D1, 1_000, 0, 0, 0),
+                    new Event(SALE, y, 3_000, 1_800, D1, 2_000, 0, 0, 0),
+                    new Event(SALE, y, 3_000, 1_800, D1, 0, 3_000, 1_800, 3_000));
+            List<DayFigures> rows = CreditRecognition.deltas(events, D1, D1);
+            assertThat(profit(rows.stream().filter(r -> r.branchId().equals(x)).toList()))
+                    .isEqualTo(400);
+            assertThat(profit(rows.stream().filter(r -> r.branchId().equals(y)).toList()))
+                    .isEqualTo(-400);
+        }
+    }
 }

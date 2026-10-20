@@ -44,6 +44,7 @@ import com.rincoltech.bms.retail.sales.internal.SalesRepository.Header;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.LinePricing;
 import com.rincoltech.bms.retail.sales.internal.SalesRepository.NewLine;
 import com.rincoltech.bms.retail.stock.BranchRoles;
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailBooks;
 import com.rincoltech.bms.retail.stock.RetailBooks.Leg;
@@ -229,7 +230,8 @@ class SalesService {
                 null,
                 null,
                 1,
-                null);
+                null,
+                false);
         repo.insert(header);
         lines.forEach(l -> repo.insertLine(id, l));
         stock.record(
@@ -692,7 +694,8 @@ class SalesService {
                                 + items.getLast().createdAt() + "|"
                                 + items.getLast().id()))
                 : null;
-        return new SalePage(items.stream().map(this::visible).toList(), next);
+        CreditPeriods periods = capabilities.onPaymentPeriods();
+        return new SalePage(items.stream().map(x -> visible(x, periods)).toList(), next);
     }
 
     @Transactional(readOnly = true)
@@ -804,15 +807,19 @@ class SalesService {
             throw ApiException.rule(
                     "payment_exceeds_balance", "The sale's balance is " + balance + "; the payment is larger.");
         }
-        LocalDate today = clock.today(tenant.profile().timezone());
+        // One read of the business clock: the day and the moment the payment is entered come from the same instant
+        // (ADR-043).
+        Instant now = clock.now();
+        LocalDate today = now.atZone(tenant.profile().timezone()).toLocalDate();
         LocalDate paidOn = r.paidOn() == null ? today : r.paidOn();
         if (paidOn.isAfter(today) || paidOn.isBefore(s.saleDate())) {
             throw ApiException.validation(
                     List.of(new FieldProblem("paid_on", "invalid", "A payment is dated between the sale and today.")));
         }
-        // Under the rule "when the buyer pays" a payment counts on the day it is entered, so it carries that day
-        // (ADR-043).
-        if (capabilities.recognisesOnPayment() && !paidOn.equals(today)) {
+        // A sale counted when the buyer pays (its date is inside the rule's range) is paid on the day the payment
+        // counts on, so the
+        // payment carries that day (ADR-043). A sale dated before the rule started is paid as it always was.
+        if (capabilities.onPaymentPeriods().contains(s.saleDate()) && !paidOn.equals(today)) {
             throw ApiException.validation(
                     List.of(
                             new FieldProblem(
@@ -841,7 +848,7 @@ class SalesService {
                 r.method(),
                 paidOn,
                 entry.entryId(),
-                clock.now(),
+                now,
                 principal.userId());
         repo.insertPayment(payment);
         repo.addPaid(saleId, r.amountMinor());
@@ -1001,6 +1008,11 @@ class SalesService {
      * and the way each line was priced are left out (issue #195), so the capability off reads exactly as before.
      */
     Sale visible(Sale s) {
+        return visible(s, capabilities.onPaymentPeriods());
+    }
+
+    /** As above, with the rule's range read once by a caller that shows a list. */
+    Sale visible(Sale s, CreditPeriods periods) {
         Principal principal = CurrentPrincipal.require();
         boolean hideCost = !principal.may("retail.profit.read", s.branchId());
         // Who made or voided a sale is shown to those who may read profit there, and to the person themselves.
@@ -1008,7 +1020,10 @@ class SalesService {
                 hideCost && !java.util.Objects.equals(principal.userId(), s.createdBy()) ? null : s.createdBy();
         UUID voidedBy = hideCost && !java.util.Objects.equals(principal.userId(), s.voidedBy()) ? null : s.voidedBy();
         boolean hidePricing = !pricing.on();
-        if (!hideCost && !hidePricing) {
+        // A credit sale dated from the first day of the rule "when the buyer pays" is paid on the day the payment
+        // counts on (ADR-043).
+        boolean counted = s.paymentMethod().equals("credit") && !s.historical() && periods.contains(s.saleDate());
+        if (!hideCost && !hidePricing && counted == s.countedWhenPaid()) {
             return s;
         }
         return new Sale(
@@ -1056,7 +1071,8 @@ class SalesService {
                 voidedBy,
                 s.voidReason(),
                 s.version(),
-                s.writeOff());
+                s.writeOff(),
+                counted);
     }
 
     /** 409 {@code sale_written_off}: what a sale whose unpaid part was written off refuses (ADR-043). */

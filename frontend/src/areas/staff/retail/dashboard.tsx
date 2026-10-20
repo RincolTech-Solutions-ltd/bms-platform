@@ -64,6 +64,13 @@ export function DashboardView({ data, nameOf, stockLink }: { data: Dashboard; na
           </>
         )}
       </ul>
+      {data.credit_recognition_starts_on && (
+        <p className="hint" data-testid="credit-starts-on">
+          {onPayment
+            ? `Credit sales dated before ${data.credit_recognition_starts_on} count as they did, on the day of the sale.`
+            : `From ${data.credit_recognition_starts_on}, credit sales will count when the buyer pays.`}
+        </p>
+      )}
 
       <h3>{onPayment ? 'Sold, last 7 and 30 days' : 'Sales, last 7 and 30 days'}</h3>
       <div className="an-sparks">

@@ -27,13 +27,11 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
     static final List<String> CREDIT_RECOGNITIONS = List.of("on_sale", "on_payment");
 
     /**
-     * The date a change of {@link #CREDIT_RECOGNITION} takes effect, set by the route (the tenant's business date) and never by
-     * the caller: credit sales dated before it keep counting the way they did (ADR-043). Absent, a change applies from the beginning.
+     * The first business day the rule {@code on_payment} counts from, set by the route (the business day after it was asked for) and
+     * never by the caller: credit sales dated before it keep counting at the sale (ADR-043). The rule is one-way: it is switched on
+     * once, and the only way back is to cancel it before this day has come. Absent while the rule is {@code on_sale}.
      */
     static final String EFFECTIVE_FROM = "credit_recognition_effective_from";
-
-    /** Every change of the rule so far, oldest first: {from, mode}. A tenant that never changed it has none (on_sale throughout). */
-    static final String CHANGES = "credit_recognition_changes";
 
     static final String BEGINNING = "1970-01-01";
 
@@ -70,9 +68,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         String mode =
                 current.get(CREDIT_RECOGNITION) instanceof String c && CREDIT_RECOGNITIONS.contains(c) ? c : "on_sale";
         out.put(CREDIT_RECOGNITION, mode);
-        List<Map<String, String>> changes = changesOf(current.get(CHANGES));
-        if (changes.isEmpty() && mode.equals("on_payment")) {
-            changes.add(change(BEGINNING, mode));
+        String effective = current.get(EFFECTIVE_FROM) instanceof String d && validDate(d) ? d : null;
+        if (mode.equals("on_payment") && effective == null) {
+            effective = BEGINNING;
         }
         for (String key : CAPABILITIES) {
             out.put(key, Boolean.TRUE.equals(current.get(key)));
@@ -99,22 +97,19 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             throw ApiException.validation(problems);
         }
         if (proposed.get(CREDIT_RECOGNITION) instanceof String next && !next.equals(mode)) {
-            String from = proposed.get(EFFECTIVE_FROM) instanceof String f ? f : BEGINNING;
-            if (!changes.isEmpty() && changes.getLast().get("from").equals(from)) {
-                // Asked for again before it takes effect (the same day, since a change starts the next business day):
-                // the last
-                // word replaces the pending one, and going back to what stood before leaves no trace.
-                changes.removeLast();
+            // One way: on_payment is switched on once, from the day the route names. Going back to on_sale is only the
+            // cancelling of
+            // a change that has not taken effect yet, which the route allows and nothing else does.
+            if (next.equals("on_payment")) {
+                effective = proposed.get(EFFECTIVE_FROM) instanceof String f ? f : BEGINNING;
+            } else {
+                effective = null;
             }
-            String before = changes.isEmpty() ? "on_sale" : changes.getLast().get("mode");
-            if (!before.equals(next)) {
-                changes.add(change(from, next));
-            }
-            out.put(CREDIT_RECOGNITION, next);
+            mode = next;
+            out.put(CREDIT_RECOGNITION, mode);
         }
-        out.put(CHANGES, List.copyOf(changes));
-        if (!changes.isEmpty()) {
-            out.put(EFFECTIVE_FROM, changes.getLast().get("from"));
+        if (effective != null) {
+            out.put(EFFECTIVE_FROM, effective);
         }
         if (proposed.get(PROFILE) instanceof String profile) {
             out.put(PROFILE, profile);
@@ -143,30 +138,6 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             out.add(ON_PAYMENT_FLAG);
         }
         out.sort(null);
-        return out;
-    }
-
-    private static Map<String, String> change(String from, String mode) {
-        Map<String, String> m = new LinkedHashMap<>();
-        m.put("from", from);
-        m.put("mode", mode);
-        return m;
-    }
-
-    /** The stored changes, kept only when well formed, as a list this call may edit. */
-    private static List<Map<String, String>> changesOf(Object stored) {
-        List<Map<String, String>> out = new ArrayList<>();
-        if (stored instanceof List<?> list) {
-            for (Object o : list) {
-                if (o instanceof Map<?, ?> m
-                        && m.get("from") instanceof String from
-                        && validDate(from)
-                        && m.get("mode") instanceof String mode
-                        && CREDIT_RECOGNITIONS.contains(mode)) {
-                    out.add(change(from, mode));
-                }
-            }
-        }
         return out;
     }
 

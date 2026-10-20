@@ -101,6 +101,20 @@ class OutboxTemplates {
 
                     Rincoltech
                     """),
+            // A debt of a credit sale was written off by the only active administrator (issue #340, ADR-043): every
+            // administrator of the last 30 days is told. No figure, no customer name.
+            "retail.write_off_alone",
+            new Template("A debt was written off at {business_name}", """
+                    Hello,
+
+                    A debt on a credit sale was written off at {business_name} by one administrator, without a second
+                    administrator, because only one was active when it was done.
+
+                    If you or another administrator did this, nothing more is needed. If you do not know about it, open
+                    Credit sales in BMS, check the sale, and change your password.
+
+                    Rincoltech
+                    """),
             // The insights digest (ADR-030): the text is built by lending.insights as plain text
             // from the tenant's own figures, ready for a WhatsApp relay later.
             "insights.daily_digest",

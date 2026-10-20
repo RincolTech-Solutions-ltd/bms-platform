@@ -373,21 +373,14 @@ class AccountsService {
         UUID branch = branches.resolve("retail.sale.create", r.branchId());
         // The buyer's row is locked first: payments, and credit sales that check the limit, queue behind each other.
         repo.terms(customerId, true).orElseThrow(ApiException::notFound);
-        LocalDate today = clock.today(tenant.profile().timezone());
+        // One read of the business clock: the day and the moment the payment is entered come from the same instant
+        // (ADR-043).
+        Instant now = clock.now();
+        LocalDate today = now.atZone(tenant.profile().timezone()).toLocalDate();
         LocalDate paidOn = r.paidOn() == null ? today : r.paidOn();
         if (paidOn.isAfter(today)) {
             throw ApiException.validation(
                     List.of(new FieldProblem("paid_on", "invalid", "A payment cannot be dated in the future.")));
-        }
-        // Under the rule "when the buyer pays" a payment counts on the day it is entered, so it carries that day
-        // (ADR-043).
-        if (capabilities.recognisesOnPayment() && !paidOn.equals(today)) {
-            throw ApiException.validation(
-                    List.of(
-                            new FieldProblem(
-                                    "paid_on",
-                                    "backdated_payment",
-                                    "Under the 'when the buyer pays' rule a payment is dated today. If you took the money earlier, ask your administrator.")));
         }
         long amount = r.amountMinor();
         boolean manual = r.allocations() != null && !r.allocations().isEmpty();
@@ -397,6 +390,18 @@ class AccountsService {
         // The sales were locked above, in the same order for every payment; read them back with their numbers.
         Map<UUID, OpenSale> byId = repo.lockSales(customerId, new ArrayList<>(split.keySet())).stream()
                 .collect(Collectors.toMap(OpenSale::id, s -> s, (a, b) -> a, LinkedHashMap::new));
+        // A payment that pays a sale counted when the buyer pays (its date is inside the rule's range) is dated today
+        // (ADR-043).
+        if (!paidOn.equals(today)
+                && byId.values().stream()
+                        .anyMatch(x -> capabilities.onPaymentPeriods().contains(x.saleDate()))) {
+            throw ApiException.validation(
+                    List.of(
+                            new FieldProblem(
+                                    "paid_on",
+                                    "backdated_payment",
+                                    "Under the 'when the buyer pays' rule a payment is dated today. If you took the money earlier, ask your administrator.")));
+        }
         UUID id = UUID.randomUUID();
         String receiptNo = "RC%08d".formatted(sequences.next("retail_account_payment_no"));
         List<Leg> legs = new ArrayList<>();
@@ -415,7 +420,6 @@ class AccountsService {
                         legs))
                 .orElseThrow();
         String currency = tenant.profile().currency();
-        Instant now = clock.now();
         repo.insertReceipt(new Receipt(
                 id,
                 receiptNo,

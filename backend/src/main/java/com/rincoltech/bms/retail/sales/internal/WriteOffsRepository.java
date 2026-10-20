@@ -1,8 +1,10 @@
 package com.rincoltech.bms.retail.sales.internal;
 
 import java.sql.Date;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -93,12 +95,24 @@ class WriteOffsRepository {
                 .single();
     }
 
-    /** Active tenant administrators of the tenant (row-level security supplies the tenant). */
-    long activeAdmins() {
+    /** An administrator who counts for the second-person rule, and the address to tell when a debt is written off alone. */
+    record Admin(UUID userId, String email) {}
+
+    /**
+     * The tenant administrators who count as active for the second-person rule (ADR-043): active ones, and ones whose role was
+     * revoked or who were deactivated within the last {@code since} window, so an administrator cannot be removed first to write a
+     * debt off alone. A locked-out administrator still counts. Row-level security supplies the tenant.
+     */
+    List<Admin> recentAdmins(Instant since) {
         return jdbc.sql("""
-                        SELECT count(DISTINCT a.user_id) FROM user_role_assignments a JOIN users u ON u.id = a.user_id
-                         WHERE a.role_key = 'tenant_admin' AND a.revoked_at IS NULL AND u.status = 'active'
-                        """).query(Long.class).single();
+                        SELECT DISTINCT u.id, u.email FROM users u JOIN user_role_assignments a ON a.user_id = u.id
+                         WHERE u.kind = 'staff' AND a.role_key = 'tenant_admin'
+                           AND (a.revoked_at IS NULL OR a.revoked_at > :since)
+                           AND (u.status = 'active' OR (u.status = 'deactivated' AND u.updated_at > :since))
+                        """)
+                .param("since", Timestamp.from(since))
+                .query((rs, n) -> new Admin(rs.getObject("id", UUID.class), rs.getString("email")))
+                .list();
     }
 
     Optional<Row> forSale(UUID saleId) {

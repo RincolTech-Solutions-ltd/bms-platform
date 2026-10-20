@@ -224,8 +224,9 @@ class DashboardService {
                 profit ? profit30 : null,
                 stock,
                 shops,
-                capabilities.creditRecognition(),
+                capabilities.creditRecognitionOn(today),
                 onPay ? received7 : null,
-                onPay ? received30 : null);
+                onPay ? received30 : null,
+                periods.from());
     }
 }

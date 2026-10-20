@@ -18,9 +18,16 @@ export const RECOGNITION_CHOICES: readonly { value: CreditRecognition; label: st
   {
     value: 'on_payment',
     label: 'When the buyer pays',
-    hint: 'A credit sale is listed as On credit and gives no profit until the buyer pays. Each payment counts on the day it is received, with its share of the profit.',
+    hint: 'A credit sale is listed as On credit and gives no profit until the buyer pays. Each payment counts on the day it is received, with its share of the profit. Once it has started it cannot be switched off.',
   },
 ];
+
+/** What the screen and the server say when someone tries to go back after the rule has started (ADR-043). */
+export const CANNOT_SWITCH_OFF = 'This rule cannot be switched off once it has started. Ask Rincol support.';
+
+/** True once the rule "when the buyer pays" has started: its first day is today or earlier. A change not started yet can still be cancelled. */
+export const ruleStarted = (c: CapabilitiesRead['capabilities'] | undefined, today: string = businessToday()): boolean =>
+  c?.credit_sale_recognition === 'on_payment' && (c.credit_recognition_effective_from ?? '') <= today;
 
 /** The saved choice; anything but on_payment (including a server that does not send it) is today's way. */
 export const recognitionOf = (c: CapabilitiesRead['capabilities'] | undefined): CreditRecognition =>
@@ -32,7 +39,7 @@ export const startDay = (today: string = businessToday()): string => daysBefore(
 /**
  * What choosing a value will change, in plain words, one sentence each. Empty when nothing changes. The change starts on `day`
  * (tomorrow): credit sales dated before it keep counting the way they did, so no profit is counted twice and no savings already
- * saved move. Choosing again before then replaces the pending change.
+ * saved move. The rule is one way: once started it cannot be switched off, and until then a change can only be cancelled.
  */
 export function recognitionSentences(from: CreditRecognition, to: CreditRecognition, day: string = startDay()): string[] {
   if (from === to) return [];
@@ -42,11 +49,11 @@ export function recognitionSentences(from: CreditRecognition, to: CreditRecognit
       'When the buyer pays, that money counts on the day it is entered, with its share of the sale profit. A part payment gives part of the profit. A payment is then dated today.',
       `Credit sales dated before ${day} keep counting the way they did: their profit stays on the day of the sale, and payments on them add nothing.`,
       'Stock still goes down when the sale is made. Your accounts do not change. Savings already saved are not changed.',
+      'Once it has started this cannot be switched off from here. If it was a mistake, ask Rincol support.',
     ];
   }
   return [
-    `From ${day} (tomorrow) on, a credit sale counts as a sale, as profit and in the daily savings on the day it is made, even before the buyer pays.`,
-    `Credit sales dated before ${day} keep counting the way they did: those counted when the buyer pays still count as the money comes in.`,
+    'This cancels the change before it starts. Nothing is counted differently.',
   ];
 }
 
@@ -70,23 +77,25 @@ export function CreditRecognitionSetting({ read, onSaved }: { read: Capabilities
   const sentences = recognitionSentences(saved, choice);
   const since = read.capabilities.credit_recognition_effective_from;
   const pending = since !== undefined && since > businessToday();
+  const started = ruleStarted(read.capabilities);
   return (
     <fieldset className="stack" data-tour="retail-credit-recognition">
       <legend>When does a credit sale count as income and profit?</legend>
       {since && (
         <p className="hint" data-testid="credit-since">
           {pending
-            ? `This rule will stand from ${since}. Choosing again today replaces it. Credit sales made before then count the way they did.`
+            ? `This rule will stand from ${since}. Until then you can cancel it by choosing When the sale is made. Credit sales made before then count the way they did.`
             : `This rule has stood since ${since}. Credit sales made before then count the way they did.`}
         </p>
       )}
+      {started && <p className="hint" data-testid="credit-one-way">{CANNOT_SWITCH_OFF}</p>}
       {RECOGNITION_CHOICES.map((c) => (
         <label key={c.value}>
           <input
             type="radio"
             name="credit-recognition"
             checked={choice === c.value}
-            disabled={save.isPending}
+            disabled={save.isPending || (started && c.value === 'on_sale')}
             onChange={() => { setChoice(c.value); setReviewing(false); }}
           />
           <span>
@@ -109,10 +118,12 @@ export function CreditRecognitionSetting({ read, onSaved }: { read: Capabilities
           </p>
         </section>
       ) : (
-        <p className="cluster">
-          <button type="button" className="rt-primary" disabled={sentences.length === 0} onClick={() => setReviewing(true)}>Review change</button>
-          {choice !== saved && <button type="button" className="btn-ghost" onClick={() => setChoice(saved)}>Undo</button>}
-        </p>
+        !started && (
+          <p className="cluster">
+            <button type="button" className="rt-primary" disabled={sentences.length === 0} onClick={() => setReviewing(true)}>Review change</button>
+            {choice !== saved && <button type="button" className="btn-ghost" onClick={() => setChoice(saved)}>Undo</button>}
+          </p>
+        )
       )}
     </fieldset>
   );

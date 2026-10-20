@@ -137,8 +137,7 @@ class WriteOffsServicer {
     }
 
     /** Posts the entry, records the write-off and clears the debt on the sale. */
-    WriteOff record(
-            Plan plan, String reason, UUID makerId, UUID approvalId, UUID checkerId, boolean onlyAdministrator) {
+    WriteOff record(Plan plan, String reason, UUID makerId, UUID approvalId, UUID checkerId, Integer notifiedAdmins) {
         Sale s = plan.sale();
         UUID id = UUID.randomUUID();
         LocalDate today = clock.today(tenant.profile().timezone());
@@ -186,10 +185,11 @@ class WriteOffsServicer {
         after.put("unpaid_minor", unpaid);
         after.put("reason", row.reason());
         after.put("approved", approvalId != null);
-        if (onlyAdministrator) {
-            // No second person was possible: the audit row says so (ADR-043; the default checker rule awaits Hillary's
-            // confirmation).
+        if (notifiedAdmins != null) {
+            // No second person was possible: the audit row says so, and how many administrators were told (ADR-043; the
+            // default checker rule awaits Hillary's confirmation).
             after.put("no_second_person", "only_one_active_administrator");
+            after.put("notified_admins", notifiedAdmins);
         }
         audit.record(new AuditLog.Entry(
                 "retail.sale.written_off", SALE, s.id(), s.branchId(), Map.of("paid_minor", s.paidMinor()), after));

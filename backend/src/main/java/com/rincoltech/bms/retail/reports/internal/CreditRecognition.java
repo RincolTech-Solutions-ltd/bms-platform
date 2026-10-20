@@ -86,6 +86,9 @@ final class CreditRecognition {
         long returned = 0;
         long returnedCost = 0;
         long refunded = 0;
+        // What each branch took of this sale, so that a return credited to the buyer's balance (no cash out) is spread
+        // over them.
+        Map<UUID, Long> paidBy = new LinkedHashMap<>();
         State before = new State(0, 0);
         for (Event e : events) {
             if (!e.saleId().equals(current)) {
@@ -94,27 +97,87 @@ final class CreditRecognition {
                 returned = 0;
                 returnedCost = 0;
                 refunded = 0;
+                paidBy = new LinkedHashMap<>();
                 before = new State(0, 0);
             }
             paid = Math.addExact(paid, e.paidMinor());
             returned = Math.addExact(returned, e.returnedMinor());
             returnedCost = Math.addExact(returnedCost, e.returnedCostMinor());
             refunded = Math.addExact(refunded, e.refundedMinor());
-            State after = state(e.totalMinor(), e.costMinor(), paid, returned, returnedCost, refunded);
-            if (!e.day().isBefore(from)
-                    && !e.day().isAfter(to)
-                    && (branches == null || branches.contains(e.branchId()))) {
-                String key = e.day() + "|" + e.branchId();
-                branchOf.putIfAbsent(key, e.branchId());
-                dayOf.putIfAbsent(key, e.day());
-                long[] f = out.computeIfAbsent(key, k -> new long[2]);
-                f[0] = Math.addExact(f[0], after.revenue() - before.revenue());
-                f[1] = Math.addExact(f[1], after.cost() - before.cost());
+            if (e.paidMinor() != 0) {
+                paidBy.merge(e.branchId(), e.paidMinor(), Long::sum);
             }
+            State after = state(e.totalMinor(), e.costMinor(), paid, returned, returnedCost, refunded);
+            long dRevenue = after.revenue() - before.revenue();
+            long dCost = after.cost() - before.cost();
             before = after;
+            if (e.day().isBefore(from) || e.day().isAfter(to)) {
+                continue;
+            }
+            // Cash went back out of the branch of the event (the refund's), so that branch takes the change. A return
+            // credited to
+            // the balance paid nothing out: its change goes to the branches that took the sale's money, in proportion
+            // to it.
+            List<Map.Entry<UUID, Long>> takers = new ArrayList<>();
+            if (e.returnedMinor() != 0 && e.refundedMinor() == 0 && e.paidMinor() == 0) {
+                paidBy.entrySet().stream()
+                        .filter(x -> x.getValue() > 0)
+                        .sorted(Map.Entry.<UUID, Long>comparingByValue()
+                                .reversed()
+                                .thenComparing(Map.Entry.comparingByKey()))
+                        .forEach(takers::add);
+            }
+            if (takers.isEmpty()) {
+                add(out, branchOf, dayOf, e.day(), e.branchId(), dRevenue, dCost, branches);
+            } else {
+                long total = takers.stream().mapToLong(Map.Entry::getValue).sum();
+                long[] revenue = spread(dRevenue, takers, total);
+                long[] cost = spread(dCost, takers, total);
+                for (int i = 0; i < takers.size(); i++) {
+                    add(out, branchOf, dayOf, e.day(), takers.get(i).getKey(), revenue[i], cost[i], branches);
+                }
+            }
         }
         List<DayFigures> rows = new ArrayList<>();
         out.forEach((key, f) -> rows.add(new DayFigures(branchOf.get(key), dayOf.get(key), f[0], f[1], 0)));
         return rows;
+    }
+
+    private static void add(
+            Map<String, long[]> out,
+            Map<String, UUID> branchOf,
+            Map<String, LocalDate> dayOf,
+            LocalDate day,
+            UUID branch,
+            long revenue,
+            long cost,
+            java.util.Set<UUID> branches) {
+        if (branches != null && !branches.contains(branch)) {
+            return;
+        }
+        String key = day + "|" + branch;
+        branchOf.putIfAbsent(key, branch);
+        dayOf.putIfAbsent(key, day);
+        long[] f = out.computeIfAbsent(key, k -> new long[2]);
+        f[0] = Math.addExact(f[0], revenue);
+        f[1] = Math.addExact(f[1], cost);
+    }
+
+    /**
+     * {@code amount} shared out in proportion to the weights, in whole units: each takes the rounded-down share and the first (the
+     * one that took most) takes what is left, so the shares always add up to the amount.
+     */
+    static long[] spread(long amount, List<Map.Entry<UUID, Long>> weights, long total) {
+        long[] shares = new long[weights.size()];
+        long given = 0;
+        for (int i = 0; i < shares.length; i++) {
+            shares[i] = java.math.BigInteger.valueOf(amount)
+                    .multiply(java.math.BigInteger.valueOf(weights.get(i).getValue()))
+                    .divide(java.math.BigInteger.valueOf(total))
+                    .longValueExact();
+            given = Math.addExact(given, shares[i]);
+        }
+        shares[0] = Math.addExact(shares[0], amount - given);
+        return shares;
     }
 }
