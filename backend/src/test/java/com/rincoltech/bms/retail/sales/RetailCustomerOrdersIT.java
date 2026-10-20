@@ -186,7 +186,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
     // ---- the steps -----------------------------------------------------------------------------------
 
-    /** FR-RET-51, FR-RET-53, FR-RET-54: ordered, packed, out for delivery, delivered and paid in cash; the history says who did what, when. */
+    /** FR-RET-53, FR-RET-55, FR-RET-56: ordered, packed, out for delivery, delivered and paid in cash; the history says who did what, when. */
     @Test
     void anOrderMovesThroughEveryStepAndBecomesASale() {
         api.stockUp(hq, product, "10");
@@ -310,7 +310,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
     // ---- stock kept aside ------------------------------------------------------------------------------
 
-    /** FR-RET-52: a unit kept for an order is not sold at the till; what is free still is; a cancel gives it back. */
+    /** FR-RET-54: a unit kept for an order is not sold at the till; what is free still is; a cancel gives it back. */
     @Test
     void theTillCannotSellAUnitKeptForAnOrder() {
         api.stockUp(hq, product, "3");
@@ -335,7 +335,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(api.sell(hq, "cash", product, "2").getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
-    /** FR-RET-52: two orders for the last unit at the same moment: one keeps it, the other is refused, and one unit is kept. */
+    /** FR-RET-54: two orders for the last unit at the same moment: one keeps it, the other is refused, and one unit is kept. */
     @Test
     void twoOrdersForTheLastUnitAtOnceKeepItOnce() throws Exception {
         api.stockUp(hq, product, "1");
@@ -362,7 +362,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(balance(hq, product)[1]).isEqualByComparingTo("1");
     }
 
-    /** FR-RET-52: an order and a till sale of the last unit at the same moment: exactly one of them gets it. */
+    /** FR-RET-54: an order and a till sale of the last unit at the same moment: exactly one of them gets it. */
     @Test
     void anOrderAndATillSaleOfTheLastUnitAtOnceTakeItOnce() throws Exception {
         api.stockUp(hq, product, "1");
@@ -390,7 +390,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
     // ---- delivery and payment -----------------------------------------------------------------------
 
-    /** FR-RET-53: part payment, the fee first, the rest of the money on the credit sale, the remainder owed. */
+    /** FR-RET-55: part payment, the fee first, the rest of the money on the credit sale, the remainder owed. */
     @Test
     void aPartPaymentPaysTheFeeFirstAndLeavesTheRestOnCredit() {
         api.stockUp(hq, product, "5");
@@ -417,7 +417,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(account("trade_debtors", true)).isEqualTo(17_000);
     }
 
-    /** FR-RET-53: all on credit with no fee; a fee is never put on credit; everything paid is not credit. */
+    /** FR-RET-55: all on credit with no fee; a fee is never put on credit; everything paid is not credit. */
     @Test
     void creditTakesAtLeastTheFeeAndNeverEverything() {
         api.stockUp(hq, product, "5");
@@ -481,7 +481,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
     // ---- lists, lookup and reports -------------------------------------------------------------------
 
-    /** FR-RET-54: the list by step and today's deliveries, the board's counts, and the search by name, number or phone. */
+    /** FR-RET-56: the list by step and today's deliveries, the board's counts, and the search by name, number or phone. */
     @Test
     void theListAndTheBoardShowEachStepAndTodaysDeliveries() {
         api.stockUp(hq, product, "10");
@@ -521,7 +521,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         return out;
     }
 
-    /** FR-RET-54: an order copied from a chat: the phone finds the last order's name, place and fee, in any of its usual forms. */
+    /** FR-RET-56: an order copied from a chat: the phone finds the last order's name, place and fee, in any of its usual forms. */
     @Test
     void thePhoneFindsTheCustomerOfTheLastOrder() {
         api.stockUp(hq, product, "5");
@@ -550,7 +550,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
-    /** FR-RET-55: delivery fees by source and by rider, and the cancelled orders with their reasons. */
+    /** FR-RET-57: delivery fees by source and by rider, and the cancelled orders with their reasons. */
     @Test
     void theReportsGroupFeesAndCancellationsBySource() {
         api.stockUp(hq, product, "10");
@@ -584,7 +584,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(cancelled.get("by_source").get(0).get("label").asString()).isEqualTo("WhatsApp");
     }
 
-    /** FR-RET-53: a cash fee comes into the till on the day of the delivery, so the cash book agrees with the cash account. */
+    /** FR-RET-55: a cash fee comes into the till on the day of the delivery, so the cash book agrees with the cash account. */
     @Test
     void aCashFeeCountsInTheDaysTakings() {
         api.stockUp(hq, product, "5");
@@ -673,7 +673,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
 
     // ---- review fixes: voids, the agreed prices, branches, holds, fees on account -----------------------
 
-    /** FR-RET-53: voiding the sale of a delivered order reverses its fee too, and the cash book takes the fee out that day. */
+    /** FR-RET-55: voiding the sale of a delivered order reverses its fee too, and the cash book takes the fee out that day. */
     @Test
     void voidingTheSaleOfADeliveredOrderReversesItsDeliveryFee() {
         api.stockUp(hq, product, "5");
@@ -706,7 +706,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
     }
 
     /**
-     * FR-RET-53: an order is delivered at the prices agreed even when the price list now gives another price, the cost rose
+     * FR-RET-55: an order is delivered at the prices agreed even when the price list now gives another price, the cost rose
      * above the agreed price, and the person delivering may not change prices; the sale line says the price was agreed.
      */
     @Test
@@ -735,7 +735,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                 .isIn(HttpStatus.FORBIDDEN, HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
-    /** FR-RET-53: an item switched off after the order was taken is still delivered; a new order for it is refused. */
+    /** FR-RET-55: an item switched off after the order was taken is still delivered; a new order for it is refused. */
     @Test
     void anItemSwitchedOffAfterTheOrderIsStillDelivered() {
         api.stockUp(hq, product, "5");
@@ -758,7 +758,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertKeptMatchesOpenOrders();
     }
 
-    /** FR-RET-52: usage, damage and a transfer out may not take units kept for an order. */
+    /** FR-RET-54: usage, damage and a transfer out may not take units kept for an order. */
     @Test
     void usageDamageAndTransfersCannotTakeUnitsKeptForAnOrder() {
         api.stockUp(hq, product, "3");
@@ -802,7 +802,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertKeptMatchesOpenOrders();
     }
 
-    /** FR-RET-52: a count below what is kept is recorded; the order then cannot be delivered until stock arrives. */
+    /** FR-RET-54: a count below what is kept is recorded; the order then cannot be delivered until stock arrives. */
     @Test
     void aStockTakeBelowWhatIsKeptStopsTheDeliveryUntilStockArrives() {
         api.stockUp(hq, product, "3");
@@ -853,7 +853,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
     }
 
     /**
-     * FR-RET-53: a credit buyer's delivery fee goes on the account (trade debtors, against the sale) and is paid later; the
+     * FR-RET-55: a credit buyer's delivery fee goes on the account (trade debtors, against the sale) and is paid later; the
      * credit limit counts what actually goes on credit; a sale whose fee was paid later is not voided here.
      */
     @Test
@@ -985,7 +985,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
     }
 
     /**
-     * FR-RET-53: items paid in full at the door and the fee on the account: the buyer owes the fee on the buyer list, the account,
+     * FR-RET-55: items paid in full at the door and the fee on the account: the buyer owes the fee on the buyer list, the account,
      * the customer ageing and the statement; the shop cannot be made a store while it is owed; paid later in cash, it counts in the
      * cash book on the day it is paid; a replay of the payment with the same key pays once; a holder of the sale permission alone
      * collects it.
@@ -1075,7 +1075,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(day.get("cash_takings_minor").asLong()).isEqualTo(12_000);
     }
 
-    /** FR-RET-53: voiding the sale of an order whose fee is still on the account reverses the fee: Dr 4120, Cr trade debtors. */
+    /** FR-RET-55: voiding the sale of an order whose fee is still on the account reverses the fee: Dr 4120, Cr trade debtors. */
     @Test
     void voidingASaleWithAnUnpaidFeeOnTheAccountReversesTheFee() {
         api.stockUp(hq, product, "5");
@@ -1107,7 +1107,7 @@ class RetailCustomerOrdersIT extends IntegrationTest {
     }
 
     /**
-     * FR-RET-51, FR-RET-53: a price changed when the order was taken is one changed price on the Controls page, for the person
+     * FR-RET-53, FR-RET-55: a price changed when the order was taken is one changed price on the Controls page, for the person
      * who took the order and not for the one who delivered it; a price agreed on the order that today's list prices otherwise is
      * not counted at all.
      */
@@ -1167,5 +1167,58 @@ class RetailCustomerOrdersIT extends IntegrationTest {
                         .getBody()
                         .get("items"))
                 .hasSize(1);
+    }
+
+    /**
+     * FR-RET-53, FR-RET-54 with item variants (#384, ADR-051): an order line is a size and colour of an item (a variant is a
+     * product), keeps that variant's stock aside and not the others', and is sold as that variant on delivery.
+     */
+    @Test
+    void anOrderLineIsOneSizeAndColourOfAnItem() {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("name", "Test Romper");
+        item.put("base_code", "ROMP");
+        item.put("category_id", api.category("Test Baby Clothes"));
+        item.put("unit_id", api.unit("u-romper"));
+        item.put("cost_minor", 4_000);
+        item.put("sell_minor", 9_000);
+        item.put("sizes", List.of("0-3m", "3-6m"));
+        item.put("colours", List.of("Blue", "Pink"));
+        ResponseEntity<JsonNode> made = api.post("/product-families", item, ADMIN);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID blue = null;
+        UUID pink = null;
+        for (JsonNode v : made.getBody().get("variants")) {
+            JsonNode of = v.get("variant");
+            if (of.get("size").asString().equals("0-3m")
+                    && of.get("colour").asString().equals("Blue")) {
+                blue = UUID.fromString(v.get("id").asString());
+            }
+            if (of.get("size").asString().equals("3-6m")
+                    && of.get("colour").asString().equals("Pink")) {
+                pink = UUID.fromString(v.get("id").asString());
+            }
+        }
+        api.stockUp(hq, blue, "2");
+        api.stockUp(hq, pink, "2");
+        ResponseEntity<JsonNode> ordered = order(body(hq, "instagram", 0, List.of(line(blue, "2"))));
+        assertThat(ordered.getStatusCode()).as("%s", ordered.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(ordered.getBody().get("lines").get(0).get("description").asString())
+                .isEqualTo("Test Romper (0-3m, Blue)");
+        // The blue romper in 0-3m is kept for the order; the pink one in 3-6m is still free at the till.
+        assertThat(balance(hq, blue)[1]).isEqualByComparingTo("2");
+        assertThat(balance(hq, pink)[1]).isEqualByComparingTo("0");
+        assertThat(api.sell(hq, "cash", blue, "1").getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(api.sell(hq, "cash", pink, "1").getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> done = deliver(RetailTestSupport.id(ordered), Map.of("payment_method", "cash"));
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        JsonNode sold = api.get("/sales/" + done.getBody().get("sale_id").asString(), ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0);
+        assertThat(sold.get("product_id").asString()).isEqualTo(blue.toString());
+        assertThat(sold.get("description").asString()).isEqualTo("Test Romper (0-3m, Blue)");
+        assertThat(balance(hq, blue)[0]).isEqualByComparingTo("0");
+        assertKeptMatchesOpenOrders();
     }
 }

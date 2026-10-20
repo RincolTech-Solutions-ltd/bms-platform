@@ -1906,6 +1906,23 @@ rows they read.
 (null when the cost is zero and nothing posts) and `created_by`. The movement list reads it through `movement_id` to show a
 correction with its reason and the old and new quantity.
 
+### 6.11.2b Items with sizes and colours (FR-RET-51, FR-RET-52; ADR-051; issue #384; V69)
+
+A variant is a row of `retail_products`; every movement, balance and line keeps pointing at it, so no stock or ledger table changes.
+
+`retail_product_families`: the item with sizes and colours. `name` (varchar(200), trimmed, not blank: what every variant's description
+starts with), `base_code` (varchar(24): what generated variant codes start with), `category_id` and `unit_id` (composite FKs; every
+variant has the same category and unit, kept equal by the service), `created_by`, `version` for If-Match. Forced row-level security;
+the application role may select, insert and update.
+
+`retail_products` gains four nullable columns: `family_id` (composite FK to `retail_product_families`), `variant_size` and
+`variant_colour` (varchar(30), trimmed, not blank when present) and `variant_sort` (the variant's place in its item, from 0, in the
+order the sizes and colours were given). `retail_products_variant_chk` keeps the four all null (an item without variants, which is its
+own single variant: every product that existed before V69) or a complete variant (a family, a sort and at least one of size and
+colour). The partial unique index `retail_products_variant` on `(tenant_id, family_id, lower(coalesce(variant_size, '')),
+lower(coalesce(variant_colour, '')))` where `family_id` is not null keeps one variant per size and colour in an item and serves the
+lookup of an item's variants. A query that reads "per item" groups by `coalesce(family_id, product_id)`.
+
 ### 6.11.3 Valuation and profit (FR-RET-09, FR-RET-10; #54)
 
 No table: `retail.reports` reads the tables above. Valuation per branch and product is the
@@ -1966,7 +1983,7 @@ checks and update guard of `retail_transfers`, built in V38, and the kind and si
 dropped last; V38 validates in the same migration because `retail_transfers` gains a few rows a day,
 and the stock movement checks, on the largest table, validate in a later migration.
 
-### 6.11.3c Customer orders with delivery (FR-RET-51 to FR-RET-55, issue #385, ADR-052, V70)
+### 6.11.3c Customer orders with delivery (FR-RET-53 to FR-RET-57, issue #385, ADR-052, V70)
 
 Built: customer orders (migration `V70`, renamed at merge in merge order). Three tables, forced row-level security and composite foreign keys on the tenant on each. `retail_customer_orders`: `order_no` (`OR` and six digits, `UNIQUE (tenant_id, order_no)`, from the tenant sequence `retail_order_no`), `branch_id` (a shop), `ordered_on`, `source` (`whatsapp`, `instagram`, `facebook`, `phone`, `walk_in`, `other`), `customer_id` (a credit buyer, optional), `customer_name` (required), `customer_phone`, `delivery_place` (empty means the customer collects at the shop), `delivery_date`, `delivery_fee_minor`, `currency`, `items_total_minor` (the sum of the lines at the prices agreed), `notes`, `status` (`ordered`, `packed`, `out_for_delivery`, `delivered`, `cancelled`), `packed_at`/`packed_by`, `sent_at`/`sent_by` and `delivered_by` (who takes it out, free text), `delivered_at`/`delivered_on`/`delivered_by_user` and `sale_id` (the sale it became, unique), `fee_method` and `fee_entry_id` (how the fee was paid, `cash`, `mobile_money`, `bank` or `account`, and its journal entry), `fee_paid_at`/`fee_paid_on`/`fee_paid_method`/`fee_paid_by`/`fee_payment_entry_id` (a fee on account paid later, once; the trigger allows only that change on a delivered order), `cancelled_at`/`cancelled_on`/`cancelled_by`/`cancel_reason`, and `version`. Checks tie each step to its columns (a delivered order has its sale, a cancelled one its reason, a sent one who took it); the application role may update only the step and delivery columns (column grants), and the trigger `retail_customer_orders_guard_update` moves the step forward only (ordered to packed, out for delivery, delivered or cancelled; packed to out for delivery, delivered or cancelled; out for delivery to delivered or cancelled), one version per change, nothing after delivered or cancelled. Indexes: the list (`tenant_id, branch_id, status, created_at DESC, id DESC`), the open orders by delivery day, the delivered by `delivered_on`, the cancelled by `cancelled_on`, and the phone lookup on `right(bms_digits(customer_phone), 9)` (and on `retail_customers (tenant_id, right(bms_digits(contact), 9))` for the credit buyers). `retail_customer_order_lines` (append-only): `line_no`, `product_id`, `unit_id` (a pack, or null for the base unit), `qty` (in that unit), `base_qty` (what the order keeps aside, in base units), `unit_price_minor` (agreed, per that unit), `line_total_minor`, and while price lists are on how the price was chosen (`price_source` retail, list or override, `price_list_id`, `price_break_min_qty`, `resolved_unit_price_minor`, and for an override `price_override_reason` and `overridden_by`). `retail_sale_lines` gains `price_overridden_by` (who changed a price when the customer order was taken) and the price source `order_agreed` in its price check (dropped and added again NOT VALID, then validated). `retail_customer_order_events` (append-only): the history, `step` (`ordered`, `changed`, `packed`, `out_for_delivery`, `delivered`, `cancelled`, `fee_paid`, `sale_voided`), `note`, `by_user`, `created_at`.
 

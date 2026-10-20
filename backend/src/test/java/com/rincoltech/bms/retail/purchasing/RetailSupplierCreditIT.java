@@ -110,7 +110,7 @@ class RetailSupplierCreditIT extends LandedCostTestBase {
 
     // ---- goods sent back ---------------------------------------------------------------------
 
-    /** Issue #385, FR-RET-52: units kept for a customer order are not sent back to the supplier. */
+    /** Issue #385, FR-RET-54: units kept for a customer order are not sent back to the supplier. */
     @Test
     void goodsKeptForACustomerOrderAreNotSentBack() {
         JsonNode r = receive(hq, product, "10", 100);
