@@ -30,11 +30,14 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
     `stock-correct:${me.user_id ?? ''}:${branchId}:${row.product_id ?? ''}`,
     { qty: showQty(current), reason: '', note: '', expected: current },
   );
-  // A draft kept from an earlier opening was typed against another quantity: start again from the one on the list now.
+  // A draft typed against another quantity (kept from an earlier opening, or the shelf moved and the list was read again) starts
+  // again from the quantity on the list now, with a new key: the quantity sent as expected is always the one on the list.
   useEffect(() => {
-    if (draft.expected !== current) discard();
+    if (draft.expected === current) return;
+    discard();
+    setDraft({ qty: showQty(current), reason: '', note: '', expected: current });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [current]);
   const problem = quantityProblem(draft.qty, current);
   const ready = problem === null && draft.reason !== '';
   // A second press before the first request has started must not send another one: the ref answers at once.
