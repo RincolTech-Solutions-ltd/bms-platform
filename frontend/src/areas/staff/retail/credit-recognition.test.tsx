@@ -49,11 +49,15 @@ describe('the setting', () => {
   it('says in plain words what each choice does and what a change will do', () => {
     expect(RECOGNITION_CHOICES.map((c) => c.value)).toEqual(['on_sale', 'on_payment']);
     expect(recognitionSentences('on_sale', 'on_sale')).toEqual([]);
-    const toPayment = recognitionSentences('on_sale', 'on_payment').join(' ');
+    const toPayment = recognitionSentences('on_sale', 'on_payment', '2026-10-20').join(' ');
     expect(toPayment).toContain('On credit');
+    expect(toPayment).toContain('From 2026-10-20 on');
+    expect(toPayment).toContain('Credit sales dated before 2026-10-20 keep counting the way they did');
     expect(toPayment).toContain('Stock still goes down');
     expect(toPayment).toContain('Savings already saved are not changed');
-    expect(recognitionSentences('on_payment', 'on_sale').join(' ')).toContain('no longer add to profit');
+    const back = recognitionSentences('on_payment', 'on_sale', '2026-10-25').join(' ');
+    expect(back).toContain('From 2026-10-25 on');
+    expect(back).toContain('still count as the money comes in');
     expect(`${toPayment} ${RECOGNITION_CHOICES.map((c) => c.hint).join(' ')}`).not.toMatch(/[\u2013\u2014]/);
   });
 
@@ -69,6 +73,15 @@ describe('the setting', () => {
     expect(html).toContain('data-tour="retail-credit-recognition"');
     expect(html).toMatch(/checked=""[^>]*\/><span><strong>When the sale is made/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review change/);
+  });
+
+  it('says since when the saved rule stands', () => {
+    const html = renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <CreditRecognitionSetting read={{ capabilities: { profile: 'shop', credit_sale_recognition: 'on_payment', credit_recognition_effective_from: '2026-10-20' }, version: 2 }} />
+      </QueryClientProvider>,
+    );
+    expect(html).toContain('This rule has stood since 2026-10-20');
   });
 
   it('starts on the buyer pays choice when that is saved', () => {

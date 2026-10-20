@@ -69,6 +69,15 @@ final class CreditRecognition {
      * them and hold every event up to the end of the window.
      */
     static List<DayFigures> deltas(List<Event> events, LocalDate from, LocalDate to) {
+        return deltas(events, from, to, null);
+    }
+
+    /**
+     * As above, for the events of the branches in {@code branches} (null: all). Every event of a sale moves its running figures, but
+     * a change is credited to the branch of the event that caused it (the branch that took the payment), and only reported when
+     * that branch is in scope.
+     */
+    static List<DayFigures> deltas(List<Event> events, LocalDate from, LocalDate to, java.util.Set<UUID> branches) {
         Map<String, long[]> out = new LinkedHashMap<>();
         Map<String, UUID> branchOf = new LinkedHashMap<>();
         Map<String, LocalDate> dayOf = new LinkedHashMap<>();
@@ -92,7 +101,9 @@ final class CreditRecognition {
             returnedCost = Math.addExact(returnedCost, e.returnedCostMinor());
             refunded = Math.addExact(refunded, e.refundedMinor());
             State after = state(e.totalMinor(), e.costMinor(), paid, returned, returnedCost, refunded);
-            if (!e.day().isBefore(from) && !e.day().isAfter(to)) {
+            if (!e.day().isBefore(from)
+                    && !e.day().isAfter(to)
+                    && (branches == null || branches.contains(e.branchId()))) {
                 String key = e.day() + "|" + e.branchId();
                 branchOf.putIfAbsent(key, e.branchId());
                 dayOf.putIfAbsent(key, e.day());

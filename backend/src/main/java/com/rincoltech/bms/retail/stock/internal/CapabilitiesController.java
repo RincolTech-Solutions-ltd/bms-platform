@@ -1,7 +1,9 @@
 package com.rincoltech.bms.retail.stock.internal;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.RequiresPermission;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
@@ -9,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.MediaType;
@@ -33,11 +36,20 @@ class CapabilitiesController {
     private final RetailCapabilities capabilities;
     private final TransferService transfers;
     private final TenantSettings settings;
+    private final BusinessClock clock;
+    private final CurrentTenant tenant;
 
-    CapabilitiesController(RetailCapabilities capabilities, TransferService transfers, TenantSettings settings) {
+    CapabilitiesController(
+            RetailCapabilities capabilities,
+            TransferService transfers,
+            TenantSettings settings,
+            BusinessClock clock,
+            CurrentTenant tenant) {
         this.capabilities = capabilities;
         this.transfers = transfers;
         this.settings = settings;
+        this.clock = clock;
+        this.tenant = tenant;
     }
 
     @Schema(name = "RetailCapabilities")
@@ -58,6 +70,13 @@ class CapabilitiesController {
                             "How credit sales count in the reports, the dashboard and the daily savings (ADR-043):"
                                     + " on_sale (the default) counts them when they are made, on_payment only when the buyer pays")
             String creditSaleRecognition,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Read only: the day the credit rule last changed (the tenant's business date): credit sales dated before"
+                                    + " it keep counting the way they did (ADR-043); absent while it never changed")
+            LocalDate creditRecognitionEffectiveFrom,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
@@ -108,6 +127,13 @@ class CapabilitiesController {
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
+        if (r.creditSaleRecognition() != null && !r.creditSaleRecognition().equals(capabilities.creditRecognition())) {
+            // A change of the rule counts from today: credit sales dated earlier keep counting the way they did
+            // (ADR-043).
+            proposed.put(
+                    "credit_recognition_effective_from",
+                    clock.today(tenant.profile().timezone()).toString());
+        }
         transfers.guardSwitchOff(proposed);
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
         return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);
@@ -132,6 +158,7 @@ class CapabilitiesController {
                 flag(g, "transfer_receipt"),
                 flag(g, "returns"),
                 g.get(RetailCapabilities.CREDIT_RECOGNITION) instanceof String c ? c : RetailCapabilities.ON_SALE,
+                g.get("credit_recognition_effective_from") instanceof String d ? LocalDate.parse(d) : null,
                 threshold > 0 ? threshold : null);
     }
 

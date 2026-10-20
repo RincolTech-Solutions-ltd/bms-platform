@@ -36,13 +36,24 @@ balance today and every closed period.
    `retail.capabilities.changed` with the old and new group. Choosing the shop or trade profile does not touch it. The value is
    validated (422 on anything else).
 
+   **The setting has an effective date.** A change counts from the business date on which it was made (`credit_recognition_effective_from`,
+   set by the route, never by the caller, and kept with every earlier change in `credit_recognition_changes`). A credit sale is counted
+   the way the rule stood on the day the sale is dated, whatever the rule is today: a sale dated on or after the day `on_payment` took
+   effect is counted when the buyer pays, a sale dated before it keeps counting at the sale, and the mirror holds when the rule is given
+   up again (a sale made while `on_payment` stood keeps counting as the money comes in). So switching never counts the profit of an older
+   sale a second time (once at the sale, once as it is paid) and never moves profit onto a day whose savings were already set aside. A
+   change back on the same day leaves no trace. The confirmation on the switch says exactly this, with the date.
+
 2. **Stock and the general ledger are unchanged under both values.** Stock leaves at the sale. Trade debtors are recorded at the
    sale. Only the reporting layer and the savings rule change, so the accounts still balance.
 
 3. **Three figures under `on_payment`.**
    - **Sold:** everything sold, credit included. The figure of `on_sale`, by the sale's own date.
    - **Received:** money collected for sales. A sale paid at the sale counts in full on the sale date. A payment on a credit
-     sale counts on the day it was received (`paid_on`). Money refunded on a return takes it back on the day of the return.
+     sale counts on the day it was **recorded** (the tenant's day of its entry), not on the date written on it (`paid_on` stays the
+     receipt date shown on the payment and the statement). A payment dated last Monday and entered on Wednesday is Wednesday's money,
+     so a day already reported, and the savings saved for it, are never rewritten by a backdated entry. Money refunded on a return
+     takes it back on the day of the return.
    - **On credit:** what buyers still owe on credit sales made on the system: total less paid, where the paid amount already
      holds the credit given on returns. Not part of any period; it is a position now.
 
@@ -62,12 +73,15 @@ balance today and every closed period.
    `/retail/sales/summary` and the grouped sales lists are not changed here (issue #341 owns that endpoint); the sales analysis,
    margins and evaluation reports keep counting what was sold, as product analytics.
 
-6. **A payment belongs to the shop that made the sale.** For profit and Received the branch is the sale's, whichever branch took a
-   payment on account. The cash book's till figures keep using the receiving branch, as they do today.
+6. **A payment belongs to the branch that took it.** For Received and the profit share the branch is the one that took the money: the
+   receiving branch of a payment on account, else the sale's (the margin still comes from the sale). So the savings suggestion of a shop
+   follows the cash that is in that shop's till, the cash book's till figures use the same branch, and a payment on account taken at
+   branch B for a sale of branch A gives its profit to B.
 
 7. **Reversals, voids and returns of a credit sale.**
-   - A payment on account that is reversed stays on the day it was received; the reversal is its own negative figure on the day it
-     was reversed. A day already reported is never rewritten (the rule the credit control payments and the cash book already follow).
+   - A payment on account that is reversed stays on the day it was recorded; the reversal is its own negative figure on the day it
+     was reversed, at the branch that took the payment. A day already reported is never rewritten (the rule the credit control
+     payments and the cash book already follow).
    - A voided credit sale leaves every figure: Sold, On credit and Received. A credit sale with payments cannot be voided, and a
      payment on account reversed to zero leaves nothing to take back.
    - A return that stands takes value and cost off the sale, so the recognised figures follow the smaller sale. A return of goods
@@ -79,9 +93,12 @@ balance today and every closed period.
    count as they always did, on their own sale date, take no part in On credit, and a payment recorded against one adds nothing.
 
 9. **Savings already saved are never recomputed.** A saved savings row keeps its amount; only the suggestion for a day with no
-   saved record follows the setting. Changing the setting is read back to the administrator in plain words and confirmed.
+   saved record follows the setting, and with the effective date (decision 1) and the day of entry (decision 3) no change of the rule
+   and no late entry reaches a day that already has its savings. Changing the setting is read back to the administrator in plain words,
+   with the date it counts from, and confirmed.
 
-10. **Write-off (a loss for a buyer who never pays).** A holder of `retail.credit.manage` can write off the unpaid part of a live
+10. **Write-off (a loss for a buyer who never pays).** A holder of the new permission `retail.credit.write_off` (its own, administrators
+    only, kept apart from `retail.credit.manage` which sets limits and terms) can write off the unpaid part of a live
     credit sale, with a reason. It never deletes: the sale stays, reads "Written off", and leaves the owing and overdue lists and
     On credit. It is audited and recorded in the append-only `retail_sale_writeoffs` (one per sale, never reversed in this
     release). The journal entry clears the buyer's trade debtors for the unpaid amount `U`. Under `on_payment` the loss is the cost of the goods that no payment has carried into the profit yet (with no
@@ -89,11 +106,16 @@ balance today and every closed period.
     share the money kept has recognised, so the cost recognised plus `L` is the sale's cost to the unit), because the profit of the unpaid part was never counted: the entry
     debits the new chart account 5140 `bad_debt_loss` for `L`, debits sales revenue for the rest `U - L` (the profit never counted;
     a credit when the sale was sold below cost) and credits trade debtors for `U`. Under `on_sale` the sale's profit was counted when
-    it was made, so the loss is the whole `U` and revenue is not touched. Both figures are stored, and the daily profit report shows the one
-    that the tenant's setting of the day it is read calls for. The loss is a figure of the daily profit report on the
+    it was made, so the loss is the whole `U` and revenue is not touched. The loss follows how the sale itself was counted (its date
+    against the stretches of the rule, decision 1) and is stored, so the daily profit report never changes with a later switch. The loss is a figure of the daily profit report on the
     write-off date (`bad_debt_minor`, inside `profit_minor`) and so lowers that day's savings suggestion. Above the tenant's approval
     threshold for the action `retail_sale_write_off` the write-off is a maker-checker action (ADR-015); with no threshold set it
-    needs no second person, like every other optional threshold of ADR-033. An imported sale cannot be written off.
+    needs no second person, like every other optional threshold of ADR-033. Whether a checker should be mandatory by default is a decision
+    for Hillary (a tenant with a single administrator cannot approve its own request); until he decides, the default is open and the
+    separate permission is the safeguard. If a threshold applies, the loss counts on the day it is approved. A written-off sale takes no
+    payment, void or return, its payments on account cannot be reversed and its returns cannot be voided. An imported sale cannot be
+    written off. **Undoing a write-off is out of scope for this release**; a follow-up issue will decide how (a recovery entry, not an
+    edit). The invoice or delivery note of a written-off sale still says "Paid in full when issued": issue #354.
 
 ## Consequences
 
@@ -112,17 +134,19 @@ balance today and every closed period.
 - The ledger still shows the profit of a credit sale at the sale (revenue and cost of goods sold), so the profit and loss account
   and the report differ in time until the buyer pays or the debt is written off; the difference is exactly On credit at margin.
 - A write-off lowers the savings suggestion of its day.
-- Switching the setting after a write-off is safe for the reports: the write-off stores both figures (the unpaid amount and the cost never
-  carried into the profit) and the report picks the one that the setting of the day it is read calls for. The entry the write-off booked in
-  the ledger is not rewritten, so the split between bad debt loss and sales revenue stays as it was on the day.
+- A write-off is booked the way its sale was counted and keeps that loss, so switching the setting later never changes it.
 - A voided credit sale (possible only with no payment standing) drops out of every day, including days of payments that were later
   reversed; the days net to zero but a past figure is restated.
 - A sale whose unpaid part was written off takes no payment, no void, no return, and its payments and returns cannot be reversed or voided.
   A document issued from it (an invoice) still reads its paid amount, which includes the write-off; the document wording is a follow-up.
 
 **Watch for:**
-- Switching the setting back and forth: the reports restate the past by the new rule (nothing stored changes), but saved savings
-  rows do not move.
+- **Do not switch the pilot tenant to `on_payment` until the grouped sales lists and the sales summary (issue #341 and the issue that
+  follows it) are merged and labelled.** Until then two profit figures exist side by side: the summary and the grouped lists show the
+  profit of sales MADE (the screens say "profit of sales made" while the rule is `on_payment`), the Daily profit, the home cards and the
+  savings show the profit of money RECEIVED. The home card now includes debts written off, as Daily profit does.
+- Switching the setting back and forth no longer restates the past: each sale keeps the way it was counted (decision 1). Switching on a
+  day with sales already made leaves those sales counted at the sale.
 - Credit sales that have a write-off return or a cross-branch payment on account: the shop of the sale carries the profit.
 - The dashboard counts the cost of goods a return writes off as damaged through the sale, where the daily profit report counts it as
   usage; the two differ for that rare case only.

@@ -4,6 +4,9 @@ import com.rincoltech.bms.core.tenancy.ModuleSettings;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
 import com.rincoltech.bms.retail.catalogue.RetailPricing;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -48,6 +51,44 @@ public class RetailCapabilities {
     /** The tenant's credit sale recognition, {@link #ON_SALE} unless the owner chose {@link #ON_PAYMENT} (ADR-043). */
     public String creditRecognition() {
         return ON_PAYMENT.equals(settings.group(MODULE).get(CREDIT_RECOGNITION)) ? ON_PAYMENT : ON_SALE;
+    }
+
+    /**
+     * The stretches of sale dates counted when the buyer pays (ADR-043): from the day the owner chose {@code on_payment} to the day
+     * he went back, or still open. Empty for a tenant that never chose it, so every report reads as it always did.
+     */
+    public CreditPeriods onPaymentPeriods() {
+        Object stored = settings.group(MODULE).get("credit_recognition_changes");
+        if (!(stored instanceof List<?> list)) {
+            return CreditPeriods.NONE;
+        }
+        List<CreditPeriods.Range> ranges = new ArrayList<>();
+        LocalDate open = null;
+        for (Object o : list) {
+            if (!(o instanceof Map<?, ?> m)
+                    || !(m.get("from") instanceof String from)
+                    || !(m.get("mode") instanceof String mode)) {
+                continue;
+            }
+            LocalDate date = LocalDate.parse(from);
+            if (mode.equals(ON_PAYMENT) && open == null) {
+                open = date;
+            } else if (mode.equals(ON_SALE) && open != null) {
+                ranges.add(new CreditPeriods.Range(open, date));
+                open = null;
+            }
+        }
+        if (open != null) {
+            ranges.add(new CreditPeriods.Range(open, null));
+        }
+        return new CreditPeriods(ranges);
+    }
+
+    /** The day the current credit rule took effect, when it was ever changed (ADR-043). */
+    public LocalDate creditRecognitionEffectiveFrom() {
+        return settings.group(MODULE).get("credit_recognition_effective_from") instanceof String d
+                ? LocalDate.parse(d)
+                : null;
     }
 
     /** True when credit sales are reported as received money only (ADR-043). */

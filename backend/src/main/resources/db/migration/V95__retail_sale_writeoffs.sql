@@ -78,6 +78,19 @@ REVOKE ALL ON FUNCTION bms_seed_retail_chart(uuid) FROM PUBLIC;
 SELECT bms_seed_retail_chart(tenant_id) FROM tenant_modules WHERE module_key = 'retail';
 
 -- ---------------------------------------------------------------------------------------------
+-- Permission (chapter 8 section 8.3.2; PermissionMatrixIT compares these rows with the matrix). retail.credit.write_off is its own
+-- permission, kept apart from retail.credit.manage (the credit limit and terms) because a write-off cannot be taken back in this
+-- release. Administrators only, for every tenant (role_permissions is by role). Above the tenant's approval threshold for the
+-- action retail_sale_write_off a second holder must approve it (maker-checker, ADR-015); with no threshold set there is no checker.
+-- ---------------------------------------------------------------------------------------------
+
+INSERT INTO permissions (key, module, description, is_money_moving) VALUES
+    ('retail.credit.write_off', 'retail', 'Credit buyers: write off a debt that will never be paid, as a loss', true);
+
+INSERT INTO role_permissions (role_key, permission_key) VALUES
+    ('tenant_admin', 'retail.credit.write_off');
+
+-- ---------------------------------------------------------------------------------------------
 -- retail_sale_writeoffs: one write-off per credit sale. unpaid_minor is what the buyer still owed, the amount the entry clears
 -- from trade debtors. cost_share_minor is the cost of the goods that no payment had carried into the profit (the unpaid share of
 -- the cost of goods, after returns): the loss the profit report shows on written_off_on under credit_sale_recognition on_payment,

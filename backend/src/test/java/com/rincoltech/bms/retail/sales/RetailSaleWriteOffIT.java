@@ -32,7 +32,8 @@ class RetailSaleWriteOffIT extends IntegrationTest {
 
     static final String SETTINGS = "core.settings.manage";
     static final String MANAGER = ADMIN
-            + ",retail.credit.manage,retail.sale.return,core.approvals.read,retail.savings.record,retail.cashbook.read";
+            + ",retail.credit.manage,retail.credit.write_off,retail.sale.return,core.approvals.read,retail.savings.record,"
+            + "retail.cashbook.read";
 
     @Autowired
     TestRestTemplate http;
@@ -98,6 +99,27 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
+        if (daysAgo > 0) {
+            String id = r.getBody().get("payment").get("id").asString();
+            TestDatabase.owner()
+                    .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                            + " UPDATE retail_sale_payments SET created_at = (TIMESTAMP '" + today().minusDays(daysAgo)
+                            + " 12:00:00') AT TIME ZONE 'Africa/Kampala' WHERE id = '" + id + "'; END $$")
+                    .update();
+        }
+    }
+
+    /** The rule "when the buyer pays" as for a tenant that switched long ago: it counts every sale of the test. */
+    void fromTheStart() {
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_recognition_changes}',"
+                        + " '[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"}]'::jsonb),"
+                        + " '{module_groups,retail,credit_recognition_effective_from}', '\"1970-01-01\"'::jsonb)"
+                        + " WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
     }
 
     ResponseEntity<JsonNode> writeOff(UUID sale, String reason, String perms) {
@@ -170,7 +192,7 @@ class RetailSaleWriteOffIT extends IntegrationTest {
 
     @Test
     void underOnPaymentTheLossIsTheUnpaidShareOfTheCostAndTheBooksBalance() {
-        setting(Map.of("credit_sale_recognition", "on_payment"));
+        fromTheStart();
         UUID s = creditSale(3, 3);
         pay(s, 1_000, 2);
         assertThat(debtorsOf(s)).isEqualTo(2_000);
@@ -256,7 +278,7 @@ class RetailSaleWriteOffIT extends IntegrationTest {
 
     @Test
     void afterAReturnTheLossIsTheCostThatIsLeftLessWhatThePaymentsCarriedIn() {
-        setting(Map.of("credit_sale_recognition", "on_payment"));
+        fromTheStart();
         UUID s = creditSale(3, 3);
         pay(s, 500, 2);
         returnToAccount(s, "1");
@@ -313,22 +335,63 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     @Test
-    void theReportFollowsTheSettingOfTheDayItIsReadNotOfTheDayOfTheWriteOff() {
+    void aSaleIsWrittenOffTheWayItWasCountedWhateverTheRuleIsLater() {
         UUID s = creditSale(3, 3);
         pay(s, 1_000, 2);
         JsonNode w = writeOffOk(s);
-        assertThat(w.get("loss_minor").asLong()).as("booked under on_sale").isEqualTo(2_000);
-        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(2_000);
+        assertThat(w.get("loss_minor").asLong())
+                .as("counted at the sale: the whole unpaid amount")
+                .isEqualTo(2_000);
         setting(Map.of("credit_sale_recognition", "on_payment"));
         JsonNode report = profit();
         assertThat(report.get("bad_debt_minor").asLong())
-                .as("the cost never carried into the profit")
-                .isEqualTo(1_200);
-        assertThat(report.get("profit_minor").asLong())
-                .as("1,000 received less the 1,800 cost")
-                .isEqualTo(-800);
+                .as("the sale is dated before the rule changed, so it keeps counting as it did")
+                .isEqualTo(2_000);
+        assertThat(report.get("profit_minor").asLong()).isEqualTo(-800);
         setting(Map.of("credit_sale_recognition", "on_sale"));
         assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(2_000);
+    }
+
+    @Test
+    void aSaleCountedWhenTheBuyerPaysIsWrittenOffAtTheCostNeverCarriedIntoTheProfit() {
+        setting(Map.of("credit_sale_recognition", "on_payment"));
+        UUID s = creditSale(3, 0);
+        pay(s, 1_000, 0);
+        JsonNode w = writeOffOk(s);
+        assertThat(w.get("loss_minor").asLong()).isEqualTo(1_200);
+        assertThat(w.get("credit_sale_recognition").asString()).isEqualTo("on_payment");
+        assertThat(profit().get("bad_debt_minor").asLong()).isEqualTo(1_200);
+    }
+
+    @Test
+    void aPaymentOnAccountCannotBeReversedOnceTheSaleWasWrittenOff() {
+        setting(Map.of("customer_accounts", true));
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 05"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", today().minusDays(1).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "3")));
+        UUID s = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 1_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        UUID receiptId = RetailTestSupport.id(receipt);
+        writeOffOk(s);
+        ResponseEntity<JsonNode> undo = api.postKeyed(
+                "/customers/" + buyer + "/payments/" + receiptId + "/reverse",
+                Map.of("reason", "Entered by mistake"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(undo.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(undo.getBody().get("code").asString()).isEqualTo("payment_not_reversible");
+        assertThat(sale(s).get("balance_minor").asLong()).isZero();
     }
 
     // ---- rules and permissions ----------------------------------------------------------------------
@@ -337,6 +400,10 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     void itNeverDeletesAndRefusesTheWrongSales() {
         UUID s = creditSale(2, 1);
         assertThat(writeOff(s, "abc", MANAGER).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(writeOff(s, "     ab     ", MANAGER).getStatusCode())
+                .as("blanks around a short reason do not make it long enough")
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(sale(s).has("write_off")).isFalse();
         writeOffOk(s);
         ResponseEntity<JsonNode> again = writeOff(s, "Buyer left town", MANAGER);
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -385,11 +452,11 @@ class RetailSaleWriteOffIT extends IntegrationTest {
         Map<String, Object> pay = Map.of("amount_minor", 100, "method", "cash");
         ResponseEntity<JsonNode> payment = api.postKeyed(
                 "/sales/" + s + "/payments", pay, ADMIN, "*", UUID.randomUUID().toString());
-        assertThat(payment.getStatusCode().is2xxSuccessful()).isFalse();
-        assertThat(api.post("/sales/" + s + "/void", Map.of("reason", "Test void"), ADMIN)
-                        .getStatusCode()
-                        .is2xxSuccessful())
-                .isFalse();
+        assertThat(payment.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(payment.getBody().get("code").asString()).isEqualTo("payment_exceeds_balance");
+        ResponseEntity<JsonNode> voided = api.post("/sales/" + s + "/void", Map.of("reason", "Test void"), ADMIN);
+        assertThat(voided.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(voided.getBody().get("code").asString()).isEqualTo("sale_has_payments");
         UUID line = UUID.fromString(sale(s).get("lines").get(0).get("id").asString());
         Map<String, Object> l = new LinkedHashMap<>();
         l.put("sale_line_id", line);
@@ -407,8 +474,10 @@ class RetailSaleWriteOffIT extends IntegrationTest {
     }
 
     @Test
-    void itNeedsRetailCreditManage() {
+    void itNeedsItsOwnPermissionNotJustRetailCreditManage() {
         UUID s = creditSale(2, 1);
+        String manageOnly = ADMIN + ",retail.credit.manage";
+        assertThat(writeOff(s, "Buyer left town", manageOnly).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(writeOff(s, "Buyer left town", RetailTestSupport.SALES).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(writeOff(s, "Buyer left town", ADMIN).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);

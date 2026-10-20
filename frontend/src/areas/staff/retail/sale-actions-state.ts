@@ -112,13 +112,19 @@ export const writeOffReasonOf = (text: string): string | null => reasonOf(text);
 
 /** What the person is told before they confirm: the amount, that it is a loss, that nothing is deleted and that it cannot be undone. */
 export const writeOffWarning = (owed: number): string =>
-  `${formatMinor(owed, RETAIL_CURRENCY)} owed will be cleared as a bad debt. The sale stays on record and reads Written off, the buyer no longer owes it, and it leaves the owing and overdue lists. The loss shows in Daily profit on today's date. This cannot be undone.`;
+  `${formatMinor(owed, RETAIL_CURRENCY)} owed will be cleared as a bad debt. The sale stays on record and reads Written off, the buyer no longer owes it, and it leaves the owing and overdue lists. The loss shows in Daily profit on the day it is written off; if a second administrator has to approve it, that is the day it is approved. This cannot be undone.`;
 
 /** A sentence for the result of a write-off: done, or waiting for a second administrator. */
 export const writeOffWords = (outcome: Pick<WriteOffOutcome, 'executed' | 'write_off'>): string =>
   outcome.executed === true
     ? `Cleared ${formatMinor(outcome.write_off?.unpaid_minor ?? 0, RETAIL_CURRENCY)} owed as a bad debt. The sale stays on record.`
     : 'Sent to a second administrator to approve. Nothing changes until they do.';
+
+/** What is shown in place of the button while a write-off of the sale waits for a second administrator. */
+export const WRITE_OFF_PENDING = 'A write-off of this debt is waiting for a second administrator to approve it. Nothing changes until they do.';
+
+/** The server already holds a waiting request for this sale. */
+export const writeOffAlreadyPending = (error: unknown): boolean => codeOf(error) === 'approval_already_pending';
 
 /** Refusals that mean the sale moved on since the screen read it. */
 export const writeOffMovedOn = (error: unknown): boolean => ['already_written_off', 'nothing_owing', 'sale_voided'].includes(codeOf(error) ?? '');

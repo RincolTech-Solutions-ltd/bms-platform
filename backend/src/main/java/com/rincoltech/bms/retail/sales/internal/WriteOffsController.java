@@ -32,7 +32,7 @@ class WriteOffsController {
     }
 
     @PostMapping("/sales/{sale_id}/write-off")
-    @RequiresPermission("retail.credit.manage")
+    @RequiresPermission("retail.credit.write_off")
     @Operation(
             summary =
                     "Write off the unpaid part of a credit sale as a loss: clears the debt, never deletes (issue #340); M."

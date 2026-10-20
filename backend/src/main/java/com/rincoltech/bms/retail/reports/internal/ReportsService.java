@@ -16,7 +16,6 @@ import com.rincoltech.bms.retail.reports.internal.ReportsApi.ValuationRow;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.DayFigures;
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.Holding;
 import com.rincoltech.bms.retail.stock.Quantities;
-import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -226,7 +225,7 @@ class ReportsService {
         // ADR-043: with credit sales counted when the buyer pays, the figures are the money received, and Sold
         // (everything
         // sold, credit included) comes beside them.
-        boolean onPayment = profitFigures.onPayment();
+        boolean onPayment = profitFigures.usesOnPayment();
         Map<String, Long> sold = new java.util.TreeMap<>();
         for (DayFigures d : profitFigures.daily(filter, start, end)) {
             long[] f = figures(days, branchOf, dateOf, d.branchId(), d.date());
@@ -287,7 +286,7 @@ class ReportsService {
                 Math.subtractExact(
                         Math.addExact(Math.subtractExact(Math.subtractExact(sales, costOfSales), usage), difference),
                         badDebt),
-                onPayment ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
+                profitFigures.mode(),
                 onPayment ? soldTotal : null,
                 onPayment ? credit.onCredit(filter)[0] : null);
     }

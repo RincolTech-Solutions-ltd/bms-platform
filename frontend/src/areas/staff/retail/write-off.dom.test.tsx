@@ -53,8 +53,12 @@ describe('who is offered the write-off', () => {
     expect(screen.getByRole('button', { name: 'Write off' })).toBeTruthy();
   });
 
-  it('is nobody else', () => {
+  it('is nobody else, and not a holder of retail.credit.manage alone', () => {
     screenOf(seller, <WriteOffSaleAction sale={owing} />);
+    expect(screen.queryByRole('button', { name: 'Write off' })).toBeNull();
+    cleanup();
+    const manageOnly = { ...admin, permissions: (admin.permissions ?? []).filter((p) => p !== 'retail.credit.write_off'), permission_scopes: Object.fromEntries(Object.entries(admin.permission_scopes ?? {}).filter(([p]) => p !== 'retail.credit.write_off')) };
+    screenOf(manageOnly, <WriteOffSaleAction sale={owing} />);
     expect(screen.queryByRole('button', { name: 'Write off' })).toBeNull();
   });
 
@@ -107,6 +111,7 @@ describe('the form', () => {
     fireEvent.change(screen.getByLabelText(/Why will this buyer not pay/), { target: { value: 'Buyer left town' } });
     fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
     expect(await screen.findByText(/Sent to a second administrator to approve/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Write off' })).toBeNull();
   });
 
   it('tells a refusal in plain words and keeps the form', async () => {
@@ -116,6 +121,16 @@ describe('the form', () => {
     fireEvent.change(screen.getByLabelText(/Why will this buyer not pay/), { target: { value: 'Buyer left town' } });
     fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/changed while you were looking/);
+  });
+
+  it('hides the button and says so while the write-off waits for a second administrator', async () => {
+    writeOffSale.mockRejectedValueOnce(refusal('approval_already_pending', 409));
+    screenOf(admin, <WriteOffSaleAction sale={owing} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
+    fireEvent.change(screen.getByLabelText(/Why will this buyer not pay/), { target: { value: 'Buyer left town' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Write off' }));
+    expect((await screen.findByTestId('write-off-pending')).textContent).toMatch(/waiting for a second administrator/);
+    expect(screen.queryByRole('button', { name: 'Write off' })).toBeNull();
   });
 
   it('can be left without writing anything off', () => {
@@ -136,6 +151,7 @@ describe('the words', () => {
   it('warns with the amount and says the sale is kept', () => {
     expect(writeOffWarning(2500)).toContain('UGX 2,500');
     expect(writeOffWarning(2500)).toMatch(/not deleted|stays on record/);
+    expect(writeOffWarning(2500)).toContain('the day it is approved');
     expect(`${writeOffWarning(1)} ${writeOffWords({ executed: false })}`).not.toMatch(/[\u2013\u2014]/);
   });
 

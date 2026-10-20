@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.reports.internal;
 
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -101,25 +102,31 @@ class ReportsRepository {
      * supplier invoice or credit note is not in this report, as it never was.
      */
     List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        return daily(branchIds, from, to, false);
+        return daily(branchIds, from, to, CreditPeriods.NONE);
     }
 
     /**
-     * The same figures; with {@code received} (credit sales counted when the buyer pays, ADR-043) a credit sale that is
-     * not an imported one leaves the sales leg and the sales and cost of its returns, since its sales and cost reach the
-     * report through {@link CreditRecognition} on the days the money comes in. What a return writes off as damaged stays
-     * a usage cost on the day of the return: the goods are lost whether or not the buyer paid.
+     * The same figures; a credit sale that is not an imported one and is dated inside a stretch of {@code periods} (counted
+     * when the buyer pays, ADR-043) leaves the sales leg, and so do the sales and cost of its returns, since its sales and
+     * cost reach the report through {@link CreditRecognition} on the days the money comes in. What a return writes off as
+     * damaged stays a usage cost on the day of the return: the goods are lost whether or not the buyer paid. Credit sales
+     * dated outside the stretches count at the sale, as they always did.
      */
-    List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to, boolean received) {
-        String deferredSale = received ? " AND (s.payment_method <> 'credit' OR s.historical)" : "";
-        String deferredReturn = received
-                ? "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
-                        + " AND rs.payment_method = 'credit' AND NOT rs.historical)"
-                : "false";
+    List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to, CreditPeriods periods) {
+        Map<String, Object> periodParams = new LinkedHashMap<>();
+        String deferredSale = periods.isEmpty()
+                ? ""
+                : " AND (s.payment_method <> 'credit' OR s.historical OR NOT "
+                        + periods.sql("s.sale_date", periodParams, "crpS") + ")";
+        String deferredReturn = periods.isEmpty()
+                ? "false"
+                : "EXISTS (SELECT 1 FROM retail_sales rs WHERE rs.tenant_id = r.tenant_id AND rs.id = r.sale_id"
+                        + " AND rs.payment_method = 'credit' AND NOT rs.historical AND "
+                        + periods.sql("rs.sale_date", periodParams, "crpR") + ")";
         // Spelled outside the text blocks below, which strip the space at the end of a line.
         String returnSales = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.total_minor END,";
         String returnCost = " CASE WHEN " + deferredReturn + " THEN 0 ELSE -r.cost_minor END,";
-        Map<String, Object> params = new LinkedHashMap<>();
+        Map<String, Object> params = new LinkedHashMap<>(periodParams);
         params.put("from", Date.valueOf(from));
         params.put("to", Date.valueOf(to));
         String salesFilter = "";

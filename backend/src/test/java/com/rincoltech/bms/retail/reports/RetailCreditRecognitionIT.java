@@ -80,8 +80,27 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
     }
 
+    /** The real switch: it counts from today, so only credit sales dated today or later are counted when the buyer pays. */
     void onPayment() {
         capability(Map.of("credit_sale_recognition", "on_payment"));
+    }
+
+    /** A rule that has stood since before any sale of the test, as for a tenant that switched long ago. */
+    void onPaymentFromTheStart() {
+        onPayment();
+        history("on_payment", "[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"}]", "1970-01-01");
+    }
+
+    /** Writes the rule and its history as the settings row holds them (the real route only ever appends today's change). */
+    void history(String mode, String changesJson, String effectiveFrom) {
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(jsonb_set(jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_sale_recognition}', CAST(? AS jsonb)),"
+                        + " '{module_groups,retail,credit_recognition_changes}', CAST(? AS jsonb)),"
+                        + " '{module_groups,retail,credit_recognition_effective_from}', CAST(? AS jsonb))"
+                        + " WHERE tenant_id = ?")
+                .params("\"" + mode + "\"", changesJson, "\"" + effectiveFrom + "\"", t.tenantId())
+                .update();
     }
 
     UUID cashSale(UUID branch, int qty, LocalDate date) {
@@ -107,7 +126,17 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         return RetailTestSupport.id(r);
     }
 
-    void pay(UUID sale, long amount, LocalDate on) {
+    /** A payment dated {@code on} and entered on that day (the entry is moved back in time when it is not today). */
+    UUID pay(UUID sale, long amount, LocalDate on) {
+        UUID id = payEnteredToday(sale, amount, on);
+        if (!on.equals(today())) {
+            moveEntered(id, on);
+        }
+        return id;
+    }
+
+    /** A payment dated {@code on} but entered now: it is today's money whatever date it carries. */
+    UUID payEnteredToday(UUID sale, long amount, LocalDate on) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("amount_minor", amount);
         body.put("method", "cash");
@@ -118,6 +147,41 @@ class RetailCreditRecognitionIT extends IntegrationTest {
                 ADMIN,
                 "*",
                 UUID.randomUUID().toString());
+        assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
+        return UUID.fromString(r.getBody().get("payment").get("id").asString());
+    }
+
+    static String enteredAt(LocalDate day) {
+        return "(TIMESTAMP '" + day + " 12:00:00') AT TIME ZONE 'Africa/Kampala'";
+    }
+
+    /** Moves the moment a payment was entered to the middle of {@code day}, as if it had been entered then. */
+    void moveEntered(UUID payment, LocalDate day) {
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sale_payments SET created_at = " + enteredAt(day) + " WHERE id = '" + payment
+                        + "'; END $$")
+                .update();
+    }
+
+    /** The same for every sale payment a receipt on account created. */
+    void moveReceiptEntered(UUID receipt, LocalDate day) {
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sale_payments SET created_at = " + enteredAt(day)
+                        + " WHERE id IN (SELECT sale_payment_id FROM retail_account_payment_allocations WHERE receipt_id = '"
+                        + receipt + "'); END $$")
+                .update();
+    }
+
+    void saveSavings(UUID branch, LocalDate day) {
+        JsonNode suggestion = suggestion(branch, day);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", branch);
+        body.put("business_date", day.toString());
+        body.put("suggestion_token", suggestion.get("suggestion_token").asString());
+        ResponseEntity<JsonNode> r =
+                api.postKeyed("/savings", body, CASHBOOK, "*", UUID.randomUUID().toString());
         assertThat(r.getStatusCode().is2xxSuccessful()).as("%s", r.getBody()).isTrue();
     }
 
@@ -199,6 +263,12 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
         long before = AnalyticsData.auditRows();
         onPayment();
+        assertThat(api.get("/settings/capabilities", SETTINGS)
+                        .getBody()
+                        .get("credit_recognition_effective_from")
+                        .asString())
+                .as("a change counts from today")
+                .isEqualTo(today().toString());
         assertThat(AnalyticsData.auditRows()).isGreaterThan(before);
         assertThat(TestDatabase.owner()
                         .sql(
@@ -284,7 +354,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void anUnpaidCreditSaleIsSoldAndOnCreditButNotReceivedNorProfitNorSavings() {
-        onPayment();
+        onPaymentFromTheStart();
         creditSale(hq, 3, ago(2));
         cashSale(hq, 2, today());
 
@@ -317,7 +387,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void aPartPaymentGivesPartOfTheProfitAndSeveralPaymentsAddUpExactly() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 3, ago(3));
         pay(s, 1_000, ago(2));
         pay(s, 500, ago(1));
@@ -348,7 +418,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void aPaymentInALaterMonthCountsOnTheDayItIsReceived() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 2, ago(40));
         pay(s, 2_000, today());
         JsonNode old = profit(ago(40), ago(40));
@@ -362,7 +432,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void theProfitStaysWithTheShopThatMadeTheSale() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(br2, 2, ago(1));
         pay(s, 2_000, today());
         JsonNode report = profit(ago(1), today());
@@ -372,7 +442,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void aVoidedUnpaidCreditSaleLeavesSoldAndOnCredit() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 2, ago(1));
         assertThat(profit(ago(1), today()).get("on_credit_minor").asLong()).isEqualTo(2_000);
         assertThat(api.post("/sales/" + s + "/void", Map.of("reason", "Test void"), ADMIN)
@@ -388,7 +458,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void aReturnOfTheUnpaidPartTakesNoProfitBackAndThePaymentsThatFollowCountTheSmallerSale() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 3, ago(2));
         giveBack(s, "1", "account");
         JsonNode afterReturn = profit(ago(2), today());
@@ -406,7 +476,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void aReturnOfPaidGoodsRefundedInMoneyGivesTheProfitBack() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 3, ago(2));
         pay(s, 3_000, ago(1));
         assertThat(profit(ago(2), today()).get("profit_minor").asLong()).isEqualTo(1_200);
@@ -422,7 +492,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void anImportedCreditSaleStaysOutsideTheRule() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID sale = UUID.randomUUID();
         TestDatabase.owner()
                 .sql("""
@@ -474,7 +544,7 @@ class RetailCreditRecognitionIT extends IntegrationTest {
 
     @Test
     void withoutProfitReadTheReceivedMoneyStaysAndTheProfitGoes() {
-        onPayment();
+        onPaymentFromTheStart();
         UUID s = creditSale(hq, 2, ago(1));
         pay(s, 2_000, today());
         JsonNode dash = api.get("/reports/dashboard", RetailTestSupport.SALES).getBody();
@@ -482,5 +552,191 @@ class RetailCreditRecognitionIT extends IntegrationTest {
         assertThat(dash.get("today").has("gross_profit_minor")).isFalse();
         assertThat(api.get("/reports/profit/daily", RetailTestSupport.SALES).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // ---- the rule has an effective date --------------------------------------------------------
+
+    @Test
+    void switchingTheRuleNeverCountsAnOlderSalesProfitTwiceNorMovesSavedSavings() {
+        UUID old = creditSale(hq, 100, ago(3));
+        assertThat(suggestion(hq, ago(3)).get("suggested_minor").asLong()).isEqualTo(20_000);
+        saveSavings(hq, ago(3));
+
+        onPayment();
+        payEnteredToday(old, 100_000, today());
+        JsonNode report = profit(ago(3), today());
+        assertThat(field(row(report, hq, ago(3)), "profit_minor"))
+                .as("counted at the sale, as it was")
+                .isEqualTo(40_000);
+        assertThat(field(row(report, hq, today()), "profit_minor"))
+                .as("its payment adds nothing")
+                .isZero();
+        assertThat(report.get("profit_minor").asLong()).isEqualTo(40_000);
+        assertThat(suggestion(hq, today()).get("suggested_minor").asLong()).isZero();
+        assertThat(suggestion(hq, ago(3)).get("suggested_minor").asLong()).isEqualTo(20_000);
+
+        // A sale dated on the day the rule changed is counted when the buyer pays.
+        UUID fresh = creditSale(hq, 2, today());
+        assertThat(profit(ago(3), today()).get("profit_minor").asLong()).isEqualTo(40_000);
+        payEnteredToday(fresh, 2_000, today());
+        assertThat(profit(ago(3), today()).get("profit_minor").asLong()).isEqualTo(40_800);
+        assertThat(suggestion(hq, today()).get("suggested_minor").asLong()).isEqualTo(400);
+        assertThat(dashboard().get("today").get("gross_profit_minor").asLong()).isEqualTo(800);
+    }
+
+    @Test
+    void switchingBackLeavesTheSalesOfTheOtherEraAsTheyWere() {
+        // The rule stood from the start and was given up today: a sale made while it stood keeps counting as the money
+        // comes in.
+        history(
+                "on_sale",
+                "[{\"from\":\"1970-01-01\",\"mode\":\"on_payment\"},{\"from\":\"" + today()
+                        + "\",\"mode\":\"on_sale\"}]",
+                today().toString());
+        UUID made = creditSale(hq, 3, ago(3));
+        pay(made, 3_000, ago(1));
+        JsonNode report = profit(ago(3), today());
+        assertThat(field(row(report, hq, ago(3)), "profit_minor"))
+                .as("not counted at the sale")
+                .isZero();
+        assertThat(field(row(report, hq, ago(1)), "profit_minor"))
+                .as("counted when the money came in")
+                .isEqualTo(1_200);
+        // A sale dated today is counted at the sale again, and a payment on it adds nothing.
+        UUID fresh = creditSale(hq, 1, today());
+        payEnteredToday(fresh, 1_000, today());
+        JsonNode after = profit(ago(3), today());
+        assertThat(field(row(after, hq, today()), "profit_minor")).isEqualTo(400);
+        assertThat(after.get("profit_minor").asLong()).isEqualTo(1_600);
+    }
+
+    @Test
+    void aPaymentEnteredLaterCountsOnTheDayItWasEnteredNotTheDateItCarries() {
+        onPaymentFromTheStart();
+        cashSale(hq, 2, ago(2));
+        saveSavings(hq, ago(2));
+        UUID credit = creditSale(hq, 2, ago(5));
+        payEnteredToday(credit, 2_000, ago(2));
+        JsonNode report = profit(ago(5), today());
+        assertThat(field(row(report, hq, ago(2)), "profit_minor"))
+                .as("the day already saved is not rewritten")
+                .isEqualTo(800);
+        assertThat(field(row(report, hq, today()), "sales_minor")).isEqualTo(2_000);
+        assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(800);
+        assertThat(suggestion(hq, ago(2)).get("suggested_minor").asLong()).isEqualTo(400);
+        assertThat(suggestion(hq, today()).get("suggested_minor").asLong()).isEqualTo(400);
+    }
+
+    @Test
+    void aPaymentOnAccountBelongsToTheBranchThatTookIt() {
+        capability(Map.of("customer_accounts", true));
+        onPaymentFromTheStart();
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 07"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(1).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        UUID sale = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", br2, "amount_minor", 2_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(receipt.getStatusCode()).as("%s", receipt.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode report = profit(ago(1), today());
+        assertThat(row(report, hq, today()))
+                .as("the sale's shop never got the money")
+                .isNull();
+        assertThat(field(row(report, br2, today()), "profit_minor")).isEqualTo(800);
+        assertThat(suggestion(br2, today()).get("suggested_minor").asLong()).isEqualTo(400);
+        assertThat(suggestion(hq, today()).get("suggested_minor").asLong()).isZero();
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                                SELECT coalesce(sum(l.debit - l.credit), 0) FROM journal_lines l
+                                  JOIN journal_entries e ON e.id = l.entry_id JOIN gl_accounts a ON a.id = l.account_id
+                                 WHERE e.tenant_id = ? AND e.branch_id = ? AND a.system_key = 'cash_on_hand'
+                                """)
+                        .params(t.tenantId(), br2)
+                        .query(Long.class)
+                        .single())
+                .as("the cash is in the receiving branch's till, where the savings are set aside")
+                .isEqualTo(2_000);
+        assertThat(api.get("/sales/" + sale, ADMIN)
+                        .getBody()
+                        .get("balance_minor")
+                        .asLong())
+                .isZero();
+    }
+
+    @Test
+    void reversingAPaymentOnAccountTakesItsProfitBackOnTheDayOfTheReversal() {
+        capability(Map.of("customer_accounts", true));
+        onPaymentFromTheStart();
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 08"), ADMIN));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(1).toString());
+        body.put("payment_method", "credit");
+        body.put("customer_id", buyer);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "2")));
+        RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> receipt = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 2_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        UUID receiptId = RetailTestSupport.id(receipt);
+        moveReceiptEntered(receiptId, ago(1));
+        assertThat(field(row(profit(ago(1), today()), hq, ago(1)), "profit_minor"))
+                .isEqualTo(800);
+
+        ResponseEntity<JsonNode> undone = api.postKeyed(
+                "/customers/" + buyer + "/payments/" + receiptId + "/reverse",
+                Map.of("reason", "Entered by mistake"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(undone.getStatusCode().is2xxSuccessful())
+                .as("%s", undone.getBody())
+                .isTrue();
+        JsonNode report = profit(ago(1), today());
+        assertThat(field(row(report, hq, ago(1)), "profit_minor"))
+                .as("the day it was received is not rewritten")
+                .isEqualTo(800);
+        assertThat(field(row(report, hq, today()), "profit_minor")).isEqualTo(-800);
+        assertThat(report.get("profit_minor").asLong()).isZero();
+        assertThat(report.get("on_credit_minor").asLong())
+                .as("the debt is owed again")
+                .isEqualTo(2_000);
+    }
+
+    @Test
+    void aSaleThatDoesNotDivideEvenlyAddsUpToTheWholeProfitThroughSqlAndJava() {
+        UUID dear = api.product("CRD-2", 700, 1_000);
+        api.importedBalance(hq, dear, "1000");
+        onPaymentFromTheStart();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("branch_id", hq);
+        body.put("sale_date", ago(3).toString());
+        body.put("payment_method", "credit");
+        body.put("buyer_name", "Test Buyer 09");
+        body.put("lines", List.of(Map.of("product_id", dear, "qty", "100")));
+        UUID sale = RetailTestSupport.id(
+                api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString()));
+        pay(sale, 33_333, ago(2));
+        pay(sale, 66_667, ago(1));
+        JsonNode report = profit(ago(3), today());
+        assertThat(field(row(report, hq, ago(2)), "profit_minor")).isEqualTo(10_000);
+        assertThat(field(row(report, hq, ago(1)), "profit_minor")).isEqualTo(20_000);
+        assertThat(report.get("profit_minor").asLong()).isEqualTo(30_000);
+        assertThat(report.get("sales_minor").asLong()).isEqualTo(100_000);
+        assertThat(report.get("cost_of_sales_minor").asLong()).isEqualTo(70_000);
     }
 }

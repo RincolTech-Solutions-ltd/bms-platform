@@ -41,7 +41,9 @@ import org.springframework.stereotype.Service;
 @Service
 class WriteOffsServicer {
 
-    static final String PERMISSION = "retail.credit.manage";
+    /** Its own permission, administrators only: a debt written off cannot be taken back in this release (ADR-043). */
+    static final String PERMISSION = "retail.credit.write_off";
+
     static final int MIN_REASON = 5;
     private static final String SALE = "retail.sale";
 
@@ -104,7 +106,10 @@ class WriteOffsServicer {
         if (unpaid <= 0) {
             throw ApiException.rule("nothing_owing", "This sale has nothing left to pay.");
         }
-        String recognition = capabilities.creditRecognition();
+        // A sale is written off the way it was counted: by its own date against the stretches of the rule (ADR-043).
+        String recognition = capabilities.onPaymentPeriods().contains(s.saleDate())
+                ? RetailCapabilities.ON_PAYMENT
+                : RetailCapabilities.ON_SALE;
         long costShare = unrecognisedCost(s);
         long loss = recognition.equals(RetailCapabilities.ON_PAYMENT) ? costShare : unpaid;
         return new Plan(s, unpaid, loss, costShare, recognition);

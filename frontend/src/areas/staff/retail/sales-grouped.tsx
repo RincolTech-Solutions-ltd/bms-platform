@@ -1,7 +1,9 @@
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import { retail, type SalesSummaryGroup, type SalesSummaryQuery } from '../../../api/retail';
 import { CHILD_LEVEL, childRange, defaultOpen, emptyWords, groupKey, methodLines, periodTitle, salesWord, shutGroup, toggleGroup, type DayRange, type Level } from './sales-grouped-state';
+import { StaffContext } from '../context';
+import { capabilityOn } from './permissions';
 import { Problem, money } from './ui';
 
 // The All sales and Credit sales lists grouped by year, month and day (issue #328). Every header is a figure the
@@ -96,6 +98,9 @@ function GroupList({ level, range, trail, empty, ...shared }: Shared & { level: 
 
 function GroupRow({ level, group, range, trail, ...shared }: Shared & { level: Level; group: SalesSummaryGroup; range: DayRange; trail: Ancestor[] }) {
   const { credit, groups } = shared;
+  // With credit sales counted when the buyer pays (ADR-043) this profit is the profit of what was sold, not of the money received.
+  const staff = useContext(StaffContext);
+  const profitWord = staff && capabilityOn(staff.me, 'retail', 'credit_on_payment') ? 'profit of sales made' : 'profit';
   const period = group.period ?? '';
   const key = groupKey(level, period);
   const bodyId = `group-${key.replace(':', '-')}`;
@@ -112,7 +117,7 @@ function GroupRow({ level, group, range, trail, ...shared }: Shared & { level: L
         <span className="rt-group-total">{money(group.total_minor ?? 0)}</span>{' '}
         <span className="rt-group-meta">
           {salesWord(count)}
-          {group.profit_minor !== undefined && <>, profit {money(group.profit_minor)}</>}
+          {group.profit_minor !== undefined && <>, {profitWord} {money(group.profit_minor)}</>}
           {!credit && (group.voided_count ?? 0) > 0 && <>, {group.voided_count} voided (not counted)</>}
         </span>{' '}
         {lines.length > 0 && (

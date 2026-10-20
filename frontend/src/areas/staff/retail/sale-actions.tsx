@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { RetailError, retail, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
-import { CREDIT_MANAGE, SALE_VOID, holdsAt } from './permissions';
+import { CREDIT_WRITE_OFF, SALE_VOID, holdsAt } from './permissions';
 import {
   IMPORTED_FULL, IMPORTED_SHORT, MIN_REASON, PAY_METHODS, blankPay, buildPayRequest, fullPay, importedAndOwing, keyReused, owedMinor, paidWords, payFailureWords, payProblem,
   saleMovedOn, takesPayment, typedAmount, voidBlocked, voidReasonOf, type PayForm,
-  canWriteOff, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffWarning, writeOffWords,
+  WRITE_OFF_PENDING, canWriteOff, writeOffAlreadyPending, writeOffFailureWords, writeOffMovedOn, writeOffReasonOf, writeOffWarning, writeOffWords,
 } from './sale-actions-state';
 import { Problem, Success, money } from './ui';
 
@@ -256,6 +256,8 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // A write-off waiting for a second administrator: the button stays away, so the same debt is not asked for twice.
+  const [pending, setPending] = useState(false);
   const saleId = sale.id ?? '';
   const { key, draft, setDraft, discard } = usePersistedDraft<{ reason: string }>(`sale-write-off:${me.user_id ?? ''}:${saleId}`, { reason: '' });
   const sending = useRef(false);
@@ -265,15 +267,21 @@ export function WriteOffSaleAction({ sale }: { sale: Sale }) {
       discard();
       setOpen(false);
       setMessage(writeOffWords(outcome));
+      if (outcome.executed !== true) setPending(true);
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onError: (error) => {
+      if (writeOffAlreadyPending(error)) {
+        setOpen(false);
+        setPending(true);
+      }
       if (writeOffMovedOn(error)) void queryClient.invalidateQueries({ queryKey: ['retail'] });
     },
     onSettled: () => { sending.current = false; },
   });
-  if (!holdsAt(me, CREDIT_MANAGE, sale.branch_id)) return null;
+  if (!holdsAt(me, CREDIT_WRITE_OFF, sale.branch_id)) return null;
   if (message) return <Success>{message}</Success>;
+  if (pending) return <p className="hint" data-testid="write-off-pending">{WRITE_OFF_PENDING}</p>;
   if (!canWriteOff(sale)) return null;
   if (!open) return <p><button type="button" className="btn-sm" onClick={() => { send.reset(); setOpen(true); }}>Write off</button></p>;
   return (

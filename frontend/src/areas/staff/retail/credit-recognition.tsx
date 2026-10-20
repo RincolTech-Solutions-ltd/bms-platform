@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { retail, type CapabilitiesRead } from '../../../api/retail';
+import { businessToday, retail, type CapabilitiesRead } from '../../../api/retail';
 import { Problem, changeFailureText } from './ui';
 
 // How credit sales count (ADR-043, issue #340): when the sale is made (today's way, the default) or when the buyer pays.
@@ -26,20 +26,24 @@ export const RECOGNITION_CHOICES: readonly { value: CreditRecognition; label: st
 export const recognitionOf = (c: CapabilitiesRead['capabilities'] | undefined): CreditRecognition =>
   c?.credit_sale_recognition === 'on_payment' ? 'on_payment' : 'on_sale';
 
-/** What choosing a value will change, in plain words, one sentence each. Empty when nothing changes. */
-export function recognitionSentences(from: CreditRecognition, to: CreditRecognition): string[] {
+/**
+ * What choosing a value will change, in plain words, one sentence each. Empty when nothing changes. The change counts from `day`
+ * (today's business date): credit sales dated before it keep counting the way they did, so no profit is counted twice and no
+ * savings already saved move.
+ */
+export function recognitionSentences(from: CreditRecognition, to: CreditRecognition, day: string = businessToday()): string[] {
   if (from === to) return [];
   if (to === 'on_payment') {
     return [
-      'A credit sale stays out of Received money, Profit and the daily savings until the buyer pays. It shows as On credit.',
-      'When the buyer pays, that money counts on the day it is paid, with its share of the sale profit. A part payment gives part of the profit.',
-      'Stock still goes down when the sale is made. Your accounts do not change.',
-      'Credit sales already made count as On credit until they are paid. Savings already saved are not changed.',
+      `From ${day} on, a credit sale stays out of Received money, Profit and the daily savings until the buyer pays. It shows as On credit.`,
+      'When the buyer pays, that money counts on the day it is entered, with its share of the sale profit. A part payment gives part of the profit.',
+      `Credit sales dated before ${day} keep counting the way they did: their profit stays on the day of the sale, and payments on them add nothing.`,
+      'Stock still goes down when the sale is made. Your accounts do not change. Savings already saved are not changed.',
     ];
   }
   return [
-    'A credit sale counts as a sale, as profit and in the daily savings on the day it is made, even before the buyer pays.',
-    'Payments that buyers make later no longer add to profit.',
+    `From ${day} on, a credit sale counts as a sale, as profit and in the daily savings on the day it is made, even before the buyer pays.`,
+    `Credit sales dated before ${day} keep counting the way they did: those counted when the buyer pays still count as the money comes in.`,
   ];
 }
 
@@ -61,9 +65,11 @@ export function CreditRecognitionSetting({ read, onSaved }: { read: Capabilities
     onError: () => setReviewing(false),
   });
   const sentences = recognitionSentences(saved, choice);
+  const since = read.capabilities.credit_recognition_effective_from;
   return (
     <fieldset className="stack" data-tour="retail-credit-recognition">
       <legend>When does a credit sale count as income and profit?</legend>
+      {since && <p className="hint" data-testid="credit-since">This rule has stood since {since}. Credit sales made before then count the way they did.</p>}
       {RECOGNITION_CHOICES.map((c) => (
         <label key={c.value}>
           <input

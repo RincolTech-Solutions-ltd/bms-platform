@@ -5,10 +5,13 @@ import com.rincoltech.bms.core.approvals.Approvals.ActionRequest;
 import com.rincoltech.bms.core.operations.Idempotency;
 import com.rincoltech.bms.core.operations.Idempotency.Outcome;
 import com.rincoltech.bms.core.tenancy.TenantSettings;
+import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffOutcome;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsApi.WriteOffRequest;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -45,6 +48,12 @@ class WriteOffsService {
     }
 
     private WriteOffOutcome writeOffOrAsk(UUID saleId, WriteOffRequest r) {
+        if (r.reason().trim().length() < WriteOffsServicer.MIN_REASON) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "reason",
+                    "invalid",
+                    "Give a reason of at least " + WriteOffsServicer.MIN_REASON + " characters.")));
+        }
         Plan plan = servicer.plan(saleId);
         long threshold = settings.approvalThresholdMinor(SaleWriteOffAction.TYPE);
         if (threshold > 0 && plan.unpaidMinor() >= threshold) {

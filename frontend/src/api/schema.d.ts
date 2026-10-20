@@ -7999,6 +7999,11 @@ export interface components {
         RetailCapabilities: {
             branch_roles?: boolean;
             /**
+             * Format: date
+             * @description Read only: the day the credit rule last changed (the tenant's business date): credit sales dated before it keep counting the way they did (ADR-043); absent while it never changed
+             */
+            credit_recognition_effective_from?: string;
+            /**
              * @description How credit sales count in the reports, the dashboard and the daily savings (ADR-043): on_sale (the default) counts them when they are made, on_payment only when the buyer pays
              * @enum {string}
              */

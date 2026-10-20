@@ -13,6 +13,7 @@ import com.rincoltech.bms.retail.reports.internal.DashboardApi.Stock;
 import com.rincoltech.bms.retail.reports.internal.DashboardApi.Today;
 import com.rincoltech.bms.retail.reports.internal.DashboardRepository.DaySales;
 import com.rincoltech.bms.retail.reports.internal.DashboardRepository.Position;
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.math.BigDecimal;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,20 +87,24 @@ class DashboardService {
                 now[4] += d.cost();
             }
         }
-        // ADR-043: with credit sales counted when the buyer pays, profit comes from the money received (sales paid at
-        // the sale,
-        // and each payment on a credit sale with its share of the profit); Sold stays what was sold.
-        boolean onPay = capabilities.recognisesOnPayment();
+        // ADR-043: credit sales dated inside a stretch of the rule "when the buyer pays" bring profit through the money
+        // received (a
+        // payment on the day it was recorded, with its share of the sale's profit); Sold stays what was sold, and every
+        // other credit
+        // sale counts at the sale as it always did.
+        CreditPeriods periods = capabilities.onPaymentPeriods();
+        boolean onPay = !periods.isEmpty();
+        LocalDate windowStart = today.minusDays(29);
         Map<UUID, Map<LocalDate, long[]>> recBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> recDay = new LinkedHashMap<>();
         if (onPay) {
-            LocalDate from = today.minusDays(29);
-            for (DaySales d : repo.sales(filter, from, today, true)) {
+            for (DaySales d : repo.sales(filter, windowStart, today, periods)) {
                 add(recBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.day(), d.sales(), d.cost());
                 add(recDay, d.day(), d.sales(), d.cost());
             }
-            for (ReportsRepository.DayFigures d :
-                    CreditRecognition.deltas(credit.events(filter, from, today), from, today)) {
+            Set<UUID> scope = filter == null ? null : Set.copyOf(filter);
+            for (ReportsRepository.DayFigures d : CreditRecognition.deltas(
+                    credit.events(filter, windowStart, today, periods), windowStart, today, scope)) {
                 add(
                         recBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()),
                         d.date(),
@@ -108,6 +114,12 @@ class DashboardService {
             }
         }
         Map<LocalDate, long[]> profitDay = onPay ? recDay : byDay;
+        Map<UUID, Map<LocalDate, long[]>> profitBranch = onPay ? recBranch : byBranch;
+        // A debt written off is a loss on its day in Daily profit and in the savings suggestion, so it is here too.
+        for (ReportsRepository.DayFigures d : credit.badDebt(filter, windowStart, today)) {
+            add(profitBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.date(), 0, d.badDebt());
+            add(profitDay, d.date(), 0, d.badDebt());
+        }
         List<Day> days = new ArrayList<>();
         long last7 = 0;
         long last30 = 0;
@@ -212,7 +224,7 @@ class DashboardService {
                 profit ? profit30 : null,
                 stock,
                 shops,
-                onPay ? RetailCapabilities.ON_PAYMENT : RetailCapabilities.ON_SALE,
+                capabilities.creditRecognition(),
                 onPay ? received7 : null,
                 onPay ? received30 : null);
     }

@@ -15,6 +15,16 @@ screens, how to check the figures and how to go back. Nothing here touches stock
 Stock still leaves at the sale and trade debtors are recorded at the sale, so the accounts balance either way. Imported (historical)
 credit sales are outside the rule.
 
+## Before you switch it on
+
+Do not switch the pilot tenant to "When the buyer pays" until the sales summary and the grouped sales lists have caught up (issue #341 and
+the one after it): until then they show the profit of sales made, labelled so, beside the profit of money received that the home page,
+Daily profit and the savings use.
+
+The change counts from the day you make it. Credit sales dated before that day keep counting the way they did, so nothing is counted
+twice and no savings already set aside move. A payment counts on the day it is entered (not the date written on it), at the branch that
+took the money.
+
 ## Switch it on
 
 1. Sign in as an administrator (`core.settings.manage`) and open Retail, then Retail settings.
@@ -34,7 +44,7 @@ credit sales are outside the rule.
 
 ## Write off a buyer who never pays
 
-1. Open the credit sale (Credit sales, then the sale) as an administrator (`retail.credit.manage`).
+1. Open the credit sale (Credit sales, then the sale) as an administrator (`retail.credit.write_off`).
 2. Tap Write off, give the reason and tap Write off again. Above the business's approval limit for `retail_sale_write_off`, a second administrator approves it in the approvals inbox first; with no limit set there is no second person.
 3. The sale stays and reads Written off. The unpaid amount leaves On credit and the owing and overdue lists. Daily profit shows the loss on that day (with "When the buyer pays" the unpaid share of the cost of goods, with the default the whole unpaid amount), which also lowers that day's savings suggestion.
 4. The accounts: trade debtors for the sale are cleared against bad debt loss (account 5140) and, with "When the buyer pays", sales revenue for the rest. Nothing is deleted and a write-off cannot be undone in this release; ask the maintainers if one was made by mistake.

@@ -1,12 +1,14 @@
 package com.rincoltech.bms.retail.reports.internal;
 
 import com.rincoltech.bms.retail.reports.internal.ReportsRepository.DayFigures;
+import com.rincoltech.bms.retail.stock.CreditPeriods;
 import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -30,8 +32,19 @@ class ProfitFigures {
         this.capabilities = capabilities;
     }
 
-    boolean onPayment() {
-        return capabilities.recognisesOnPayment();
+    /** The stretches of sale dates counted when the buyer pays; none for a tenant that never chose it. */
+    CreditPeriods periods() {
+        return capabilities.onPaymentPeriods();
+    }
+
+    /** True when any credit sale is counted when the buyer pays, now or in the past (ADR-043). */
+    boolean usesOnPayment() {
+        return !periods().isEmpty();
+    }
+
+    /** The rule as it stands now, {@code on_sale} or {@code on_payment}. */
+    String mode() {
+        return capabilities.creditRecognition();
     }
 
     /**
@@ -39,12 +52,12 @@ class ProfitFigures {
      * write-off is a dated loss in both: the sale it clears was counted or not by the setting, and the loss it carries says so.
      */
     List<DayFigures> daily(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        List<DayFigures> base = onPayment() ? received(branchIds, from, to) : repo.daily(branchIds, from, to);
+        List<DayFigures> base = usesOnPayment() ? received(branchIds, from, to) : repo.daily(branchIds, from, to);
         return withBadDebt(base, branchIds, from, to);
     }
 
     private List<DayFigures> withBadDebt(List<DayFigures> base, List<UUID> branchIds, LocalDate from, LocalDate to) {
-        List<DayFigures> losses = credit.badDebt(branchIds, from, to, onPayment());
+        List<DayFigures> losses = credit.badDebt(branchIds, from, to);
         if (losses.isEmpty()) {
             return base;
         }
@@ -59,10 +72,12 @@ class ProfitFigures {
     List<DayFigures> received(List<UUID> branchIds, LocalDate from, LocalDate to) {
         Map<String, long[]> merged = new LinkedHashMap<>();
         Map<String, DayFigures> keys = new LinkedHashMap<>();
-        for (DayFigures d : repo.daily(branchIds, from, to, true)) {
+        CreditPeriods periods = periods();
+        for (DayFigures d : repo.daily(branchIds, from, to, periods)) {
             add(merged, keys, d);
         }
-        for (DayFigures d : CreditRecognition.deltas(credit.events(branchIds, from, to), from, to)) {
+        Set<UUID> scope = branchIds == null ? null : Set.copyOf(branchIds);
+        for (DayFigures d : CreditRecognition.deltas(credit.events(branchIds, from, to, periods), from, to, scope)) {
             add(merged, keys, d);
         }
         return rows(merged, keys);

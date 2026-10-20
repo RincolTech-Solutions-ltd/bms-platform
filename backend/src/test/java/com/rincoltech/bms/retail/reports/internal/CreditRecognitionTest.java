@@ -118,4 +118,39 @@ class CreditRecognitionTest {
         assertThat(rows.get(0).sales()).isEqualTo(4_000);
         assertThat(rows.get(0).costOfSales()).isEqualTo(2_300);
     }
+
+    @Test
+    void aPaymentIsCreditedToTheBranchThatTookItAndTheRunningFiguresAreTheSales() {
+        UUID other = UUID.fromString("00000000-0000-4000-8000-0000000000b2");
+        Event atFirst = new Event(SALE, BRANCH, 3_000, 1_800, D1, 1_000, 0, 0, 0);
+        Event atOther = new Event(SALE, other, 3_000, 1_800, D2, 500, 0, 0, 0);
+        List<DayFigures> all = CreditRecognition.deltas(List.of(atFirst, atOther), D1, D2);
+        assertThat(all.stream()
+                        .filter(r -> r.branchId().equals(BRANCH))
+                        .mapToLong(r -> r.sales() - r.costOfSales())
+                        .sum())
+                .isEqualTo(400);
+        assertThat(all.stream()
+                        .filter(r -> r.branchId().equals(other))
+                        .mapToLong(r -> r.sales() - r.costOfSales())
+                        .sum())
+                .isEqualTo(200);
+        List<DayFigures> onlyOther =
+                CreditRecognition.deltas(List.of(atFirst, atOther), D1, D2, java.util.Set.of(other));
+        assertThat(onlyOther).hasSize(1);
+        assertThat(profit(onlyOther))
+                .as("the same 200, with the first payment still counted in the running figures")
+                .isEqualTo(200);
+    }
+
+    @Test
+    void thePaymentsAndTheirCostSharesOfOneBranchAndDaySumTogether() {
+        Event a = new Event(SALE, BRANCH, 3_000, 1_800, D1, 1_000, 0, 0, 0);
+        Event b = new Event(
+                UUID.fromString("00000000-0000-4000-8000-0000000000a3"), BRANCH, 1_000, 500, D1, 1_000, 0, 0, 0);
+        List<DayFigures> rows = CreditRecognition.deltas(List.of(a, b), D1, D1, java.util.Set.of(BRANCH));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).sales()).isEqualTo(2_000);
+        assertThat(rows.get(0).costOfSales()).isEqualTo(1_100);
+    }
 }
