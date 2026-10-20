@@ -173,7 +173,7 @@ describe('the store switch (#366)', () => {
     await screen.findByText('Test Shop Two (KLA)');
     fireEvent.click(screen.getAllByRole('button', { name: 'Mark as a store (does not sell)' })[1] as HTMLElement);
     // One tap only asks: nothing is sent until the person confirms.
-    expect(screen.getByText(/nothing can be sold, paid for or refunded there afterwards/)).toBeTruthy();
+    expect(screen.getByText(/Only expenses can be paid\s+from it/)).toBeTruthy();
     expect(api.setSelling).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Yes, make it a store' }));
     expect(await screen.findByText(/2 credit sales that still owe money/)).toBeTruthy();
@@ -190,6 +190,8 @@ describe('the store switch (#366)', () => {
     shell();
     await screen.findByText('Test Shop Two (KLA)');
     expect(screen.getByText('Store (does not sell)', { selector: '.badge' })).toBeTruthy();
+    // A store keeps goods by definition, so the keeps-no-goods switch is not offered on it (head office still has it).
+    expect(screen.getAllByRole('button', { name: 'Mark as keeping no goods' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Sells again (make it a shop)' }));
     await waitFor(() => expect(api.setSelling).toHaveBeenCalledTimes(1));
     expect(api.setSelling.mock.calls[0]?.[1]).toBe(true);

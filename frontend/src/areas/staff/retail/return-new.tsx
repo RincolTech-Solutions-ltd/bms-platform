@@ -96,11 +96,13 @@ export function ReturnRow({ line, row, back, branches, onChange }: {
 }
 
 /** The whole form for one sale, controlled by the page so a draft can survive a reload. */
-export function ReturnFormView({ sale, back, form: chosen, branches, busy, error, onChange, onSubmit }: {
+export function ReturnFormView({ sale, back, form: chosen, branches, usualIsStore = false, busy, error, onChange, onSubmit }: {
   sale: Sale;
   back: Back;
   form: ReturnForm;
   branches: { id?: string; name?: string; code?: string; sells_goods?: boolean }[];
+  /** The sale was made at a store (ADR-048): its till is not the usual one, so the person (or the only shop) chooses. */
+  usualIsStore?: boolean;
   busy?: boolean;
   error?: unknown;
   onChange: (form: ReturnForm) => void;
@@ -130,11 +132,11 @@ export function ReturnFormView({ sale, back, form: chosen, branches, busy, error
           ))}
         </select>
         {!accountRefundAllowed(sale) && <p className="hint">{accountWhy(sale)}</p>}
-        {plan.moneyMinor > 0 && tills.length > 1 && (
+        {plan.moneyMinor > 0 && (tills.length > 1 || (usualIsStore && tills.length > 0)) && (
           <>
             <label htmlFor="refund-branch">Pay the money out of the till of</label>
             <select id="refund-branch" value={form.refundBranchId} onChange={(e) => onChange({ ...form, refundBranchId: e.target.value })}>
-              <option value="">{sale.branch_id ? 'The usual branch' : 'Choose a branch'}</option>
+              <option value="">{sale.branch_id && !usualIsStore ? 'The usual branch' : 'Choose a branch'}</option>
               {tills.map((b) => <option key={b.id} value={b.id}>{branchLabel(b)}</option>)}
             </select>
           </>
@@ -179,8 +181,12 @@ export function ReturnNewPage() {
   const branches = branchesWhere(me, SALE_RETURN);
   const { key, draft, setDraft, discard } = usePersistedDraft<ReturnForm>(`sale-return:${me.user_id ?? ''}:${saleId}`, blankReturn());
   const back = backOf(earlier.data ?? []);
+  // A sale made at a store has no till of its own to pay from (ADR-048): with exactly one shop to pay from it is chosen and sent.
+  const usualIsStore = (me.branches ?? []).some((b) => b.id === sale.data?.branch_id && b.sells_goods === false);
+  const tills = sellingBranches(branches, undefined);
+  const form = usualIsStore && draft.refundBranchId === '' && tills.length === 1 ? { ...draft, refundBranchId: tills[0]?.id ?? '' } : draft;
   const send = useMutation({
-    mutationFn: (s: Sale) => retail.createSaleReturn(saleId, buildReturnRequest(s, draft, back), key),
+    mutationFn: (s: Sale) => retail.createSaleReturn(saleId, buildReturnRequest(s, form, back), key),
     onSuccess: (r) => {
       discard();
       setOutcome(r);
@@ -219,8 +225,9 @@ export function ReturnNewPage() {
           <ReturnFormView
             sale={s}
             back={back}
-            form={draft}
+            form={form}
             branches={branches}
+            usualIsStore={usualIsStore}
             busy={send.isPending}
             error={send.error}
             onChange={(f) => setDraft(f)}

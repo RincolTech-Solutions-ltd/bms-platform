@@ -225,13 +225,16 @@ class StoreBranchIT extends IntegrationTest {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("lines", List.of(line));
         body.put("refund_method", "cash");
+        // Naming the store as the paying branch is refused.
+        body.put("refund_branch_id", t.secondBranch());
         assertDoesNotSell(retail.postKeyed(
                 "/sales/" + sale + "/returns",
                 body,
                 RETURNER,
                 "*",
                 UUID.randomUUID().toString()));
-        body.put("refund_branch_id", t.headOffice());
+        body.remove("refund_branch_id");
+        // With exactly one selling branch in scope (HQ) it pays the refund, as the usual till is a store.
         ResponseEntity<JsonNode> ok = retail.postKeyed(
                 "/sales/" + sale + "/returns",
                 body,
@@ -239,6 +242,25 @@ class StoreBranchIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(ok.getStatusCode()).as("%s", ok.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT refund_branch_id FROM retail_sale_returns WHERE tenant_id = ? AND sale_id = ?")
+                        .params(t.tenantId(), sale)
+                        .query(UUID.class)
+                        .single())
+                .isEqualTo(t.headOffice());
+        // With two shops to choose from the caller is asked to choose.
+        TestDatabase.owner()
+                .sql("INSERT INTO branches (id, tenant_id, code, name) VALUES (?, ?, 'SHP3', 'Test Shop Three')")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        ResponseEntity<JsonNode> asked = retail.postKeyed(
+                "/sales/" + sale + "/returns",
+                body,
+                RETURNER,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(asked.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(asked)).isEqualTo("refund_branch_required");
     }
 
     // ---------------------------------------------------------------------------------------- marking a branch
