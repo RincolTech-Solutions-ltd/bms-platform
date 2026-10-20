@@ -3707,6 +3707,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/product-families": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create an item with sizes and colours: every combination becomes a variant (issue #384) */
+        post: operations["createRetailProductFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/product-families/{family_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An item with sizes and colours, its variants and its stock over the caller's branches (issue #384) */
+        get: operations["getRetailProductFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename an item with sizes and colours or change its category, under If-Match (issue #384) */
+        patch: operations["updateRetailProductFamily"];
+        trace?: never;
+    };
+    "/api/v1/retail/product-families/{family_id}/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add sizes or colours to an item; a combination it has is skipped (issue #384) */
+        post: operations["addRetailProductVariants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/products": {
         parameters: {
             query?: never;
@@ -3775,6 +3827,23 @@ export interface paths {
         head?: never;
         /** Edit a product's non-price fields */
         patch: operations["updateRetailProduct"];
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/family": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Give an item without variants sizes and colours; it keeps its stock and history as one of them (issue #384) */
+        post: operations["makeRetailProductFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/retail/products/{product_id}/price-history": {
@@ -5519,6 +5588,22 @@ export interface components {
             tenant_id?: string;
             tenant_slug?: string;
         };
+        /** @description Issue #384: more sizes or colours for an item; a combination it has already is skipped. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
+        AddRetailVariantsRequest: {
+            colours?: string[];
+            /**
+             * Format: int64
+             * @description The new variants' cost; by default the cost of the item's first variant
+             */
+            cost_minor?: number;
+            /**
+             * Format: int64
+             * @description The new variants' selling price; by default the price of the item's first variant
+             */
+            sell_minor?: number;
+            sizes?: string[];
+            variants?: components["schemas"]["RetailVariantLine"][];
+        };
         AddSmsOptOutRequest: {
             /** @description A Uganda mobile number; anything we cannot read without guessing is 422 invalid_phone */
             phone: string;
@@ -6038,6 +6123,30 @@ export interface components {
             purpose?: string;
             /** Format: uuid */
             subject_id?: string;
+        };
+        /** @description Issue #384: an item with sizes and colours. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
+        CreateRetailFamilyRequest: {
+            /** @description What every variant's code starts with, as ROMP; unique codes ignore case */
+            base_code: string;
+            /** Format: uuid */
+            category_id: string;
+            colours?: string[];
+            /**
+             * Format: int64
+             * @description Each variant's cost unless it has its own; 0 without retail.profit.read
+             */
+            cost_minor: number;
+            /** @description The item's name, as Baby romper */
+            name: string;
+            /**
+             * Format: int64
+             * @description Each variant's selling price unless it has its own
+             */
+            sell_minor: number;
+            sizes?: string[];
+            /** Format: uuid */
+            unit_id: string;
+            variants?: components["schemas"]["RetailVariantLine"][];
         };
         CreateRetailProductRequest: {
             /** Format: uuid */
@@ -8314,6 +8423,12 @@ export interface components {
         RetailBranchRoleList: {
             items?: components["schemas"]["RetailBranchRole"][];
         };
+        /** @description The item's stock per branch the caller may read, where it is not zero */
+        RetailBranchStock: {
+            /** Format: uuid */
+            branch_id?: string;
+            qty?: string;
+        };
         RetailBusinessEvaluation: {
             branches?: components["schemas"]["RetailEvaluationBranch"][];
             currency?: string;
@@ -9595,6 +9710,36 @@ export interface components {
             /** Format: uuid */
             receipt_document_id?: string;
         };
+        /** @description Issue #384: an item with sizes and colours and its variants */
+        RetailFamily: {
+            base_code?: string;
+            category?: string;
+            /** Format: uuid */
+            category_id?: string;
+            /** @description The colours or prints in the item's order */
+            colours?: string[];
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /** @description The sizes in the item's order */
+            sizes?: string[];
+            /** @description The item's stock per branch the caller may read, where it is not zero */
+            stock_by_branch?: components["schemas"]["RetailBranchStock"][];
+            /** @description The item's stock over the branches the caller may read, every variant together */
+            stock_on_hand?: string;
+            unit?: string;
+            /** Format: uuid */
+            unit_id?: string;
+            /** @description Every variant, active or not, in the item's order, each with stock_on_hand and stock_branches over the branches the caller may read */
+            variants?: components["schemas"]["RetailProduct"][];
+            /**
+             * Format: int32
+             * @description Send as If-Match when updating
+             */
+            version?: number;
+        };
         RetailGoodsReceipt: {
             /** Format: uuid */
             branch_id?: string;
@@ -10077,6 +10222,16 @@ export interface components {
              */
             value_minor?: number;
         };
+        /** @description Issue #384: give an item without variants sizes and colours. The item becomes the variant named by size and colour, keeping its code, prices, stock and history; the other combinations are made at its prices. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
+        RetailMakeFamilyRequest: {
+            /** @description The colour or print of the stock the item holds now */
+            colour?: string;
+            colours?: string[];
+            /** @description The size of the stock the item holds now */
+            size?: string;
+            sizes?: string[];
+            variants?: components["schemas"]["RetailVariantLine"][];
+        };
         RetailMarginBelowTarget: {
             items?: components["schemas"]["RetailMarginRow"][];
             /**
@@ -10542,6 +10697,7 @@ export interface components {
             unit_id?: string;
             /** Format: date-time */
             updated_at?: string;
+            variant?: components["schemas"]["RetailProductVariantOf"];
             /** Format: int32 */
             version?: number;
         };
@@ -10576,6 +10732,19 @@ export interface components {
         RetailProductPage: {
             items?: components["schemas"]["RetailProduct"][];
             next_cursor?: string;
+        };
+        /** @description Issue #384: the item with sizes and colours this product is one variant of; absent for an item without variants */
+        RetailProductVariantOf: {
+            colour?: string;
+            /** Format: uuid */
+            family_id?: string;
+            family_name?: string;
+            /**
+             * Format: int32
+             * @description The variant's place in the item's list, in the order the sizes and colours were given
+             */
+            position?: number;
+            size?: string;
         };
         RetailPurchase: {
             /** Format: date-time */
@@ -12987,6 +13156,24 @@ export interface components {
              */
             value_at_cost_minor?: number;
         };
+        /** @description One size and colour to make: a size, a colour or both; the code and prices default from the item */
+        RetailVariantLine: {
+            /** @description The variant's own code; by default the base code, the size and the colour in capitals, as ROMP-03M-BLUE */
+            code?: string;
+            /** @description A colour or a print */
+            colour?: string;
+            /**
+             * Format: int64
+             * @description This variant's own cost; by default the item's
+             */
+            cost_minor?: number;
+            /**
+             * Format: int64
+             * @description This variant's own selling price; by default the item's
+             */
+            sell_minor?: number;
+            size?: string;
+        };
         RetailVoidRequest: {
             reason: string;
         };
@@ -13982,6 +14169,12 @@ export interface components {
             transfer_receipt?: boolean;
             units?: boolean;
         };
+        /** @description Omitted fields are unchanged. A new name renames every variant; a new category moves every variant */
+        UpdateRetailFamilyRequest: {
+            /** Format: uuid */
+            category_id?: string;
+            name?: string;
+        };
         /** @description Omitted fields are unchanged; prices change only through /prices */
         UpdateRetailProductRequest: {
             active?: boolean;
@@ -13993,6 +14186,10 @@ export interface components {
             duplicate_reason?: string;
             /** Format: uuid */
             unit_id?: string;
+            /** @description Issue #384, a variant only: its new colour or print; an empty string removes it */
+            variant_colour?: string;
+            /** @description Issue #384, a variant only: its new size; an empty string removes it (a colour must remain). The description follows: the item's name, then the size and colour */
+            variant_size?: string;
         };
         /** @description The interest fields cannot change once an account uses the product */
         UpdateSavingsProductRequest: {
@@ -20689,6 +20886,106 @@ export interface operations {
             };
         };
     };
+    createRetailProductFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRetailFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
+    getRetailProductFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
+    updateRetailProductFamily: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path: {
+                family_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRetailFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
+    addRetailProductVariants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddRetailVariantsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
+                };
+            };
+        };
+    };
     listRetailProducts: {
         parameters: {
             query?: {
@@ -20836,6 +21133,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailProduct"];
+                };
+            };
+        };
+    };
+    makeRetailProductFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetailMakeFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailFamily"];
                 };
             };
         };
