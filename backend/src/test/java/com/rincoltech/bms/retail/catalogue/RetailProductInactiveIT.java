@@ -143,4 +143,24 @@ class RetailProductInactiveIT extends IntegrationTest {
                 .map(r -> r.get("product_id").asString())
                 .toList();
     }
+
+    /** A positive and a negative balance net to zero, yet two branches hold a quantity; a caller who reads one branch sees one. */
+    @Test
+    void theStockWarningCountsEveryBranchWithAQuantityWithinTheCallersScope() {
+        api.importedBalance(t.secondBranch(), product, "-5");
+        JsonNode all = api.get("/products/" + product, ADMIN).getBody();
+        assertThat(all.get("stock_on_hand").asString()).isEqualTo("0.000");
+        assertThat(all.get("stock_branches").asInt()).isEqualTo(2);
+
+        JsonNode one = api.call(
+                        HttpMethod.GET,
+                        "/products/" + product,
+                        null,
+                        ADMIN,
+                        t.headOffice().toString(),
+                        Map.of())
+                .getBody();
+        assertThat(one.get("stock_branches").asInt()).isEqualTo(1);
+        assertThat(one.get("stock_on_hand").asString()).isEqualTo("5.000");
+    }
 }

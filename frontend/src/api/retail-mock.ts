@@ -3,8 +3,9 @@ import type {
   Supplier, Transfer, Unit, Usage, Valuation, ValuationRow,
 } from './retail';
 import type { SalesQuery } from './retail';
-import { RetailError, businessToday, daysBefore } from './retail';
+import { NO_SUPPLIER, RetailError, businessToday, daysBefore } from './retail';
 import { summariseChain } from './retail-chain-mock';
+import { summarisePurchases, summariseStock } from './retail-grouping-mock';
 import { retailMessage } from './retail-errors';
 import type { Me } from './client';
 import { createCashbookMock } from './retail-cashbook-mock';
@@ -352,7 +353,12 @@ export function createMockRetail(): RetailApi {
       return delay({ items: wanted.slice(start, start + 50).map(asProduct), ...(start + 50 < wanted.length ? { next_cursor: String(start + 50) } : {}) });
     },
 
-    getProduct: (id) => run(() => asProduct(find(id))),
+    // Issue #342: the one-product read also reports the stock on hand and in how many branches it is not zero.
+    getProduct: (id) =>
+      run(() => {
+        const held = MOCK_BRANCHES.map((b) => bal(b.id, id)).filter((m) => m !== 0);
+        return { ...asProduct(find(id)), stock_on_hand: fromMilli(held.reduce((x, y) => x + y, 0)), stock_branches: held.length };
+      }),
 
     similarProducts: ({ description, unitId, excludeId }) =>
       run(() => {
@@ -746,12 +752,36 @@ export function createMockRetail(): RetailApi {
     stockHistory: ({ productId, branchId }) =>
       run(() => ({ items: stockLog.filter((m) => m.product_id === productId && m.branch_id === branchId).reverse() })),
 
-    listPurchases: ({ from, to, status }) =>
+    listPurchases: ({ branchId, from, to, supplierId, categoryId: category, productId, status }) =>
       run(() => ({
         items: purchases
-          .filter((p) => (!from || (p.purchased_on ?? '') >= from) && (!to || (p.purchased_on ?? '') <= to) && (!status || p.status === status))
+          .filter((p) => (!from || (p.purchased_on ?? '') >= from) && (!to || (p.purchased_on ?? '') <= to) && (!status || p.status === status)
+            && (!supplierId || (p.supplier_id ?? NO_SUPPLIER) === supplierId)
+            && (!branchId || (p.lines ?? []).some((l) => (l.qty_by_branch ?? []).some((b) => b.branch_id === branchId)))
+            && (!productId || (p.lines ?? []).some((l) => l.product_id === productId))
+            && (!category || (p.lines ?? []).some((l) => categoryId(products.get(l.product_id ?? '')?.category ?? '') === category)))
           .map(({ before: _before, ...p }) => p)
           .reverse(),
+      })),
+
+    purchasesSummary: (q) =>
+      run(() => summarisePurchases(purchases, q, {
+        cost: profitAccess,
+        branchName: (id) => MOCK_BRANCHES.find((b) => b.id === id)?.name ?? 'Branch',
+        supplierName: (id) => suppliers.find((s) => s.id === id)?.name ?? 'Unknown',
+        product: (id) => {
+          const p = id ? products.get(id) : undefined;
+          return p ? { name: p.description, categoryId: categoryId(p.category), categoryName: p.category, unit: p.unit } : undefined;
+        },
+      })),
+
+    stockSummary: (q) =>
+      delay(summariseStock(q, {
+        cost: profitAccess,
+        branches: MOCK_BRANCHES.map((b) => ({ id: b.id, name: b.name })),
+        products: [...products.values()].filter((p) => matches(p, q.query)).map((p) => ({ id: p.id, category: p.category, categoryId: categoryId(p.category), sellMinor: p.sellMinor, costMinor: p.costMinor })),
+        balance: bal,
+        keepQty: (m) => atLevel(m / 1000, q.stockLevel),
       })),
 
     getPurchase: (id) => run(() => {

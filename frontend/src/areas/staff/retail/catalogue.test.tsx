@@ -323,4 +323,14 @@ describe('inactive items (issue #342)', () => {
     expect((await api.listStock({ branchId })).some((r) => r.product_id === p?.id)).toBe(false);
     expect((await countableStock(branchId, api)).some((r) => r.product_id === p?.id)).toBe(true);
   });
+
+  it('reports the stock on hand and the branches holding it on the one-product read, not on the list', async () => {
+    const api = createMockRetail();
+    const branchId = (await api.listStockAllBranches({})).branches[0]?.id ?? '';
+    const held = (await api.listStock({ branchId })).find((r) => Number(r.qty) !== 0);
+    const one = await api.getProduct(held?.product_id ?? '');
+    expect(Number(one.stock_on_hand)).not.toBe(0);
+    expect(one.stock_branches).toBeGreaterThan(0);
+    expect((await api.listCatalogue({})).items?.[0]?.stock_branches).toBeUndefined();
+  });
 });
