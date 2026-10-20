@@ -306,7 +306,7 @@ class BranchClosingIT extends IntegrationTest {
                 ADMIN,
                 "*",
                 UUID.randomUUID().toString());
-        assertThat(received.getStatusCode()).as("%s", received.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(received.getStatusCode()).as("%s", received.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(retail.get("/transfers/" + transfer, ADMIN)
                         .getBody()
                         .get("status")
