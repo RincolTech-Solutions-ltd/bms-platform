@@ -246,21 +246,33 @@ class ReportsService {
             f[2] = d.usageCost();
             f[4] = d.badDebt();
         }
-        // The part of sales_minor that is credit counted at the sale (before the rule started), not collected: what the
-        // figures count
-        // with the rule, less what they would count if every credit sale were left out.
+        // Received is real money collected (ADR-043): sales paid at the sale, and every payment recorded on a credit
+        // sale in the window,
+        // whatever the sale's date and whether it counts when the buyer pays, imported ones included. It is a cash
+        // figure and not a
+        // profit basis. The profit leg is separate: the profit counted at the sale for credit made before the rule
+        // started is shown
+        // for information (net of returns) and is never subtracted from Received.
+        Map<String, Long> received = new java.util.TreeMap<>();
         Map<String, Long> atSale = new java.util.TreeMap<>();
         if (onPayment) {
             for (DayFigures d : repo.daily(filter, start, end)) {
                 figures(days, branchOf, dateOf, d.branchId(), d.date());
                 sold.put(d.date() + "|" + d.branchId(), d.sales());
             }
+            for (DayFigures d : repo.dailyCash(filter, start, end)) {
+                received.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
+            }
+            for (DayFigures d : credit.collections(filter, start, end)) {
+                figures(days, branchOf, dateOf, d.branchId(), d.date());
+                received.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
+            }
             CreditPeriods everyCredit = new CreditPeriods(LocalDate.of(1970, 1, 1), periods.zone());
             for (DayFigures d : repo.daily(filter, start, end, periods)) {
-                atSale.merge(d.date() + "|" + d.branchId(), d.sales(), Long::sum);
+                atSale.merge(d.date() + "|" + d.branchId(), d.sales() - d.costOfSales(), Long::sum);
             }
             for (DayFigures d : repo.daily(filter, start, end, everyCredit)) {
-                atSale.merge(d.date() + "|" + d.branchId(), -d.sales(), Long::sum);
+                atSale.merge(d.date() + "|" + d.branchId(), d.costOfSales() - d.sales(), Long::sum);
             }
         }
         for (ReportsRepository.Difference d : repo.stocktakeDifferences(filter, start, end)) {
@@ -276,6 +288,7 @@ class ReportsService {
         long badDebt = 0;
         long soldTotal = 0;
         long atSaleTotal = 0;
+        long receivedTotal = 0;
         for (Map.Entry<String, long[]> e : days.entrySet()) {
             long[] f = e.getValue();
             long gross = Math.subtractExact(f[0], f[1]);
@@ -290,9 +303,11 @@ class ReportsService {
                     f[3],
                     Math.subtractExact(Math.addExact(Math.subtractExact(gross, f[2]), f[3]), f[4]),
                     onPayment ? sold.getOrDefault(e.getKey(), 0L) : null,
+                    onPayment ? received.getOrDefault(e.getKey(), 0L) : null,
                     onPayment ? atSale.getOrDefault(e.getKey(), 0L) : null));
             soldTotal = Math.addExact(soldTotal, sold.getOrDefault(e.getKey(), 0L));
             atSaleTotal = Math.addExact(atSaleTotal, atSale.getOrDefault(e.getKey(), 0L));
+            receivedTotal = Math.addExact(receivedTotal, received.getOrDefault(e.getKey(), 0L));
             sales = Math.addExact(sales, f[0]);
             costOfSales = Math.addExact(costOfSales, f[1]);
             usage = Math.addExact(usage, f[2]);
@@ -316,6 +331,7 @@ class ReportsService {
                 onPayment ? soldTotal : null,
                 onPayment ? credit.onCredit(filter, periods)[0] : null,
                 startsOn,
+                onPayment ? receivedTotal : null,
                 onPayment ? atSaleTotal : null);
     }
 

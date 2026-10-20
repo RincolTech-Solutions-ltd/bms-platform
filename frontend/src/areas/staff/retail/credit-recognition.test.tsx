@@ -191,24 +191,53 @@ describe('the daily profit report', () => {
     expect(html).not.toContain('Credit counted at the sale');
   });
 
-  it('keeps credit counted at the sale apart from the money collected when a report straddles the start', () => {
-    const straddle = report({
+  const straddle = (extra: Partial<DailyProfit> = {}): DailyProfit =>
+    report({
       credit_sale_recognition: 'on_payment',
       sold_minor: 3000,
       on_credit_minor: 500,
+      received_minor: 1900,
       sales_minor: 2500,
       cost_of_sales_minor: 1500,
       profit_minor: 1000,
-      counted_at_sale_minor: 1000,
+      counted_at_sale_minor: 400,
       rows: [
-        { branch_id: 'b1', date: '2026-10-10', sales_minor: 1000, cost_of_sales_minor: 600, gross_profit_minor: 400, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 400, sold_minor: 1000, counted_at_sale_minor: 1000 },
-        { branch_id: 'b1', date: '2026-10-20', sales_minor: 1500, cost_of_sales_minor: 900, gross_profit_minor: 600, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 600, sold_minor: 2000, counted_at_sale_minor: 0 },
+        { branch_id: 'b1', date: '2026-10-10', sales_minor: 1000, cost_of_sales_minor: 600, gross_profit_minor: 400, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 400, sold_minor: 1000, received_minor: 400, counted_at_sale_minor: 400 },
+        { branch_id: 'b1', date: '2026-10-20', sales_minor: 1500, cost_of_sales_minor: 900, gross_profit_minor: 600, usage_cost_minor: 0, stocktake_difference_minor: 0, profit_minor: 600, sold_minor: 2000, received_minor: 1500, counted_at_sale_minor: 0 },
       ],
+      ...extra,
     });
-    const html = renderToString(<ProfitTable report={straddle} />);
-    expect(html).toContain('Credit counted at the sale');
-    expect(html).toContain('UGX 1,500');
+  const summaryOf = (html: string): string => {
+    const at = html.indexOf('data-testid="credit-recognition-summary"');
+    return at < 0 ? '' : html.slice(at, html.indexOf('</ul>', at));
+  };
+  const tile = (summary: string, label: string): string | undefined =>
+    new RegExp(`an-stat-label">${label}</span><strong class="an-stat-value num">([^<]*)</strong>`).exec(summary)?.[1];
+
+  it('shows Received as the real money collected, apart from the profit counted at the sale before the rule', () => {
+    const html = renderToString(<ProfitTable report={straddle()} />);
+    const summary = summaryOf(html);
+    expect(tile(summary, 'Sold')).toBe('UGX 3,000');
+    expect(tile(summary, 'Received')).toBe('UGX 1,900');
+    expect(tile(summary, 'On credit now')).toBe('UGX 500');
+    expect(tile(summary, 'Net credit profit counted at the sale')).toBe('UGX 400');
+    expect(summary).not.toContain('not collected');
     expect(html).not.toContain('Profit from money received');
-    expect(html).toContain('UGX 1,000');
+    // The 2026-10-10 row: Sold, Received (the 400 deposit that day), then what counted for profit.
+    const cells = /<td>2026-10-10<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td>/.exec(html);
+    expect(cells?.slice(1, 4)).toEqual(['UGX 1,000', 'UGX 400', 'UGX 1,000']);
+  });
+
+  it('words a negative credit profit counted at the sale as a net figure', () => {
+    const html = renderToString(<ProfitTable report={straddle({ counted_at_sale_minor: -300 })} />);
+    const summary = summaryOf(html);
+    expect(summary).toContain('Net credit profit counted at the sale');
+    expect(summary).not.toContain('>Credit counted at the sale<');
+    expect(tile(summary, 'Net credit profit counted at the sale')).toMatch(/300/);
+  });
+
+  it('shows no such tile when nothing was counted at the sale', () => {
+    const html = renderToString(<ProfitTable report={straddle({ counted_at_sale_minor: 0 })} />);
+    expect(summaryOf(html)).not.toContain('counted at the sale');
   });
 });

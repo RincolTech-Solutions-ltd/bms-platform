@@ -191,4 +191,61 @@ class CreditRecognitionRepository {
                 .query(Boolean.class)
                 .single();
     }
+
+    /**
+     * The money actually collected on credit sales, by the day it was entered and the branch that took it (ADR-043): every payment
+     * on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported sales included (a
+     * payment recorded after the import is real cash); less a payment on account when it is reversed, on the day of the reversal; less
+     * the money paid back on a return of a credit sale, on the day of the return, at the branch it left from. This is a cash figure.
+     */
+    List<ReportsRepository.DayFigures> collections(List<UUID> branchIds, LocalDate from, LocalDate to) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("from", Date.valueOf(from));
+        params.put("to", Date.valueOf(to));
+        java.time.ZoneId zone = tenant.profile().timezone();
+        params.put("zone", zone.getId());
+        params.put("fromTs", java.sql.Timestamp.from(from.atStartOfDay(zone).toInstant()));
+        params.put(
+                "toTs",
+                java.sql.Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()));
+        String branch = "";
+        if (branchIds != null) {
+            params.put("branchIds", branchIds);
+            branch = " WHERE x.br IN (:branchIds)";
+        }
+        return jdbc.sql("SELECT x.br AS branch_id, x.d AS day, sum(x.amt) AS amount FROM ("
+                        + " SELECT coalesce(ap.branch_id, s.branch_id) AS br, CAST((p.created_at AT TIME ZONE :zone) AS date) AS d,"
+                        + " p.amount_minor AS amt"
+                        + " FROM retail_sale_payments p"
+                        + " JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
+                        + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
+                        + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
+                        + " WHERE s.payment_method = 'credit' AND s.status = 'completed'"
+                        + " AND p.created_at >= :fromTs AND p.created_at < :toTs"
+                        + " UNION ALL"
+                        + " SELECT ap.branch_id, ap.reversed_on, -al.amount_minor"
+                        + " FROM retail_account_payments ap"
+                        + " JOIN retail_account_payment_allocations al ON al.tenant_id = ap.tenant_id AND al.receipt_id = ap.id"
+                        + " JOIN retail_sales s ON s.tenant_id = al.tenant_id AND s.id = al.sale_id"
+                        + " WHERE ap.status = 'reversed' AND ap.reversed_on BETWEEN :from AND :to"
+                        + " AND s.payment_method = 'credit' AND s.status = 'completed'"
+                        + " UNION ALL"
+                        + " SELECT r.refund_branch_id, r.returned_on, -r.refund_minor"
+                        + " FROM retail_sale_returns r"
+                        + " JOIN retail_sales s ON s.tenant_id = r.tenant_id AND s.id = r.sale_id"
+                        + " WHERE r.status = 'completed' AND r.refund_minor > 0 AND r.returned_on BETWEEN :from AND :to"
+                        + " AND s.payment_method = 'credit'"
+                        + ") x" + branch + " GROUP BY x.br, x.d")
+                .params(params)
+                .query((rs, n) -> new ReportsRepository.DayFigures(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getDate("day").toLocalDate(),
+                        rs.getLong("amount"),
+                        0,
+                        0))
+                .list();
+    }
 }

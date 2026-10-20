@@ -9,8 +9,9 @@ screens, how to check the figures and how the operator undoes it. Nothing here t
 
 - `on_sale` (the default for every tenant): a credit sale counts as a sale, as profit and in the daily savings on the day it is made.
   This is how the system always worked.
-- `on_payment` (the owner's rule): a credit sale is Sold and On credit. It counts as Received and as profit only as the buyer pays, on
-  the day of each payment, with its share of the sale's profit (the payment times the sale's profit margin).
+- `on_payment` (the owner's rule): a credit sale is Sold and On credit. It counts as profit only as the buyer pays, on
+  the day of each payment, with its share of the sale's profit (the payment times the sale's profit margin). Received is separate: it is
+  always the real money collected, every payment on a credit sale on the day it was entered, new or old, imported or not.
 
 Stock still leaves at the sale and trade debtors are recorded at the sale, so the accounts balance either way. Imported (historical)
 credit sales are outside the rule.
@@ -45,10 +46,10 @@ relabelled. A report that straddles the start shows the older credit sales apart
 
 ## Check the figures
 
-1. Pick a day with a credit sale that is unpaid. In Daily profit, Sold shows the sale, Received and Profit do not, and On credit now
+1. Pick a day with a credit sale that is unpaid. In Daily profit, Sold shows the sale, Received and Profit do not (for a sale counted when the buyer pays), and On credit now
    shows what is owed.
-2. Record a part payment on the sale (Record payment). In Daily profit, on the day of the payment, Received is the payment and Profit
-   is the payment times the margin of the sale, rounded once on the running total so the parts add up to the whole.
+2. Record a part payment on the sale (Record payment). In Daily profit, on the day of the payment, Received is the payment (for any credit sale, old ones included) and Profit
+   is, for a sale counted when the buyer pays, the payment times the margin of the sale, rounded once on the running total so the parts add up to the whole.
 3. Open the cash book savings for that day: the suggestion is half of the received profit of the shop for the day.
 4. A savings amount already saved is not changed by the switch. Void it and enter it again if it should follow the new rule.
 

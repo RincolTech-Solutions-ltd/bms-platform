@@ -176,19 +176,17 @@ function ValuationPage() {
   );
 }
 
-type Figures = { sold: number; atSale: number; sales: number; cost: number; usage: number; bad: number; difference: number; profit: number };
+type Figures = { sold: number; received: number; sales: number; cost: number; usage: number; bad: number; difference: number; profit: number };
 const add = (to: Figures, r: DailyProfitRow): Figures => ({
   sold: to.sold + (r.sold_minor ?? 0),
-  atSale: to.atSale + (r.counted_at_sale_minor ?? 0),
+  received: to.received + (r.received_minor ?? 0),
   sales: to.sales + (r.sales_minor ?? 0), cost: to.cost + (r.cost_of_sales_minor ?? 0), usage: to.usage + (r.usage_cost_minor ?? 0), bad: to.bad + (r.bad_debt_minor ?? 0), difference: to.difference + (r.stocktake_difference_minor ?? 0), profit: to.profit + (r.profit_minor ?? 0),
 });
-const none = (): Figures => ({ sold: 0, atSale: 0, sales: 0, cost: 0, usage: 0, bad: 0, difference: 0, profit: 0 });
+const none = (): Figures => ({ sold: 0, received: 0, sales: 0, cost: 0, usage: 0, bad: 0, difference: 0, profit: 0 });
 
 function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: string; name: string; f: Figures }[]; onPayment?: boolean }) {
   // Debts written off (ADR-043) get a column only once there is one, so a shop that never writes a debt off sees no new column.
   const withBad = rows.some((r) => r.f.bad !== 0);
-  // Credit sales counted at the sale (made before the rule "when the buyer pays" started) have a column only once there is one.
-  const withAtSale = onPayment === true && rows.some((r) => r.f.atSale !== 0);
   // On a phone the cost and usage go under the name, so Sales and Profit stay in view.
   const phone = useIsPhone();
   return (
@@ -197,8 +195,8 @@ function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: 
         <tr>
           <th>{label}</th>
           {onPayment && !phone && <th className="num">Sold</th>}
-          <th className="num">{onPayment ? 'Received' : 'Sales'}</th>
-          {withAtSale && !phone && <th className="num">Credit counted<br />at the sale</th>}
+          {onPayment && <th className="num">Received</th>}
+          <th className="num">{onPayment ? 'Counted for profit' : 'Sales'}</th>
           {!phone && <th className="num">Cost</th>}
           {!phone && <th className="num">Usage</th>}
           {withBad && !phone && <th className="num">Debts<br />written off</th>}
@@ -209,10 +207,10 @@ function FiguresTable({ label, rows, onPayment }: { label: string; rows: { key: 
       <tbody>
         {rows.map(({ key, name, f }) => (
           <tr key={key}>
-            <td>{name}{phone && <><br /><span className="hint">{onPayment && <>Sold {money(f.sold)}<br /></>}{withAtSale && <>Credit counted at the sale {money(f.atSale)}<br /></>}Cost {money(f.cost)}<br />Usage {money(f.usage)}<br />{withBad && <>Debts written off {money(f.bad)}<br /></>}Stock-take difference {money(f.difference)}</span></>}</td>
+            <td>{name}{phone && <><br /><span className="hint">{onPayment && <>Sold {money(f.sold)}<br /></>}Cost {money(f.cost)}<br />Usage {money(f.usage)}<br />{withBad && <>Debts written off {money(f.bad)}<br /></>}Stock-take difference {money(f.difference)}</span></>}</td>
             {onPayment && !phone && <td className="num">{money(f.sold)}</td>}
-            <td className="num">{money(onPayment ? f.sales - f.atSale : f.sales)}</td>
-            {withAtSale && !phone && <td className="num">{money(f.atSale)}</td>}
+            {onPayment && <td className="num">{money(f.received)}</td>}
+            <td className="num">{money(f.sales)}</td>
             {!phone && <td className="num">{money(f.cost)}</td>}
             {!phone && <td className="num">{money(f.usage)}</td>}
             {withBad && !phone && <td className="num">{money(f.bad)}</td>}
@@ -249,8 +247,8 @@ export function ProfitTable({ report, nameOf }: { report: DailyProfit; nameOf?: 
       {onPayment && (
         <ul className="an-stats" data-testid="credit-recognition-summary">
           <li className="an-stat"><span className="an-stat-label">Sold</span><strong className="an-stat-value num">{money(report.sold_minor ?? 0)}</strong><span className="hint">Everything sold, credit included</span></li>
-          <li className="an-stat"><span className="an-stat-label">Received</span><strong className="an-stat-value num">{money((report.sales_minor ?? 0) - atSale)}</strong><span className="hint">Money collected for sales</span></li>
-          {atSale !== 0 && <li className="an-stat"><span className="an-stat-label">Credit counted at the sale</span><strong className="an-stat-value num">{money(atSale)}</strong><span className="hint">Made before the rule started, in the profit</span></li>}
+          <li className="an-stat"><span className="an-stat-label">Received</span><strong className="an-stat-value num">{money(report.received_minor ?? 0)}</strong><span className="hint">Money collected, including payments on earlier credit sales</span></li>
+          {atSale !== 0 && <li className="an-stat"><span className="an-stat-label">Net credit profit counted at the sale</span><strong className="an-stat-value num">{money(atSale)}</strong><span className="hint">From credit made before the rule started, after returns. In the profit, not taken off Received</span></li>}
           <li className="an-stat"><span className="an-stat-label">On credit now</span><strong className="an-stat-value num">{money(report.on_credit_minor ?? 0)}</strong><span className="hint">Not paid yet, not counted as profit. Credit sales from before the rule started are not in it</span></li>
         </ul>
       )}

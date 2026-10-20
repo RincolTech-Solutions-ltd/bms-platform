@@ -8676,7 +8676,7 @@ export interface components {
             cost_of_sales_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the rule started, counted at the sale and not collected (the money collected is sales_minor less this)
+             * @description Present only with on_payment: the profit counted at the sale for credit sales entered and dated before the rule started, net of their returns (informational; part of the profit, never subtracted from Received)
              */
             counted_at_sale_minor?: number;
             /**
@@ -8699,6 +8699,11 @@ export interface components {
             on_credit_minor?: number;
             /** Format: int64 */
             profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with on_payment: the real money collected (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed and money paid back on returns. A cash figure that matches the cash drawer, not a profit basis
+             */
+            received_minor?: number;
             rows?: components["schemas"]["RetailDailyProfitRow"][];
             /** Format: int64 */
             sales_minor?: number;
@@ -8729,7 +8734,7 @@ export interface components {
             cost_of_sales_minor?: number;
             /**
              * Format: int64
-             * @description Present only with on_payment: the part of sales_minor that is credit sales entered and dated before the rule started, counted at the sale and not collected (the money collected is sales_minor less this)
+             * @description Present only with on_payment: the profit counted at the sale for credit sales entered and dated before the rule started, net of their returns (informational; part of the profit, never subtracted from Received)
              */
             counted_at_sale_minor?: number;
             /** Format: date */
@@ -8738,11 +8743,16 @@ export interface components {
             gross_profit_minor?: number;
             /** Format: int64 */
             profit_minor?: number;
+            /**
+             * Format: int64
+             * @description Present only with on_payment: the real money collected (Received): sales paid at the sale and every payment recorded on a credit sale, whatever the sale's date and whether or not it counts when the buyer pays, imported credit sales included; less payments reversed and money paid back on returns. A cash figure that matches the cash drawer, not a profit basis
+             */
+            received_minor?: number;
             /** Format: int64 */
             sales_minor?: number;
             /**
              * Format: int64
-             * @description Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is the money collected for sales plus counted_at_sale_minor, and the profit columns are the profit of both (ADR-043)
+             * @description Present only when credit_sale_recognition is on_payment: everything sold on the day, credit sales included (Sold). Then sales_minor is the sales counted for profit (sales paid at the sale, the profit share of each payment on a credit sale counted when the buyer pays, and credit counted at the sale before the rule started) and the profit columns follow it; received_minor is the cash (ADR-043)
              */
             sold_minor?: number;
             /**

@@ -99,9 +99,9 @@ class DashboardService {
         LocalDate windowStart = today.minusDays(29);
         Map<UUID, Map<LocalDate, long[]>> recBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> recDay = new LinkedHashMap<>();
-        // What was collected: the same, without the credit sales counted at the sale (made before the rule started, or
-        // imported),
-        // which the profit includes but nobody has paid.
+        // Received (ADR-043): the real money collected, a cash figure. It is the sales paid at the sale plus every
+        // payment recorded on a
+        // credit sale, and is not the profit basis above.
         Map<UUID, Map<LocalDate, long[]>> collBranch = new LinkedHashMap<>();
         Map<LocalDate, long[]> collDay = new LinkedHashMap<>();
         if (onPay) {
@@ -122,6 +122,11 @@ class DashboardService {
                         d.sales(),
                         d.costOfSales());
                 add(recDay, d.date(), d.sales(), d.costOfSales());
+            }
+            // Received is the real money collected, the same figure as in the profit report (ADR-043): every payment on
+            // a credit
+            // sale, counted when the buyer pays or not, imported ones included, less reversals and money paid back.
+            for (ReportsRepository.DayFigures d : credit.collections(filter, windowStart, today)) {
                 add(collBranch.computeIfAbsent(d.branchId(), x -> new LinkedHashMap<>()), d.date(), d.sales(), 0);
                 add(collDay, d.date(), d.sales(), 0);
             }
