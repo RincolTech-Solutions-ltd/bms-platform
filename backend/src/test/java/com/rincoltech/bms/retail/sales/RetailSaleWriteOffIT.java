@@ -579,9 +579,11 @@ class RetailSaleWriteOffIT extends IntegrationTest {
                 .isFalse();
         String manageOnly = ADMIN + ",retail.credit.manage,core.approvals.read";
         ResponseEntity<JsonNode> notAllowed = decide(approval, new RetailTestSupport(http, t), manageOnly);
-        assertThat(notAllowed.getStatusCode())
-                .as("retail.credit.manage alone cannot decide it")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(notAllowed.getStatusCode().value())
+                .as(
+                        "retail.credit.manage alone cannot decide it: the approvals module refuses it (403) or hides the request (404)")
+                .isIn(403, 404);
+        assertThat(sale(s).has("write_off")).isFalse();
         assertThat(decide(approval, new RetailTestSupport(http, t)).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
         assertThat(sale(s).get("write_off").get("unpaid_minor").asLong()).isEqualTo(1_000);
