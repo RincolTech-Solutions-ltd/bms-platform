@@ -238,7 +238,7 @@ optional by default; a wrong password counts toward the same 15 minute lock as a
 Send on WhatsApp (issue #339). A tenant admin cannot be reset this way, nor can an admin reset themselves; the platform operator's
 route for a tenant admin has no screen and is called by API.
 
-**Two-step sign-in is optional by default** (migration `V65`, issue #348, ADR-046): no role is flagged, so a new tenant admin is signed in after
+**Two-step sign-in is optional by default** (migration `V67`, issue #348, ADR-046): no role is flagged, so a new tenant admin is signed in after
 the first run and is offered the second factor, and every database behaves the same (staging's hand edit of `roles.mfa_required` is no longer needed). A
 tenant administrator chooses who must use it under Business set-up > Two-step sign-in (everyone, or chosen roles, with a grace period); the platform
 operator can read it in the tenant's settings. A no-factor admin resets other users with their own password, and, where SMTP is set up, can use Forgot

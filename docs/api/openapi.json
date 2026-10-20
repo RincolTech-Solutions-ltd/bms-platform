@@ -4677,6 +4677,10 @@
             },
             "type" : "array"
           },
+          "tenant_timezone" : {
+            "description" : "The business's time zone, in which mfa_due_by is a day's end (ADR-046)",
+            "type" : "string"
+          },
           "tours" : {
             "additionalProperties" : {
               "$ref" : "#/components/schemas/TourState"
@@ -16881,6 +16885,10 @@
           },
           "theme_primary" : {
             "description" : "Brand colour #RRGGBB, or null for the platform look (FR-TEN-08)",
+            "type" : "string"
+          },
+          "timezone" : {
+            "description" : "The business's time zone, in which a two-step deadline is a day's end (ADR-046)",
             "type" : "string"
           },
           "version" : {

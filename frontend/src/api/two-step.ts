@@ -74,7 +74,7 @@ export function relaxes(current: Choice, next: Choice): boolean {
 /**
  * The settings body for a choice. The grace period moves the deadline, so it is sent only when it is meant to: when the policy
  * widens (new people need a date) or the administrator changed the grace period. Narrowing never sends it, so a date that has passed
- * is not re-opened. A change that relaxes the rule carries the administrator's proof.
+ * is not re-opened. The caller passes the administrator's proof when saving needs it (the rule gets weaker or a date is put back).
  */
 export function bodyOf(choice: Choice, current: Choice, proof: Proof = {}) {
   const sendGrace = choice.policy !== 'off' && (widens(current, choice) || choice.graceDays !== current.graceDays);
@@ -82,7 +82,7 @@ export function bodyOf(choice: Choice, current: Choice, proof: Proof = {}) {
     require_mfa_all_staff: choice.policy === 'everyone',
     require_mfa_roles: choice.policy === 'roles' ? choice.roles : [],
     ...(sendGrace ? { mfa_grace_days: choice.graceDays } : {}),
-    ...(relaxes(current, choice) ? proof : {}),
+    ...proof,
   };
 }
 

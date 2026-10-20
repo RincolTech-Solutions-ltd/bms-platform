@@ -23,7 +23,7 @@ export function OwnTwoStep({ blocking = false }: { blocking?: boolean }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const due = me.mfa_enabled ? null : deadlineWords(me.mfa_due_by);
+  const due = me.mfa_enabled ? null : deadlineWords(me.mfa_due_by, me.tenant_timezone);
 
   async function run(action: () => Promise<void>) {
     if (busy) return;

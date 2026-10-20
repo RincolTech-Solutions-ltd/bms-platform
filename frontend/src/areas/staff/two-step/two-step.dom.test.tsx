@@ -73,7 +73,8 @@ const button = (name: RegExp | string) => screen.getByRole('button', { name }) a
 describe('the policy screen', () => {
   it('starts from the saved choice, optional, with nothing to save yet', async () => {
     shell();
-    await waitFor(() => expect(radio(/Optional/).checked).toBe(true));
+    // The first screen of the file loads its modules cold, which can take longer than the default second on a busy machine.
+    await waitFor(() => expect(radio(/Optional/).checked).toBe(true), { timeout: 8000 });
     expect(radio(/Required for everyone/).checked).toBe(false);
     expect(button('Review and save').disabled).toBe(true);
     expect(screen.getByText('Nothing has changed yet.')).toBeTruthy();

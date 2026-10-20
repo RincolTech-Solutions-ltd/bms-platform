@@ -253,7 +253,7 @@ public final class Api {
 
     /**
      * Makes the tenant require two-step sign-in of its tenant admins, at once, the way a business would through its settings
-     * (ADR-046). Two-step sign-in is optional by default since V65, so a test of the second factor calls this first.
+     * (ADR-046). Two-step sign-in is optional by default since V67, so a test of the second factor calls this first.
      */
     public static void requireTwoStepForAdmins(TestDatabase.Fixture t) {
         requireTwoStepForAdmins(t.tenantId());

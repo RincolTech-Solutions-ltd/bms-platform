@@ -2,9 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { users } from '../../../api/users';
-import { type Choice, type Policy, relaxes, twoStep } from '../../../api/two-step';
+import { type Choice, type Policy, twoStep } from '../../../api/two-step';
 import { useStaff } from '../context';
-import { DEFAULT_GRACE, canManageTwoStep, choiceOf, deadlineWords, differs, graceChoices, policyOf, ready, reviewLines } from './state';
+import { DEFAULT_GRACE, canManageTwoStep, choiceOf, deadlineWords, differs, graceChoices, needsProof, policyOf, ready, reviewLines } from './state';
 
 // Two-step sign-in (issue #348; ADR-046): who must use a code from their phone as well as their password. It is optional until an
 // administrator chooses otherwise. Three choices (nobody, chosen roles, everyone), a grace period, and a plain-words review that is read
@@ -52,6 +52,7 @@ export function TwoStepPolicyScreen() {
   const staffRoles = (roles.data ?? []).filter((r) => r.key);
   const names: Record<string, string> = Object.fromEntries(staffRoles.map((r) => [r.key as string, r.name ?? (r.key as string)]));
   const current = saved ? choiceOf(saved) : null;
+  const savedState = saved && current ? { choice: current, enforceFrom: saved.mfa_enforce_from, timezone: saved.timezone } : null;
   const changed = choice !== null && current !== null && differs(choice, current);
 
   function pick(policy: Policy) {
@@ -75,11 +76,11 @@ export function TwoStepPolicyScreen() {
     setBusy(true);
     setError(null);
     try {
-      const asked = relaxes(current, choice) ? (me.mfa_enabled ? { totp_code: proof.trim() } : { password: proof }) : {};
+      const asked = savedState && needsProof(savedState, choice, new Date()) ? (me.mfa_enabled ? { totp_code: proof.trim() } : { password: proof }) : {};
       const after = await twoStep.save(saved.version ?? 1, choice, current, asked);
       setProof('');
       const now = policyOf(after);
-      const date = deadlineWords(after.mfa_enforce_from);
+      const date = deadlineWords(after.mfa_enforce_from, after.timezone);
       setNotice(
         now === 'off'
           ? 'Saved. Two-step sign-in is optional again.'
@@ -194,11 +195,11 @@ export function TwoStepPolicyScreen() {
             <strong>Please check this before you save.</strong>
           </p>
           <ul className="stack">
-            {reviewLines(choice, names, me, new Date(), current ? { choice: current, enforceFrom: saved?.mfa_enforce_from } : undefined).map((line) => (
+            {reviewLines(choice, names, me, new Date(), savedState ?? undefined).map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {current && relaxes(current, choice) && (
+          {savedState && needsProof(savedState, choice, new Date()) && (
             <label>
               {me.mfa_enabled ? 'The current code from your authenticator app' : 'Your own password'}
               <input
@@ -212,7 +213,7 @@ export function TwoStepPolicyScreen() {
             </label>
           )}
           <p className="cluster">
-            <button type="button" className="rt-primary" disabled={busy || (current !== null && relaxes(current, choice) && proof.trim() === '')} onClick={() => void save()}>
+            <button type="button" className="rt-primary" disabled={busy || (savedState !== null && needsProof(savedState, choice, new Date()) && proof.trim() === '')} onClick={() => void save()}>
               {busy ? 'Saving' : choice.policy === 'off' ? 'Yes, make it optional' : 'Yes, save this'}
             </button>
             <button type="button" className="btn-ghost" disabled={busy} onClick={() => setReviewing(false)}>

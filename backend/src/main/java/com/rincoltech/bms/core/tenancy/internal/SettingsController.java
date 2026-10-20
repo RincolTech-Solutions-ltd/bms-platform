@@ -95,6 +95,9 @@ class SettingsController {
                             "When a covered user without a second factor must set one up; null means at once or no requirement (ADR-046)")
             Instant mfaEnforceFrom,
 
+            @Schema(description = "The business's time zone, in which a two-step deadline is a day's end (ADR-046)")
+            String timezone,
+
             int version) {}
 
     /** Omitted (or null) fields are unchanged (chapter 7 section 7.5). */
@@ -172,13 +175,7 @@ class SettingsController {
         if (relaxes) {
             guard.requireProof(request.totpCode(), request.password());
         }
-        SettingsResponse settings = service.update(ifMatch, request);
-        if (relaxes) {
-            guard.notifyRelaxed(
-                    settings.requireMfaRoles().isEmpty() && !settings.requireMfaAllStaff()
-                            ? "two-step sign-in is now optional for everyone"
-                            : "two-step sign-in is now required of fewer people");
-        }
+        SettingsResponse settings = service.update(ifMatch, request, relaxes);
         return ResponseEntity.ok().eTag(String.valueOf(settings.version())).body(settings);
     }
 

@@ -51,41 +51,77 @@ export function differs(a: Choice, b: Choice): boolean {
 /** A save needs the roles it names: "chosen roles" with none chosen is not a choice yet. */
 export const ready = (choice: Choice): boolean => choice.policy !== 'roles' || choice.roles.length > 0;
 
+/** The zone a deadline is a day's end in until the server says otherwise (the tenant's own zone is in `/me` and the settings). */
+export const DEFAULT_ZONE = 'Africa/Kampala';
+
 /** "3 Nov 2026" in the business's time zone, or null for something that is not a date. */
-export function dateWords(iso: string | null | undefined): string | null {
+export function dateWords(iso: string | null | undefined, zone: string = DEFAULT_ZONE): string | null {
   if (!iso) return null;
   const when = new Date(iso);
   if (Number.isNaN(when.getTime())) return null;
-  return when.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Kampala' });
+  return when.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: zone });
 }
 
-/** Kampala is UTC+3 all year: a day starts at 00:00+03:00. */
-const KAMPALA = '+03:00';
+const localDay = (at: Date, zone: string): string => at.toLocaleDateString('en-CA', { timeZone: zone });
 
-function kampalaDay(at: Date): string {
-  return at.toLocaleDateString('en-CA', { timeZone: 'Africa/Kampala' });
+/** How far the zone is ahead of UTC at this instant, in milliseconds. */
+function zoneOffsetMs(at: number, zone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(at));
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second')) - Math.floor(at / 1000) * 1000;
+}
+
+/** The instant a calendar day starts in the zone (the offset is read twice so a day that changes the clock is still right). */
+function startOfDay(year: number, month: number, day: number, zone: string): number {
+  const guess = Date.UTC(year, month - 1, day);
+  const first = guess - zoneOffsetMs(guess, zone);
+  return guess - zoneOffsetMs(first, zone);
 }
 
 /**
- * The instant the server stores for a grace period of `graceDays` saved at `now`: the start of the day after the last day people
- * may sign in, so "by 3 Nov" means the whole of 3 Nov in Kampala. Mirrors SettingsService.deadlineAfter.
+ * The instant the server stores for a grace period of `graceDays` saved at `now`: the start of the day after the last day people may
+ * sign in, so "by 3 Nov" means the whole of 3 Nov in the business's zone. Mirrors SettingsService.deadlineAfter.
  */
-export function deadlineOf(graceDays: number, now: Date): string {
-  const day = new Date(`${kampalaDay(now)}T00:00:00${KAMPALA}`);
-  return new Date(day.getTime() + (graceDays + 1) * 86_400_000).toISOString();
+export function deadlineOf(graceDays: number, now: Date, zone: string = DEFAULT_ZONE): string {
+  const [year, month, day] = localDay(now, zone).split('-').map(Number) as [number, number, number];
+  const target = new Date(Date.UTC(year, month - 1, day + graceDays + 1));
+  return new Date(startOfDay(target.getUTCFullYear(), target.getUTCMonth() + 1, target.getUTCDate(), zone)).toISOString();
 }
 
 /** The last day people may sign in for a stored deadline: the day before the instant, "3 Nov 2026". */
-export function deadlineWords(iso: string | null | undefined): string | null {
+export function deadlineWords(iso: string | null | undefined, zone: string = DEFAULT_ZONE): string | null {
   if (!iso) return null;
   const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? null : dateWords(new Date(at.getTime() - 1).toISOString());
+  return Number.isNaN(at.getTime()) ? null : dateWords(new Date(at.getTime() - 1).toISOString(), zone);
 }
 
 const listWords = (names: string[]): string => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
 
 /** What the screen knows of the saved state, so the review can say what happens to the date already set. */
-export type Saved = { choice: Choice; enforceFrom: string | null | undefined };
+export type Saved = { choice: Choice; enforceFrom: string | null | undefined; timezone?: string };
+
+/**
+ * Whether sending this choice would put a deadline back: a grace period is sent (the policy widens or the grace changed) and its date
+ * is later than the one set, or people were required at once and now get a date. The server asks for the same proof then.
+ */
+export function postpones(saved: Saved, choice: Choice, now: Date): boolean {
+  if (saved.choice.policy === 'off' || choice.policy === 'off' || choice.graceDays === 0) return false;
+  if (!(widens(saved.choice, choice) || choice.graceDays !== saved.choice.graceDays)) return false;
+  const next = new Date(deadlineOf(choice.graceDays, now, saved.timezone)).getTime();
+  return !saved.enforceFrom || next > new Date(saved.enforceFrom).getTime();
+}
+
+/** Whether saving needs the administrator's proof: the rule gets weaker, or a date is put back. */
+export const needsProof = (saved: Saved, choice: Choice, now: Date): boolean => relaxes(saved.choice, choice) || postpones(saved, choice, now);
 
 /**
  * The review shown before the policy is saved, one plain sentence per line. It says who is asked, until when, whether the date already
@@ -106,17 +142,18 @@ export function reviewLines(choice: Choice, roleNames: Record<string, string>, m
     lines.push(`People with the ${names.length === 1 ? 'role' : 'roles'} ${listWords(names)} will be asked to use it.`);
   }
   const sendsGrace = !saved || widens(saved.choice, choice) || choice.graceDays !== saved.choice.graceDays;
-  const old = deadlineWords(saved?.enforceFrom);
+  const zone = saved?.timezone ?? DEFAULT_ZONE;
+  const old = deadlineWords(saved?.enforceFrom, zone);
   if (sendsGrace) {
     if (choice.graceDays === 0) {
       lines.push('There is no wait: anyone who has not set it up is asked the next time they sign in, and cannot use the app until they have.');
       if (old) lines.push(`This replaces the date now set, the end of ${old}.`);
     } else {
-      const date = deadlineWords(deadlineOf(choice.graceDays, now));
+      const date = deadlineWords(deadlineOf(choice.graceDays, now, zone), zone);
       lines.push(
         `Nobody is locked out before the end of ${date}. Until then people who have not set it up can keep signing in and see a reminder. After that, they are asked at their next sign-in and cannot use the app until they have set it up.`,
       );
-      if (old && saved?.enforceFrom && deadlineOf(choice.graceDays, now) < saved.enforceFrom) {
+      if (old && saved?.enforceFrom && new Date(deadlineOf(choice.graceDays, now, zone)).getTime() < new Date(saved.enforceFrom).getTime()) {
         lines.push(`This moves the date earlier than the one now set, the end of ${old}.`);
       } else if (old) {
         lines.push(`This replaces the date now set, the end of ${old}.`);
@@ -131,6 +168,8 @@ export function reviewLines(choice: Choice, roleNames: Record<string, string>, m
   }
   if (saved && relaxes(saved.choice, choice)) {
     lines.push('Because this makes the rule weaker, you will be asked to confirm that it is you, and the other administrators are told by email.');
+  } else if (saved && postpones(saved, choice, now)) {
+    lines.push('Because this gives people more time, you will be asked to confirm that it is you, and the other administrators are told by email.');
   }
   lines.push(
     'If someone loses their phone, an administrator can reset their two-step sign-in. If you have only one administrator, we have to help them, so ask them to keep their recovery codes safe.',
@@ -142,10 +181,10 @@ export function reviewLines(choice: Choice, roleNames: Record<string, string>, m
  * The reminder for a person the policy covers who has not set it up yet, or null. Before the date it names the last day; after it,
  * the person is blocked until they have set it up (the staff layout shows the set-up screen), and the reminder says why.
  */
-export function reminderWords(me: Pick<Me, 'mfa_due_by' | 'mfa_enabled' | 'mfa_required'>): string | null {
+export function reminderWords(me: Pick<Me, 'mfa_due_by' | 'mfa_enabled' | 'mfa_required' | 'tenant_timezone'>): string | null {
   if (me.mfa_enabled) return null;
   if (me.mfa_required) return 'Your business now requires two-step sign-in. Set it up to go on using the app.';
-  const date = deadlineWords(me.mfa_due_by);
+  const date = deadlineWords(me.mfa_due_by, me.tenant_timezone ?? DEFAULT_ZONE);
   return date ? `Your business asks you to set up two-step sign-in by ${date} (you can sign in until the end of that day). After that you cannot sign in without it.` : null;
 }
 

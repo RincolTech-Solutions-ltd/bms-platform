@@ -126,7 +126,7 @@ class TwoStepPolicyIT extends IntegrationTest {
                         .sql("SELECT mfa_required FROM roles WHERE key = 'tenant_admin'")
                         .query(Boolean.class)
                         .single())
-                .as("V65 clears the seed's flag")
+                .as("V67 clears the seed's flag")
                 .isFalse();
         JsonNode current = settings();
         assertThat(current.get("require_mfa_all_staff").asBoolean()).isFalse();
@@ -259,8 +259,15 @@ class TwoStepPolicyIT extends IntegrationTest {
         assertThat(settings().get("require_mfa_all_staff").asBoolean()).isTrue();
         assertThat(relaxedMails()).isZero();
 
-        // Widening and raising need no proof.
-        assertThat(patchRaw(Map.of("mfa_grace_days", 30)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // Putting the date back (30 days is later than the 14 set) is a relaxation too: no proof, no change.
+        ResponseEntity<JsonNode> postponed = patchRaw(Map.of("mfa_grace_days", 30));
+        assertThat(postponed.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(postponed.getBody().get("code").asString()).isEqualTo("password_required");
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(endOfDayAfter(14));
+        assertThat(patch(Map.of("mfa_grace_days", 30)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(Instant.parse(settings().get("mfa_enforce_from").asString())).isEqualTo(endOfDayAfter(30));
+        // Bringing it forward needs no proof.
+        assertThat(patchRaw(Map.of("mfa_grace_days", 7)).getStatusCode()).isEqualTo(HttpStatus.OK);
 
         // Narrowing from everyone to chosen roles needs it, and so does dropping a role.
         assertThat(patchRaw(Map.of("require_mfa_all_staff", false, "require_mfa_roles", List.of("cashier", "auditor")))
@@ -277,7 +284,7 @@ class TwoStepPolicyIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.OK);
 
         // Each relaxation told the administrator, once, with no value in it.
-        assertThat(relaxedMails()).isEqualTo(3);
+        assertThat(relaxedMails()).isEqualTo(4);
         String params = TestDatabase.owner()
                 .sql("SELECT params::text FROM notification_outbox WHERE tenant_id = ? AND template_key = ? LIMIT 1")
                 .params(t.tenantId(), "identity.two_step_policy_weakened")
@@ -311,7 +318,10 @@ class TwoStepPolicyIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> after = api.refresh(next);
         assertThat(after.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(after.getBody().get("status").asString()).isEqualTo("mfa_enrolment_required");
+        // No MFA token comes from a refresh cookie: a stolen cookie must not be able to enrol the thief's
+        // authenticator.
+        assertThat(after.getBody().get("status").asString()).isEqualTo("sign_in_required");
+        assertThat(after.getBody().get("mfa_token").isNull()).isTrue();
         assertThat(after.getBody().get("access_token").isNull()).isTrue();
         assertThat(after.getHeaders().get("Set-Cookie")).isNull();
         assertThat(TestDatabase.owner()
@@ -320,8 +330,77 @@ class TwoStepPolicyIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isZero();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT DISTINCT revoked_reason FROM auth_sessions WHERE user_id = ? AND revoked_at IS NOT NULL")
+                        .param(cashierId)
+                        .query(String.class)
+                        .list())
+                .contains("two_step_required");
         // The family is gone: the same cookie is not accepted again.
         assertThat(api.refresh(next).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    /** ADR-046 decision 3: a day's end is the business's own, not Kampala's. */
+    @Test
+    void theDeadlineIsTheEndOfADayInTheBusinessOwnTimeZone() {
+        TestDatabase.Fixture other = TestDatabase.tenant("twostep-tz", true);
+        ZoneId zone = ZoneId.of("America/Los_Angeles");
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET timezone = ? WHERE id = ?")
+                .params(zone.getId(), other.tenantId())
+                .update();
+        Api there = Api.tenant(http, other.slug());
+        String email = Api.email("admin");
+        UUID id = Api.staff(other, email, new Role("tenant_admin", null));
+        Session session = there.signIn(id, email, Api.PASSWORD, null);
+        String etag = there.get("/api/v1/settings", session.accessToken())
+                .getHeaders()
+                .getETag();
+
+        ResponseEntity<JsonNode> on = there.call(
+                HttpMethod.PATCH,
+                "/api/v1/settings",
+                Map.of("require_mfa_all_staff", true, "mfa_grace_days", 14),
+                session.accessToken(),
+                Map.of("If-Match", etag));
+
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+        Instant expected = LocalDate.now(zone).plusDays(15).atStartOfDay(zone).toInstant();
+        assertThat(Instant.parse(on.getBody().get("mfa_enforce_from").asString()))
+                .isEqualTo(expected);
+        assertThat(on.getBody().get("timezone").asString()).isEqualTo(zone.getId());
+        assertThat(there.get("/api/v1/me", session.accessToken())
+                        .getBody()
+                        .get("tenant_timezone")
+                        .asString())
+                .isEqualTo(zone.getId());
+    }
+
+    /** ADR-042 with ADR-046: a link an administrator hands over still works after the deadline, and leads to enrolment. */
+    @Test
+    void anAdminResetLinkAfterTheDeadlineLeadsToEnrolmentNotToASession() {
+        String cashier = Api.email("cashier");
+        UUID cashierId = Api.staff(t, cashier, new Role("cashier", t.headOffice()));
+        assertThat(patch(Map.of("require_mfa_all_staff", true, "mfa_grace_days", 14))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        deadlineWas(Instant.now().minusSeconds(60));
+
+        ResponseEntity<JsonNode> issued = api.post(
+                "/api/v1/users/" + cashierId + "/reset-sign-in", Map.of("password", Api.PASSWORD), admin.accessToken());
+        assertThat(issued.getStatusCode()).as("%s", issued.getBody()).isEqualTo(HttpStatus.OK);
+        String url = issued.getBody().get("url").asString();
+        ResponseEntity<JsonNode> done = api.call(
+                HttpMethod.POST,
+                "/api/v1/auth/staff/password/reset",
+                Map.of("token", url.substring(url.indexOf("#token=") + 7), "password", "Test-Another-Password-77"),
+                null,
+                Map.of("X-Forwarded-For", "203.0.113." + (ADDRESS.incrementAndGet() % 250 + 1)));
+
+        assertThat(done.getStatusCode()).as("%s", done.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(done.getBody().get("status").asString()).isEqualTo("mfa_enrolment_required");
+        assertThat(done.getBody().get("access_token").isNull()).isTrue();
     }
 
     /** ADR-046 decision 3: a person given a covered role after the deadline has no grace. */

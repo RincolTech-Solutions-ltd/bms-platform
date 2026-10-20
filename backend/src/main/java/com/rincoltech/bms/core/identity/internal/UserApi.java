@@ -150,7 +150,10 @@ final class UserApi {
             @Schema(
                     description =
                             "The tenant's two-step sign-in policy: off, roles or everyone; the PWA recommends turning it on to administrators while it is off (ADR-046)")
-            String twoStepPolicy) {}
+            String twoStepPolicy,
+
+            @Schema(description = "The business's time zone, in which mfa_due_by is a day's end (ADR-046)")
+            String tenantTimezone) {}
 
     @Schema(name = "PlatformMe")
     record PlatformMeResponse(UUID userId, String kind, String fullName, String email, List<String> permissions) {}

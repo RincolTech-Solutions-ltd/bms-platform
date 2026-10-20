@@ -7320,6 +7320,8 @@ export interface components {
             /** @description True when the tenant has switched report runs on (setting reports_enabled, ADR-038); the PWA shows the Reports tab only then */
             reports_enabled?: boolean;
             roles?: components["schemas"]["RoleAssignment"][];
+            /** @description The business's time zone, in which mfa_due_by is a day's end (ADR-046) */
+            tenant_timezone?: string;
             /** @description Guided tours the user finished or dismissed, by tour id (issue #19) */
             tours?: {
                 [key: string]: components["schemas"]["TourState"];
@@ -13366,6 +13368,8 @@ export interface components {
             setup_dismissed?: boolean;
             /** @description Brand colour #RRGGBB, or null for the platform look (FR-TEN-08) */
             theme_primary?: string;
+            /** @description The business's time zone, in which a two-step deadline is a day's end (ADR-046) */
+            timezone?: string;
             /** Format: int32 */
             version?: number;
         };

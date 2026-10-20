@@ -6,6 +6,8 @@ import {
   choiceOf,
   dateWords,
   deadlineOf,
+  needsProof,
+  postpones,
   deadlineWords,
   differs,
   graceChoices,
@@ -98,8 +100,9 @@ describe('what is sent', () => {
 
   it('sends a grace period the administrator changed, and leaves the proof out of a change that asks more', () => {
     expect(bodyOf({ ...everyone, graceDays: 7 }, everyone)).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [], mfa_grace_days: 7 });
-    expect(bodyOf(everyone, everyone, { password: 'x' })).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [] });
-    expect(bodyOf(everyone, off, { password: 'x' })).not.toHaveProperty('password');
+    // The screen passes the proof only when saving needs it; the body carries whatever it is given.
+    expect(bodyOf(everyone, everyone)).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [] });
+    expect(bodyOf({ ...everyone, graceDays: 90 }, everyone, { password: 'x' })).toEqual({ require_mfa_all_staff: true, require_mfa_roles: [], mfa_grace_days: 90, password: 'x' });
   });
 
   it('tells widening from relaxing', () => {
@@ -131,10 +134,37 @@ describe('dates', () => {
     expect(deadlineOf(1, new Date('2026-10-20T22:30:00Z'))).toBe('2026-10-22T21:00:00.000Z');
   });
 
+  it("rounds in the business's own zone, not Kampala", () => {
+    // 20 Oct 05:00 in New York; 14 days on is 3 Nov; the clocks go back on 1 Nov, so the 4th starts at 05:00 UTC.
+    expect(deadlineOf(14, NOW, 'America/New_York')).toBe('2026-11-04T05:00:00.000Z');
+    expect(deadlineWords('2026-11-04T05:00:00.000Z', 'America/New_York')).toBe('3 Nov 2026');
+    expect(dateWords('2026-11-04T02:00:00Z', 'America/New_York')).toBe('3 Nov 2026');
+  });
+
   it('names the last day for a stored deadline, not the day after', () => {
     expect(deadlineWords('2026-11-03T21:00:00.000Z')).toBe('3 Nov 2026');
     expect(deadlineWords(deadlineOf(14, NOW))).toBe('3 Nov 2026');
     expect(deadlineWords(null)).toBeNull();
+  });
+});
+
+describe("when saving needs the administrator's proof", () => {
+  const everyone = { policy: 'everyone' as const, roles: [], graceDays: 14 };
+  const on = (enforceFrom: string | null) => ({ choice: everyone, enforceFrom });
+
+  it('asks when the rule gets weaker or a date is put back, and not when it is brought forward', () => {
+    expect(needsProof(on(null), { policy: 'off', roles: [], graceDays: 14 }, NOW)).toBe(true);
+    // People were required at once: any date is a postponement.
+    expect(postpones(on(null), { ...everyone, graceDays: 7 }, NOW)).toBe(true);
+    // The date set is 3 Nov: 30 days is later, 7 days is earlier, 14 days is the same and is not even sent.
+    const set = on(deadlineOf(14, NOW));
+    expect(postpones(set, { ...everyone, graceDays: 30 }, NOW)).toBe(true);
+    expect(postpones(set, { ...everyone, graceDays: 7 }, NOW)).toBe(false);
+    expect(postpones(set, everyone, NOW)).toBe(false);
+    expect(needsProof(set, { ...everyone, graceDays: 7 }, NOW)).toBe(false);
+    expect(postpones(set, { ...everyone, graceDays: 0 }, NOW)).toBe(false);
+    // Turning it on from off sets a first date for nobody who was covered.
+    expect(postpones({ choice: { policy: 'off', roles: [], graceDays: 14 }, enforceFrom: null }, everyone, NOW)).toBe(false);
   });
 });
 
@@ -195,6 +225,7 @@ describe('the reminder for a covered person', () => {
     expect(reminderWords({ mfa_due_by: '2026-11-03T21:00:00Z', mfa_enabled: false })).toBe(
       'Your business asks you to set up two-step sign-in by 3 Nov 2026 (you can sign in until the end of that day). After that you cannot sign in without it.',
     );
+    expect(reminderWords({ mfa_due_by: '2026-11-04T05:00:00Z', mfa_enabled: false, tenant_timezone: 'America/New_York' })).toContain('by 3 Nov 2026');
     expect(reminderWords({ mfa_due_by: '2026-11-03T21:00:00Z', mfa_enabled: true })).toBeNull();
     expect(reminderWords({ mfa_enabled: false })).toBeNull();
   });
