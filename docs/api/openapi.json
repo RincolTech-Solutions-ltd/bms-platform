@@ -19166,9 +19166,9 @@
             "type" : "boolean"
           },
           "daily_summary_time" : {
-            "description" : "HH:mm on the business's clock",
+            "description" : "HH:mm on the business's clock, a quarter hour up to 23:30",
             "example" : "20:00",
-            "pattern" : "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "pattern" : "^(([01][0-9]|2[0-2]):(00|15|30|45)|23:(00|15|30))$",
             "type" : "string"
           },
           "low_stock" : {

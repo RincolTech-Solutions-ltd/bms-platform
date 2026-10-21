@@ -15106,7 +15106,7 @@ export interface components {
             credit_due?: boolean;
             daily_summary?: boolean;
             /**
-             * @description HH:mm on the business's clock
+             * @description HH:mm on the business's clock, a quarter hour up to 23:30
              * @example 20:00
              */
             daily_summary_time?: string;
