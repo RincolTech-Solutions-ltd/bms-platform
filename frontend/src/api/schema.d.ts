@@ -10763,6 +10763,7 @@ export interface components {
             stock_by_branch?: components["schemas"]["RetailBranchStock"][];
             /** @description The item's stock over the branches the caller may read, every variant together */
             stock_on_hand?: string;
+            terms_copied?: components["schemas"]["RetailTermsCopied"];
             unit?: string;
             /** Format: uuid */
             unit_id?: string;
@@ -11959,6 +11960,26 @@ export interface components {
             active?: boolean;
             name?: string;
             strict?: boolean;
+        };
+        /** @description Issue #395: a price list price that was not copied to a new size */
+        RetailPriceNotCopied: {
+            min_qty?: string;
+            /** Format: uuid */
+            price_list_id?: string;
+            /** Format: int64 */
+            price_minor?: number;
+            /**
+             * Format: uuid
+             * @description The new size
+             */
+            product_id?: string;
+            /**
+             * @description price_differs: the new size does not keep the cost and selling price it was made from; below_cost: the price is below the new size's cost; unit_not_sold: the new size is not sold in that pack
+             * @enum {string}
+             */
+            reason?: "price_differs" | "below_cost" | "unit_not_sold";
+            /** Format: uuid */
+            unit_id?: string;
         };
         /** @description Price and source per line; never the cost */
         RetailPriceResolution: {
@@ -14265,6 +14286,20 @@ export interface components {
             active?: boolean;
             contact?: string;
             name?: string;
+        };
+        /** @description Issue #395: the pack sizes and price list prices copied to new sizes, and the prices that were not */
+        RetailTermsCopied: {
+            /** Format: int32 */
+            packs_copied?: number;
+            /** Format: int32 */
+            price_list_items_copied?: number;
+            /** @description Each price list price not copied to a new size, and why; set it on the list if it is wanted */
+            price_list_items_not_copied?: components["schemas"]["RetailPriceNotCopied"][];
+            /**
+             * @description Why no price list price was copied at all, absent when they were looked at one by one: price_list_permission (the caller does not hold retail.pricelist.manage; nothing about the lists is shown) or price_lists_off (the price lists capability is off)
+             * @enum {string}
+             */
+            price_list_items_skipped?: "price_list_permission" | "price_lists_off";
         };
         RetailTransfer: {
             /**

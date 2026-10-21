@@ -57,10 +57,9 @@ class PhotoController {
         Documents.Image image = service.photo(id, size != null);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(image.contentType()))
-                // Access is checked on every read, and a shared till keeps its cache after a sign-out: a short life,
-                // then the
-                // browser asks again with the ETag (a 304 still passes the permission check), and the cache is keyed by
-                // who asks.
+                // Access is checked on every read, and a shared till keeps its cache after a sign-out:
+                // a short life, then the browser asks again with the ETag (a 304 still passes the
+                // permission check), and the cache is keyed by who asks.
                 .cacheControl(CacheControl.maxAge(Duration.ofMinutes(5))
                         .cachePrivate()
                         .mustRevalidate())

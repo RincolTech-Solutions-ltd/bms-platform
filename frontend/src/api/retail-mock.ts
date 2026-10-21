@@ -351,7 +351,9 @@ export function createMockRetail(): RetailApi {
     const plan = lines && lines.length > 0
       ? lines.map((l, i) => ({ size: cleanOption(l.size), colour: cleanOption(l.colour), code: (l.code ?? '').trim() || planVariants({ baseCode: f.baseCode, sizes: [l.size ?? ''], colours: [l.colour ?? ''], costMinor, sellMinor })[0]?.code || f.baseCode, costMinor: l.cost_minor ?? costMinor, sellMinor: l.sell_minor ?? sellMinor, position: nextPosition + i }))
       : planVariants({ baseCode: f.baseCode, sizes, colours, costMinor, sellMinor, existing, nextPosition });
-    if (plan.length > 100) refuse(422, 'too_many_variants', `That makes ${plan.length} sizes and colours. Make at most 100 at a time; add the rest afterwards.`);
+    if (plan.length > 100) refuse(422, 'too_many_variants', `That makes ${plan.length} sizes and colours. An item has at most 100.`);
+    // An item never has more than 100, counting those it has (issue #395).
+    if (existing.size + plan.length > 100) refuse(422, 'too_many_variants', `The item has ${existing.size} sizes and colours and this adds ${plan.length}. An item has at most 100; add fewer.`);
     for (const v of plan) {
       if (existing.has(variantKey(v.size, v.colour)) && lines && lines.length > 0) refuse(409, 'duplicate_variant', `The item has ${variantLabel(v.size, v.colour)} already. Each one is listed once.`);
       if ([...products.values()].some((x) => x.code.toLowerCase() === v.code.toLowerCase())) refuse(409, 'duplicate_product_code', `A product with the code ${v.code} exists. Give ${variantLabel(v.size, v.colour)} another code.`);

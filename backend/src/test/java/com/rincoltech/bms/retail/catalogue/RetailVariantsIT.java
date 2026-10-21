@@ -867,9 +867,22 @@ class RetailVariantsIT extends IntegrationTest {
         ResponseEntity<JsonNode> more = api.post(
                 "/product-families/" + f.get("id").asString() + "/variants",
                 Map.of("sizes", List.of("12-18m"), "colours", List.of("Blue")),
-                ADMIN);
+                perms);
         assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
         UUID added = variant(more.getBody(), "12-18m", "Blue");
+        JsonNode copied = more.getBody().get("terms_copied");
+        assertThat(copied.get("packs_copied").asInt()).isEqualTo(1);
+        assertThat(copied.get("price_list_items_copied").asInt()).isEqualTo(2);
+        assertThat(copied.get("price_list_items_not_copied")).isEmpty();
+        // Each copied price is audited as one set by hand is.
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.price_list_item.created'"
+                                        + " AND data::text LIKE ?")
+                        .params(t.tenantId(), "%" + added + "%")
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2L);
         JsonNode packs =
                 api.get("/products/" + added + "/units", perms).getBody().get("items");
         assertThat(packs).hasSize(1);
@@ -905,6 +918,201 @@ class RetailVariantsIT extends IntegrationTest {
         }
         assertThat(api.get("/products/" + medium + "/units", perms).getBody().get("items"))
                 .hasSize(1);
+    }
+
+    // ---- issue #395 review: an item never passes 100, and copied list prices keep the price list rules --------------
+
+    String listPrices(UUID product) {
+        return TestDatabase.owner()
+                .sql(
+                        "SELECT coalesce(string_agg(price_minor::text, ',' ORDER BY price_minor), '') FROM retail_price_list_items"
+                                + " WHERE tenant_id = ? AND product_id = ?")
+                .params(t.tenantId(), product)
+                .query(String.class)
+                .single();
+    }
+
+    void listPrice(UUID list, UUID product, UUID unit, long price, String perms) {
+        ResponseEntity<JsonNode> r = api.post(
+                "/price-lists/" + list + "/items",
+                Map.of("product_id", product, "unit_id", unit, "price_minor", price),
+                perms);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void addingSizesNeverTakesAnItemPastTheMostSizesItMayHave() {
+        // Nine sizes in ten colours is 90; fifty more would make 140.
+        List<String> sizes = new ArrayList<>();
+        List<String> colours = new ArrayList<>();
+        for (int i = 1; i <= 10; i++) {
+            colours.add("C" + i);
+        }
+        for (int i = 1; i <= 9; i++) {
+            sizes.add("S" + i);
+        }
+        ResponseEntity<JsonNode> ninety = createFamily("Test Ninety Item", "NINE", sizes, colours);
+        assertThat(ninety.getStatusCode()).as("%s", ninety.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID id = UUID.fromString(ninety.getBody().get("id").asString());
+        ResponseEntity<JsonNode> r = api.post(
+                "/product-families/" + id + "/variants",
+                Map.of("sizes", List.of("S10", "S11", "S12", "S13", "S14"), "colours", colours),
+                ADMIN);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("too_many_variants");
+        assertThat(family(id).get("variants")).hasSize(90);
+        // Ten more is exactly the 100 an item may have.
+        ResponseEntity<JsonNode> ten = api.post(
+                "/product-families/" + id + "/variants", Map.of("sizes", List.of("S10"), "colours", colours), ADMIN);
+        assertThat(ten.getStatusCode()).as("%s", ten.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(family(id).get("variants")).hasSize(100);
+
+        // An item given sizes in place counts the size it becomes: 1 and 100 more is refused.
+        UUID plain = plain("PLN-1", "Test Plain Item");
+        ResponseEntity<JsonNode> made = api.post(
+                "/products/" + plain + "/family", Map.of("size", "S0", "sizes", sizes, "colours", colours), ADMIN);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID other = plain("PLN-2", "Test Other Item");
+        List<String> tenSizes = new ArrayList<>(sizes);
+        tenSizes.add("S10");
+        ResponseEntity<JsonNode> over = api.post(
+                "/products/" + other + "/family", Map.of("size", "S0", "sizes", tenSizes, "colours", colours), ADMIN);
+        assertThat(over.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(over.getBody().get("code").asString()).isEqualTo("too_many_variants");
+        assertThat(api.get("/products/" + other, ADMIN).getBody().has("variant"))
+                .isFalse();
+    }
+
+    @Test
+    void aListPriceIsCopiedOnlyInTheSizesOwnUnitOrAPackCopiedWithIt() {
+        capability("units", true);
+        capability("price_lists", true);
+        String perms = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+        JsonNode f = romper();
+        UUID model = variant(f, "0-3m", "Blue");
+        UUID carton = api.unit("test-carton");
+        UUID bale = api.unit("test-bale");
+        assertThat(api.post("/products/" + model + "/units", Map.of("unit_id", carton, "factor", "12"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(api.post("/products/" + model + "/units", Map.of("unit_id", bale, "factor", "50"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Wholesale"), perms));
+        listPrice(list, model, pieces, 8_000, perms);
+        listPrice(list, model, carton, 100_000, perms);
+        listPrice(list, model, bale, 400_000, perms);
+        // The bale is switched off on the size the new ones are made from: neither the pack nor its price goes across.
+        TestDatabase.owner()
+                .sql(
+                        "UPDATE retail_product_units SET active = false WHERE tenant_id = ? AND product_id = ? AND unit_id = ?")
+                .params(t.tenantId(), model, bale)
+                .update();
+
+        ResponseEntity<JsonNode> more = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants",
+                Map.of("sizes", List.of("12-18m"), "colours", List.of("Blue")),
+                perms);
+        assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID added = variant(more.getBody(), "12-18m", "Blue");
+        assertThat(listPrices(added)).isEqualTo("8000,100000");
+        JsonNode notCopied = more.getBody().get("terms_copied").get("price_list_items_not_copied");
+        assertThat(notCopied).hasSize(1);
+        assertThat(notCopied.get(0).get("unit_id").asString()).isEqualTo(bale.toString());
+        assertThat(notCopied.get(0).get("reason").asString()).isEqualTo("unit_not_sold");
+
+        // With the units capability off no pack is copied, and so no pack's list price either.
+        capability("units", false);
+        ResponseEntity<JsonNode> off = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants",
+                Map.of("sizes", List.of("18-24m"), "colours", List.of("Blue")),
+                perms);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID bare = variant(off.getBody(), "18-24m", "Blue");
+        assertThat(listPrices(bare)).isEqualTo("8000");
+        assertThat(off.getBody()
+                        .get("terms_copied")
+                        .get("price_list_items_copied")
+                        .asInt())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aCatalogueOnlyRoleAddsSizesWithoutMakingPriceListPrices() {
+        capability("price_lists", true);
+        String perms = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+        JsonNode f = romper();
+        UUID model = variant(f, "0-3m", "Blue");
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Wholesale"), perms));
+        listPrice(list, model, pieces, 8_000, perms);
+
+        ResponseEntity<JsonNode> more = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants",
+                Map.of("sizes", List.of("12-18m"), "colours", List.of("Blue")),
+                ADMIN);
+        assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID added = variant(more.getBody(), "12-18m", "Blue");
+        assertThat(listPrices(added)).isEmpty();
+        JsonNode copied = more.getBody().get("terms_copied");
+        assertThat(copied.get("price_list_items_copied").asInt()).isZero();
+        assertThat(copied.get("price_list_items_skipped").asString()).isEqualTo("price_list_permission");
+        // Nothing of the list is shown to a caller who may not read it.
+        assertThat(copied.get("price_list_items_not_copied")).isEmpty();
+        assertThat(more.getBody().toString()).doesNotContain(list.toString());
+    }
+
+    @Test
+    void aSizeAtItsOwnPricesTakesNoListPriceAndNoneIsEverWrittenBelowCost() {
+        capability("price_lists", true);
+        String perms = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+        // Size M sells at 30,000 (cost 20,000) with a wholesale price of 25,000.
+        Map<String, Object> shirt = new LinkedHashMap<>();
+        shirt.put("code", "SHIRT-M");
+        shirt.put("description", "Test Shirt");
+        shirt.put("category_id", category);
+        shirt.put("unit_id", pieces);
+        shirt.put("cost_minor", 20_000);
+        shirt.put("sell_minor", 30_000);
+        UUID m = RetailTestSupport.id(api.post("/products", shirt, ADMIN));
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Wholesale"), perms));
+        listPrice(list, m, pieces, 25_000, perms);
+        UUID staff = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Staff"), perms));
+        listPrice(staff, m, pieces, 15_000, perms);
+
+        // XL is added at 50,000, cost 40,000: the wholesale 25,000 would sell it below cost, so nothing is copied.
+        Map<String, Object> xl = new LinkedHashMap<>();
+        xl.put("size", "XL");
+        xl.put("sell_minor", 50_000);
+        xl.put("cost_minor", 40_000);
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("size", "L");
+        ResponseEntity<JsonNode> made =
+                api.post("/products/" + m + "/family", Map.of("size", "M", "variants", List.of(xl, l)), perms);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID xlId = null;
+        UUID lId = null;
+        for (JsonNode v : made.getBody().get("variants")) {
+            String size = text(v.get("variant"), "size");
+            if ("XL".equals(size)) {
+                xlId = UUID.fromString(v.get("id").asString());
+            } else if ("L".equals(size)) {
+                lId = UUID.fromString(v.get("id").asString());
+            }
+        }
+        assertThat(listPrices(xlId)).isEmpty();
+        // L keeps M's prices; the wholesale price goes across, the staff price below cost does not.
+        assertThat(listPrices(lId)).isEqualTo("25000");
+        JsonNode notCopied = made.getBody().get("terms_copied").get("price_list_items_not_copied");
+        List<String> reasons = new ArrayList<>();
+        for (JsonNode n : notCopied) {
+            reasons.add(n.get("product_id").asString() + ":"
+                    + n.get("price_list_id").asString() + ":" + n.get("reason").asString());
+        }
+        assertThat(reasons)
+                .containsExactlyInAnyOrder(
+                        xlId + ":" + list + ":price_differs",
+                        xlId + ":" + staff + ":price_differs",
+                        lId + ":" + staff + ":below_cost");
     }
 
     @Test

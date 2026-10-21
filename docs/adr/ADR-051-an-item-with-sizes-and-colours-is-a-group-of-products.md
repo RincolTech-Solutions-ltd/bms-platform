@@ -47,10 +47,16 @@ movement and every report, and the many rows already on staging would need a def
   until now, one per size, are joined as the sizes of one item (`POST /retail/product-families/join`, or `.../{id}/join` for one that
   exists): each keeps its id, code, prices, stock and history; its name becomes the item's with its size and colour, its category
   the item's; they must share one unit. A size added to an item whose every size is switched off starts switched off. A new size made from an item (more sizes added to it, or an item given sizes) takes
-  the template variant's active pack sizes and its price list prices that are in force or coming, at the same price. Joining into an
-  item that exists takes only the items (a name, base code, category or duplicate reason is refused with 422), at most 100 sizes and
-  colours in all, and clears each joined product's `duplicate_reason`, which the audit keeps in `before` (issue #395). At most 100
-  variants are made per request; a size or colour is one line of at most 30 characters after trimming.
+  the template variant's active pack sizes (while the units capability is on) and its price list prices that are in force or coming,
+  at the same price, on the rules of a list price set by hand (issue #395): only while the price lists capability is on and the caller
+  also holds `retail.pricelist.manage` (a catalogue-only role adds the size without list prices, and the answer says so); only in the
+  size's own unit or a pack copied with it; only to a size that keeps the template's cost and selling price exactly (a size at its
+  own prices takes none, so a dearer size never sells at the old wholesale price); never below the new size's cost; each copy
+  audited as `retail.price_list_item.created`. The answer's `terms_copied` lists every list price not copied and why. Joining into an
+  item that exists takes only the items (a name, base code, category or duplicate reason is refused with 422) and clears each joined
+  product's `duplicate_reason`, which the audit keeps in `before` (issue #395). **An item never has more than 100 sizes and colours:**
+  creating, adding sizes, giving an item sizes and joining all count what the item has already (422 `too_many_variants`); a size
+  or colour is one line of at most 30 characters after trimming.
 - **Reports roll up to the item.** The sales and restock summaries group an `item` as the item with sizes (all its variants together)
   or the item without; a new `variant` level splits an item by size and colour, offered in `available_levels` only to a tenant that has
   an item with sizes. Wherever an item id is a filter (`product_id` of the sales and restock lists, `item_id` of the summaries), the id
@@ -82,4 +88,4 @@ movement and every report, and the many rows already on staging would need a def
 
 **Watch for:**
 - A query that groups by `product_id` and is meant to read "per item" must group by `coalesce(family_id, product_id)`.
-- The 100 variants per request and the 7 characters of each size and colour in a generated code; an owner can type a code of their own.
+- The 100 sizes and colours an item may have and the 7 characters of each size and colour in a generated code; an owner can type a code of their own.

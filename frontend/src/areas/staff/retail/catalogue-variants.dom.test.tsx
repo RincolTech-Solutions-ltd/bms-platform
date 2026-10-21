@@ -15,6 +15,8 @@ vi.setConfig({ testTimeout: 20000 });
 
 const createFamily = vi.fn();
 const joinFamily = vi.fn();
+const romperFamily = () => Promise.resolve({ id: 'f9', name: 'Test Romper', unit_id: 'u1', variants: [{ id: 's1', variant: { family_id: 'f9', family_name: 'Test Romper', size: 'S', position: 0 } }] });
+const getFamily = vi.fn<(...a: unknown[]) => Promise<unknown>>(romperFamily);
 
 vi.mock('../../../api/retail', async (original) => {
   const real = await original<typeof import('../../../api/retail')>();
@@ -30,7 +32,7 @@ vi.mock('../../../api/retail', async (original) => {
         { id: 'p1', code: 'CAB-15', description: 'Test Cable thin', unit: 'piece', unit_id: 'u1', sell_minor: 2000 },
         { id: 's1', code: 'ROMP-S', description: 'Test Romper (S)', unit: 'piece', unit_id: 'u1', sell_minor: 9000, variant: { family_id: 'f9', family_name: 'Test Romper', size: 'S', position: 0 } },
       ]),
-      getFamily: () => Promise.resolve({ id: 'f9', name: 'Test Romper', unit_id: 'u1', variants: [{ id: 's1', variant: { family_id: 'f9', family_name: 'Test Romper', size: 'S', position: 0 } }] }),
+      getFamily: (...a: unknown[]) => getFamily(...a),
     },
   };
 });
@@ -41,6 +43,8 @@ afterEach(() => {
   cleanup();
   createFamily.mockReset();
   joinFamily.mockReset();
+  getFamily.mockReset();
+  getFamily.mockImplementation(romperFamily);
 });
 
 const admin = mockMe('admin');
@@ -110,6 +114,35 @@ describe('an item with sizes and colours', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add as a size Test Cable thin' }));
     fireEvent.change(screen.getByLabelText('Size of Test Cable thin'), { target: { value: 's' } });
     await waitFor(() => expect(screen.getByRole('note').textContent).toContain('Test Romper has one of these sizes and colours already'));
+    expect((screen.getByRole('button', { name: 'Join them as one item' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('says so when the item picked to join has no sizes, instead of doing nothing', async () => {
+    screenOf(<JoinPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Join this item Test Cable thin' }));
+    expect(screen.getByRole('note').textContent).toContain('Test Cable thin has no sizes yet');
+    expect(screen.getByLabelText('What is the item called?')).toBeTruthy();
+  });
+
+  it('waits for the item it joins before judging the units, and says when it could not be read', async () => {
+    getFamily.mockImplementation(() => new Promise(() => {}));
+    screenOf(<JoinPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Join this item Test Romper (S)' }));
+    await screen.findByText('Test Romper', { selector: 'strong' });
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add as a size Test Cable thin' }).length).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Add as a size Test Cable thin' }));
+    fireEvent.change(screen.getByLabelText('Size of Test Cable thin'), { target: { value: 'M' } });
+    expect(screen.getByRole('note').textContent).toContain('Reading Test Romper');
+    expect(screen.getByRole('note').textContent).not.toContain('one unit');
+    cleanup();
+
+    getFamily.mockImplementation(() => Promise.reject(new Error('offline')));
+    screenOf(<JoinPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Join this item Test Romper (S)' }));
+    await screen.findByText('Test Romper', { selector: 'strong' });
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add as a size Test Cable thin' }).length).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Add as a size Test Cable thin' }));
+    await waitFor(() => expect(screen.getByRole('note').textContent).toContain('Test Romper could not be read'));
     expect((screen.getByRole('button', { name: 'Join them as one item' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

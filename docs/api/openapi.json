@@ -9901,6 +9901,9 @@
             "description" : "The item's stock over the branches the caller may read, every variant together",
             "type" : "string"
           },
+          "terms_copied" : {
+            "$ref" : "#/components/schemas/RetailTermsCopied"
+          },
           "unit" : {
             "type" : "string"
           },
@@ -12262,6 +12265,36 @@
           },
           "strict" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "RetailPriceNotCopied" : {
+        "description" : "Issue #395: a price list price that was not copied to a new size",
+        "properties" : {
+          "min_qty" : {
+            "type" : "string"
+          },
+          "price_list_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "price_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "product_id" : {
+            "description" : "The new size",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "price_differs: the new size does not keep the cost and selling price it was made from; below_cost: the price is below the new size's cost; unit_not_sold: the new size is not sold in that pack",
+            "enum" : [ "price_differs", "below_cost", "unit_not_sold" ],
+            "type" : "string"
+          },
+          "unit_id" : {
+            "format" : "uuid",
+            "type" : "string"
           }
         }
       },
@@ -16697,6 +16730,31 @@
           "name" : {
             "maxLength" : 200,
             "minLength" : 1,
+            "type" : "string"
+          }
+        }
+      },
+      "RetailTermsCopied" : {
+        "description" : "Issue #395: the pack sizes and price list prices copied to new sizes, and the prices that were not",
+        "properties" : {
+          "packs_copied" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "price_list_items_copied" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "price_list_items_not_copied" : {
+            "description" : "Each price list price not copied to a new size, and why; set it on the list if it is wanted",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailPriceNotCopied"
+            },
+            "type" : "array"
+          },
+          "price_list_items_skipped" : {
+            "description" : "Why no price list price was copied at all, absent when they were looked at one by one: price_list_permission (the caller does not hold retail.pricelist.manage; nothing about the lists is shown) or price_lists_off (the price lists capability is off)",
+            "enum" : [ "price_list_permission", "price_lists_off" ],
             "type" : "string"
           }
         }

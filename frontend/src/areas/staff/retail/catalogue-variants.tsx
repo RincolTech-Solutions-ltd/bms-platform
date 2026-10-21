@@ -103,7 +103,7 @@ export function linesOf(rows: readonly PreviewRow[], profit: boolean): VariantLi
 /** Why the preview cannot be saved yet, in plain words, or null when it can. */
 export function previewProblem(rows: readonly PreviewRow[]): string | null {
   if (rows.length === 0) return 'Type at least one size or one colour.';
-  if (rows.length > MAX_VARIANTS) return `That makes ${rows.length}. Make at most ${MAX_VARIANTS} at a time, then add the rest on the item's page.`;
+  if (rows.length > MAX_VARIANTS) return `That makes ${rows.length}. An item has at most ${MAX_VARIANTS} sizes and colours.`;
   if (rows.some((r) => r.codeText.trim() === '')) return 'Every size and colour needs a code.';
   if (rows.some((r) => parseMinor(r.sellText, RETAIL_CURRENCY) === null)) return 'Every size and colour needs a selling price.';
   const repeated = repeatedCodes(rows.map((r) => ({ code: r.codeText })));
@@ -323,14 +323,21 @@ export function JoinPage() {
   const [rows, setRows] = useState<JoinRow[]>([]);
   // The item they join when it exists already: any one of its sizes names it.
   const [target, setTarget] = useState<{ id: string; name: string } | null>(null);
+  // An item without sizes picked in the "join an item that has sizes" search: said, not ignored.
+  const [notSized, setNotSized] = useState<string | null>(null);
   const targetItem = useQuery({ queryKey: ['retail', 'family', target?.id], queryFn: () => retail.getFamily(target?.id ?? ''), enabled: target !== null });
   const there = targetItem.data?.variants ?? [];
   const unit = target ? targetItem.data?.unit_id : rows[0]?.product.unit_id;
   const keys = rows.map((r) => variantKey(r.size.trim() || undefined, r.colour.trim() || undefined));
   const taken = new Set(there.map((v) => variantKey(v.variant?.size, v.variant?.colour)));
+  // Until the item they join is read, no row is judged against it (its unit is not known yet).
   const problem = rows.length === 0
     ? 'Pick the items that are sizes or colours of one thing.'
-    : rows.some((r) => r.product.unit_id !== unit)
+    : target && targetItem.isError
+      ? `${target.name} could not be read. Try again, or make a new item instead.`
+      : target && !targetItem.data
+        ? `Reading ${target.name}.`
+        : rows.some((r) => r.product.unit_id !== unit)
       ? 'Pick items counted in one unit: the sizes of one item are counted the same way.'
       : rows.some((r) => r.size.trim() === '' && r.colour.trim() === '')
         ? 'Give each one its size, its colour or both.'
@@ -374,8 +381,16 @@ export function JoinPage() {
             <p className="hint">Search for any one of its sizes and add it here; the items you pick below then become more sizes of that item.</p>
             <ProductPicker
               id="join-target-search" showStock={false} addLabel="Join this item"
-              onAdd={(p) => { if (p.variant?.family_id) setTarget({ id: p.variant.family_id, name: p.variant.family_name ?? '' }); }}
+              onAdd={(p) => {
+                if (p.variant?.family_id) {
+                  setNotSized(null);
+                  setTarget({ id: p.variant.family_id, name: p.variant.family_name ?? '' });
+                } else {
+                  setNotSized(`${p.description ?? 'That item'} has no sizes yet. Pick it below as one of the sizes instead, or search for a size of the item to join.`);
+                }
+              }}
             />
+            {notSized && <p role="note" className="alert alert-warning">{notSized}</p>}
           </section>
         </>
       )}
