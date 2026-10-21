@@ -55,6 +55,12 @@ class Passwords {
     private final String dummyHash;
     /** Package-private so a test can take the slots. */
     final Semaphore hashing;
+    /**
+     * How long a caller waits for a slot: always {@link #WAIT_SECONDS} in production. A plain field, not a property, so no
+     * setting or environment variable can change it; only a test in this package may lengthen it for a moment, so that a
+     * slow CI runner cannot turn a deliberately queued request into a 503.
+     */
+    volatile long waitMillis = WAIT_SECONDS * 1000;
 
     Passwords(AuthProperties properties, @Value("${bms.auth.argon2-max-concurrent:4}") int maxConcurrent) {
         this.hashing = new Semaphore(Math.max(1, maxConcurrent), true);
@@ -81,7 +87,7 @@ class Passwords {
         }
         boolean acquired;
         try {
-            acquired = hashing.tryAcquire(WAIT_SECONDS, TimeUnit.SECONDS);
+            acquired = hashing.tryAcquire(waitMillis, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             acquired = false;

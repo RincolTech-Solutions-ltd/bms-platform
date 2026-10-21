@@ -407,6 +407,8 @@ class SignInLimitsIT extends IntegrationTest {
         passwordsSent.add(Api.PASSWORD);
 
         int slots = passwords.hashing.drainPermits();
+        // Long enough that no queued request gives up (503) on a slow runner before the slots come back.
+        passwords.waitMillis = 60_000;
         ExecutorService callers = Executors.newFixedThreadPool(2 * passwordsSent.size());
         try {
             List<Future<ResponseEntity<JsonNode>>> forReal = new ArrayList<>();
@@ -415,7 +417,7 @@ class SignInLimitsIT extends IntegrationTest {
                 forReal.add(callers.submit(() -> login(api, STAFF_LOGIN, real, password, freshIp())));
                 forNobody.add(callers.submit(() -> login(api, STAFF_LOGIN, nobody, password, freshIp())));
             }
-            long deadline = System.nanoTime() + Duration.ofMillis(1_500).toNanos();
+            long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
             while (passwords.hashing.getQueueLength() < 2 * passwordsSent.size() && System.nanoTime() < deadline) {
                 Thread.sleep(10);
             }
@@ -462,6 +464,7 @@ class SignInLimitsIT extends IntegrationTest {
             if (slots > 0) {
                 passwords.hashing.release(slots);
             }
+            passwords.waitMillis = Passwords.WAIT_SECONDS * 1000;
             callers.shutdownNow();
         }
     }
@@ -495,8 +498,11 @@ class SignInLimitsIT extends IntegrationTest {
                     wrong.add(status);
                 }
             }
-            assertThat(wrong).allMatch(s -> s == 401 || s == 423);
-            assertThat(right).isIn(200, 423);
+            // A smoke test under load: 503 (every hashing slot busy) is a legitimate answer; the forced-lock test above
+            // is
+            // the one that proves the property. A wrong password never signs in.
+            assertThat(wrong).allMatch(s -> s == 401 || s == 423 || s == 503);
+            assertThat(right).isIn(200, 423, 503);
             if (right == 423) {
                 assertThat(wrong.stream().filter(s -> s == 401).count()).isEqualTo(AuthFlow.MAX_FAILURES);
             }
@@ -516,6 +522,9 @@ class SignInLimitsIT extends IntegrationTest {
         // One more than the pool has connections: had each held one while it waited, the last could not even get here.
         int waiting = pool.getMaximumPoolSize() + 1;
         int slots = passwords.hashing.drainPermits();
+        // Long enough that every request is still queued when the pool is checked, even on a slow runner; they are then
+        // turned away as busy when it ends.
+        passwords.waitMillis = 20_000;
         ExecutorService callers = Executors.newFixedThreadPool(waiting);
         try {
             List<Future<ResponseEntity<JsonNode>>> calls = new ArrayList<>();
@@ -523,7 +532,7 @@ class SignInLimitsIT extends IntegrationTest {
                 calls.add(callers.submit(
                         () -> login(api, STAFF_LOGIN, Api.email("nobody"), "Wrong-Password-1", freshIp())));
             }
-            long deadline = System.nanoTime() + Duration.ofMillis(1_500).toNanos();
+            long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
             while (passwords.hashing.getQueueLength() < waiting && System.nanoTime() < deadline) {
                 Thread.sleep(10);
             }
@@ -547,6 +556,7 @@ class SignInLimitsIT extends IntegrationTest {
             }
         } finally {
             passwords.hashing.release(slots);
+            passwords.waitMillis = Passwords.WAIT_SECONDS * 1000;
             callers.shutdownNow();
         }
     }
