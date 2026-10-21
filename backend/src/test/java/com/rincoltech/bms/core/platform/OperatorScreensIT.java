@@ -173,7 +173,7 @@ class OperatorScreensIT extends IntegrationTest {
         refusedToEveryoneButOperators(
                 HttpMethod.POST,
                 "/api/v1/platform/plans/starter/prices",
-                Map.of("monthly_minor", 1000, "annual_months", 10));
+                Map.of("monthly_minor", 1000, "annual_months", 11));
         // Nothing was changed by any refused call.
         assertThat(TestDatabase.owner()
                         .sql(
@@ -410,14 +410,14 @@ class OperatorScreensIT extends IntegrationTest {
                 .update();
         String path = "/api/v1/platform/tenants/" + a.id() + "/payments";
 
-        ResponseEntity<JsonNode> noKey = platform.post(path, payment(30000, 1, "TEST-REF-01"), operator.accessToken());
+        ResponseEntity<JsonNode> noKey = platform.post(path, payment(10000, 1, "TEST-REF-01"), operator.accessToken());
         assertThat(noKey.getBody().get("code").asString()).isEqualTo("idempotency_key_missing");
 
         String key = "pay-" + UUID.randomUUID();
         ResponseEntity<JsonNode> first = platform.call(
                 HttpMethod.POST,
                 path,
-                payment(30000, 1, "TEST-REF-01"),
+                payment(10000, 1, "TEST-REF-01"),
                 operator.accessToken(),
                 Map.of("Idempotency-Key", key));
         assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -431,7 +431,7 @@ class OperatorScreensIT extends IntegrationTest {
         ResponseEntity<JsonNode> again = platform.call(
                 HttpMethod.POST,
                 path,
-                payment(30000, 1, "TEST-REF-01"),
+                payment(10000, 1, "TEST-REF-01"),
                 operator.accessToken(),
                 Map.of("Idempotency-Key", key));
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -449,7 +449,7 @@ class OperatorScreensIT extends IntegrationTest {
         ResponseEntity<JsonNode> year = platform.call(
                 HttpMethod.POST,
                 path,
-                payment(300000, 12, "TEST-REF-02"),
+                payment(100000, 12, "TEST-REF-02"),
                 operator.accessToken(),
                 Map.of("Idempotency-Key", "pay-" + UUID.randomUUID()));
         assertThat(year.getBody().get("period_start").asString())
@@ -466,7 +466,7 @@ class OperatorScreensIT extends IntegrationTest {
         assertThat(pageB.get("payments")).isEmpty();
         assertThat(pageB.get("tenant").get("subscription_status").asString()).isEqualTo("trial");
 
-        Map<String, Object> future = payment(30000, 1, "TEST-REF-03");
+        Map<String, Object> future = payment(10000, 1, "TEST-REF-03");
         future.put("paid_on", today.plusDays(1).toString());
         assertThat(platform.call(
                                 HttpMethod.POST,
@@ -562,13 +562,13 @@ class OperatorScreensIT extends IntegrationTest {
         String prices = path + "/prices";
         ResponseEntity<JsonNode> priced = platform.post(
                 prices,
-                Map.of("monthly_minor", 30000, "annual_months", 10, "reason", "Test price"),
+                Map.of("monthly_minor", 10000, "annual_months", 11, "reason", "Test price"),
                 operator.accessToken());
         assertThat(priced.getStatusCode()).as("%s", priced.getBody()).isEqualTo(HttpStatus.OK);
         JsonNode current = priced.getBody().get("plan").get("current_price");
-        assertThat(current.get("monthly_minor").asLong()).isEqualTo(30000);
-        assertThat(current.get("annual_minor").asLong()).isEqualTo(300000);
-        platform.post(prices, Map.of("monthly_minor", 30000, "annual_months", 10), operator.accessToken());
+        assertThat(current.get("monthly_minor").asLong()).isEqualTo(10000);
+        assertThat(current.get("annual_minor").asLong()).isEqualTo(110000);
+        platform.post(prices, Map.of("monthly_minor", 10000, "annual_months", 11), operator.accessToken());
         LocalDate today = LocalDate.now(KAMPALA);
         ResponseEntity<JsonNode> past = platform.post(
                 prices,
@@ -585,7 +585,7 @@ class OperatorScreensIT extends IntegrationTest {
                 prices,
                 Map.of(
                         "monthly_minor",
-                        35000,
+                        15000,
                         "annual_months",
                         10,
                         "effective_from",
@@ -596,13 +596,13 @@ class OperatorScreensIT extends IntegrationTest {
                         .get("current_price")
                         .get("monthly_minor")
                         .asLong())
-                .isEqualTo(30000);
+                .isEqualTo(10000);
         assertThat(later.getBody()
                         .get("plan")
                         .get("next_price")
                         .get("monthly_minor")
                         .asLong())
-                .isEqualTo(35000);
+                .isEqualTo(15000);
         assertThat(later.getBody().get("prices")).hasSize(2);
         assertThat(TestDatabase.owner()
                         .sql("SELECT count(*) FROM plan_prices pp JOIN plans p ON p.id = pp.plan_id WHERE p.code = ?")
@@ -617,7 +617,7 @@ class OperatorScreensIT extends IntegrationTest {
                         .get("plan_price")
                         .get("monthly_minor")
                         .asLong())
-                .isEqualTo(30000);
+                .isEqualTo(10000);
         ResponseEntity<JsonNode> inUse = platform.call(
                 HttpMethod.PUT, path, planWith("Test Starter", List.of("lending"), 1, 3), operator.accessToken());
         assertThat(inUse.getBody().get("code").asString()).isEqualTo("plan_module_in_use");
