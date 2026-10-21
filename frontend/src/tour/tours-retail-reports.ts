@@ -150,7 +150,8 @@ export const marginsPage: Tour = {
 
 export const stockHealthPage: Tour = {
   id: 'page-stock-health',
-  version: 2,
+  // Version 2 added the slow movers step (issue #414), version 3 the why-low step (issue #412).
+  version: 3,
   title: 'This page: stock health',
   audience: (me) => held(me, STOCK_READ),
   autoStart: false,
@@ -161,6 +162,7 @@ export const stockHealthPage: Tour = {
     retail({ id: 'results', target: 'health-results', title: 'What to buy and what is stuck', body: 'See what to reorder, how long each item lasts, and what has not sold for 90 days. Tap an item to open it in Stock.' }),
     // Issue #412: why a row is on the reorder list, and where its level is set.
     retail({ id: 'why-low', target: 'health-results', title: 'Why it needs buying', body: 'Each item to reorder says why. It is below the minimum you set, or it runs out soon at the pace it sells. Tap Set a level to choose "Warn me when stock is below" for it.' }),
+    retail({ id: 'slow', target: 'health-slow', title: 'Slow movers', body: 'Items that sell, but slowly: the months it takes to sell what you hold. If it sells better at another branch, tap Move to send some there. Managers who see costs also see the money tied up.' }),
   ],
 };
 
