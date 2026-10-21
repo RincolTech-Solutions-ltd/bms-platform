@@ -1193,7 +1193,7 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Tours: `page-orders`, `page-order`, `page-orders-report` (`frontend/src/tour/tours-retail-orders.ts`). The retail menu has an Orders
   shortcut right after Sale, and the retail home an Orders tile, for whoever holds `retail.order.manage`.
 
-## Slow movers on Stock health (issue #414, FR-RET-59)
+## Slow movers on Stock health (issue #414, FR-RET-62)
 
 - Stock health has a Slow movers section between Days of cover and Dead stock: items that sold in the branch in the last 90
   days, but whose stock lasts more than the business's months at that pace (or that sold fewer than its minimum). The title
