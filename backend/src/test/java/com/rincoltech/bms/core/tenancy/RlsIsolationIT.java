@@ -330,6 +330,16 @@ class RlsIsolationIT {
                         INSERT INTO push_subscriptions (id, tenant_id, user_id, endpoint, endpoint_hash, p256dh, auth)
                         VALUES (?, ?, ?, 'https://fcm.googleapis.com/fcm/send/test-rls', repeat('c', 64), repeat('A', 87), repeat('B', 22))
                         """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // A subscription payment the operator recorded (migration V75, issue #407).
+        owner.sql("""
+                        INSERT INTO subscription_payments (id, tenant_id, subscription_id, plan_id, amount_minor, currency, method,
+                                                           paid_on, months, period_start, period_end, recorded_by_platform_user_id)
+                        SELECT ?, s.tenant_id, s.id, s.plan_id, 1000, 'UGX', 'other', DATE '2026-01-01', 1, DATE '2026-01-01',
+                               DATE '2026-01-31', ?
+                          FROM subscriptions s WHERE s.tenant_id = ?
+                        """)
+                .params(UUID.randomUUID(), UUID.randomUUID(), t.tenantId())
+                .update();
         owner.sql(
                         "INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type) VALUES (?, ?, 'system', 'test.fixture.created', 'test')")
                 .params(UUID.randomUUID(), t.tenantId())

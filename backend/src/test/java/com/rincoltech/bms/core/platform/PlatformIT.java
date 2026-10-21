@@ -345,14 +345,17 @@ class PlatformIT extends IntegrationTest {
 
         ResponseEntity<JsonNode> pastDue = platform.post(
                 "/api/v1/platform/tenants/" + tenantId + "/subscription",
-                Map.of("status", "past_due", "next_status_change_on", "2026-11-01"),
+                Map.of("status", "past_due", "next_status_change_on", "2026-11-01", "reason", "Test: payment late"),
                 operator.accessToken());
         assertThat(pastDue.getBody().get("subscription_status").asString()).isEqualTo("past_due");
         assertThat(pastDue.getBody().get("status").asString()).isEqualTo("active");
         assertThat(pastDue.getBody().get("next_status_change_on").asString()).isEqualTo("2026-11-01");
 
-        ResponseEntity<JsonNode> suspended =
-                platform.post("/api/v1/platform/tenants/" + tenantId + "/suspend", null, operator.accessToken());
+        // Issue #407: suspend and resume take the operator's reason.
+        ResponseEntity<JsonNode> suspended = platform.post(
+                "/api/v1/platform/tenants/" + tenantId + "/suspend",
+                Map.of("reason", "Test: still unpaid"),
+                operator.accessToken());
         assertThat(suspended.getBody().get("status").asString()).isEqualTo("suspended");
         Map<String, String> dev = Map.of(
                 "X-Dev-User-Id", UUID.randomUUID().toString(),
@@ -368,7 +371,10 @@ class PlatformIT extends IntegrationTest {
                         .asString())
                 .isEqualTo("tenant_suspended");
 
-        platform.post("/api/v1/platform/tenants/" + tenantId + "/resume", null, operator.accessToken());
+        platform.post(
+                "/api/v1/platform/tenants/" + tenantId + "/resume",
+                Map.of("reason", "Test: paid"),
+                operator.accessToken());
         assertThat(tenant.call(HttpMethod.POST, "/api/v1/branches", Map.of("code", "S1", "name", "Test S"), null, dev)
                         .getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
