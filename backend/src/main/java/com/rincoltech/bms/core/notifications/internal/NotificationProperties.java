@@ -4,6 +4,7 @@ import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -43,7 +44,10 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
          * unseen in the outbox. Names the unset variables, never a value. Elsewhere unset SMTP stays a quiet off.
          */
         void requireInProduction(String environment) {
-            if (!"production".equalsIgnoreCase(environment == null ? "" : environment.strip())) {
+            // The same reading of BMS_ENVIRONMENT as SmsSettings and PesapalSettings: trimmed, lower case, then exact,
+            // so one
+            // value turns every production guard on or none of them.
+            if (!(environment == null ? "" : environment.trim().toLowerCase(Locale.ROOT)).equals("production")) {
                 return;
             }
             List<String> missing = new ArrayList<>();

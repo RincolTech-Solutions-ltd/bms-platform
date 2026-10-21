@@ -132,9 +132,9 @@ bms:
     data-key-id: ${BMS_DATA_KEY_ID:k1}
     # Retired data keys (id:base64, comma separated), kept only until every row sealed with them is re-sealed (docs/runbooks/payments.md).
     previous-data-keys: ${BMS_DATA_KEY_PREVIOUS:}
-    # Sign-in requests from one client IP in 10 minutes, on every public sign-in, two-step, invitation and setup route
-    # (ADR-059). Per address and per account limits are fixed in code.
-    sign-in-per-ip: ${BMS_AUTH_SIGN_IN_PER_IP:60}
+    # FAILED sign-in requests from one client IP in 10 minutes, on every public sign-in, two-step, invitation and setup
+    # route (ADR-059); a success costs nothing. The lock per address and per account is in the database, fixed in code.
+    sign-in-failures-per-ip: ${BMS_AUTH_SIGN_IN_FAILURES_PER_IP:300}
     # argon2id hashes at once (64 MiB each at the production cost); a caller that waits 2 s gets 503 sign_in_busy.
     argon2-max-concurrent: ${BMS_AUTH_ARGON2_MAX_CONCURRENT:4}
   database:

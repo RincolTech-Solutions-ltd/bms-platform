@@ -27840,6 +27840,45 @@
         "tags" : [ "platform" ]
       }
     },
+    "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/unlock" : {
+      "post" : {
+        "operationId" : "platformUnlockUserSignIn",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "user_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformReasonRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "summary" : "Lift the sign-in lock of a tenant's staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059)",
+        "tags" : [ "platform" ]
+      }
+    },
     "/api/v1/report-runs" : {
       "get" : {
         "operationId" : "listReportRuns",
@@ -37782,6 +37821,34 @@
           }
         },
         "summary" : "Replace a user's roles and branch scopes (FR-IAM-01)",
+        "tags" : [ "users" ]
+      }
+    },
+    "/api/v1/users/{user_id}/unlock" : {
+      "post" : {
+        "operationId" : "unlockUserSignIn",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "user_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/User"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Lift the sign-in lock of a staff user after too many wrong passwords; audited, changes no password (ADR-059)",
         "tags" : [ "users" ]
       }
     },

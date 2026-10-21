@@ -1,7 +1,6 @@
 package com.rincoltech.bms.core.identity.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -14,12 +13,14 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 /**
- * The sign-in limits of ADR-059 (launch readiness M9, issue #426; FR-IAM-05): per client IP, per sign-in address and the lock
- * of an address that matches no account, which behaves exactly like the database lock of a real one. Fabricated values only.
+ * The in-memory sign-in buckets of ADR-059 (launch readiness M9, issue #426; review of #433 findings 1, 2, 7 and 8): only
+ * failures count per client IP, a refusal carries the refill time, and a bucket that remembers anything is never evicted.
+ * Fabricated values only.
  */
 class AuthThrottleTest {
 
@@ -53,74 +54,172 @@ class AuthThrottleTest {
         return accounts;
     }
 
+    static ApiException wrongPassword() {
+        return AuthFlow.invalidCredentials();
+    }
+
+    /** Runs a sign-in that fails as a wrong password does, through the per-IP guard. */
+    void fail(String ip) {
+        assertThatThrownBy(() -> throttle.countingFailures(throttle.signInPerIp, ip, () -> {
+                    throw wrongPassword();
+                }))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.code()).isEqualTo("invalid_credentials"));
+    }
+
     @Test
-    void theSignInLimitPerIpRefillsOverTenMinutes() {
-        for (int i = 0; i < 3; i++) {
-            throttle.acquire(throttle.signInPerIp, "203.0.113.7");
+    void theDefaultIsThreeHundredFailuresInTenMinutes() {
+        AuthThrottle defaults =
+                new AuthThrottle(new BusinessClock(clock), AuthThrottle.DEFAULT_SIGN_IN_FAILURES_PER_IP);
+        assertThat(defaults.signInPerIp.capacity()).isEqualTo(300);
+        assertThat(defaults.signInPerIp.per()).isEqualTo(Duration.ofMinutes(10));
+    }
+
+    /**
+     * Carrier-grade NAT (finding 8): many people behind one IP sign in successfully without using the IP's budget, and a
+     * caller with the right password is let through however many others have signed in from that IP.
+     */
+    @Test
+    void successesFromOneIpCostNothing() {
+        AtomicInteger signedIn = new AtomicInteger();
+        for (int i = 0; i < 1_000; i++) {
+            throttle.countingFailures(throttle.signInPerIp, "203.0.113.7", signedIn::incrementAndGet);
         }
-        assertThatThrownBy(() -> throttle.acquire(throttle.signInPerIp, "203.0.113.7"))
+        assertThat(signedIn).hasValue(1_000);
+        assertThat(throttle.allows(throttle.signInPerIp, "203.0.113.7")).isTrue();
+        // A success leaves no key behind at all.
+        assertThat(throttle.keys(throttle.signInPerIp)).isZero();
+    }
+
+    @Test
+    void failuresFromOneIpAreLimitedAndTheRefusalSaysWhenToComeBack() {
+        for (int i = 0; i < 3; i++) {
+            fail("203.0.113.7");
+        }
+        AtomicInteger ran = new AtomicInteger();
+        assertThatThrownBy(() -> throttle.countingFailures(throttle.signInPerIp, "203.0.113.7", ran::incrementAndGet))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.status()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
                     assertThat(e.code()).isEqualTo("rate_limited");
+                    // Three tokens over ten minutes: one comes back in 200 seconds (finding 7).
+                    assertThat(e.retryAfter()).contains(Duration.ofSeconds(200));
                 });
-        // Another office is not affected, and one IPv6 /64 is one client.
-        assertThatCode(() -> throttle.acquire(throttle.signInPerIp, "203.0.113.8"))
-                .doesNotThrowAnyException();
-        for (int i = 0; i < 3; i++) {
-            throttle.acquire(throttle.signInPerIp, "2001:db8:1:2::" + (i + 1));
-        }
-        assertThat(throttle.tryAcquire(throttle.signInPerIp, "2001:db8:1:2:ffff::9"))
-                .isFalse();
+        // Refused before any work: no hash, no database.
+        assertThat(ran).hasValue(0);
+        // Another office is not affected.
+        assertThat(throttle.allows(throttle.signInPerIp, "203.0.113.8")).isTrue();
 
-        clock.now = clock.now.plus(Duration.ofMinutes(10).dividedBy(3));
-        assertThat(throttle.tryAcquire(throttle.signInPerIp, "203.0.113.7")).isTrue();
-        assertThat(throttle.tryAcquire(throttle.signInPerIp, "203.0.113.7")).isFalse();
+        clock.now = clock.now.plus(Duration.ofSeconds(150));
+        assertThatThrownBy(() -> throttle.countingFailures(throttle.signInPerIp, "203.0.113.7", ran::incrementAndGet))
+                .isInstanceOfSatisfying(
+                        ApiException.class, e -> assertThat(e.retryAfter()).contains(Duration.ofSeconds(50)));
+        clock.now = clock.now.plus(Duration.ofSeconds(50));
+        assertThat(throttle.countingFailures(throttle.signInPerIp, "203.0.113.7", ran::incrementAndGet))
+                .isEqualTo(1);
     }
 
-    /** The budget follows the address typed, whatever IP sends it, and the same address in another form is the same key. */
     @Test
-    void theSignInLimitPerAddressCountsEveryFormOfTheAddress() {
+    void oneIpv6SlashSixtyFourIsOneClient() {
+        for (int i = 0; i < 3; i++) {
+            fail("2001:db8:1:2::" + (i + 1));
+        }
+        assertThat(throttle.allows(throttle.signInPerIp, "2001:db8:1:2:ffff::9"))
+                .isFalse();
+        assertThat(throttle.allows(throttle.signInPerIp, "2001:db8:1:3::1")).isTrue();
+    }
+
+    /** What counts against the IP: a client error does; a lock, a limit and the server being busy cost it no work. */
+    @Test
+    void onlyClientErrorsCountAsFailures() {
+        assertThat(AuthThrottle.isFailure(wrongPassword())).isTrue();
+        assertThat(AuthThrottle.isFailure(ApiException.rule("invitation_invalid", "x")))
+                .isTrue();
+        assertThat(AuthThrottle.isFailure(new ApiException(HttpStatus.LOCKED, "account_locked", "t", "d")))
+                .isFalse();
+        assertThat(AuthThrottle.isFailure(AuthThrottle.limited(Duration.ofSeconds(1))))
+                .isFalse();
+        assertThat(AuthThrottle.isFailure(new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "sign_in_busy", "t", "d")))
+                .isFalse();
+
+        for (int i = 0; i < 10; i++) {
+            assertThatThrownBy(() -> throttle.countingFailures(throttle.signInPerIp, "203.0.113.9", () -> {
+                        throw new ApiException(HttpStatus.LOCKED, "account_locked", "t", "d");
+                    }))
+                    .isInstanceOf(ApiException.class);
+        }
+        assertThat(throttle.allows(throttle.signInPerIp, "203.0.113.9")).isTrue();
+    }
+
+    /** The reset buckets still count every request, and their refusal carries the refill time too. */
+    @Test
+    void theResetBucketsCountEveryRequestWithRetryAfter() {
+        String address = AuthThrottle.address(accounts("staff", UUID.randomUUID()), "test.clerk@example.test");
+        for (int i = 0; i < AuthThrottle.REQUEST_PER_ADDRESS.capacity(); i++) {
+            throttle.acquireFor(AuthThrottle.REQUEST_PER_ADDRESS, address);
+        }
+        assertThatThrownBy(() -> throttle.acquireFor(AuthThrottle.REQUEST_PER_ADDRESS, address))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.code()).isEqualTo("rate_limited");
+                    assertThat(e.retryAfter()).contains(Duration.ofMinutes(6));
+                });
+    }
+
+    /** The key of an address: every form of one address is one key, and another tenant or kind is another. */
+    @Test
+    void everyFormOfAnAddressIsOneKey() {
         Accounts staff = accounts("staff", UUID.fromString("00000000-0000-4000-8000-0000000000a1"));
         String phone = AuthThrottle.address(staff, "0700 000 001");
         assertThat(AuthThrottle.address(staff, "+256700000001")).isEqualTo(phone);
         assertThat(AuthThrottle.address(staff, " Test.Cashier@Example.TEST "))
                 .isEqualTo(AuthThrottle.address(staff, "test.cashier@example.test"));
-        // Another tenant, or a platform operator, is another address.
         assertThat(AuthThrottle.address(accounts("staff", UUID.randomUUID()), "0700000001"))
                 .isNotEqualTo(phone);
         assertThat(AuthThrottle.address(accounts("platform", null), "0700000001"))
                 .isNotEqualTo(phone);
-
-        for (int i = 0; i < AuthThrottle.SIGN_IN_PER_ADDRESS.capacity(); i++) {
-            throttle.acquireFor(AuthThrottle.SIGN_IN_PER_ADDRESS, phone);
-        }
-        assertThatThrownBy(() -> throttle.acquireFor(AuthThrottle.SIGN_IN_PER_ADDRESS, phone))
-                .isInstanceOfSatisfying(
-                        ApiException.class, e -> assertThat(e.code()).isEqualTo("rate_limited"));
+        assertThat(SignInAddressFailures.key(phone)).hasSize(64).matches("[0-9a-f]{64}");
     }
 
-    /** FR-IAM-05 for an address with no account: locked at the fifth failure in a row, for 15 minutes, then counted afresh. */
+    /**
+     * Finding 1: a flood of new keys cannot evict a drained bucket. Once the store is full, refilled buckets are dropped to
+     * make room and drained ones are kept; when nothing can be dropped, a new key goes uncounted instead of a kept one
+     * being forgotten.
+     */
     @Test
-    void anUnknownAddressLocksExactlyLikeARealAccount() {
-        String address = AuthThrottle.address(accounts("staff", UUID.randomUUID()), "nobody@example.test");
-        for (int i = 1; i < AuthFlow.MAX_FAILURES; i++) {
-            throttle.unknownFailed(address);
-            assertThat(throttle.unknownLocked(address))
-                    .as("after %s failures", i)
-                    .isFalse();
+    void aDrainedBucketSurvivesAFloodOfNewKeys() {
+        for (int i = 0; i < 3; i++) {
+            fail("198.51.100.1");
         }
-        throttle.unknownFailed(address);
-        assertThat(throttle.unknownLocked(address)).isTrue();
+        // Fill the store with other IPs that failed once (partly drained, so they must be kept too).
+        for (int i = 0; i < AuthThrottle.MAX_KEYS; i++) {
+            fail("10." + (i >> 16 & 255) + "." + (i >> 8 & 255) + "." + (i & 255));
+        }
+        assertThat(throttle.keys(throttle.signInPerIp)).isEqualTo(AuthThrottle.MAX_KEYS);
+        assertThat(throttle.allows(throttle.signInPerIp, "198.51.100.1"))
+                .as("the drained IP is still limited")
+                .isFalse();
 
-        // Failures inside the lock keep it, they do not extend it.
+        // Every kept bucket refills; after the sweep interval the next new key makes room by dropping refilled ones
+        // only.
         clock.now = clock.now.plus(Duration.ofMinutes(10));
-        throttle.unknownFailed(address);
-        assertThat(throttle.unknownLocked(address)).isTrue();
-        clock.now = clock.now.plus(AuthFlow.LOCK.minus(Duration.ofMinutes(10)));
-        assertThat(throttle.unknownLocked(address)).isFalse();
+        fail("198.51.100.2");
+        assertThat(throttle.keys(throttle.signInPerIp)).isLessThan(AuthThrottle.MAX_KEYS);
+        assertThat(throttle.allows(throttle.signInPerIp, "198.51.100.2")).isTrue();
+    }
 
-        // After the lock a new run of failures starts from one.
-        throttle.unknownFailed(address);
-        assertThat(throttle.unknownLocked(address)).isFalse();
+    @Test
+    void aFullStoreOfLiveBucketsLetsANewKeyThroughUncountedRatherThanForgetOne() {
+        for (int i = 0; i < AuthThrottle.MAX_KEYS; i++) {
+            fail("10." + (i >> 16 & 255) + "." + (i >> 8 & 255) + "." + (i & 255));
+        }
+        for (int i = 0; i < 5; i++) {
+            fail("198.51.100.3");
+        }
+        assertThat(throttle.keys(throttle.signInPerIp)).isEqualTo(AuthThrottle.MAX_KEYS);
+        assertThat(throttle.allows(throttle.signInPerIp, "198.51.100.3")).isTrue();
+        // None of the kept buckets was forgotten.
+        assertThat(throttle.allows(throttle.signInPerIp, "10.0.0.0")).isTrue();
+        fail("10.0.0.0");
+        fail("10.0.0.0");
+        assertThat(throttle.allows(throttle.signInPerIp, "10.0.0.0")).isFalse();
     }
 }

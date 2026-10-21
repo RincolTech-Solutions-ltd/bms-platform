@@ -48,6 +48,11 @@ services:
       - maintenance_work_mem=128MB
       - -c
       - max_connections=60
+      # Terse error lines: no DETAIL, so a refused duplicate never prints its key value (a phone number) into
+      # the container log the local driver keeps (ADR-059). Bound parameters are not logged either
+      # (log_parameter_max_length_on_error stays 0).
+      - -c
+      - log_error_verbosity=terse
     mem_limit: 1280m
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -95,8 +100,8 @@ services:
       BMS_DATA_KEY: ${BMS_DATA_KEY:?}
       BMS_DATA_KEY_ID: ${BMS_DATA_KEY_ID:-k1}
       BMS_DATA_KEY_PREVIOUS: ${BMS_DATA_KEY_PREVIOUS:-}
-      # Sign-in limits (ADR-059): requests per client IP in 10 minutes, and argon2id hashes at once.
-      BMS_AUTH_SIGN_IN_PER_IP: ${BMS_AUTH_SIGN_IN_PER_IP:-60}
+      # Sign-in limits (ADR-059): failed sign-ins per client IP in 10 minutes, and argon2id hashes at once.
+      BMS_AUTH_SIGN_IN_FAILURES_PER_IP: ${BMS_AUTH_SIGN_IN_FAILURES_PER_IP:-300}
       BMS_AUTH_ARGON2_MAX_CONCURRENT: ${BMS_AUTH_ARGON2_MAX_CONCURRENT:-4}
       R2_ENDPOINT: ${R2_ENDPOINT:?}
       R2_DOCUMENTS_ACCESS_KEY_ID: ${R2_DOCUMENTS_ACCESS_KEY_ID:?}
@@ -118,8 +123,11 @@ services:
       BMS_TELEGRAM_OPERATOR_CHAT_ID: ${BMS_TELEGRAM_OPERATOR_CHAT_ID:-}
       # SMS (ADR-036, docs/runbooks/sms-setup.md). Off unless a mode and a provider are set; staging
       # defaults to the sink, which texts nobody. BMS_ENVIRONMENT decides what the startup guard allows:
-      # production sets it in /opt/bms/.env; an unset value is treated as not production, which refuses live.
-      BMS_ENVIRONMENT: ${BMS_ENVIRONMENT:-}
+      # production sets it in /opt/bms/.env. This file runs production only, so an unset value means
+      # production here: every production guard (SMTP required, SMS live only, the Pesapal live API) stays on
+      # and a start without SMTP stops (ADR-059). A plain `:?` would also stop the CI check that parses
+      # this file, whose placeholder values do not set it.
+      BMS_ENVIRONMENT: ${BMS_ENVIRONMENT:-production}
       BMS_SMS_PROVIDER: ${BMS_SMS_PROVIDER:-}
       BMS_SMS_MODE: ${BMS_SMS_MODE:-}
       BMS_SMS_ALLOWLIST: ${BMS_SMS_ALLOWLIST:-}

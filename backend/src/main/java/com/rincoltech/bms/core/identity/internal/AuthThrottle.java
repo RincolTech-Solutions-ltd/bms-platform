@@ -7,29 +7,45 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
- * Token buckets for the public sign-in family (FR-IAM-05, FR-IAM-15, ADR-042, ADR-059): per client IP on every public sign-in,
- * two-step, invitation, setup and password reset route, and per sign-in address (the email or phone typed, within one
- * tenant) on sign-in and the forgotten password, and per account on the second factor. In memory and bounded: at most
- * {@link #MAX_KEYS} keys a map, the least recently used dropped first, so a flood cannot grow it. An IPv6 client is keyed
- * by its /64, an IPv4 client by its address. Per instance and lost on restart.
+ * Token buckets for the public sign-in family (FR-IAM-05, FR-IAM-15, ADR-042, ADR-059), in memory, per instance and lost on
+ * restart. None of them is what keeps a guesser off an account: that is the database lock of {@link AuthFlow}, five
+ * failures in a row for 15 minutes, which counts an address that matches no account exactly as it counts an account
+ * ({@link SignInAddressFailures}, migration V78). These buckets only bound the noise one client can make:
  *
- * <p>Nothing here depends on whether an account exists, so no answer tells a prober anything: a bucket is keyed by what
- * the caller sent, and an address that matches no account is locked after the same {@link AuthFlow#MAX_FAILURES}
- * failures, for the same {@link AuthFlow#LOCK}, with the same 423 {@code account_locked} as a real account (whose lock
- * stays in the database). The limits per account that must survive a restart are counted in the database by
- * {@link AuthFlow} and {@link PasswordResets}.
+ * <ul>
+ *   <li><b>Failed sign-ins per client IP</b> ({@link #countingFailures}), an IPv6 client by its /64: a wrong password, a
+ *       wrong code, a bad token. A success costs nothing, so the many subscribers a mobile carrier puts behind one public
+ *       IPv4 (carrier-grade NAT, the normal case on MTN and Airtel in Uganda) do not use up one another's budget by signing
+ *       in, and a caller with the right password is never turned away for the sign-ins of others; only a run of failures
+ *       from that IP is.
+ *   <li>Requests for a reset link per client IP and per sign-in address, and uses of a link per client IP, as before.
+ *   <li>Second-factor attempts per account.
+ * </ul>
+ *
+ * <p>Bounded without forgetting: each limit keeps at most {@link #MAX_KEYS} keys, and only a bucket that has refilled
+ * completely (it remembers nothing) is ever dropped to make room. A bucket that is drained or partly drained is never
+ * evicted, so a flood of new keys cannot reset the bucket of the IP it wants to free. When every kept bucket still holds
+ * state, a new key is let through uncounted (logged, at most once a minute) rather than refusing every newcomer; the
+ * database lock still applies to it.
  */
 @Component
 class AuthThrottle {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthThrottle.class);
 
     /** {@code capacity} requests, refilled evenly over {@code per}. */
     record Limit(String name, int capacity, Duration per) {}
@@ -40,41 +56,82 @@ class AuthThrottle {
     static final Limit COMPLETE_PER_IP = new Limit("reset-complete-ip", 30, Duration.ofMinutes(10));
     /** Requests for a reset link for one sign-in address: 10 an hour, whoever asks (the database allows 3 links of them). */
     static final Limit REQUEST_PER_ADDRESS = new Limit("reset-request-address", 10, Duration.ofHours(1));
-    /** Sign-in attempts for one sign-in address: 30 in 15 minutes, right or wrong, from anywhere. */
-    static final Limit SIGN_IN_PER_ADDRESS = new Limit("sign-in-address", 30, Duration.ofMinutes(15));
     /** Second-factor attempts for one account: 30 in 15 minutes; the fifth wrong code in a row still locks it. */
     static final Limit MFA_PER_ACCOUNT = new Limit("mfa-account", 30, Duration.ofMinutes(15));
 
-    static final int MAX_KEYS = 10_000;
+    /** The default of {@code bms.auth.sign-in-failures-per-ip}: failed sign-ins from one client IP in 10 minutes. */
+    static final int DEFAULT_SIGN_IN_FAILURES_PER_IP = 300;
+
+    static final int MAX_KEYS = 50_000;
+    /** A full store is swept for refilled buckets at most this often, so a flood cannot make every request scan it. */
+    static final Duration SWEEP_EVERY = Duration.ofSeconds(1);
 
     /**
-     * Sign-in, two-step, invitation and setup requests from one client IP: {@code bms.auth.sign-in-per-ip} in 10 minutes,
-     * 60 by default (about 30 people of one office signing in with two steps). The test profile raises it, because the
-     * whole suite signs in from one address. Package-private and not final so a test can lower it for a moment.
+     * Failed sign-in, two-step, invitation and setup requests from one client IP: {@code bms.auth.sign-in-failures-per-ip}
+     * in 10 minutes, {@value #DEFAULT_SIGN_IN_FAILURES_PER_IP} by default. The test profile raises it, because the whole
+     * suite signs in from one address. Package-private and not final so a test can lower it for a moment.
      */
     Limit signInPerIp;
 
     private final BusinessClock clock;
-    private final Map<String, Bucket> buckets = bounded();
-    private final Map<String, Failures> unknown = bounded();
+    private final Map<String, Store> stores = new HashMap<>();
+    private Instant lastWarned = Instant.EPOCH;
 
-    AuthThrottle(BusinessClock clock, @Value("${bms.auth.sign-in-per-ip:60}") int signInPerIp) {
+    AuthThrottle(
+            BusinessClock clock,
+            @Value("${bms.auth.sign-in-failures-per-ip:" + DEFAULT_SIGN_IN_FAILURES_PER_IP + "}") int failuresPerIp) {
         this.clock = clock;
-        this.signInPerIp = new Limit("sign-in-ip", Math.max(1, signInPerIp), Duration.ofMinutes(10));
+        this.signInPerIp = new Limit("sign-in-ip", Math.max(1, failuresPerIp), Duration.ofMinutes(10));
     }
 
-    /** Takes one token for the client IP or answers 429 {@code rate_limited}. */
+    /** Takes one token for the client IP or answers 429 {@code rate_limited} with Retry-After. */
     void acquire(Limit limit, String ip) {
         take(limit, ip(ip));
     }
 
-    /** Takes one token for a subject (a sign-in address, an account) or answers 429 {@code rate_limited}. */
+    /** Takes one token for a subject (a sign-in address, an account) or answers 429 {@code rate_limited} with Retry-After. */
     void acquireFor(Limit limit, String subject) {
         take(limit, "subject:" + subject);
     }
 
-    boolean tryAcquire(Limit limit, String ip) {
-        return tryTake(limit, ip(ip));
+    /**
+     * Runs {@code work} for a caller from {@code ip}, counting only its failures: refused with 429 {@code rate_limited} and
+     * Retry-After, before any work, while the IP's bucket of failures is empty; otherwise the work runs and a token is taken
+     * only when it fails ({@link #isFailure}). A success takes nothing.
+     */
+    <T> T countingFailures(Limit limit, String ip, Supplier<T> work) {
+        String key = ip(ip);
+        Duration wait = waitFor(limit, key);
+        if (wait != null) {
+            throw limited(wait);
+        }
+        try {
+            return work.get();
+        } catch (ApiException e) {
+            if (isFailure(e)) {
+                failed(limit, key);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Whether an answer counts against the caller's IP: a client error (a wrong password, code or token, a weak password)
+     * does; a lock (423), a refusal by a limit (429) and the server being busy (503) cost the caller no work and do not.
+     */
+    static boolean isFailure(ApiException e) {
+        int status = e.status().value();
+        return status >= 400 && status < 500 && status != 423 && status != 429;
+    }
+
+    /** Whether one more request from {@code ip} would be let through now; takes nothing. */
+    boolean allows(Limit limit, String ip) {
+        return waitFor(limit, ip(ip)) == null;
+    }
+
+    /** Counts one failure for {@code ip}, as {@link #countingFailures} does when its work fails. */
+    void recordFailure(Limit limit, String ip) {
+        failed(limit, ip(ip));
     }
 
     /**
@@ -89,49 +146,89 @@ class AuthThrottle {
         return accounts.kind() + ":" + accounts.tenantId() + ":" + normal;
     }
 
-    /** Whether an address that matches no account has failed {@link AuthFlow#MAX_FAILURES} times in a row and is locked. */
-    synchronized boolean unknownLocked(String address) {
-        Failures failures = unknown.get(address);
-        return failures != null && failures.lockedUntil != null && clock.now().isBefore(failures.lockedUntil);
-    }
-
-    /** Counts a failure for an address that matches no account, exactly as the database counts one for an account. */
-    synchronized void unknownFailed(String address) {
-        Instant now = clock.now();
-        Failures failures = unknown.computeIfAbsent(address, k -> new Failures());
-        if (failures.lockedUntil != null && !now.isBefore(failures.lockedUntil)) {
-            failures.consecutive = 0;
-            failures.lockedUntil = null;
-        }
-        failures.consecutive++;
-        if (failures.lockedUntil == null && failures.consecutive >= AuthFlow.MAX_FAILURES) {
-            failures.lockedUntil = now.plus(AuthFlow.LOCK);
-        }
+    /** How many keys a limit keeps now; for tests. */
+    synchronized int keys(Limit limit) {
+        Store store = stores.get(limit.name());
+        return store == null ? 0 : store.buckets.size();
     }
 
     private void take(Limit limit, String key) {
-        if (!tryTake(limit, key)) {
-            throw new ApiException(
-                    HttpStatus.TOO_MANY_REQUESTS,
-                    "rate_limited",
-                    "Too many requests",
-                    "Too many attempts. Wait a few minutes and try again.");
+        Duration wait = tryTake(limit, key);
+        if (wait != null) {
+            throw limited(wait);
         }
     }
 
-    private synchronized boolean tryTake(Limit limit, String key) {
+    static ApiException limited(Duration wait) {
+        return new ApiException(
+                        HttpStatus.TOO_MANY_REQUESTS,
+                        "rate_limited",
+                        "Too many requests",
+                        "Too many attempts. Wait a few minutes and try again.")
+                .withRetryAfter(wait);
+    }
+
+    /** Takes a token; null when taken, else how long until one is there. */
+    private synchronized Duration tryTake(Limit limit, String key) {
         Instant now = clock.now();
-        String id = limit.name() + ":" + key;
-        Bucket bucket = buckets.computeIfAbsent(id, k -> new Bucket(limit.capacity(), now));
-        double perToken = (double) limit.per().toMillis() / limit.capacity();
-        double refill = Math.max(0, Duration.between(bucket.at, now).toMillis()) / perToken;
-        bucket.tokens = Math.min(limit.capacity(), bucket.tokens + refill);
-        bucket.at = now;
+        Store store = store(limit);
+        Bucket bucket = store.buckets.get(key);
+        if (bucket == null) {
+            if (!store.makeRoom(limit, now)) {
+                full(limit, now);
+                return null;
+            }
+            bucket = new Bucket(limit.capacity(), now);
+            store.buckets.put(key, bucket);
+        }
+        bucket.refill(limit, now);
         if (bucket.tokens < 1) {
-            return false;
+            return bucket.untilOne(limit);
         }
         bucket.tokens -= 1;
-        return true;
+        return null;
+    }
+
+    /** Null when a request may go ahead, else how long until it may. Takes nothing and adds no key. */
+    private synchronized Duration waitFor(Limit limit, String key) {
+        Store store = stores.get(limit.name());
+        Bucket bucket = store == null ? null : store.buckets.get(key);
+        if (bucket == null) {
+            return null;
+        }
+        bucket.refill(limit, clock.now());
+        return bucket.tokens < 1 ? bucket.untilOne(limit) : null;
+    }
+
+    private synchronized void failed(Limit limit, String key) {
+        Instant now = clock.now();
+        Store store = store(limit);
+        Bucket bucket = store.buckets.get(key);
+        if (bucket == null) {
+            if (!store.makeRoom(limit, now)) {
+                full(limit, now);
+                return;
+            }
+            bucket = new Bucket(limit.capacity(), now);
+            store.buckets.put(key, bucket);
+        }
+        bucket.refill(limit, now);
+        // Parallel failures that all passed the check may take it below zero: they are all paid for.
+        bucket.tokens -= 1;
+    }
+
+    private Store store(Limit limit) {
+        return stores.computeIfAbsent(limit.name(), k -> new Store());
+    }
+
+    private void full(Limit limit, Instant now) {
+        if (Duration.between(lastWarned, now).compareTo(Duration.ofMinutes(1)) >= 0) {
+            lastWarned = now;
+            log.warn(
+                    "Sign-in throttle {} holds {} keys that still remember requests; new keys are not counted",
+                    limit.name(),
+                    MAX_KEYS);
+        }
     }
 
     private static String ip(String address) {
@@ -149,13 +246,31 @@ class AuthThrottle {
         }
     }
 
-    private static <V> Map<String, V> bounded() {
-        return new LinkedHashMap<>(256, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, V> eldest) {
-                return size() > MAX_KEYS;
+    /** The buckets of one limit, least recently used first. */
+    private static final class Store {
+        final LinkedHashMap<String, Bucket> buckets = new LinkedHashMap<>(256, 0.75f, true);
+        Instant lastSweep = Instant.EPOCH;
+
+        /**
+         * Whether a new key fits: at once below {@link #MAX_KEYS}, else after dropping every bucket that has refilled
+         * completely (it remembers nothing, so dropping it changes no answer). A bucket that still holds state is never
+         * dropped.
+         */
+        boolean makeRoom(Limit limit, Instant now) {
+            if (buckets.size() < MAX_KEYS) {
+                return true;
             }
-        };
+            if (Duration.between(lastSweep, now).compareTo(SWEEP_EVERY) < 0) {
+                return false;
+            }
+            lastSweep = now;
+            for (Iterator<Bucket> it = buckets.values().iterator(); it.hasNext(); ) {
+                if (it.next().fullAt(limit, now)) {
+                    it.remove();
+                }
+            }
+            return buckets.size() < MAX_KEYS;
+        }
     }
 
     private static final class Bucket {
@@ -166,10 +281,25 @@ class AuthThrottle {
             this.tokens = tokens;
             this.at = at;
         }
-    }
 
-    private static final class Failures {
-        int consecutive;
-        Instant lockedUntil;
+        static double perTokenMillis(Limit limit) {
+            return (double) limit.per().toMillis() / limit.capacity();
+        }
+
+        void refill(Limit limit, Instant now) {
+            double refill = Math.max(0, Duration.between(at, now).toMillis()) / perTokenMillis(limit);
+            tokens = Math.min(limit.capacity(), tokens + refill);
+            at = now;
+        }
+
+        boolean fullAt(Limit limit, Instant now) {
+            double refill = Math.max(0, Duration.between(at, now).toMillis()) / perTokenMillis(limit);
+            return tokens + refill >= limit.capacity();
+        }
+
+        /** Time until the bucket holds one token again, after {@link #refill}. */
+        Duration untilOne(Limit limit) {
+            return Duration.ofMillis((long) Math.ceil((1 - tokens) * perTokenMillis(limit)));
+        }
     }
 }

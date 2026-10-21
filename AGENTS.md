@@ -401,16 +401,26 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `BACKUP_RETENTION_ON_HOST=false` once the R2 lock and lifecycle rules are on (provider steps left for Hillary). Tests:
   `bash deploy/tests/monitor-test.sh` (CI, with shellcheck). Runbooks `docs/runbooks/monitoring-and-alerts.md`,
   `restore-from-backup.md` sections 5 to 7, `security-incident.md` and `support-and-on-call.md` (owner placeholders to fill).
-- **Built (launch hardening A, issue #426, ADR-059):** no migration. `core.identity`: `AuthThrottle` (was `ResetThrottle`) limits
-  every public staff and operator sign-in, two-step, invitation and setup route per client IP (`BMS_AUTH_SIGN_IN_PER_IP`, 60 in 10
-  minutes), sign-in and the forgotten password per sign-in address (30 in 15 minutes, 10 an hour) and the second factor per
-  account (30 in 15 minutes), all answering the same 429; an address that matches no account is locked after five failures with
-  the same 423 as a real one; `Passwords` runs at most `BMS_AUTH_ARGON2_MAX_CONCURRENT` (4) argon2id hashes at once and answers
-  503 `sign_in_busy` after two seconds. Member sign-in is not built yet and will use the same throttle. `core.notifications`:
-  with `BMS_ENVIRONMENT=production` the API refuses to start without `BMS_SMTP_HOST`, `BMS_SMTP_USER`, `BMS_SMTP_PASSWORD` and
-  `BMS_MAIL_FROM`. `kernel.LogRedaction` redacts emails, phones, NINs, tokens, secrets and named name fields from every
-  string of the `server` profile's JSON logs (NFR-SEC-08); both compose files cap and rotate container logs. Tests:
-  `AuthThrottleTest`, `PasswordsBoundTest`, `SignInLimitsIT`, `SmtpProductionGuardTest`, `LogRedactionTest`.
+- **Built (launch hardening A, issue #426, ADR-059, revised after the review of #433):** migration `V78` (V77 is #421's):
+  `sign_in_address_failures`, the five-failure count and lock of every sign-in address that matches no account, keyed by
+  its SHA-256, so it locks exactly as an account across restarts (`SignInAddressFailures`, nightly purge
+  `core.identity.sign-in-failure-purge`). `core.identity`: `AuthThrottle` (was `ResetThrottle`) counts only FAILED
+  requests per client IP on every public staff and operator sign-in, two-step, invitation and setup route
+  (`BMS_AUTH_SIGN_IN_FAILURES_PER_IP`, 300 in 10 minutes; carrier NAT), keeps the reset buckets (20 an hour per IP, 10 an
+  hour per address, 30 link uses in 10 minutes) and the second factor per account (30 in 15 minutes), never evicts a
+  bucket that remembers anything, and sends Retry-After with every 429; there is no in-memory per-address sign-in
+  budget. A completed reset, `POST /users/{user_id}/unlock` (tenant admin) and
+  `POST /platform/tenants/{tenant_id}/users/{user_id}/unlock` (operator, with a reason) lift a lock, audited
+  `core.auth.unlocked`; nothing unlocks an operator. `Passwords` runs at most `BMS_AUTH_ARGON2_MAX_CONCURRENT` (4)
+  argon2id hashes, answers 503 `sign_in_busy` with Retry-After 2 to 5 seconds after two seconds, and refuses to hash
+  inside a transaction: sign-in, the step-up password, invitation acceptance, the reset and the operator's first password
+  read, hash with no connection held, then write. `core.notifications`: with `BMS_ENVIRONMENT=production` (read as SMS
+  and Pesapal read it; `deploy/compose.yml` defaults it to production) the API refuses to start without SMTP.
+  `kernel.LogRedaction` redacts secrets (keys inside longer names too, whole quoted values), Basic and Bearer
+  credentials, emails, NINs in any case, Uganda numbers (`%2B`, spaced landlines) but not labelled amounts, times or
+  ids, and name keys including `name=`, in linear time; PostgreSQL logs tersely; both compose files cap container logs.
+  Tests: `AuthThrottleTest`, `PasswordsBoundTest`, `SignInLimitsIT`, `PasswordResetIT`, `SmtpProductionGuardTest`,
+  `LogRedactionTest`, `ApiExceptionRetryAfterTest`.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -719,7 +729,8 @@ Accepted (this list is the ADR index):
 - ADR-057 Everyday push notices (new orders, delivery, low stock, credit due, the daily summary) with per-business switches, a one-tap
   turn-on card, and a low-stock minimum per item and branch beside the pace rule, whichever trips first (proposed, #412; renumbered at merge if needed)
 - ADR-058 Host checks post to the Telegram operator chat on a systemd timer, an external uptime monitor and heartbeat watch the host, the
-  restore drill is timed and scheduled, and R2 lock and lifecycle rules make backups undeletable from the host (proposed, #425; renumbered at merge if needed)- ADR-059 Sign-in locks in the database for every address (an unknown one locked like an account), failures-only limits per
+  restore drill is timed and scheduled, and R2 lock and lifecycle rules make backups undeletable from the host (proposed, #425; renumbered at merge if needed)
+- ADR-059 Sign-in locks in the database for every address (an unknown one locked like an account), failures-only limits per
   client IP, audited unlock, at most four password hashes at once and never inside a transaction, SMTP required in production, server logs redacted and container logs capped
   (proposed, #426; launch readiness M8 to M10; renumbered at merge if needed)
 - ADR-060 The Retail home follows one chosen range against the period before (as many days before, This year against last

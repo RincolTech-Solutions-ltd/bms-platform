@@ -129,6 +129,16 @@ class UserController {
         return service.resetMfa(userId);
     }
 
+    @PostMapping("/{user_id}/unlock")
+    @RequiresPermission("core.users.manage")
+    @Operation(
+            summary =
+                    "Lift the sign-in lock of a staff user after too many wrong passwords; audited, changes no password (ADR-059)",
+            operationId = "unlockUserSignIn")
+    UserResponse unlock(@PathVariable("user_id") UUID userId) {
+        return service.unlockSignIn(userId);
+    }
+
     /**
      * The order matters: the target is checked first (read-only), then the acting admin proves they are still themselves, then
      * the link is made, which checks the target again under a lock. The proof is a fresh code from their own authenticator when

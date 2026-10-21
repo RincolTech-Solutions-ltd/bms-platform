@@ -48,6 +48,7 @@ class StaffAuthController {
     private final UserService users;
     private final PasswordResets resets;
     private final AuthThrottle throttle;
+    private final Passwords passwords;
     private final long resetMinResponseMillis;
 
     StaffAuthController(
@@ -56,12 +57,14 @@ class StaffAuthController {
             UserService users,
             PasswordResets resets,
             AuthThrottle throttle,
+            Passwords passwords,
             @Value("${bms.auth.reset-min-response-ms:400}") long resetMinResponseMillis) {
         this.flow = flow;
         this.accounts = accounts;
         this.users = users;
         this.resets = resets;
         this.throttle = throttle;
+        this.passwords = passwords;
         this.resetMinResponseMillis = resetMinResponseMillis;
     }
 
@@ -69,16 +72,20 @@ class StaffAuthController {
     @PublicEndpoint
     @Operation(summary = "Sign in with email or phone and password (FR-IAM-04, FR-IAM-05)", operationId = "staffLogin")
     ResponseEntity<SignInResponse> login(@Valid @RequestBody SignInRequest request, HttpServletRequest http) {
-        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
-        return respond(flow.login(accounts, request.login(), request.password(), http.getServerName(), agent(http)));
+        return respond(throttle.countingFailures(
+                throttle.signInPerIp,
+                RequestContext.clientIp(),
+                () -> flow.login(accounts, request.login(), request.password(), http.getServerName(), agent(http))));
     }
 
     @PostMapping("/staff/mfa/verify")
     @PublicEndpoint
     @Operation(summary = "Second factor: TOTP or recovery code (FR-IAM-06, FR-IAM-11)", operationId = "staffMfaVerify")
     ResponseEntity<SignInResponse> verify(@Valid @RequestBody MfaVerifyRequest request, HttpServletRequest http) {
-        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
-        return respond(flow.verifyMfa(accounts, request.mfaToken(), request.code(), http.getServerName(), agent(http)));
+        return respond(throttle.countingFailures(
+                throttle.signInPerIp,
+                RequestContext.clientIp(),
+                () -> flow.verifyMfa(accounts, request.mfaToken(), request.code(), http.getServerName(), agent(http))));
     }
 
     /** Public route: the caller proves who it is with the MFA token, or is signed in already. */
@@ -86,7 +93,11 @@ class StaffAuthController {
     @PublicEndpoint
     @Operation(summary = "Start TOTP enrolment; returns the secret once (FR-IAM-06)", operationId = "staffMfaEnrol")
     MfaEnrolmentResponse enrol(@RequestBody(required = false) MfaEnrolRequest request) {
-        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
+        return throttle.countingFailures(
+                throttle.signInPerIp, RequestContext.clientIp(), () -> startEnrolment(request));
+    }
+
+    private MfaEnrolmentResponse startEnrolment(MfaEnrolRequest request) {
         String mfaToken = request == null ? null : request.mfaToken();
         UUID userId = enrollee(mfaToken);
         if (mfaToken == null || mfaToken.isBlank()) {
@@ -109,11 +120,11 @@ class StaffAuthController {
             summary = "Confirm TOTP enrolment; returns recovery codes once, and tokens when enrolment was forced",
             operationId = "staffMfaConfirm")
     ResponseEntity<SignInResponse> confirm(@Valid @RequestBody MfaConfirmRequest request, HttpServletRequest http) {
-        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         boolean forced = request.mfaToken() != null && !request.mfaToken().isBlank();
-        UUID userId = enrollee(request.mfaToken());
-        return respond(
-                flow.confirmEnrolment(accounts, userId, request.code(), forced, http.getServerName(), agent(http)));
+        return respond(throttle.countingFailures(throttle.signInPerIp, RequestContext.clientIp(), () -> {
+            UUID userId = enrollee(request.mfaToken());
+            return flow.confirmEnrolment(accounts, userId, request.code(), forced, http.getServerName(), agent(http));
+        }));
     }
 
     @PostMapping("/staff/mfa/recovery-codes")
@@ -133,9 +144,14 @@ class StaffAuthController {
             operationId = "acceptInvitation")
     ResponseEntity<SignInResponse> accept(
             @Valid @RequestBody AcceptInvitationRequest request, HttpServletRequest http) {
-        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
-        UUID userId = users.acceptInvitation(request.token(), request.password());
-        return respond(flow.afterInvitation(accounts, userId, http.getServerName(), agent(http)));
+        return respond(throttle.countingFailures(throttle.signInPerIp, RequestContext.clientIp(), () -> {
+            // The token is checked first and the password hashed outside any transaction (ADR-059).
+            UserService.Invitee invitee = users.precheckInvitation(request.token());
+            passwords.checkStrength(request.password(), invitee.email(), invitee.phone());
+            String hash = passwords.hash(request.password());
+            UUID userId = users.acceptInvitation(request.token(), request.password(), hash);
+            return flow.afterInvitation(accounts, userId, http.getServerName(), agent(http));
+        }));
     }
 
     /**
@@ -171,7 +187,11 @@ class StaffAuthController {
     ResponseEntity<SignInResponse> completeReset(
             @Valid @RequestBody PasswordResetCompleteRequest request, HttpServletRequest http) {
         throttle.acquire(AuthThrottle.COMPLETE_PER_IP, RequestContext.clientIp());
-        UUID userId = resets.complete(request.token(), request.password());
+        // The link is checked first and the password hashed outside any transaction (ADR-059).
+        PasswordResets.LinkHolder holder = resets.precheck(request.token());
+        passwords.checkStrength(request.password(), holder.email(), holder.phone());
+        String hash = passwords.hash(request.password());
+        UUID userId = resets.complete(request.token(), request.password(), hash);
         return respond(flow.afterReset(accounts, userId, http.getServerName(), agent(http)));
     }
 

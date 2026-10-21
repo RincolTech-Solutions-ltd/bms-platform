@@ -7,11 +7,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.argon2.Argon2PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Password hashing and the password rules (chapter 8 section 8.2, FR-IAM-04, ADR-014): argon2id
@@ -28,8 +31,14 @@ import org.springframework.stereotype.Component;
  *
  * <p>Hashing is bounded (launch readiness M9, ADR-059): at most {@code bms.auth.argon2-max-concurrent} hashes run at once (4
  * by default, 256 MiB at the production cost), and a caller that waits {@link #WAIT_SECONDS} without a slot is answered
- * 503 {@code sign_in_busy} with Retry-After, so a flood of sign-ins, even for accounts that do not exist, slows sign-in
- * down instead of filling the heap.
+ * 503 {@code sign_in_busy} with a Retry-After of {@link #BUSY_RETRY_MIN_SECONDS} to {@link #BUSY_RETRY_MAX_SECONDS}
+ * seconds (spread, so the callers that were turned away do not all come back in the same second), so a flood of
+ * sign-ins, even for accounts that do not exist, slows sign-in down instead of filling the heap.
+ *
+ * <p>No hash ever runs, or waits for its slot, inside a transaction (review of #433, finding 3): a caller holding a
+ * database connection while it queued here would let a sign-in flood take the whole pool from every other tenant. Every
+ * caller reads what it needs in a short transaction, hashes outside it, and writes in another; {@link #bounded} refuses
+ * to run inside one, so a new caller that forgets fails its first test instead of production.
  */
 @Component
 class Passwords {
@@ -37,6 +46,8 @@ class Passwords {
     static final int MIN_LENGTH = 10;
     static final int MAX_LENGTH = 128;
     static final long WAIT_SECONDS = 2;
+    static final int BUSY_RETRY_MIN_SECONDS = 2;
+    static final int BUSY_RETRY_MAX_SECONDS = 5;
 
     private final Argon2PasswordEncoder encoder;
     private final Set<String> common;
@@ -64,6 +75,10 @@ class Passwords {
     }
 
     private <T> T bounded(Supplier<T> work) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException(
+                    "A password hash must not run inside a transaction: it would hold a database connection (ADR-059)");
+        }
         boolean acquired;
         try {
             acquired = hashing.tryAcquire(WAIT_SECONDS, TimeUnit.SECONDS);
@@ -73,10 +88,12 @@ class Passwords {
         }
         if (!acquired) {
             throw new ApiException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "sign_in_busy",
-                    "Sign-in busy",
-                    "Sign-in is busy right now. Wait a moment and try again.");
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "sign_in_busy",
+                            "Sign-in busy",
+                            "Sign-in is busy right now. Wait a moment and try again.")
+                    .withRetryAfter(Duration.ofSeconds(
+                            ThreadLocalRandom.current().nextInt(BUSY_RETRY_MIN_SECONDS, BUSY_RETRY_MAX_SECONDS + 1)));
         }
         try {
             return work.get();

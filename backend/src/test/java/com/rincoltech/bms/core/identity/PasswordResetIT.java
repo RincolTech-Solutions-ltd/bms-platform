@@ -449,9 +449,12 @@ class PasswordResetIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
-    /** FR-IAM-05: a reset does not clear the lock, so it cannot be used to keep guessing a code. */
+    /**
+     * ADR-059 (review of #433, finding 2): the link from the owner's own mailbox lifts the lock a stranger's wrong passwords
+     * set, audited, and the owner signs in at once; nothing else can keep them out for good.
+     */
     @Test
-    void aLockedAccountSetsThePasswordButIsToldToSignInLater() {
+    void aCompletedResetLiftsTheLockAndSignsIn() {
         String email = Api.email("cashier");
         UUID userId = user(email);
         request(email);
@@ -461,22 +464,25 @@ class PasswordResetIT extends IntegrationTest {
                         "UPDATE users SET failed_login_count = 5, locked_until = now() + interval '10 minutes' WHERE id = ?")
                 .param(userId)
                 .update();
+        assertThat(api.login(email, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.LOCKED);
 
         ResponseEntity<JsonNode> done = complete(token, NEW_PASSWORD);
         assertThat(done.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(done.getBody().get("status").asString()).isEqualTo("sign_in_required");
-        assertThat(done.getHeaders().getFirst("Set-Cookie")).isNull();
-        assertThat(TestDatabase.owner()
-                        .sql("SELECT locked_until > now() FROM users WHERE id = ?")
-                        .param(userId)
-                        .query(Boolean.class)
-                        .single())
-                .isTrue();
-        // The new password is stored: once the lock lapses it signs in.
-        TestDatabase.owner()
-                .sql("UPDATE users SET locked_until = NULL, failed_login_count = 0 WHERE id = ?")
+        assertThat(done.getBody().get("status").asString()).isEqualTo("signed_in");
+        Map<String, Object> row = TestDatabase.owner()
+                .sql("SELECT failed_login_count, locked_until FROM users WHERE id = ?")
                 .param(userId)
-                .update();
+                .query()
+                .singleRow();
+        assertThat(((Number) row.get("failed_login_count")).intValue()).isZero();
+        assertThat(row.get("locked_until")).isNull();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM audit_log WHERE action = 'core.auth.unlocked' AND entity_id = ?"
+                                + " AND data -> 'after' ->> 'by' = 'password_reset'")
+                        .param(userId)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
         assertThat(api.login(email, NEW_PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 

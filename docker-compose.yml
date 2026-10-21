@@ -25,6 +25,8 @@ services:
   postgres:
     <<: *logging
     image: postgres:16.15-alpine
+    # Terse error lines, as on the servers: no DETAIL with a refused key value in the log (ADR-059).
+    command: ["postgres", "-c", "log_error_verbosity=terse"]
     environment:
       POSTGRES_DB: bms
       POSTGRES_USER: postgres

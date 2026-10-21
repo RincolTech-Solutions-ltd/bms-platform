@@ -42,6 +42,25 @@ class SmtpProductionGuardTest {
                 .hasMessage("BMS_MAIL_FROM is not an email address (BMS_ENVIRONMENT=production)");
     }
 
+    /**
+     * Review of #433: BMS_ENVIRONMENT is read as SmsSettings and PesapalSettings read it (trimmed, lower case, exact), so one
+     * value turns every production guard on or none.
+     */
+    @Test
+    void productionIsReadAsTheOtherGuardsReadIt() {
+        Smtp none = new Smtp(null, null, null, null, null);
+        for (String production : new String[] {"production", "Production", " PRODUCTION ", "\tproduction\n"}) {
+            assertThatThrownBy(() -> none.requireInProduction(production))
+                    .as("'%s'", production)
+                    .isInstanceOf(IllegalStateException.class);
+        }
+        for (String other : new String[] {"prod", "production-eu", "pre-production", "staging"}) {
+            assertThatCode(() -> none.requireInProduction(other))
+                    .as("'%s'", other)
+                    .doesNotThrowAnyException();
+        }
+    }
+
     @Test
     void stagingALaptopAndAnUnsetEnvironmentStayQuietlyOff() {
         Smtp none = new Smtp(null, null, null, null, null);
