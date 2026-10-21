@@ -371,15 +371,12 @@ class OutboxTemplates {
             Map.entry(
                     "retail.credit_due",
                     new Template(
-                            "Credit payments to collect",
-                            "Today {due_count} credit sales fall due and {overdue_count} are overdue in all. Open Credit"
-                                    + " control to follow them up.")),
+                            "Credit payments to collect", "{credit_words}. Open Credit control to follow them up.")),
             Map.entry(
                     "retail.credit_due_branch",
                     new Template(
                             "Credit payments to collect",
-                            "At {branch_name} today {due_count} credit sales fall due and {overdue_count} are overdue in"
-                                    + " all. Open Credit control to follow them up.")),
+                            "At {branch_name}, {credit_words}. Open Credit control to follow them up.")),
             Map.entry(
                     "retail.daily_summary",
                     new Template("Today's sales, {day}", "{shops}. Open the day's sales to see the totals.")),

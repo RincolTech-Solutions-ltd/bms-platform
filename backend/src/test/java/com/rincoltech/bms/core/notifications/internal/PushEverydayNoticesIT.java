@@ -401,11 +401,23 @@ class PushEverydayNoticesIT extends IntegrationTest {
         dailyAt(today(), LocalTime.of(8, 15));
         assertThat(told("retail.credit_due")).containsExactly(user(admin));
         assertThat(param("retail.credit_due", "due_count")).isEqualTo("1");
+        assertThat(param("retail.credit_due", "credit_words")).isEqualTo("1 credit sale falls due today");
         dailyAt(today(), LocalTime.of(8, 30));
         assertThat(told("retail.credit_due")).hasSize(1);
         // The day after, the same sale fell overdue: one more notice, for that day.
         dailyAt(today().plusDays(1), LocalTime.of(9, 0));
         assertThat(told("retail.credit_due")).hasSize(2);
+        // Nothing falls due that day: the words leave out "0 credit sales fall due".
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                                SELECT params ->> 'credit_words' FROM notification_outbox
+                                 WHERE tenant_id = ? AND channel = 'push' AND idempotency_key LIKE ?
+                                 ORDER BY created_at DESC LIMIT 1
+                                """)
+                        .params(t.tenantId(), "push:retail.credit_due:%")
+                        .query(String.class)
+                        .single())
+                .isEqualTo("1 credit sale is overdue in all");
         // Sellers are not told: the supervisors of a shop (retail.sale.all_sellers at that branch, #404) are the only
         // branch
         // staff who hear it, and no role holds that permission on this database yet.
@@ -451,13 +463,17 @@ class PushEverydayNoticesIT extends IntegrationTest {
 
     @Test
     void aSummaryAtHalfPastElevenGoesBeforeMidnight() {
+        // A summary on an earlier day first, so a late one would be owed if the day at 23:30 were not recorded.
+        dailyAt(today(), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(1);
         switchSetting(Map.of("daily_summary_time", "23:30"));
-        dailyAt(today(), LocalTime.of(23, 15));
-        assertThat(told("retail.daily_summary")).isEmpty();
-        dailyAt(today(), LocalTime.of(23, 30));
-        assertThat(told("retail.daily_summary")).containsExactly(user(admin));
-        // After midnight nothing is owed: yesterday's went.
-        dailyAt(today().plusDays(1), LocalTime.of(0, 15));
+        LocalDate day2 = today().plusDays(1);
+        dailyAt(day2, LocalTime.of(23, 15));
+        assertThat(told("retail.daily_summary")).hasSize(1);
+        dailyAt(day2, LocalTime.of(23, 30));
+        assertThat(told("retail.daily_summary")).hasSize(2);
+        // After midnight nothing is owed: day two's went before midnight.
+        dailyAt(day2.plusDays(1), LocalTime.of(0, 15));
         assertThat(told("retail.daily_summary_late")).isEmpty();
     }
 
@@ -488,6 +504,24 @@ class PushEverydayNoticesIT extends IntegrationTest {
         switchSetting(Map.of("daily_summary", false));
         dailyAt(today(), LocalTime.of(21, 0));
         assertThat(told("retail.daily_summary")).isEmpty();
+    }
+
+    @Test
+    void aDaySwitchedOffIsNotSentLateWhenTheSummaryIsTurnedBackOn() {
+        // Day one: a summary, so the business has had one before.
+        dailyAt(today(), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(1);
+        // Day two: switched off, its closing time passes without a notice.
+        switchSetting(Map.of("daily_summary", false));
+        dailyAt(today().plusDays(1), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(1);
+        // Day three: on again at 08:00. Day two was switched off, so no "Yesterday's sales".
+        switchSetting(Map.of("daily_summary", true));
+        dailyAt(today().plusDays(2), LocalTime.of(8, 0));
+        assertThat(told("retail.daily_summary_late")).isEmpty();
+        // Day three's own summary still goes at its time.
+        dailyAt(today().plusDays(2), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(2);
     }
 
     // ---- The settings ----------------------------------------------------------------------------

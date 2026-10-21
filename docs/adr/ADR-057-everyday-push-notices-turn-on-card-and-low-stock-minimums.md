@@ -40,18 +40,20 @@ sales has no pace at all; and neither rule alone catches both.
      shop's staff and are not told (the new audience `BranchStaff`).
    - `retail.order_out_for_delivery` and `retail.order_delivered`: to the person who took the order, unless they did the step.
    - `retail.low_stock`: an item below its level at a branch (decision 4), to the holders of `retail.stock.read` at that branch
-     and the administrators, at most once per item, branch and day (the outbox key carries the day). Judged after any movement
+     and the administrators, the seller who made the sale among them on purpose (they work at that shelf), at most once per
+     item, branch and day (the outbox key carries the day). Judged after any movement
      that takes stock out, inside a savepoint, so a failure never fails the sale. A branch with nothing left reads "out of stock"
      whichever rule tripped.
    - `retail.credit_due` and `retail.credit_due_branch`: each morning between 08:00 and 12:00 on the business's clock (the
      notice says "today", so a server down all morning does not send it late; the next morning's counts carry what is overdue),
      when a credit sale falls due today or fell overdue yesterday: one notice to the administrators over the whole business, and one per shop to the
      holders of `retail.sale.all_sellers` given for that shop (the Supervisor of #404; no role holds it before that lands). Counts
-     only.
+     only, in words that leave out a zero ("3 credit sales are overdue in all" when nothing falls due today).
    - `retail.daily_summary`: at the time the business sets (a quarter hour up to 23:30, 20:00 by default), to the
      administrators: the number of sales of the day at each shop. A summary whose time passed while the server was down goes after
      midnight, before 12:00, as `retail.daily_summary_late` ("Yesterday's sales"), only for a business that has had a summary
-     before, so a first release sends none. No amount, because a notification lies on a lock screen; a tap opens the day's sales, where the totals show
+     before, so a first release sends none; a day the business had switched the summary off is recorded at its time without a
+     notice, so switching it back on never sends that day late. No amount, because a notification lies on a lock screen; a tap opens the day's sales, where the totals show
      to those who may see them, and cost and profit never appear in any of these notices.
 3. **Per-business settings** are the tenant settings group `notifications` (ADR-033's mechanism, stored in the settings row,
    versioned and audited): `new_orders`, `order_updates`, `low_stock`, `credit_due`, `daily_summary` (on unless switched off) and

@@ -78,6 +78,11 @@ class DailyNotices {
             creditDue(today);
         }
         if (!preferences.on(PushPreferences.DAILY_SUMMARY)) {
+            // A day the business switched the summary off is still recorded once its time passes, without a notice, so
+            // turning it back on the next morning never sends that day late as "Yesterday's sales".
+            if (!time.isBefore(preferences.dailySummaryTime())) {
+                claim("daily_summary", today);
+            }
             return;
         }
         // A summary that was due yesterday and never prepared (the server was down at closing time) goes after
@@ -150,6 +155,7 @@ class DailyNotices {
                             "branch_id", c.branchId().toString(),
                             "due_count", String.valueOf(c.due()),
                             "overdue_count", String.valueOf(c.overdue()),
+                            "credit_words", creditWords(c.due(), c.overdue()),
                             "path", "/staff/retail/credit-control")));
         }
         if (news) {
@@ -160,8 +166,25 @@ class DailyNotices {
                     Map.of(
                             "due_count", String.valueOf(due),
                             "overdue_count", String.valueOf(overdue),
+                            "credit_words", creditWords(due, overdue),
                             "path", "/staff/retail/credit-control")));
         }
+    }
+
+    /**
+     * "2 credit sales fall due today and 3 are overdue in all", without a "0" part: "1 credit sale falls due today" when
+     * nothing is overdue, "3 credit sales are overdue in all" when nothing falls due today.
+     */
+    static String creditWords(int due, int overdue) {
+        String over = overdue == 1 ? "1 credit sale is overdue" : overdue + " credit sales are overdue";
+        if (due == 0) {
+            return over + " in all";
+        }
+        String today = due == 1 ? "1 credit sale falls due today" : due + " credit sales fall due today";
+        if (overdue == 0) {
+            return today;
+        }
+        return today + " and " + overdue + (overdue == 1 ? " is" : " are") + " overdue in all";
     }
 
     record ShopDay(String name, int sales) {}
