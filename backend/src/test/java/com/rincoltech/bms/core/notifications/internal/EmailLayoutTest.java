@@ -170,8 +170,8 @@ class EmailLayoutTest {
                 String href = "href=\"" + EmailLayout.escape(url) + "\"";
                 assertThat(html.split(Pattern.quote(href), -1)).as(key).hasSize(3);
             }
-            // The sign-off is two words.
-            assertThat(templates.render("email", key, params()).text()).as(key).doesNotContain("Rincoltech");
+            // The company is Rincoltech, one word.
+            assertThat(templates.render("email", key, params()).text()).as(key).contains("Rincoltech").doesNotContain("Rincol Tech");
         }
     }
 
