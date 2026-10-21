@@ -181,6 +181,13 @@ describe('stock health', () => {
       branches: [{ branch_id: 'b1', item_count: 1, value_at_price_minor: 2100, value_at_cost_minor: 1200 }],
       items: [{ branch_id: 'b1', product_id: 'p3', code: 'ANA-3', description: 'Test Product ANA-3', unit: 'piece', qty_on_hand: '3.000', value_at_price_minor: 2100, value_at_cost_minor: 1200 }],
     },
+    slow_movers: {
+      days: 90, slow_months: 4, min_sales: 3, items_total: 2, value_at_cost_minor: 2470,
+      items: [
+        { branch_id: 'b1', product_id: 'p7', code: 'SLOW-1', description: 'Test Product SLOW-1', unit: 'piece', qty_on_hand: '20.000', sold_last90: '3.000', last_sold_on: '2026-10-04', months_to_sell: '20.0', capped: false, value_at_cost_minor: 2000, sells_better_at: { branch_id: 'b2', sold_last90: '6.000', qty_on_hand: '1.000', suggested_qty: '7.000' } },
+        { branch_id: 'b1', product_id: 'p8', code: 'RARE-1', description: 'Test Product RARE-1', unit: 'piece', qty_on_hand: '1.000', sold_last90: '1.000', last_sold_on: '2026-09-07', months_to_sell: '3.0', capped: false, value_at_cost_minor: 470 },
+      ],
+    },
     shrinkage: [{ branch_id: 'b1', used_reports: 1, damaged_reports: 1, short_lines: 1, over_lines: 0, used_cost_minor: 1000, damaged_cost_minor: 400, stocktake_loss_minor: 400, stocktake_gain_minor: 0, net_cost_minor: 1800 }],
   };
   const nameOf = (id?: string) => (id === 'b1' ? 'Head office' : 'Branch');
@@ -207,6 +214,37 @@ describe('stock health', () => {
     expect(html).not.toMatch(/cost/i);
     expect(html).not.toContain('1,200');
     expect(html).not.toContain('1,800');
+  });
+
+  it('lists slow movers apart from dead stock, with months, last sold, the money tied up and where it sells better', () => {
+    const html = renderToString(<StockHealthView data={health} nameOf={nameOf} />);
+    expect(html).toContain('Slow movers: stock that sells slowly');
+    expect(html).toContain('more than 4 months to sell');
+    expect(html).toContain('Test Product SLOW-1');
+    expect(html).toContain('20.0 months');
+    expect(html).toContain('3.0 months');
+    expect(html).toContain('2026-10-04');
+    expect(html).toContain('Money tied up in slow stock, at cost: <strong>UGX 2,470</strong>');
+    expect(html).toContain('UGX 2,000');
+    expect(html).toContain('Sells better at Branch: move 7 piece.');
+    // Dead stock stays its own section, and the slow one is not repeated in it.
+    expect(html.indexOf('Slow movers')).toBeLessThan(html.indexOf('Dead stock: no sale in'));
+    expect(html.split('Test Product SLOW-1').length).toBe(2);
+  });
+
+  it('shows slow movers as quantities only, with no cost and no total, without the cost permission', () => {
+    const html = renderToString(<StockHealthView data={plain()} nameOf={nameOf} />);
+    expect(html).toContain('20.0 months');
+    expect(html).toContain('Sells better at Branch: move 7 piece.');
+    expect(html).not.toContain('Money tied up');
+    expect(html).not.toContain('Tied up at cost');
+    expect(html).not.toContain('2,470');
+    expect(html).not.toContain('2,000');
+  });
+
+  it('says plainly when nothing is slow', () => {
+    const none: StockHealth = { ...health, slow_movers: { days: 90, slow_months: 4, min_sales: 3, items: [], items_total: 0 } };
+    expect(renderToString(<StockHealthView data={none} nameOf={nameOf} />)).toContain('No slow movers.');
   });
 
   it('is open to stock readers and says over 365 days when capped', () => {

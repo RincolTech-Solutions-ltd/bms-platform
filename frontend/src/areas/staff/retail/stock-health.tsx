@@ -5,6 +5,7 @@ import { retailAnalytics, type CoverRow, type StockHealth } from '../../../api/r
 import { SkeletonList } from '../../../components/states';
 import { Choice, DateRange, Empty, Section, ToStock, defaultRange, moneyOrNone, plural, rangeProblem } from './analytics-ui';
 import { showQty } from './maths';
+import { SlowMoversSection } from './slow-movers';
 import { Gate, Problem, money, useBranchName, useBranchView, useIsPhone } from './ui';
 
 // Stock health (issue #149, step 3): how long the stock lasts at the pace of the last 30 days, what to
@@ -65,6 +66,7 @@ export function StockHealthView({ data, nameOf }: { data: StockHealth; nameOf: N
       <Section title="Days of cover" hint="How long the stock lasts if sales go on at the pace of the last 30 days. The lowest first. Items with no sale in 30 days are not listed.">
         <CoverTable rows={cover.items ?? []} nameOf={nameOf} reorder={false} />
       </Section>
+      <div data-tour="health-slow"><SlowMoversSection slow={data.slow_movers} nameOf={nameOf} /></div>
       <Section title={`Dead stock: no sale in ${dead?.days ?? 90} days`} hint="Stock on hand that did not sell in the branch.">
         {(dead?.branches ?? []).length === 0 ? <Empty>Everything in stock has sold lately.</Empty> : (
           <>
@@ -184,7 +186,8 @@ export function StockHealthPage() {
         <Choice id="sh-top" label="Rows to show" value={top} options={TOPS} onChange={setTop} />
       </div>
       <div data-tour="health-results">
-      {report.isPending && !problem && <SkeletonList label="Loading stock health" />}
+      {/* The slow movers anchor stands here while loading, so the tour finds it before the report arrives. */}
+      {report.isPending && !problem && <div data-tour="health-slow"><SkeletonList label="Loading stock health" /></div>}
       <Problem error={report.error} />
       {report.data && <StockHealthView data={report.data} nameOf={nameOf} />}
       </div>

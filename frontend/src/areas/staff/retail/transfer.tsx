@@ -1,12 +1,13 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, createLazyRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, createLazyRoute, useRouter } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
 import { businessToday, retail, type Product, type Transfer } from '../../../api/retail';
 import { branchLabel } from '../../../auth/branch';
 import { useStaff } from '../context';
 import { usePersistedDraft } from './idempotency';
 import { ToStock } from './analytics-ui';
 import { showQty } from './maths';
+import { readPrefill, type MovePrefill } from './slow-movers-state';
 import { buildTransfer, transferLineHint, transferProblem, type TransferDraft } from './transfer-state';
 import { milliOf } from './maths';
 import { TRANSFER_RECEIPT, capabilityOn, needsOf } from './permissions';
@@ -22,7 +23,7 @@ export function useBranchLabel(): (id: string | undefined) => string {
   return (id) => branchLabel((me.branches ?? []).find((x) => x.id === id)) || 'another branch';
 }
 
-export function TransferForm({ fromBranchId, onSaved }: { fromBranchId: string; onSaved?: (t: Transfer) => void }) {
+export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId: string; onSaved?: (t: Transfer) => void; prefill?: MovePrefill }) {
   const queryClient = useQueryClient();
   const { me } = useStaff();
   const label = useBranchLabel();
@@ -38,6 +39,15 @@ export function TransferForm({ fromBranchId, onSaved }: { fromBranchId: string; 
       onSaved?.(t);
     },
   });
+  // A link from Stock health (slow movers, issue #414) fills the form in once, and only into an empty one.
+  const applied = useRef(false);
+  const wanted = useQuery({ queryKey: ['retail', 'product', prefill?.item], queryFn: () => retail.getProduct(prefill?.item ?? ''), enabled: !!prefill });
+  useEffect(() => {
+    if (!prefill || !wanted.data || applied.current) return;
+    applied.current = true;
+    const product = wanted.data;
+    setDraft((d) => (d.lines.length > 0 ? d : { ...d, toBranchId: prefill.to, lines: [{ product, qty: prefill.qty }] }));
+  }, [prefill, wanted.data, setDraft]);
   const update = (patch: Partial<TransferDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const add = (p: Product) =>
     setDraft((d) => (d.lines.some((l) => l.product.id === p.id) ? d : { ...d, lines: [...d.lines, { product: p, qty: '1' }] }));
@@ -135,6 +145,15 @@ export function TransferSummary({ transfer, onNew }: { transfer: Transfer; onNew
 
 export function MoveStock() {
   const { branchId } = useStockingBranch();
+  const { me, chooseBranch } = useStaff();
+  // Read once from the address when the page opens; a page drawn outside a router (a test, a print view) has none.
+  const router = useRouter({ warn: false });
+  const prefill = readPrefill((router?.state.location.search ?? {}) as Record<string, unknown>);
+  // The stock leaves the branch the link names, when the person may work in it, so the form opens on that branch.
+  const named = prefill !== null && (me.branches ?? []).some((b) => b.id === prefill.from) ? prefill.from : null;
+  useEffect(() => {
+    if (named !== null && named !== branchId) chooseBranch?.(named);
+  }, [named, branchId, chooseBranch]);
   const [done, setDone] = useState<Transfer | null>(null);
   const [round, setRound] = useState(0);
   return (
@@ -144,7 +163,7 @@ export function MoveStock() {
       ) : done ? (
         <TransferSummary transfer={done} onNew={() => { setDone(null); setRound((n) => n + 1); }} />
       ) : (
-        <TransferForm key={`${branchId}-${round}`} fromBranchId={branchId} onSaved={setDone} />
+        <TransferForm key={`${branchId}-${round}`} fromBranchId={branchId} onSaved={setDone} prefill={round === 0 && prefill && prefill.from === branchId ? prefill : undefined} />
       )}
       <p><Link to={'/staff/retail/transfers' as never}>See stock moves</Link></p>
     </Gate>

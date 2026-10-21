@@ -1056,7 +1056,7 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 | `/staff/retail/settings` | Retail settings | `page-retail-settings` v1 (existing) | none added |
 | `/staff/retail/stock` | Stock | `page-stock` v3 (existing) | none added |
 | `/staff/retail/stock-by-location` | Stores and shops | `page-stock-by-location` v1 (existing) | none added |
-| `/staff/retail/stock-health` | Stock health | `page-stock-health` v1 (added) | item and branch names open Stock |
+| `/staff/retail/stock-health` | Stock health | `page-stock-health` v2 (Slow movers step, #414) | item and branch names open Stock; Sells better at opens Move stock filled in |
 | `/staff/retail/stocktake` | Stock-take | `page-stocktake` v1 (existing) | none added |
 | `/staff/retail/supplier-bills` | Supplier invoices | `page-supplier-bills` v1 (added) | none added |
 | `/staff/retail/supplier-bills/$billId` | Supplier invoice | `page-supplier-bill` v1 (added) | supplier opens its open items; delivery number opens the delivery |
@@ -1192,3 +1192,15 @@ own: the order is copied from the chat, so the form asks for the phone first and
   balance that open orders hold part of (`reserved_qty`).
 - Tours: `page-orders`, `page-order`, `page-orders-report` (`frontend/src/tour/tours-retail-orders.ts`). The retail menu has an Orders
   shortcut right after Sale, and the retail home an Orders tile, for whoever holds `retail.order.manage`.
+
+## Slow movers on Stock health (issue #414)
+
+- The section sits above Dead stock: items that do sell, but would take more than N months at the pace of the last 90 days (N from Retail
+  settings, Slow stock, 4 by default), or sold fewer than 3 times in that time. An item that did not sell at all is Dead stock, never both.
+- Per item and branch: in stock, last sold, months to sell; the money tied up at cost and the total only when the server sent them (a holder
+  of `retail.profit.read`). On a phone the row is a card and the cost is a hint line. A person without the permission sees quantities only.
+- Sells better at (an item that sells faster in another branch the person may read): "Sells better at Branch B: move 7 piece." with a
+  Move stock link to `/staff/retail/transfer?from=&to=&item=&qty=`, for whoever may use Move stock. The form opens on the branch the stock leaves
+  (the branch picker follows the link), with the item and quantity filled in and the destination chosen, only while the form is empty. The
+  person still reviews and saves.
+- The tour `page-stock-health` is version 2 with a Slow movers step. Files: `slow-movers.tsx`, `slow-movers-state.ts`, `slow-movers-setting.tsx`.

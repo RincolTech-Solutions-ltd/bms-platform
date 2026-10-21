@@ -148,7 +148,7 @@ export const marginsPage: Tour = {
 
 export const stockHealthPage: Tour = {
   id: 'page-stock-health',
-  version: 1,
+  version: 2,
   title: 'This page: stock health',
   audience: (me) => held(me, STOCK_READ),
   autoStart: false,
@@ -157,6 +157,7 @@ export const stockHealthPage: Tour = {
     rangeStep('health-range', 'It sets the days for used, damaged and missing stock.'),
     retail({ id: 'buy', target: 'health-buy', title: 'When to buy', body: 'Choose how many days of stock is too low, and how many days you want to buy for.' }),
     retail({ id: 'results', target: 'health-results', title: 'What to buy and what is stuck', body: 'See what to reorder, how long each item lasts, and what has not sold for 90 days. Tap an item to open it in Stock.' }),
+    retail({ id: 'slow', target: 'health-slow', title: 'Slow movers', body: 'Items that do sell, but slowly. See how many months the stock would last, and where the same item sells better, with a link to move stock there.' }),
   ],
 };
 

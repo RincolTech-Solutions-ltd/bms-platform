@@ -12,6 +12,9 @@ export type AnalysisRow = S['RetailSalesAnalysisRow'];
 export type StockedItem = S['RetailStockedItem'];
 export type StockHealth = S['RetailStockHealth'];
 export type CoverRow = S['RetailCoverRow'];
+/** Slow movers (issue #414): items that sell but slowly, with the money tied up where the caller may see cost. */
+export type SlowMovers = S['RetailSlowMovers'];
+export type SlowMoverItem = S['RetailSlowMoverItem'];
 export type CreditControl = S['RetailCreditControl'];
 export type Ageing = S['RetailAgeing'];
 /** Customer accounts (issue #196): ageing per credit buyer with a record, with the limit and the terms. */
