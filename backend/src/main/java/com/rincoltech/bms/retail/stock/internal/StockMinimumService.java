@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.stock.internal;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.Branches;
 import com.rincoltech.bms.kernel.ApiException;
@@ -51,6 +52,7 @@ class StockMinimumService {
     }
 
     @Schema(name = "RetailStockMinimumBranch")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record BranchLevel(
             UUID branchId,
             String branchName,
@@ -72,6 +74,7 @@ class StockMinimumService {
             boolean canSet) {}
 
     @Schema(name = "RetailStockMinimum", description = "Warn me when stock is below (issue #412)")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record View(
             UUID productId,
 

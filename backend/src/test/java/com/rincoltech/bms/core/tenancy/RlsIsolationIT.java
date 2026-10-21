@@ -929,7 +929,8 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), retailProduct, t.headOffice(), user)
                 .update();
-        owner.sql("INSERT INTO retail_notice_runs (tenant_id, kind, run_on) VALUES (?, 'daily_summary', DATE '2026-01-15')")
+        owner.sql(
+                        "INSERT INTO retail_notice_runs (tenant_id, kind, run_on) VALUES (?, 'daily_summary', DATE '2026-01-15')")
                 .param(t.tenantId())
                 .update();
     }
