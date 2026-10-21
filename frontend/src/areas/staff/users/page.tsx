@@ -119,7 +119,7 @@ export function UsersScreen() {
   const shown = search.term === '' ? all : all.filter((u) => matchesSearch(u, search.term));
   const roleList = roles.data ?? [];
   const branchList = branches.data ?? [];
-  const choices = roleChoices(roleList);
+  const choices = roleChoices(roleList, me.modules);
 
   return (
     <main className="rt ln stack">

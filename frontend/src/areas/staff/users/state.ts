@@ -22,14 +22,19 @@ export const TENANT_ADMIN = 'tenant_admin';
 
 /** What each fixed role is for, in the words of the people who pick it. The name is shown after it, with the key. */
 const ROLE_WORDS: Record<string, { title: string; about: string }> = {
-  tenant_admin: { title: 'Administrator', about: 'Runs the whole business account: staff, settings, branches and everything else. Covers every branch.' },
+  tenant_admin: { title: 'Administrator', about: 'Runs the whole business account: staff, settings, branches and everything else. Sees and does everything in every shop and store, profit and costs included.' },
   branch_manager: { title: 'Branch manager', about: 'Runs one branch day to day: members, loans, stock and sales, and approves what needs a second person.' },
   loan_officer: { title: 'Loan officer', about: 'Registers members and handles loan applications and repayments.' },
   cashier: { title: 'Cashier', about: 'Takes and records money at the counter: repayments, deposits and withdrawals.' },
   accountant: { title: 'Accountant', about: 'Reads the books and reports, and keeps the accounts and periods.' },
   auditor: { title: 'Auditor', about: 'Can look at everything but change nothing.' },
   retail_sales: { title: 'Sales person', about: 'Sells in the shop and checks stock. Sees no costs or profit.' },
+  retail_storekeeper: { title: 'Storekeeper', about: 'Moves stock between the stores and shops, receives it, counts it and reports damage. Does not sell, set prices, handle money or see costs.' },
+  retail_purchasing: { title: 'Purchasing', about: 'Records purchases and restocks, with the buying prices. Give it on top of another role to the people you trust with buying.' },
 };
+
+/** The role that records purchases and restocks (ADR-055): given on top of another role, so the invitation offers it as a tick box. */
+export const PURCHASING = 'retail_purchasing';
 
 export interface RoleChoice {
   key: string;
@@ -50,9 +55,13 @@ export function roleChoice(role: Pick<StaffRole, 'key' | 'name'>): RoleChoice {
   };
 }
 
-/** The pick-list: administrators first, then the others as the server lists them. */
-export function roleChoices(roles: StaffRole[]): RoleChoice[] {
-  const choices = roles.filter((r) => r.key).map(roleChoice);
+/**
+ * The pick-list: administrators first, then the others as the server lists them. The retail roles are left out for a business without
+ * the retail module (`modules` from /me; when it is not known, every role is shown and the server decides).
+ */
+export function roleChoices(roles: StaffRole[], modules?: string[] | null): RoleChoice[] {
+  const retail = !modules || modules.includes('retail');
+  const choices = roles.filter((r) => r.key && (retail || !r.key.startsWith('retail_'))).map(roleChoice);
   return [...choices.filter((c) => c.key === TENANT_ADMIN), ...choices.filter((c) => c.key !== TENANT_ADMIN)];
 }
 
@@ -63,11 +72,13 @@ export interface InviteDraft {
   phone: string;
   email: string;
   roleKey: string;
-  /** '' means every branch; ignored for the administrator. */
-  branchId: string;
+  /** The shops and stores the person works in; empty means every one. Ignored for the administrator. */
+  branchIds: string[];
+  /** Also records purchases and restocks there (the Purchasing role, ADR-055). */
+  purchasing: boolean;
 }
 
-export const emptyInvite = (): InviteDraft => ({ fullName: '', phone: '', email: '', roleKey: '', branchId: '' });
+export const emptyInvite = (): InviteDraft => ({ fullName: '', phone: '', email: '', roleKey: '', branchIds: [], purchasing: false });
 
 export type InviteProblems = Partial<Record<'fullName' | 'contact' | 'phone' | 'email' | 'roleKey', string>>;
 
@@ -99,9 +110,25 @@ export function assignmentFor(roleKey: string, branchId: string): RoleAssignment
   return roleKey === TENANT_ADMIN || branchId === '' ? { role_key: roleKey } : { role_key: roleKey, branch_id: branchId };
 }
 
+/**
+ * One role in the shops and stores the person works in: one assignment per branch, the way the server scopes a role (ADR-017, ADR-055).
+ * The administrator, and no branch ticked, mean every shop and store.
+ */
+export function assignmentsFor(roleKey: string, branchIds: string[]): RoleAssignmentRequest[] {
+  const ids = [...new Set(branchIds.filter((b) => b !== ''))];
+  if (roleKey === TENANT_ADMIN || ids.length === 0) return [{ role_key: roleKey }];
+  return ids.map((b) => assignmentFor(roleKey, b));
+}
+
+/** Whether the invitation may add Purchasing: a role that is neither the administrator (who has it) nor Purchasing itself. */
+export const purchasingOffered = (roleKey: string, roles: Pick<StaffRole, 'key'>[]): boolean =>
+  roleKey !== '' && roleKey !== TENANT_ADMIN && roleKey !== PURCHASING && roles.some((r) => r.key === PURCHASING);
+
 /** The request body. A phone is written as the server would store it, so what is sent is what is checked here. */
 export function inviteBody(draft: InviteDraft): InviteUserBody {
-  const body: InviteUserBody = { full_name: draft.fullName.trim(), roles: [assignmentFor(draft.roleKey, draft.branchId)] };
+  const roles = assignmentsFor(draft.roleKey, draft.branchIds);
+  if (draft.purchasing && draft.roleKey !== TENANT_ADMIN && draft.roleKey !== PURCHASING) roles.push(...assignmentsFor(PURCHASING, draft.branchIds));
+  const body: InviteUserBody = { full_name: draft.fullName.trim(), roles };
   if (draft.phone.trim() !== '') body.phone = normaliseUganda(draft.phone) ?? draft.phone.trim();
   if (draft.email.trim() !== '') body.email = draft.email.trim();
   return body;
@@ -115,15 +142,39 @@ export const statusWords = (status: string | undefined): string => STATUS_WORDS[
 export function branchLabel(branchId: string | undefined, branches: StaffBranch[]): string {
   if (!branchId) return 'every branch';
   const found = branches.find((b) => b.id === branchId);
-  return found ? (found.name ?? found.code ?? 'one branch') : 'one branch';
+  if (!found) return 'one branch';
+  const name = found.name ?? found.code ?? 'one branch';
+  return found.sells_goods === false ? `${name} (store)` : name;
 }
 
-/** "Sales person, Kampala branch" per role of the user. */
+/** A user's roles, one row per role with the shops and stores it applies in, in the order the server lists them. */
+export interface RoleRow {
+  roleKey: string;
+  /** Empty means every shop and store. */
+  branchIds: string[];
+}
+
+export function roleRows(user: Pick<StaffUser, 'roles'>): RoleRow[] {
+  const rows: RoleRow[] = [];
+  for (const r of user.roles ?? []) {
+    const key = r.role_key ?? '';
+    const row = rows.find((x) => x.roleKey === key);
+    const every = !r.branch_id;
+    if (!row) rows.push({ roleKey: key, branchIds: every ? [] : [r.branch_id ?? ''] });
+    else if (every) row.branchIds = [];
+    else if (row.branchIds.length > 0) row.branchIds.push(r.branch_id ?? '');
+  }
+  return rows;
+}
+
+/** "Sales person, Kampala branch" per role of the user; a role in several shops and stores names them all on one line. */
 export function roleLines(user: StaffUser, branches: StaffBranch[], roles: StaffRole[]): string[] {
-  return (user.roles ?? []).map((r) => {
-    const found = roles.find((x) => x.key === r.role_key);
-    const name = ROLE_WORDS[r.role_key ?? '']?.title ?? found?.name ?? r.role_name ?? r.role_key ?? '';
-    return `${name}, ${branchLabel(r.branch_id, branches)}`;
+  return roleRows(user).map((r) => {
+    const found = roles.find((x) => x.key === r.roleKey);
+    const assigned = (user.roles ?? []).find((x) => x.role_key === r.roleKey);
+    const name = ROLE_WORDS[r.roleKey]?.title ?? found?.name ?? assigned?.role_name ?? r.roleKey;
+    const where = r.branchIds.length === 0 ? branchLabel(undefined, branches) : r.branchIds.map((b) => branchLabel(b, branches)).join(', ');
+    return `${name}, ${where}`;
   });
 }
 

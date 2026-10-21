@@ -1,15 +1,13 @@
 import { useRef, useState } from 'react';
 import type { RoleAssignmentRequest, StaffBranch, StaffUser } from '../../../api/users';
 import { RolePick } from './role-pick';
-import { TENANT_ADMIN, assignmentFor, branchUnavailable, type RoleChoice } from './state';
+import { TENANT_ADMIN, assignmentsFor, branchUnavailable, roleRows, type RoleChoice, type RoleRow } from './state';
 
-// Change what a person may do: their roles, each with a branch unless it is the administrator (PUT /users/{id}/roles replaces the
-// whole list). The last active administrator cannot be changed away; the server refuses it and the words arrive here.
+// Change what a person may do: their roles, each with the shops and stores it applies in unless it is the administrator (PUT
+// /users/{id}/roles replaces the whole list, one assignment per branch, ADR-055). The last active administrator cannot be changed away;
+// the server refuses it and the words arrive here.
 
-interface Row {
-  roleKey: string;
-  branchId: string;
-}
+type Row = RoleRow;
 
 export function RoleEditor({ user, self = false, roles, branches, onSave, onCancel }: {
   user: StaffUser;
@@ -20,12 +18,12 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
   onSave: (roles: RoleAssignmentRequest[]) => Promise<string | null>;
   onCancel: () => void;
 }) {
-  const [rows, setRows] = useState<Row[]>(() => (user.roles ?? []).map((r) => ({ roleKey: r.role_key ?? '', branchId: r.branch_id ?? '' })));
+  const [rows, setRows] = useState<Row[]>(() => roleRows(user));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saving = useRef(false);
   const [confirming, setConfirming] = useState(false);
-  const ready = rows.length > 0 && rows.every((r) => r.roleKey !== '') && !rows.some((r) => branchUnavailable(r.branchId, branches));
+  const ready = rows.length > 0 && rows.every((r) => r.roleKey !== '') && !rows.some((r) => r.branchIds.some((b) => branchUnavailable(b, branches)));
   // Taking the administrator role off yourself ends your right to this page's actions the moment it is saved.
   const droppingOwnAdmin = self && (user.roles ?? []).some((r) => r.role_key === TENANT_ADMIN) && !rows.some((r) => r.roleKey === TENANT_ADMIN);
 
@@ -38,7 +36,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
     saving.current = true;
     setBusy(true);
     setError(null);
-    const failure = await onSave(rows.map((r) => assignmentFor(r.roleKey, r.branchId)));
+    const failure = await onSave(rows.flatMap((r) => assignmentsFor(r.roleKey, r.branchIds)));
     saving.current = false;
     setBusy(false);
     if (failure) {
@@ -63,7 +61,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
             roles={roles}
             branches={branches}
             roleKey={row.roleKey}
-            branchId={row.branchId}
+            branchIds={row.branchIds}
             label={rows.length > 1 ? `Role ${i + 1}` : 'Role'}
             disabled={busy}
             onChange={(next) => { setConfirming(false); setRows((all) => all.map((r, j) => (j === i ? next : r))); }}
@@ -77,7 +75,7 @@ export function RoleEditor({ user, self = false, roles, branches, onSave, onCanc
       ))}
       {!rows.some((r) => r.roleKey === TENANT_ADMIN) && (
         <p>
-          <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => [...all, { roleKey: '', branchId: '' }])}>
+          <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setRows((all) => [...all, { roleKey: '', branchIds: [] }])}>
             Add another role
           </button>
         </p>

@@ -654,7 +654,7 @@ export const paymentsPage: Tour = {
 
 export const inviteUserPage: Tour = {
   id: 'page-invite-user',
-  version: 1,
+  version: 2,
   title: 'This page: invite someone',
   audience: (me) => held(me, USERS_MANAGE),
   autoStart: false,
@@ -670,7 +670,7 @@ export const inviteUserPage: Tour = {
       id: 'role',
       target: 'invite-role',
       title: 'Their role',
-      body: 'Pick the role. It decides what the person can see and do. Choose a branch if they work in only one.',
+      body: 'Pick the role. It decides what the person can see and do: a storekeeper moves and counts stock but never sells or sees money. Then tick the shops and stores they work in; they see and do things only there. Tick purchases and restocks only for people you trust with buying. An administrator always works everywhere.',
     },
     {
       id: 'send',
