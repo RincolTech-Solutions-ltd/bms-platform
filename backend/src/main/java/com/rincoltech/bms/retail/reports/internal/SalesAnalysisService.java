@@ -64,6 +64,7 @@ class SalesAnalysisService {
         }
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter("retail.sale.read", branchIds);
+        AnalyticsSupport.requireAllSellers(principal, filter);
         LocalDate today = clock.today(tenant.profile().timezone());
         Window w = AnalyticsSupport.window(from, to, today);
         int top = AnalyticsSupport.top(topParam);

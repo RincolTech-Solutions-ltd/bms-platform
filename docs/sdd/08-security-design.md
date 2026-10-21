@@ -281,6 +281,7 @@ platform API and holds no tenant permissions.
 | `retail.sale.create` | Y | | | | | | | Y | | |
 | `retail.sale.read` | Y | | | | | | | Y | | |
 | `retail.sale.void` | Y | | | | | | | | | |
+| `retail.sale.all_sellers` | Y | | | | | | | | | |
 | `retail.stock.read` | Y | | | | | | | Y | Y | Y |
 | `retail.stock.transfer` | Y | | | | | | | | Y | |
 | `retail.stocktake.commit` | Y | | | | | | | | Y | |
@@ -409,6 +410,19 @@ Notes:
   administrator adds nothing and takes nothing away. Tests: `RetailRolesIT` (a signed-in user of each role, allowed or
   refused per route and branch, and an administrator with no branch assignment seeing every branch), `PermissionMatrixIT`,
   `MigrationOrderIT`.
+- `retail.sale.all_sellers` (issue #399 slice 2, ADR-055, migration `V74`): see the sales and totals of every seller, not only one's
+  own; the tenant admin's alone by default, scoped by branch like every retail permission, a read. A holder of `retail.sale.read`
+  without it in every branch the figures cover sees only the sales they made, enforced in the queries: the sales list and its
+  grouped summary filter on `created_by` (a `seller_id` other than one's own is 403, the salesperson level is 403), one sale and its
+  payments are 404 for someone else's, and the owner dashboard, the sales analysis and the delivery fees report are 403. One
+  exception keeps the till working: the debts still owed (`owing=owing` or `overdue`, and opening a credit sale that still owes)
+  are shown whoever made the sale, so the person at the till can take a buyer's payment; a debt is the buyer's figure, not a
+  colleague's takings. Cost, margins, profit and the value of the stock are absent for the Sales role already (`retail.profit.read`,
+  slice 1). Left as they are, and named for the owner to decide: the cash book's daily summary (the till's cash, which the person
+  who banks it needs; profit-derived figures were already hidden, ADR-022 decision 13), the credit control and customer ageing
+  reports (what buyers owe), and the order list (shared work of the shop). Tests: `RetailSellerFiguresIT` (two sellers and the
+  owner, signed in: own list, totals, sale and payments; colleague's 404; the owner reports 403; no cost, profit, margin or stock
+  value key in any seller response; the owner with no branch assignment sees every sale and figure), `RetailSalesGroupingChainIT`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
   `retail.advance.*` permissions are rows of the matrix above, seeded by the cash book migration.

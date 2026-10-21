@@ -14,7 +14,7 @@ describe('retail permission gating', () => {
     expect(canUse(sales, 'stocktake')).toBe(false);
     // Stock value, even at the selling price, is the owner's figure (ADR-055), so the seller has no Stock value tile.
     // The seeded sales role also holds four cash book permissions (chapter 8 matrix).
-    expect(screensFor(sales).map((s) => s.screen)).toEqual(['sale', 'creditSales', 'salesHistory', 'orders', 'ordersReport', 'usage', 'stock', 'transfers', 'salesAnalysis', 'stockHealth', 'creditControl', 'catalogue', 'banking', 'savings', 'expenses', 'cashSummary', 'bankingReport', 'expensesReport']);
+    expect(screensFor(sales).map((s) => s.screen)).toEqual(['sale', 'creditSales', 'salesHistory', 'orders', 'usage', 'stock', 'transfers', 'stockHealth', 'creditControl', 'catalogue', 'banking', 'savings', 'expenses', 'cashSummary', 'bankingReport', 'expensesReport']);
     expect(canUse(sales, 'transfer')).toBe(false);
   });
 
@@ -25,11 +25,13 @@ describe('retail permission gating', () => {
     expect(only('retail.usage.report')).toEqual(['usage']);
     expect(only('retail.stock.read')).toEqual(['stock', 'transfers', 'stockHealth']);
     expect(only('retail.profit.read')).toEqual(['profit', 'margins', 'evaluation']);
-    expect(only('retail.sale.read')).toEqual(['creditSales', 'salesHistory', 'salesAnalysis', 'creditControl']);
+    expect(only('retail.sale.read')).toEqual(['creditSales', 'salesHistory', 'creditControl']);
+    // ADR-055: the sales analysis and the orders report add up everybody's sales, so they are the owner's.
+    expect(screensFor({ permissions: ['retail.sale.read', 'retail.sale.all_sellers'] }).map((s) => s.screen)).toContain('salesAnalysis');
     // Controls name staff and rank them by a rate, so it is its own permission, never a sales read.
     expect(only('retail.controls.read')).toEqual(['controls']);
     // Customer orders (issue #385): the orders and their report are one permission; delivering also needs a sale permission.
-    expect(only('retail.order.manage')).toEqual(['orders', 'ordersReport']);
+    expect(only('retail.order.manage')).toEqual(['orders']);
   });
 
   it('offers everything to an admin', () => {

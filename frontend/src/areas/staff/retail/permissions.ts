@@ -7,6 +7,11 @@ import type { BranchRole } from '../../../api/retail';
 // otherwise (docs/sdd/07-api-design.md section 7.11.20, chapter 8 section 8.3.2).
 
 export const PROFIT = 'retail.profit.read';
+/**
+ * See the sales and totals of every seller, not only one's own (issue #399, ADR-055): the owner's. Without it the sales lists and
+ * their totals are the person's own sales (the server filters them), and the reports that add up everybody's sales are not offered.
+ */
+export const ALL_SELLERS = 'retail.sale.all_sellers';
 
 export type RetailScreen =
   | 'sale' | 'creditSales' | 'salesHistory' | 'orders' | 'ordersReport' | 'restock' | 'usage' | 'stock' | 'stocktake' | 'transfer' | 'transfers' | 'valuation' | 'profit' | 'salesAnalysis' | 'margins' | 'stockHealth' | 'creditControl' | 'evaluation' | 'controls'
@@ -99,7 +104,8 @@ const NEEDS: Record<RetailScreen, string[]> = {
   // Customer orders with delivery (issue #385): taken, moved and cancelled with retail.order.manage; delivering one also needs
   // retail.sale.create at its shop, checked where Delivered is offered.
   orders: [ORDER_MANAGE],
-  ordersReport: [ORDER_MANAGE],
+  // The delivery fees and the value of everybody's orders are the owner's figures (ADR-055).
+  ordersReport: [ORDER_MANAGE, ALL_SELLERS],
   restock: ['retail.purchase.create'],
   usage: ['retail.usage.report'],
   stock: ['retail.stock.read'],
@@ -139,7 +145,8 @@ const NEEDS: Record<RetailScreen, string[]> = {
   valuation: ['retail.stock.read', PROFIT],
   profit: [PROFIT],
   // The analytics reports (issue #149); profit columns arrive only with retail.profit.read.
-  salesAnalysis: ['retail.sale.read'],
+  // The sales analysis adds up every seller's sales (ADR-055).
+  salesAnalysis: ['retail.sale.read', ALL_SELLERS],
   margins: [PROFIT],
   stockHealth: ['retail.stock.read'],
   creditControl: ['retail.sale.read'],

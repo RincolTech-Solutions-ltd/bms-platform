@@ -57,11 +57,18 @@ own figures.
    adds to the union and never narrows it, because no check reads a role name: every check is a permission and its scope. Integration tests
    prove an administrator with no branch assignment sees every branch's data and reports, and that adding a branch-limited role to the same
    person changes nothing.
-5. **Sellers see only their own figures (slice 2).** A new permission lets a holder see everybody's sales at its branches (the tenant
-   administrator's by default). A holder of `retail.sale.read` without it sees only the sales they made, in every list, summary, report, export,
-   search and API response, enforced in the queries on the server and not only hidden in the PWA; it never sees profit, margins, buying prices
-   or costs (already absent without `retail.profit.read`) nor the value of the stock, which needs `retail.profit.read` too. The exact permission
-   key, the routes it covers and its migration are recorded in the slice 2 amendment of this ADR.
+5. **Sellers see only their own figures (slice 2, migration `V74`).** A new permission, `retail.sale.all_sellers`, lets a holder see
+   everybody's sales at its branches; the tenant administrator holds it, no other seeded role does. A holder of `retail.sale.read`
+   without it (in every branch the figures cover) sees only the sales they made: the sales list and its grouped summary are filtered on
+   the seller in the query, one sale and its payments are not found when they are someone else's, a `seller_id` other than one's own
+   and the salesperson level are refused, and the reports that add up everybody's sales (the owner dashboard, the sales analysis, the
+   delivery fees) are refused with 403; the Retail home shows the seller "Your sales" (today and the last 7 days) from the summary
+   instead of the dashboard. Profit, margins, buying prices, costs and the value of the stock are absent without `retail.profit.read`
+   (slice 1 extends that rule to the value at the selling price). One exception keeps the till working: the debts still owed
+   (`owing` and `overdue`, and opening a credit sale that still owes) are shown whoever made the sale, so whoever is at the till can
+   take a buyer's payment. A debt is the buyer's figure, not a colleague's takings. The cash book's daily summary, the credit control
+   and customer ageing reports and the order list are left as they are and named for the owner to decide (the till's cash, what
+   buyers owe, the shop's shared work).
 6. **Existing users keep what they have.** The administrator and every lending role keep exactly their permissions, the Sales role keeps its
    permissions, and every existing assignment keeps its branch; the only rows `V73` changes are administrator rows limited to a branch, which
    it widens. Slice 2 narrows what the Sales role sees of other people's sales, which is the change the owner asked for.

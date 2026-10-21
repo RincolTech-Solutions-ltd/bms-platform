@@ -757,13 +757,22 @@ class CustomerOrdersService {
                     List.of(new FieldProblem("group_by", "invalid", "group_by is day, source or rider.")));
         }
         LocalDate[] range = range(from, to);
-        List<ReportRow> rows =
-                repo
-                        .fees(CurrentPrincipal.require().branchFilter(MANAGE, branchIds), range[0], range[1], group)
-                        .stream()
-                        .map(row -> new ReportRow(
-                                row.key(), label(group, row.key()), row.orders(), row.itemsMinor(), row.feesMinor()))
-                        .toList();
+        Principal principal = CurrentPrincipal.require();
+        List<UUID> filter = principal.branchFilter(MANAGE, branchIds);
+        // ADR-055: the fees and the value of everybody's orders are the owner's figures; a seller who sees only their
+        // own
+        // sales is refused (403), as for the dashboard.
+        if (SalesSummaryService.ownSellerOnly(principal, filter, null) != null) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "This report adds up everybody's orders; it is for the owner.");
+        }
+        List<ReportRow> rows = repo.fees(filter, range[0], range[1], group).stream()
+                .map(row -> new ReportRow(
+                        row.key(), label(group, row.key()), row.orders(), row.itemsMinor(), row.feesMinor()))
+                .toList();
         return new FeesReport(
                 range[0],
                 range[1],

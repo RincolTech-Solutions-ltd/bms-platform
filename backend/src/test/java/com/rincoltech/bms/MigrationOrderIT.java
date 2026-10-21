@@ -1773,6 +1773,12 @@ class MigrationOrderIT {
                     .isEqualTo("retail_purchasing:retail.purchase.create,retail_purchasing:retail.stock.read,"
                             + "retail_storekeeper:retail.stock.read,retail_storekeeper:retail.stock.transfer,"
                             + "retail_storekeeper:retail.stocktake.commit,retail_storekeeper:retail.usage.report");
+            // V74 (slice 2): seeing every seller's sales is the administrator's alone; the Sales role sees its own.
+            assertThat(owner.sql("SELECT string_agg(role_key, ',' ORDER BY role_key) FROM role_permissions"
+                                    + " WHERE permission_key = 'retail.sale.all_sellers'")
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("tenant_admin");
             assertThat(owner.sql("""
                                     SELECT count(*) FROM pg_constraint
                                      WHERE conrelid = 'user_role_assignments'::regclass AND NOT convalidated
