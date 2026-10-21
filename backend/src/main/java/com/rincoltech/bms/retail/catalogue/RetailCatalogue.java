@@ -1,5 +1,6 @@
 package com.rincoltech.bms.retail.catalogue;
 
+import com.rincoltech.bms.kernel.Principal;
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.Optional;
@@ -22,6 +23,20 @@ public interface RetailCatalogue {
     String UNITS_CAPABILITY = "units";
 
     Optional<ProductSnapshot> find(UUID productId);
+
+    /** What every selling price in a response says when it is left out (ADR-055). */
+    String PRICE_ONLY =
+            "Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)";
+
+    /**
+     * ADR-055 (the owner's decision of 21 October 2026): selling prices are shown to whoever sells, sets prices or reads cost.
+     * A storekeeper, who holds none of those, sees no price in any response. Prices are tenant-wide, so any branch counts.
+     */
+    static boolean maySeePrices(Principal principal) {
+        return principal.hasPermission("retail.sale.create")
+                || principal.hasPermission("retail.price.edit")
+                || principal.hasPermission("retail.profit.read");
+    }
 
     /**
      * ADR-033, issue #194: the pack of a product in the given unit (a carton of twelve pieces), read

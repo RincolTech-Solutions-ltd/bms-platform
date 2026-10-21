@@ -34,14 +34,17 @@ own figures.
    counts and corrects stock and reports usage and damage, at its own branches only. It holds no sale, price, purchase, cash book, payable,
    document or profit permission, so it cannot sell, set a price, touch money or see a cost. The value of the stock, even at the selling
    price, is absent for it as for a seller (the valuation, the stock summary and stock health give quantities only without
-   `retail.profit.read`). It reads what a shop assistant reads: the items with their selling price (a shelf price it never changes), the
-   price history, and the stock movements of its branches with their quantities. Whether a storekeeper should not see selling prices
-   at all is left to the owner; hiding them would need a new permission over every item and stock response.
+   `retail.profit.read`). **The owner decided on 21 October 2026 that a storekeeper sees no selling prices.** A selling price
+   (`sell_minor`) is in a response only for a caller who sells, sets prices or reads cost (`retail.sale.create`,
+   `retail.price.edit` or `retail.profit.read`, `RetailCatalogue.maySeePrices`): the items and one item, the stock list of a branch
+   and of every branch, stock by location, the valuation and every item picker; the price history is refused (403). The storekeeper
+   reads names, codes, quantities and the stock movements of its branches with their quantities.
 3. **Purchasing is a role the owner gives (`retail_purchasing`, migration `V73`)**, holding `retail.stock.read` and
    `retail.purchase.create`, given on top of another role (for example a seller who also buys) at the branches it applies in. By default
    only the tenant administrator holds `retail.purchase.create`, as before. What the owner gives with it, at those branches: recording
-   restocks (and purchase orders and goods received with the purchasing capability), reading every restock, order and receipt there with
-   its buying prices and totals, money out of the branch's cash or bank for a restock paid that way, and the item's cost for the whole
+   restocks (and purchase orders and goods received with the purchasing capability), reading the restocks, orders and receipts the
+   person recorded themselves with their buying prices and totals (the owner's decision of 21 October 2026: without
+   `retail.profit.read` the lists and the records answer only one's own), money out of the branch's cash or bank for a restock paid that way, and the item's cost for the whole
    business, since the latest purchase sets it (ADR-020 decision 5). A new selling price applies in every shop, so a restock or a goods
    receipt that sets one also needs `retail.price.edit` (the unchanged price may be sent back, as the restock form does). Supplier
    invoices and payments stay with `retail.payable.manage`. A role, not a per-user permission grant, because roles are the one way

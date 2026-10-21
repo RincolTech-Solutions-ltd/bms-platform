@@ -157,7 +157,10 @@ class RetailRolesIT extends IntegrationTest {
         }
     }
 
-    /** No cost, profit, margin or stock value under any key; a flag saying the figure is hidden is not a figure. */
+    /**
+     * No cost, profit, margin, stock value or selling price under any key (a storekeeper sees no prices, the owner's decision of 21
+     * October 2026); a flag saying the figure is hidden is not a figure.
+     */
     static void noCost(ResponseEntity<JsonNode> r, String what) {
         allowed(r, what);
         List<String> keys = new ArrayList<>();
@@ -169,7 +172,9 @@ class RetailRolesIT extends IntegrationTest {
                         || k.contains("profit")
                         || k.contains("margin")
                         || k.contains("value")
-                        || k.contains("expected_sales"));
+                        || k.contains("expected_sales")
+                        || k.contains("sell")
+                        || k.contains("price"));
     }
 
     static Set<String> branchIds(JsonNode items) {
@@ -199,6 +204,17 @@ class RetailRolesIT extends IntegrationTest {
         noCost(get("/stock/summary?group_by=branch", keeper), "stock summary, without value");
         noCost(get("/reports/stock-health", keeper), "stock health, without value");
         assertThat(get("/reports/valuation", keeper).getBody().get("rows")).isNotEmpty();
+        // No selling price either, on any item or stock response, and no price history.
+        noCost(get("/products", keeper), "items, without prices");
+        noCost(get("/products/" + product, keeper), "one item, without prices");
+        noCost(get("/stock/all-branches", keeper), "stock of every branch in scope, without prices");
+        ResponseEntity<JsonNode> location = get("/reports/stock-by-location", keeper);
+        if (location.getStatusCode().is2xxSuccessful()) {
+            noCost(location, "stock by location, without prices");
+        }
+        forbidden(get("/products/" + product + "/price-history", keeper), "price history");
+        assertThat(get("/products/" + product, keeper).getBody().get("code").asString())
+                .isEqualTo("ROLE-1");
     }
 
     @Test
@@ -288,6 +304,23 @@ class RetailRolesIT extends IntegrationTest {
         Map<String, Object> repriced =
                 Map.of("purchased_on", today().toString(), "payment_method", "cash", "lines", List.of(line));
         forbidden(post("/purchases", repriced, buyer), "a buyer sets a new selling price");
+        // A buyer reads the buying prices of the restocks they recorded, not the owner's.
+        UUID ownersRestock = RetailTestSupport.id(retail.postKeyed(
+                "/purchases",
+                restock(t.headOffice()),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString()));
+        ResponseEntity<JsonNode> mine = post("/purchases", restock(t.headOffice()), buyer);
+        allowed(mine, "the buyer's own restock");
+        JsonNode listed = get("/purchases", buyer).getBody().get("items");
+        List<String> listedIds = new ArrayList<>();
+        listed.forEach(p -> listedIds.add(p.get("id").asString()));
+        assertThat(listedIds).contains(RetailTestSupport.id(mine).toString()).doesNotContain(ownersRestock.toString());
+        outsideScope(get("/purchases/" + ownersRestock, buyer), "the owner's restock");
+        // A seller still sees the selling price, to sell.
+        assertThat(get("/products/" + product, seller).getBody().has("sell_minor"))
+                .isTrue();
         line.put("sell_minor", 7_000);
         allowed(post("/purchases", repriced, buyer), "a buyer sends the price unchanged");
         assertThat(retail.get("/products/" + product, ADMIN)

@@ -444,7 +444,8 @@ class PurchasingService {
                 newestFirst,
                 afterCreated,
                 afterId,
-                size + 1);
+                size + 1,
+                ownRecordsOnly());
         boolean more = rows.size() > size;
         List<Purchase> items = more ? rows.subList(0, size) : rows;
         String next = more
@@ -461,7 +462,19 @@ class PurchasingService {
         if (filter != null && filter.isEmpty()) {
             throw ApiException.notFound();
         }
-        return repo.find(id, filter).orElseThrow(ApiException::notFound);
+        UUID own = ownRecordsOnly();
+        return repo.find(id, filter)
+                .filter(p -> own == null || own.equals(p.createdBy()))
+                .orElseThrow(ApiException::notFound);
+    }
+
+    /**
+     * ADR-055: buying prices are seen on the purchases one records oneself. Without {@code retail.profit.read} (the owner's) a
+     * caller reads only the restocks, orders and receipts they made; null means everyone's.
+     */
+    static UUID ownRecordsOnly() {
+        Principal principal = CurrentPrincipal.require();
+        return principal.hasPermission("retail.profit.read") ? null : principal.userId();
     }
 
     // ---- Void a restock (issue #351, ADR-044) -----------------------------------------------

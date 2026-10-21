@@ -117,7 +117,12 @@ class ReportsService {
                     h.unit(),
                     Quantities.format(h.qty()),
                     h.qty().signum() < 0,
-                    h.sellMinor(),
+                    // ADR-055: a storekeeper sees no selling price.
+                    principal.hasPermission("retail.sale.create")
+                                    || principal.hasPermission("retail.price.edit")
+                                    || principal.hasPermission(PROFIT_READ)
+                            ? h.sellMinor()
+                            : null,
                     // ADR-055: the value of the stock, even at the selling price, is the owner's figure.
                     cost ? expected : null,
                     expected == null,

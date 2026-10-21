@@ -583,8 +583,10 @@ class ReceiptsService {
     Receipt get(UUID id) {
         capabilities.require(RetailCapabilities.PURCHASING);
         Principal principal = CurrentPrincipal.require();
+        UUID own = PurchasingService.ownRecordsOnly();
         return repo.find(id, false)
                 .filter(x -> principal.may(PERMISSION, x.branchId()))
+                .filter(x -> own == null || own.equals(x.createdBy()))
                 .map(x -> view(x, true))
                 .orElseThrow(ApiException::notFound);
     }
@@ -620,7 +622,8 @@ class ReceiptsService {
                 search,
                 after == null ? null : after.at(),
                 after == null ? null : after.id(),
-                size + 1);
+                size + 1,
+                PurchasingService.ownRecordsOnly());
         boolean more = rows.size() > size;
         List<Row> items = more ? rows.subList(0, size) : rows;
         String next = more

@@ -68,7 +68,8 @@ export function buildPurchase(input: { supplierId: string; purchasedOn: string; 
       product_id: l.product.id ?? '',
       ...(chosenPack(l.product, l.unitId) ? { unit_id: l.unitId } : {}),
       cost_minor: parseMinor(l.cost, RETAIL_CURRENCY) ?? 0,
-      sell_minor: parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor ?? 0,
+      // ADR-055: no price is sent when none is known (someone who may not see prices); the item keeps its price.
+      ...((parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor) !== undefined ? { sell_minor: parseMinor(l.sell, RETAIL_CURRENCY) ?? l.product.sell_minor } : {}),
       qty_by_branch: Object.entries(l.qtyByBranch)
         .map(([branchId, q]) => ({ branchId, milli: branchQty(q) ?? 0 }))
         .filter((q) => q.milli > 0)
@@ -159,7 +160,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
     setLines((ls) =>
       ls.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)
         ? ls
-        : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: String(p.sell_minor ?? 0), qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
+        : [...ls, { product: p, cost: p.cost_minor !== undefined ? String(p.cost_minor) : '', sell: p.sell_minor !== undefined ? String(p.sell_minor) : '', qtyByBranch: { ...(branch && branches.some((b) => b.id === branch) ? { [branch]: '' } : {}) } }],
     );
   const patch = (i: number, change: Partial<RestockLine>) => setLines((ls) => ls.map((l, n) => (n === i ? { ...l, ...change } : l)));
   const patchWhole = (i: number, line: RestockLine) => setLines((ls) => ls.map((l, n) => (n === i ? line : l)));

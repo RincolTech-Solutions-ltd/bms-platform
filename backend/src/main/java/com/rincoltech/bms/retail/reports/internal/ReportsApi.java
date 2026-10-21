@@ -33,7 +33,12 @@ final class ReportsApi {
             String unit,
             String qty,
             boolean negative,
-            long sellMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)")
+            Long sellMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(

@@ -8622,7 +8622,10 @@ export interface components {
             negative?: boolean;
             /** Format: uuid */
             product_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /** @description The sum over the branches of the page */
             total_qty?: string;
@@ -10665,7 +10668,10 @@ export interface components {
             negative?: boolean;
             /** Format: uuid */
             product_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /** @description The sum of the balances of each role present in the report */
             subtotals?: components["schemas"]["RetailRoleQuantity"][];
@@ -11479,7 +11485,10 @@ export interface components {
             qty?: string;
             /** @description Issue #385: of the branch balance, what open customer orders keep aside (so not free to sell); sent only with branch_id, and only when something is kept */
             reserved_qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /**
              * Format: int32
@@ -12952,7 +12961,10 @@ export interface components {
             qty?: string;
             /** @description Issue #385: of qty, what open customer orders keep aside (not free to sell); absent when nothing is kept */
             reserved_qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             unit?: string;
         };
@@ -13967,7 +13979,10 @@ export interface components {
             /** Format: uuid */
             product_id?: string;
             qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             unit?: string;
             /**
