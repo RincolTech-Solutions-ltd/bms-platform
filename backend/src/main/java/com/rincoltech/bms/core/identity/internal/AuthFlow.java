@@ -23,6 +23,10 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Failures that must be remembered (the failed attempt counter, the lock, the audit row, a
  * family revoked for refresh token reuse) are written before the method throws; the methods do
  * not roll back on {@link ApiException}, so the answer is an error and the record commits.
+ *
+ * <p>Sign-in answers never say whether an account exists (ADR-058): every address has the same attempt budget
+ * ({@link AuthThrottle#SIGN_IN_PER_ADDRESS}), and an address that matches no account is locked after the same failures,
+ * for the same time, with the same answer as a real one. Neither lock pays for a hash.
  */
 @Service
 class AuthFlow {
@@ -34,12 +38,14 @@ class AuthFlow {
     private final AccessTokens tokens;
     private final SecretBox box;
     private final BusinessClock clock;
+    private final AuthThrottle throttle;
 
-    AuthFlow(Passwords passwords, AccessTokens tokens, SecretBox box, BusinessClock clock) {
+    AuthFlow(Passwords passwords, AccessTokens tokens, SecretBox box, BusinessClock clock, AuthThrottle throttle) {
         this.passwords = passwords;
         this.tokens = tokens;
         this.box = box;
         this.clock = clock;
+        this.throttle = throttle;
     }
 
     enum Step {
@@ -63,9 +69,16 @@ class AuthFlow {
     @Transactional(noRollbackFor = ApiException.class)
     Outcome login(Accounts accounts, String login, String password, String issuer, String userAgent) {
         Instant now = clock.now();
+        String address = AuthThrottle.address(accounts, login);
+        throttle.acquireFor(AuthThrottle.SIGN_IN_PER_ADDRESS, address);
         Account account = accounts.byLogin(login).orElse(null);
         if (account == null) {
+            if (throttle.unknownLocked(address)) {
+                accounts.audit("core.auth.sign_in_refused_locked", null, Map.of("login", login == null ? "" : login));
+                throw locked();
+            }
             passwords.matches(password == null ? "" : password, null);
+            throttle.unknownFailed(address);
             accounts.audit("core.auth.sign_in_failed", null, Map.of("login", login == null ? "" : login));
             throw invalidCredentials();
         }
@@ -157,6 +170,7 @@ class AuthFlow {
     Outcome verifyMfa(Accounts accounts, String mfaToken, String code, String issuer, String userAgent) {
         Instant now = clock.now();
         Account account = accountOf(accounts, mfaToken, now);
+        throttle.acquireFor(AuthThrottle.MFA_PER_ACCOUNT, accounts.kind() + ":" + account.id());
         if (!account.mfaEnabled() || account.totpSecret() == null) {
             throw new ApiException(
                     HttpStatus.CONFLICT, "mfa_not_enrolled", "MFA not enrolled", "Enrol a second factor first.");

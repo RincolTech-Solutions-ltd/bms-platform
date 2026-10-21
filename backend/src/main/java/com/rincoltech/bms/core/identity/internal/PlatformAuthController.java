@@ -16,6 +16,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.PublicEndpoint;
+import com.rincoltech.bms.kernel.RequestContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -53,6 +54,7 @@ class PlatformAuthController {
     private final JdbcClient jdbc;
     private final PlatformAuditLog audit;
     private final BusinessClock clock;
+    private final AuthThrottle throttle;
 
     PlatformAuthController(
             AuthFlow flow,
@@ -60,13 +62,15 @@ class PlatformAuthController {
             Passwords passwords,
             JdbcClient jdbc,
             PlatformAuditLog audit,
-            BusinessClock clock) {
+            BusinessClock clock,
+            AuthThrottle throttle) {
         this.flow = flow;
         this.accounts = accounts;
         this.passwords = passwords;
         this.jdbc = jdbc;
         this.audit = audit;
         this.clock = clock;
+        this.throttle = throttle;
     }
 
     @PostMapping("/auth/setup")
@@ -74,6 +78,7 @@ class PlatformAuthController {
     @Operation(summary = "Set the first password with the one-time setup token", operationId = "platformSetup")
     @Transactional
     public ResponseEntity<Void> setup(@Valid @RequestBody AcceptInvitationRequest request) {
+        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         Instant now = clock.now();
         record Setup(UUID id, String email, Instant expiresAt) {}
         Setup setup = jdbc.sql("""
@@ -104,6 +109,7 @@ class PlatformAuthController {
     @PublicEndpoint
     @Operation(summary = "Platform sign-in, first factor", operationId = "platformLogin")
     ResponseEntity<SignInResponse> login(@Valid @RequestBody SignInRequest request, HttpServletRequest http) {
+        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         return respond(flow.login(
                 accounts, request.login(), request.password(), http.getServerName(), StaffAuthController.agent(http)));
     }
@@ -112,6 +118,7 @@ class PlatformAuthController {
     @PublicEndpoint
     @Operation(summary = "Platform sign-in, second factor", operationId = "platformMfaVerify")
     ResponseEntity<SignInResponse> verify(@Valid @RequestBody MfaVerifyRequest request, HttpServletRequest http) {
+        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         return respond(flow.verifyMfa(
                 accounts, request.mfaToken(), request.code(), http.getServerName(), StaffAuthController.agent(http)));
     }
@@ -120,6 +127,7 @@ class PlatformAuthController {
     @PublicEndpoint
     @Operation(summary = "Start the mandatory TOTP enrolment with the MFA token", operationId = "platformMfaEnrol")
     MfaEnrolmentResponse enrol(@RequestBody MfaEnrolRequest request) {
+        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         Enrolment e = flow.startEnrolment(accounts, flow.userOfMfaToken(accounts, request.mfaToken()));
         return new MfaEnrolmentResponse(e.secret(), e.otpauthUri());
     }
@@ -128,6 +136,7 @@ class PlatformAuthController {
     @PublicEndpoint
     @Operation(summary = "Confirm TOTP enrolment and sign in", operationId = "platformMfaConfirm")
     ResponseEntity<SignInResponse> confirm(@Valid @RequestBody MfaConfirmRequest request, HttpServletRequest http) {
+        throttle.acquire(throttle.signInPerIp, RequestContext.clientIp());
         UUID userId = flow.userOfMfaToken(accounts, request.mfaToken());
         return respond(flow.confirmEnrolment(
                 accounts, userId, request.code(), true, http.getServerName(), StaffAuthController.agent(http)));
