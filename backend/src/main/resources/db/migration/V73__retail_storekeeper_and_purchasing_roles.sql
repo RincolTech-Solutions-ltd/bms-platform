@@ -45,7 +45,7 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
 -- row per role and branch), otherwise it is changed to every branch. Then a check keeps it so. Flyway runs the file in one
 -- transaction, so the check is added in one step: its ACCESS EXCLUSIVE lock is held until commit either way, over the scan of
 -- a table of a few rows per staff member (the lock_timeout above bounds the wait for it). The number of rows widened and
--- revoked is reported as a NOTICE in the migration log, since no person made the change and no audit row is written for it.
+-- revoked is reported as a NOTICE in the migration log, and each one gets an audit row by the system (below).
 -- ---------------------------------------------------------------------------------------------
 
 DO $$
@@ -57,6 +57,17 @@ BEGIN
     RAISE NOTICE 'V73: % active administrator assignment(s) limited to a branch are widened or revoked', limited;
 END
 $$;
+
+-- One audit row per administrator assignment widened or revoked, by the system, with the branch it had, so the owner can see
+-- in the audit log that no person made the change and what it was.
+INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type, entity_id, data)
+SELECT gen_random_uuid(), a.tenant_id, 'system', 'core.user.roles_changed', 'core.user', a.user_id,
+       jsonb_build_object(
+           'before', jsonb_build_object('roles', jsonb_build_array('tenant_admin@' || a.branch_id::text)),
+           'after', jsonb_build_object('roles', jsonb_build_array('tenant_admin@all')),
+           'reason', 'V73: an administrator covers every branch (ADR-055)')
+  FROM user_role_assignments a
+ WHERE a.role_key = 'tenant_admin' AND a.branch_id IS NOT NULL AND a.revoked_at IS NULL;
 
 UPDATE user_role_assignments a
    SET revoked_at = now(), updated_at = now(), version = version + 1

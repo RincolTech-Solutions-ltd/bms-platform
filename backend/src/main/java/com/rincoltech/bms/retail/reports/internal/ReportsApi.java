@@ -36,7 +36,9 @@ final class ReportsApi {
             long sellMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
-            @Schema(description = "qty times the current sell price; absent when amount_out_of_range")
+            @Schema(
+                    description =
+                            "qty times the current sell price; present only with retail.profit.read in this branch (ADR-055); absent when amount_out_of_range")
             Long expectedSalesMinor,
 
             @Schema(
@@ -60,7 +62,12 @@ final class ReportsApi {
     @Schema(name = "RetailValuationBranch")
     record BranchTotal(
             UUID branchId,
-            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)")
+            Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,
@@ -87,7 +94,12 @@ final class ReportsApi {
     record CategoryTotal(
             UUID categoryId,
             String category,
-            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)")
+            Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,
@@ -105,7 +117,12 @@ final class ReportsApi {
             List<ValuationRow> rows,
             List<BranchTotal> branches,
             List<CategoryTotal> categories,
-            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)")
+            Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,

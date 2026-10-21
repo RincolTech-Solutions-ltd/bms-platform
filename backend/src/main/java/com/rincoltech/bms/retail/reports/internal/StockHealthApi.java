@@ -50,6 +50,8 @@ final class StockHealthApi {
     record DeadBranch(
             UUID branchId,
             int itemCount,
+
+            @Schema(description = COST_ONLY + " (ADR-055); quantity times the current sell price")
             Long valueAtPriceMinor,
 
             @Schema(description = COST_ONLY + "; quantity times the current cost")
@@ -64,7 +66,10 @@ final class StockHealthApi {
             String description,
             String unit,
             String qtyOnHand,
+
+            @Schema(description = COST_ONLY + " (ADR-055); quantity times the current sell price")
             Long valueAtPriceMinor,
+
             @Schema(description = COST_ONLY) Long valueAtCostMinor) {}
 
     @Schema(name = "RetailDeadStock", description = "Stock on hand with no sale in the branch in the last 90 days")
@@ -81,6 +86,7 @@ final class StockHealthApi {
             @Schema(description = "All reported branches; " + COST_ONLY + " in every branch reported")
             Long valueAtCostMinor,
 
+            @Schema(description = "All reported branches; " + COST_ONLY + " in every branch reported (ADR-055)")
             Long valueAtPriceMinor) {}
 
     @Schema(name = "RetailShrinkageBranch")

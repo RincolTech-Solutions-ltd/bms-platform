@@ -77,8 +77,8 @@ own figures.
 **Worse:**
 - A role per branch per person means a person in five shops has five rows; the Users screen groups them, the API lists them. Taking
   off a person's last branch leaves nothing chosen, which the screen will not save, so it never widens them to every branch.
-- `V73` widens any administrator row limited to a branch without a person or an audit row behind it; the migration log reports the
-  count. The API never allowed such a row, so none is expected outside hand-edited data.
+- `V73` widens any administrator row limited to a branch by the system, with an audit row for each (`core.user.roles_changed`, actor `system`, the branch it had) and the
+  count in the migration log. The API never allowed such a row, so none is expected outside hand-edited data.
 - Purchasing as a role means the owner gives it per branch; a person who buys for every branch gets one assignment for every branch.
 - Seeded roles are global: a business cannot rename them or make its own mix; a custom role remains future work.
 

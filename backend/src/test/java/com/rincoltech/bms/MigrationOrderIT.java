@@ -1757,6 +1757,16 @@ class MigrationOrderIT {
                     .as("a row revoked before stays as it was")
                     .isEqualTo(1);
             assertThat(owner.sql("""
+                                    SELECT string_agg(entity_id::text, ',' ORDER BY entity_id) FROM audit_log
+                                     WHERE action = 'core.user.roles_changed' AND actor_kind = 'system'
+                                       AND data -> 'after' -> 'roles' = '["tenant_admin@all"]'::jsonb
+                                    """).query(String.class).single())
+                    .as("each widened or revoked administrator row has a system audit row")
+                    .isEqualTo(java.util.stream.Stream.of(limited, both)
+                            .map(UUID::toString)
+                            .sorted()
+                            .collect(java.util.stream.Collectors.joining(",")));
+            assertThat(owner.sql("""
                                     SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
                                       FROM role_permissions WHERE role_key IN ('retail_storekeeper', 'retail_purchasing')
                                     """).query(String.class).single())
