@@ -49,9 +49,11 @@ movement and every report, and the many rows already on staging would need a def
   the item's; they must share one unit. A size added to an item whose every size is switched off starts switched off. A new size made from an item (more sizes added to it, or an item given sizes) takes
   the template variant's active pack sizes (while the units capability is on) and its price list prices that are in force or coming,
   at the same price, on the rules of a list price set by hand (issue #395): only while the price lists capability is on and the caller
-  also holds `retail.pricelist.manage` (a catalogue-only role adds the size without list prices, and the answer says so); only in the
+  also holds `retail.pricelist.manage` (a catalogue-only role adds the size without list prices and always gets the same
+  `price_list_permission` answer, whether the size has list prices or not and whatever the capability, so it learns nothing of the
+  lists); only in the
   size's own unit or a pack copied with it; only to a size that keeps the template's cost and selling price exactly (a size at its
-  own prices takes none, so a dearer size never sells at the old wholesale price); never below the new size's cost; each copy
+  own prices takes none, so a dearer size never sells at the old wholesale price); never below the new size's cost (`below_cost`, told only to a caller with `retail.profit.read`; `not_copied` otherwise); each copy
   audited as `retail.price_list_item.created`. The answer's `terms_copied` lists every list price not copied and why. Joining into an
   item that exists takes only the items (a name, base code, category or duplicate reason is refused with 422) and clears each joined
   product's `duplicate_reason`, which the audit keeps in `before` (issue #395). **An item never has more than 100 sizes and colours:**

@@ -887,10 +887,10 @@ final class CatalogueApi {
             int priceListItemsCopied,
 
             @Schema(
-                    description =
-                            "Why no price list price was copied at all, absent when they were looked at one by one:"
-                                    + " price_list_permission (the caller does not hold retail.pricelist.manage; nothing about the"
-                                    + " lists is shown) or price_lists_off (the price lists capability is off)",
+                    description = "Why no price list price was looked at, absent when they were looked at one by one:"
+                            + " price_list_permission (the caller does not hold retail.pricelist.manage; given whether"
+                            + " or not the size has list prices and whatever the capability, so nothing about the"
+                            + " lists is shown) or price_lists_off (the price lists capability is off)",
                     allowableValues = {"price_list_permission", "price_lists_off"})
             String priceListItemsSkipped,
 
@@ -912,9 +912,10 @@ final class CatalogueApi {
             @Schema(
                     description =
                             "price_differs: the new size does not keep the cost and selling price it was made from;"
-                                    + " below_cost: the price is below the new size's cost; unit_not_sold: the new size is not sold"
-                                    + " in that pack",
-                    allowableValues = {"price_differs", "below_cost", "unit_not_sold"})
+                                    + " below_cost: the price is below the new size's cost (only to a caller with"
+                                    + " retail.profit.read); not_copied: the same for a caller without it, who is not told"
+                                    + " about cost; unit_not_sold: the new size is not sold in that pack",
+                    allowableValues = {"price_differs", "below_cost", "not_copied", "unit_not_sold"})
             String reason) {}
 
     @Schema(name = "RetailProductPage")

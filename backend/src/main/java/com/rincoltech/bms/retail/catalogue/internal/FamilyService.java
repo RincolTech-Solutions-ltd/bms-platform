@@ -525,11 +525,13 @@ class FamilyService {
         String skipped = null;
         int prices = 0;
         List<PriceNotCopied> notCopied = new ArrayList<>();
-        if (!items.isEmpty()
-                && !Boolean.TRUE.equals(settings.group("retail").get(RetailPricing.PRICE_LISTS_CAPABILITY))) {
-            skipped = "price_lists_off";
-        } else if (!items.isEmpty() && !CurrentPrincipal.require().hasPermission("retail.pricelist.manage")) {
+        // The permission is asked first and answered the same whatever the lists hold, so a caller who may not set list
+        // prices learns nothing of them: not whether the size has any, nor whether the capability is on.
+        boolean mayCost = CatalogueService.mayReadCost();
+        if (!CurrentPrincipal.require().hasPermission("retail.pricelist.manage")) {
             skipped = "price_list_permission";
+        } else if (!Boolean.TRUE.equals(settings.group("retail").get(RetailPricing.PRICE_LISTS_CAPABILITY))) {
+            skipped = "price_lists_off";
         } else {
             for (int i = 0; i < to.size(); i++) {
                 UUID id = to.get(i);
@@ -545,7 +547,8 @@ class FamilyService {
                     } else if (BigDecimal.valueOf(item.priceMinor())
                                     .compareTo(BigDecimal.valueOf(v.costMinor()).multiply(item.factor()))
                             < 0) {
-                        reason = "below_cost";
+                        // Without retail.profit.read the reason would tell that the cost is above the price.
+                        reason = mayCost ? "below_cost" : "not_copied";
                     } else {
                         reason = null;
                     }

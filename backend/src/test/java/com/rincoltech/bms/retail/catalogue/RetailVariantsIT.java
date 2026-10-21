@@ -1059,6 +1059,50 @@ class RetailVariantsIT extends IntegrationTest {
         // Nothing of the list is shown to a caller who may not read it.
         assertThat(copied.get("price_list_items_not_copied")).isEmpty();
         assertThat(more.getBody().toString()).doesNotContain(list.toString());
+
+        // A size with no list price at all gets the identical answer, and so does any size with the capability off:
+        // adding sizes item by item never tells which items carry list prices, nor whether the lists are on.
+        ResponseEntity<JsonNode> bare = createFamily("Test Bare Item", "BARE", List.of("S"), List.of());
+        assertThat(bare.getStatusCode()).as("%s", bare.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> none = api.post(
+                "/product-families/" + bare.getBody().get("id").asString() + "/variants",
+                Map.of("sizes", List.of("M")),
+                ADMIN);
+        assertThat(none.getStatusCode()).as("%s", none.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(none.getBody().get("terms_copied")).isEqualTo(copied);
+        capability("price_lists", false);
+        ResponseEntity<JsonNode> off = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants",
+                Map.of("sizes", List.of("18-24m"), "colours", List.of("Blue")),
+                ADMIN);
+        assertThat(off.getStatusCode()).as("%s", off.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(off.getBody().get("terms_copied")).isEqualTo(copied);
+    }
+
+    @Test
+    void aCallerWithoutProfitReadIsNotToldThatAListPriceIsBelowCost() {
+        capability("price_lists", true);
+        String perms = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+        String noProfit = perms.replace(",retail.profit.read", "");
+        assertThat(noProfit).doesNotContain("retail.profit.read");
+        Map<String, Object> shirt = new LinkedHashMap<>();
+        shirt.put("code", "TEE-M");
+        shirt.put("description", "Test Tee");
+        shirt.put("category_id", category);
+        shirt.put("unit_id", pieces);
+        shirt.put("cost_minor", 20_000);
+        shirt.put("sell_minor", 30_000);
+        UUID m = RetailTestSupport.id(api.post("/products", shirt, ADMIN));
+        UUID staff = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Staff"), perms));
+        listPrice(staff, m, pieces, 15_000, perms);
+
+        ResponseEntity<JsonNode> made =
+                api.post("/products/" + m + "/family", Map.of("size", "M", "sizes", List.of("L")), noProfit);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode notCopied = made.getBody().get("terms_copied").get("price_list_items_not_copied");
+        assertThat(notCopied).hasSize(1);
+        assertThat(notCopied.get(0).get("reason").asString()).isEqualTo("not_copied");
+        assertThat(made.getBody().toString()).doesNotContain("below_cost");
     }
 
     @Test
