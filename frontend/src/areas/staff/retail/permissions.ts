@@ -83,6 +83,8 @@ export const PURCHASE_APPROVE = 'retail.purchase.approve';
 export const PAYABLE_MANAGE = 'retail.payable.manage';
 export const SETTINGS_MANAGE = 'core.settings.manage';
 export const SAVINGS_RECORD = 'retail.savings.record';
+/** Close the till and do the banking (ADR-055, the owner's decision of 21 October 2026): given per person, the administrators everywhere. */
+export const TILL = 'retail.till.close';
 export const SAVINGS_OVERWRITE = 'retail.savings.overwrite';
 export const CASHBOOK_READ = 'retail.cashbook.read';
 export const CASHBOOK_VOID = 'retail.cashbook.void';
@@ -165,13 +167,13 @@ const NEEDS: Record<RetailScreen, string[]> = {
   importer: ['retail.catalogue.manage', 'retail.stock.read', 'core.settings.manage'],
   // The cash book screens each need the permission that records on them; the lists and reports on
   // them need retail.cashbook.read, and a void needs retail.cashbook.void (checked where it is offered).
-  savings: [SAVINGS_RECORD],
-  banking: ['retail.banking.record'],
+  savings: [SAVINGS_RECORD, TILL],
+  banking: ['retail.banking.record', TILL],
   expenses: ['retail.expense.record'],
   withdrawals: ['retail.withdrawal.record'],
   // Advances open to whoever may record an advance or a repayment (see ANY_OF).
   advances: [],
-  cashSummary: [CASHBOOK_READ],
+  cashSummary: [CASHBOOK_READ, TILL],
   bankingReport: [CASHBOOK_READ],
   expensesReport: [CASHBOOK_READ],
   expenseSetup: ['retail.expense.manage', CASHBOOK_READ],

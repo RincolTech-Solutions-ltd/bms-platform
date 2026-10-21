@@ -1480,7 +1480,7 @@ class MigrationOrderIT {
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
-                                        + " 'retail.order.manage', 'retail.sale.all_sellers')")
+                                        + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -1778,7 +1778,26 @@ class MigrationOrderIT {
                                     + " WHERE permission_key = 'retail.sale.all_sellers'")
                             .query(String.class)
                             .single())
-                    .isEqualTo("tenant_admin");
+                    .isEqualTo("retail_supervisor,tenant_admin");
+            // V74: the cash book left the Sales role for the till, given per person; the administrator keeps it all.
+            // JUSTIFICATION-A3: new assertions for the V74 grants; the anchor is only the insertion point.
+            assertThat(owner.sql("""
+                                    SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
+                                      FROM role_permissions
+                                     WHERE permission_key IN ('retail.cashbook.read', 'retail.savings.record',
+                                                              'retail.banking.record', 'retail.expense.record',
+                                                              'retail.till.close')
+                                       AND role_key <> 'tenant_admin'
+                                    """).query(String.class).single())
+                    .isEqualTo("retail_till:retail.banking.record,retail_till:retail.cashbook.read,"
+                            + "retail_till:retail.expense.record,retail_till:retail.savings.record,"
+                            + "retail_till:retail.till.close");
+            assertThat(owner.sql("""
+                                    SELECT count(*) FROM role_permissions
+                                     WHERE role_key = 'tenant_admin' AND permission_key IN ('retail.cashbook.read',
+                                           'retail.savings.record', 'retail.banking.record', 'retail.expense.record',
+                                           'retail.till.close')
+                                    """).query(Long.class).single()).isEqualTo(5);
             assertThat(owner.sql("""
                                     SELECT count(*) FROM pg_constraint
                                      WHERE conrelid = 'user_role_assignments'::regclass AND NOT convalidated

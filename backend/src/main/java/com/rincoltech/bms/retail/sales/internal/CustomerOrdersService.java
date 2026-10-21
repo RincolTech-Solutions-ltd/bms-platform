@@ -843,7 +843,27 @@ class CustomerOrdersService {
 
     // ---- Helpers -------------------------------------------------------------------------------------
 
+    /**
+     * ADR-055 (the owner's decision of 21 October 2026): every seller of the branch sees the orders and their values, the shop's
+     * shared work, but the sale a colleague made on delivery is not linked: its id and number are left out unless the caller made
+     * it or may see every seller's sales there.
+     */
+    private boolean saleShown(Header h) {
+        if (h.saleId() == null) {
+            return false;
+        }
+        Principal principal = CurrentPrincipal.require();
+        if (principal.may(SalesSummaryService.ALL_SELLERS, h.branchId())) {
+            return true;
+        }
+        return salesRepo
+                .find(h.saleId(), false)
+                .map(x -> principal.userId().equals(x.sale().createdBy()))
+                .orElse(false);
+    }
+
     private Order view(Header h, boolean withHistory) {
+        boolean sale = saleShown(h);
         return new Order(
                 h.id(),
                 h.orderNo(),
@@ -866,8 +886,8 @@ class CustomerOrdersService {
                 h.sentAt(),
                 h.deliveredAt(),
                 h.deliveredOn(),
-                h.saleId(),
-                h.saleNo(),
+                sale ? h.saleId() : null,
+                sale ? h.saleNo() : null,
                 h.feeMethod(),
                 h.cancelledAt(),
                 h.cancelReason(),

@@ -102,6 +102,7 @@ class CashbookController {
     SavingsSuggestion suggestion(
             @RequestParam(name = "branch_id", required = false) UUID branchId,
             @RequestParam(name = "date", required = false) LocalDate date) {
+        CashbookSupport.requireTill();
         return savings.suggestion(branchId, date);
     }
 
@@ -110,6 +111,7 @@ class CashbookController {
     @Operation(summary = "Record the day's savings (FR-RET-18 to FR-RET-20); M", operationId = "createRetailSavings")
     ResponseEntity<Savings> createSavings(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody SavingsRequest request) {
+        CashbookSupport.requireTill();
         Outcome<Savings> outcome = savings.create(key, request);
         return created(outcome, "/api/v1/retail/savings/" + outcome.body().id());
     }
@@ -147,6 +149,7 @@ class CashbookController {
     BankingExpected expected(
             @RequestParam(name = "branch_id", required = false) UUID branchId,
             @RequestParam(name = "date", required = false) LocalDate date) {
+        CashbookSupport.requireTill();
         return banking.expected(branchId, date);
     }
 
@@ -155,6 +158,7 @@ class CashbookController {
     @Operation(summary = "Record cash banked (FR-RET-22); M", operationId = "createRetailBanking")
     ResponseEntity<Banking> createBanking(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody BankingRequest request) {
+        CashbookSupport.requireTill();
         Outcome<Banking> outcome = banking.createBanking(key, request);
         return created(outcome, "/api/v1/retail/bankings/" + outcome.body().id());
     }
@@ -338,6 +342,7 @@ class CashbookController {
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
             @RequestParam(name = "to", required = false) LocalDate to) {
+        CashbookSupport.requireTill();
         return reports.daily(branchIds, from, to);
     }
 
