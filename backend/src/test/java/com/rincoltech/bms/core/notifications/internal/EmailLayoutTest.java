@@ -160,8 +160,8 @@ class EmailLayoutTest {
         assertThat(needsInfo)
                 .contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; &quot;Test&quot; Shop")
                 .contains("&lt;b onmouseover=&quot;x()&quot;&gt;Test&lt;/b&gt;")
-                // A typed note keeps its line break and is never linked.
-                .contains("Test note")
+                // A typed note is escaped text, and a URL in it is never linked.
+                .contains("&lt;img src=x onerror=alert(1)&gt; see https://evil.example.test/")
                 .doesNotContain("href=\"https://evil");
     }
 
