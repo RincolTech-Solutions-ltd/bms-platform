@@ -1,9 +1,12 @@
 package com.rincoltech.bms.core.notifications.internal;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -12,8 +15,9 @@ import java.util.regex.Pattern;
  * with no external stylesheet or script, built from the same template and the same values as the plain-text part. The
  * header is the Rincol Tech logo, or a business's own logo on the emails of its own staff; one big button carries the
  * main link, with the raw link below it for copy and paste; the footer says who sent it, why the reader got it and how
- * to reach support. Every value is HTML-escaped here, so a name a user typed can never become markup; only {@code http}
- * and {@code https} links of the link parameters become anchors.
+ * to reach support. Every value is HTML-escaped here, so a name a user typed can never become markup. Only a URL in a
+ * link parameter that the caller trusts (the platform host or a tenant host, with the platform's scheme) becomes an
+ * anchor or the button; any other URL, wherever it appears, is printed as escaped text.
  */
 final class EmailLayout {
 
@@ -29,11 +33,18 @@ final class EmailLayout {
     static final String SENDER_LINE = "BMS by Rincol Tech Solutions Ltd";
     static final String POWERED_BY = "Powered by BMS from Rincol Tech";
 
-    /** The parameters whose values are links: the only ones that become a button or an anchor. */
+    /** The standard signature delimiter, dash dash space, on a line of its own before the text part's footer. */
+    static final String SIGNATURE_DELIMITER = "-- ";
+
+    /** The parameters whose values are links: the only ones whose trusted URLs become a button or an anchor. */
     static final Set<String> LINK_PARAMS = Set.of("link", "links", "sign_in_url", "portal_url");
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-z_]+)}");
     private static final Pattern URL = Pattern.compile("https?://[^\\s<>\"']+");
+    /** Punctuation that ends a sentence after a link and is not part of it. */
+    private static final Pattern TRAILING = Pattern.compile("[.,;:!?)\\]}]+$");
+
+    private static final Pattern COLOUR = Pattern.compile("^#[0-9A-Fa-f]{6}$");
     private static final String FONT = "font-family:Arial,Helvetica,sans-serif;";
     private static final String TEXT_COLOUR = "#1F2933";
     private static final String MUTED = "#52606D";
@@ -45,8 +56,8 @@ final class EmailLayout {
      *
      * @param logoUrl absolute URL of the header logo
      * @param logoAlt the logo's alt text (the business's name, or Rincol Tech)
-     * @param colour the button colour, {@code #RRGGBB}
-     * @param textOnColour the readable text colour on {@code colour}
+     * @param colour the button colour, {@code #RRGGBB}; anything else is replaced by the platform's
+     * @param textOnColour the readable text colour on {@code colour}, {@code #RRGGBB}; anything else is white
      * @param tenant true for a business's own look: the footer then says it is powered by BMS
      */
     record Brand(
@@ -57,6 +68,12 @@ final class EmailLayout {
             String colour,
             String textOnColour,
             boolean tenant) {
+
+        /** A colour that is not {@code #RRGGBB} never reaches a style attribute. */
+        Brand {
+            colour = isColour(colour) ? colour : PLATFORM_COLOUR;
+            textOnColour = isColour(textOnColour) ? textOnColour : "#FFFFFF";
+        }
 
         static Brand platform(String platformOrigin) {
             return new Brand(
@@ -82,39 +99,47 @@ final class EmailLayout {
 
     /**
      * The body of a template as blocks. A paragraph (lines between blank lines) that is exactly one link placeholder
-     * becomes the button when the template names one, the first time only; every other paragraph is escaped text with
-     * its line breaks kept and the values of the link parameters as anchors.
+     * whose value is a trusted URL becomes the button when the template names one, the first time only; every other
+     * paragraph is escaped text with its line breaks kept and the trusted URLs of the link parameters as anchors.
+     *
+     * @param trusted whether a URL may become an anchor or the button (see {@link #trustedLinks})
      */
-    static Content content(String title, String template, Map<String, String> params, String button, String reason) {
+    static Content content(
+            String title,
+            String template,
+            Map<String, String> params,
+            String button,
+            String reason,
+            Predicate<String> trusted) {
         List<Block> blocks = new ArrayList<>();
         boolean buttonUsed = false;
         for (String paragraph : paragraphs(template)) {
             Matcher only = PLACEHOLDER.matcher(paragraph.strip());
             if (button != null && !buttonUsed && only.matches() && LINK_PARAMS.contains(only.group(1))) {
                 String url = params.get(only.group(1));
-                if (url != null && isWebLink(url.strip())) {
+                if (url != null && isWebLink(url.strip()) && trusted.test(url.strip())) {
                     blocks.add(new Button(escape(button), url.strip()));
                     buttonUsed = true;
                     continue;
                 }
             }
-            blocks.add(new Paragraph(fillHtml(paragraph, params)));
+            blocks.add(new Paragraph(fillHtml(paragraph, params, trusted)));
         }
-        return new Content(escape(title), blocks, reason == null ? null : fillHtml(reason, params));
+        return new Content(escape(title), blocks, reason == null ? null : fillHtml(reason, params, null));
     }
 
-    /** A body that has no template (a message composed elsewhere): its text as escaped paragraphs. */
+    /** A body that has no template (a message composed elsewhere): its text as escaped paragraphs, no links. */
     static Content fromText(String title, String text) {
         List<Block> blocks = new ArrayList<>();
         for (String paragraph : paragraphs(text)) {
-            blocks.add(new Paragraph(linesHtml(paragraph, false)));
+            blocks.add(new Paragraph(linesHtml(paragraph, null)));
         }
         return new Content(escape(title == null ? "" : title), blocks, null);
     }
 
-    /** The plain-text footer appended to the text part, so both parts say the same. */
+    /** The plain-text footer appended to the text part, after the signature delimiter. */
     static String textFooter(Brand brand, String reasonText, String support) {
-        StringBuilder out = new StringBuilder("\n--\n");
+        StringBuilder out = new StringBuilder("\n" + SIGNATURE_DELIMITER + "\n");
         out.append(brand.tenant() ? POWERED_BY : SENDER_LINE).append('\n');
         if (reasonText != null && !reasonText.isBlank()) {
             out.append(reasonText).append('\n');
@@ -235,45 +260,53 @@ final class EmailLayout {
                 + href + "</a></p>\n";
     }
 
-    /** Fills a template paragraph for HTML: literal text and values escaped, link values as anchors, breaks kept. */
-    private static String fillHtml(String text, Map<String, String> params) {
+    /**
+     * Fills a template paragraph for HTML: literal text and values escaped, breaks kept, and with {@code trusted} the
+     * trusted URLs in the values of the link parameters as anchors (null: no anchors at all).
+     */
+    private static String fillHtml(String text, Map<String, String> params, Predicate<String> trusted) {
         Matcher m = PLACEHOLDER.matcher(text);
         StringBuilder out = new StringBuilder();
         int last = 0;
         while (m.find()) {
-            out.append(linesHtml(text.substring(last, m.start()), false));
+            out.append(linesHtml(text.substring(last, m.start()), null));
             String name = m.group(1);
             String value = params.get(name);
             if (value == null) {
                 throw new IllegalArgumentException("missing template parameter " + name);
             }
-            out.append(linesHtml(value, LINK_PARAMS.contains(name)));
+            out.append(linesHtml(value, trusted != null && LINK_PARAMS.contains(name) ? trusted : null));
             last = m.end();
         }
-        out.append(linesHtml(text.substring(last), false));
+        out.append(linesHtml(text.substring(last), null));
         return out.toString();
     }
 
-    /** Escapes text, keeps its line breaks as {@code <br>}, and with {@code links} turns web links into anchors. */
-    private static String linesHtml(String text, boolean links) {
+    /** Escapes text, keeps its line breaks as {@code <br>}, and with {@code trusted} turns trusted URLs into anchors. */
+    private static String linesHtml(String text, Predicate<String> trusted) {
         String[] lines = text.split("\n", -1);
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < lines.length; i++) {
             if (i > 0) {
                 out.append("<br>");
             }
-            out.append(links ? linkify(lines[i]) : escape(lines[i]));
+            out.append(trusted == null ? escape(lines[i]) : linkify(lines[i], trusted));
         }
         return out.toString();
     }
 
-    private static String linkify(String line) {
+    /** Trusted URLs as anchors, cut before trailing punctuation; every other character, untrusted URLs included, escaped. */
+    private static String linkify(String line, Predicate<String> trusted) {
         Matcher m = URL.matcher(line);
         StringBuilder out = new StringBuilder();
         int last = 0;
         while (m.find()) {
+            String url = trimTrailing(m.group());
+            if (url.isEmpty() || !trusted.test(url)) {
+                continue;
+            }
             out.append(escape(line.substring(last, m.start())));
-            String href = escape(m.group());
+            String href = escape(url);
             out.append("<a href=\"")
                     .append(href)
                     .append("\" target=\"_blank\" rel=\"noopener\" style=\"color:")
@@ -281,7 +314,7 @@ final class EmailLayout {
                     .append(";word-break:break-all;\">")
                     .append(href)
                     .append("</a>");
-            last = m.end();
+            last = m.start() + url.length();
         }
         out.append(escape(line.substring(last)));
         return out.toString();
@@ -299,8 +332,32 @@ final class EmailLayout {
         return out;
     }
 
+    /** A URL in running text without the sentence punctuation after it. */
+    static String trimTrailing(String url) {
+        return TRAILING.matcher(url).replaceFirst("");
+    }
+
     static boolean isWebLink(String value) {
         return URL.matcher(value).matches();
+    }
+
+    static boolean isColour(String value) {
+        return value != null && COLOUR.matcher(value).matches();
+    }
+
+    /**
+     * The URLs an email may carry as anchors: the scheme of the platform's own links ({@code https} on staging and
+     * production) and a host the predicate accepts (the platform host or a host under the tenant pattern).
+     */
+    static Predicate<String> trustedLinks(String scheme, Predicate<String> host) {
+        return url -> {
+            try {
+                URI uri = new URI(url);
+                return scheme.equalsIgnoreCase(uri.getScheme()) && uri.getHost() != null && host.test(uri.getHost());
+            } catch (URISyntaxException e) {
+                return false;
+            }
+        };
     }
 
     /** HTML escaping of text and attribute values. */

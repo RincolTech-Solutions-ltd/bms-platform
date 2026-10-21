@@ -31,17 +31,23 @@ markup unescaped would let an applicant put their own links and markup into a me
    The subject is the title. A paragraph of the template that is only the main link placeholder becomes one big button with a label
    the template names, and the raw link is shown again below it for copy and paste; the other link values become plain anchors. The
    footer says "BMS by Rincol Tech Solutions Ltd", why the reader got this email (a sentence per template) and, when
-   `BMS_SUPPORT_CONTACT` is set, how to reach support. The text part ends with the same footer.
+   `BMS_SUPPORT_CONTACT` is set, how to reach support. The text part ends with the same footer after the standard signature
+   delimiter (`-- ` with its trailing space).
 3. **Whose logo.** The header is the Rincol Tech logo, by absolute URL on the platform host
    (`https://<BMS_PLATFORM_HOST>/brand/rincoltech-logo.png`, the PWA's own file), never attached. A row of a tenant (the emails of
-   its own staff) whose logo is set shows that logo instead, by absolute URL on the tenant's public logo route, with its alt text the
-   business's name, its width and height read from the image and fitted into 200 by 64 px, the button in the tenant's readable
-   brand colour, and "Powered by BMS from Rincol Tech" in the footer. The brand is read in one short transaction of the row's tenant
+   its own staff) whose logo is set shows that logo instead, by absolute URL on the tenant's public logo route versioned by the
+   logo's document id (`/api/v1/branding/logo?v=<id>`, as the branding route gives it, so a replaced logo is never served from a
+   stale cache), with its alt text the business's name, its width and height read from the image and fitted into 200 by 64 px, the
+   button in the tenant's readable brand colour, and "Powered by BMS from Rincol Tech" in the footer. A colour that is not
+   `#RRGGBB` never reaches a style: the platform's is used. The brand is read in one short transaction of the row's tenant
    (`TenantJobs.callForTenant`, `Letterheads`); any failure there (a suspended tenant, storage down, an image that cannot be read)
    falls back to the platform's look and never stops the send.
-4. **Escaping.** Every value is HTML-escaped (`&`, `<`, `>`, quotes), in text and in attributes, and only the values of the link
-   parameters (`link`, `links`, `sign_in_url`, `portal_url`) with an `http` or `https` URL become anchors. A URL a user typed into a
-   note stays text.
+4. **Escaping and trusted links.** Every value is HTML-escaped (`&`, `<`, `>`, quotes), in text and in attributes. Only a URL in
+   a link parameter (`link`, `links`, `sign_in_url`, `portal_url`) whose scheme is the platform's link scheme (`https` on staging
+   and production) and whose host is the platform host or exactly a tenant host under the pattern (`PlatformHost.servesPlatform`,
+   `servesTenant`) becomes an anchor or the button, cut before trailing sentence punctuation; any other URL, a business name that
+   looks like a link included, is printed as escaped text. A subject is put on one line before it is set, so a line break in a
+   business's name can never start a header of its own.
 5. **Wording.** A prose paragraph of a template is one line (a trailing backslash joins the source lines), so both parts wrap to the
    reader's screen. The activation email says to set the password; the variant `onboarding.activation_two_step`, which also asks to
    turn on two-step sign-in, is chosen only when the new administrator is required to (a role that requires it or the tenant's policy,

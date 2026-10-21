@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.Predicate;
 import javax.imageio.ImageIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +69,19 @@ class SmtpEmailChannel implements OutboxChannel {
         this.tenantJobs = tenantJobs;
         this.tenant = tenant;
         this.letterheads = letterheads;
+        this.trusted = trustedLinks(hosts);
+    }
+
+    private final Predicate<String> trusted;
+
+    /**
+     * The links an email may carry as anchors or its button: the platform's link scheme ({@code https} on staging and
+     * production) on the platform host or a tenant host under the pattern. Anything else is printed as text.
+     */
+    static Predicate<String> trustedLinks(PlatformHost hosts) {
+        String origin = hosts.platformOrigin();
+        String scheme = origin.substring(0, origin.indexOf(':'));
+        return EmailLayout.trustedLinks(scheme, host -> hosts.servesPlatform(host) || hosts.servesTenant(host));
     }
 
     @Override
@@ -111,16 +125,21 @@ class SmtpEmailChannel implements OutboxChannel {
      * gets its text as escaped paragraphs, so no email ever goes out as plain text only.
      */
     Body body(Delivery delivery, EmailLayout.Brand brand) {
-        return body(templates, delivery, brand, supportContact);
+        return body(templates, delivery, brand, supportContact, trusted);
     }
 
-    static Body body(OutboxTemplates templates, Delivery delivery, EmailLayout.Brand brand, String support) {
+    static Body body(
+            OutboxTemplates templates,
+            Delivery delivery,
+            EmailLayout.Brand brand,
+            String support,
+            Predicate<String> trusted) {
         RowContext context = delivery.context() == null ? RowContext.NONE : delivery.context();
         String key = context.templateKey();
         EmailLayout.Content content;
         String reason;
         if (key != null && OutboxTemplates.keys("email").contains(key)) {
-            content = templates.emailContent(key, context.params());
+            content = templates.emailContent(key, context.params(), trusted);
             reason = templates.emailReason(key, context.params());
         } else {
             content = EmailLayout.fromText(delivery.subject(), delivery.text());
@@ -135,7 +154,7 @@ class SmtpEmailChannel implements OutboxChannel {
         MimeMessage message = new IdMessage(session, messageId(delivery.idempotencyKey()));
         message.setFrom(new InternetAddress(from, true));
         message.setRecipient(Message.RecipientType.TO, new InternetAddress(delivery.recipient(), true));
-        message.setSubject(delivery.subject(), StandardCharsets.UTF_8.name());
+        message.setSubject(oneLine(delivery.subject()), StandardCharsets.UTF_8.name());
         MimeBodyPart plain = new MimeBodyPart();
         plain.setText(body.text(), StandardCharsets.UTF_8.name(), "plain");
         MimeBodyPart html = new MimeBodyPart();
@@ -145,6 +164,16 @@ class SmtpEmailChannel implements OutboxChannel {
         alternative.addBodyPart(html);
         message.setContent(alternative);
         return message;
+    }
+
+    /**
+     * A subject on one line: a CR, LF or other line break a value carried (a business's name) becomes a space, so no
+     * value can start a header of its own.
+     */
+    static String oneLine(String subject) {
+        return subject == null
+                ? ""
+                : subject.replaceAll("[\\r\\n\\u0085\\u2028\\u2029\\t]+", " ").strip();
     }
 
     /**
@@ -169,6 +198,10 @@ class SmtpEmailChannel implements OutboxChannel {
     }
 
     private EmailLayout.Brand tenantBrand(EmailLayout.Brand platform) {
+        Optional<String> path = letterheads.logoPath();
+        if (path.isEmpty()) {
+            return platform;
+        }
         Letterheads.Letterhead letterhead = letterheads.current();
         Optional<int[]> size = letterhead.logo().flatMap(logo -> fit(logo.bytes()));
         if (size.isEmpty()) {
@@ -180,7 +213,7 @@ class SmtpEmailChannel implements OutboxChannel {
                         ? profile.name()
                         : letterhead.displayName();
         return new EmailLayout.Brand(
-                hosts.tenantOrigin(profile.slug()) + "/api/v1/branding/logo",
+                hosts.tenantOrigin(profile.slug()) + path.get(),
                 name,
                 size.get()[0],
                 size.get()[1],

@@ -454,15 +454,22 @@ class OutboxTemplates {
 
     /**
      * The HTML content of an email template, from the same text and values as {@link #render} (issue #396, ADR-054): the
-     * subject is the title, the paragraph that is only the main link is the button, and every value is escaped.
+     * subject is the title, the paragraph that is only a trusted main link is the button, only trusted URLs become
+     * anchors, and every value is escaped.
      */
-    EmailLayout.Content emailContent(String templateKey, Map<String, String> params) {
+    EmailLayout.Content emailContent(
+            String templateKey, Map<String, String> params, java.util.function.Predicate<String> trusted) {
         Template template = EMAIL.get(templateKey);
         if (template == null) {
             throw new IllegalArgumentException("no email template " + templateKey);
         }
         return EmailLayout.content(
-                fill(template.subject(), params), template.text(), params, template.button(), template.reason());
+                fill(template.subject(), params),
+                template.text(),
+                params,
+                template.button(),
+                template.reason(),
+                trusted);
     }
 
     /** Why the reader got an email, as plain text for the text part's footer; null when the template says nothing. */
