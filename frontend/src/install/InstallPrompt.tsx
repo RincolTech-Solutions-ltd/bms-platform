@@ -4,19 +4,27 @@ import { dismiss, getServerState, getState, isIosDevice, requestInstall, subscri
 // "Install the app" (ADR-050). Two pieces share one store (install.ts):
 //   InstallPrompt: the offer. It shows after sign-in, on the sign-in page, on the invitation and first password page and on the
 //     forgot and reset password pages, only when this device can actually install the app (the browser gave us a prompt, or it is
-//     an iPhone or iPad, where the person is told the three taps). "Not now" is remembered on this device.
+//     an iPhone or iPad, where the person is told the taps in Safari). "Not now" is remembered on this device.
 //   InstallPanel: the permanent control on the Notifications and app page, which stays whatever was dismissed.
 
 function useInstall() {
   return useSyncExternalStore(subscribe, getState, getServerState);
 }
 
-/** The three taps on an iPhone or iPad, in plain words. */
+/**
+ * The taps on an iPhone or iPad, in plain words. Only Safari can add to the Home Screen, and the Share button is often out of
+ * sight: Safari folds its toolbar into the address when the page scrolls, and newer iPhones keep Share behind the ⋯ button. A
+ * first pilot owner stopped at "tap Share" because she could not see it, so the steps say how to find it.
+ */
 export function IosSteps() {
   return (
     <ol className="stack" data-testid="ios-install-steps">
       <li>
-        Tap the <strong>Share</strong> button: the square with an arrow, at the bottom of Safari (at the top on an iPad).
+        Use <strong>Safari</strong>, in a normal tab, not a Private one (a Private tab forgets your sign-in).
+      </li>
+      <li>
+        Tap the address at the bottom of the screen so the buttons show, then tap <strong>Share</strong>: the square with an
+        arrow. On newer iPhones tap <strong>⋯</strong> first, then Share. On an iPad it is at the top.
       </li>
       <li>
         Scroll down and tap <strong>Add to Home Screen</strong>.
