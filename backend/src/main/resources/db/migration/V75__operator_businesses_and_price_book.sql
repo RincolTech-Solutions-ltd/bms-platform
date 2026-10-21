@@ -361,7 +361,22 @@ REVOKE ALL ON FUNCTION bms_start_trial_clock() FROM PUBLIC;
 
 CREATE TRIGGER start_trial_clock AFTER INSERT ON auth_sessions FOR EACH ROW EXECUTE FUNCTION bms_start_trial_clock();
 
--- A tenant already in its trial whose staff have signed in: its clock starts from that first session, with one
+-- The owner's decision (21 Oct 2026): three businesses on staging are pilots until a paid start is agreed: no free month end
+-- and never suspended by a job. They are marked here only where a tenant with that slug exists, so another database is not
+-- touched; each mark writes a platform audit row as the Business page's own mark does.
+WITH marked AS (
+        UPDATE subscriptions s
+           SET is_pilot = true, trial_ends_on = NULL, updated_at = now()
+          FROM tenants t
+         WHERE t.id = s.tenant_id AND t.slug IN ('hats', 'yasad', 'dodos') AND NOT s.is_pilot
+        RETURNING s.tenant_id)
+INSERT INTO platform_audit_log (id, action, tenant_id, data)
+SELECT gen_random_uuid(), 'platform.tenant.pilot_changed', m.tenant_id,
+       jsonb_build_object('before', false, 'after', true,
+                          'reason', 'V75: a pilot until a paid start is agreed (owner decision, 21 Oct 2026)')
+  FROM marked m;
+
+-- A tenant already in its trial whose staff have signed in (not a pilot): its clock starts from that first session, with one
 -- platform.tenant.trial_started audit row per tenant dated here, as the trigger writes one.
 WITH firsts AS (
         SELECT a.tenant_id, min(a.created_at) AS first_at
@@ -372,6 +387,7 @@ WITH firsts AS (
            SET trial_ends_on = ((f.first_at AT TIME ZONE t.timezone)::date + interval '1 month' - interval '1 day')::date
           FROM tenants t, firsts f
          WHERE s.tenant_id = t.id AND f.tenant_id = t.id AND s.status = 'trial' AND s.trial_ends_on IS NULL
+           AND NOT s.is_pilot
         RETURNING s.tenant_id, s.trial_ends_on, f.first_at)
 INSERT INTO platform_audit_log (id, action, tenant_id, data)
 SELECT gen_random_uuid(), 'platform.tenant.trial_started', d.tenant_id,
