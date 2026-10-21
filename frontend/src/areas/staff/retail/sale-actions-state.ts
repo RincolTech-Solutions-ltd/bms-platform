@@ -140,7 +140,7 @@ export const WRITE_OFF_PENDING = 'A write-off of this debt is waiting for a seco
 export const writeOffAlreadyPending = (error: unknown): boolean => codeOf(error) === 'approval_already_pending';
 
 /** Refusals that mean the sale moved on since the screen read it. */
-export const writeOffMovedOn = (error: unknown): boolean => ['already_written_off', 'nothing_owing', 'sale_voided'].includes(codeOf(error) ?? '');
+export const writeOffMovedOn = (error: unknown): boolean => ['already_written_off', 'nothing_owing', 'sale_voided', 'write_off_changed'].includes(codeOf(error) ?? '');
 
 /** What to tell the person about a failed write-off, when the plain refusal alone would leave them stuck. */
 export function writeOffFailureWords(error: unknown): unknown {

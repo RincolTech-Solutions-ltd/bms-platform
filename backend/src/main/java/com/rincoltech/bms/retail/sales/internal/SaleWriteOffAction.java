@@ -1,7 +1,7 @@
 package com.rincoltech.bms.retail.sales.internal;
 
 import com.rincoltech.bms.core.approvals.ApprovalAction;
-import com.rincoltech.bms.kernel.ApiException;
+import com.rincoltech.bms.core.approvals.RequestSupersededException;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
 import java.util.Optional;
 import java.util.UUID;
@@ -68,10 +68,14 @@ class SaleWriteOffAction implements ApprovalAction {
         // off.
         Object approved = e.payload().get(UNPAID);
         if (approved instanceof Number n && n.longValue() != plan.unpaidMinor()) {
-            throw ApiException.rule(
+            // The request is superseded, not failed: the approvals inbox closes it and frees the sale for a fresh
+            // request.
+            throw new RequestSupersededException(
                     "write_off_changed",
+                    "The debt changed",
                     "The amount owed changed from " + n.longValue() + " to " + plan.unpaidMinor()
-                            + " since the write-off was asked for. Ask for it again.");
+                            + " since the write-off was asked for. Ask for it again.",
+                    java.util.Map.of("approved_minor", n.longValue(), "owed_minor", plan.unpaidMinor()));
         }
         servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), null);
     }

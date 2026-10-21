@@ -1470,4 +1470,57 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         }
         assertThat(account("trade_debtors", true)).isZero();
     }
+
+    /** A tenant administrator who counts for the second-person rule of a write-off (ADR-043). */
+    void tenantAdmin(UUID user, int i) {
+        TestDatabase.owner()
+                .sql(
+                        "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', ?, ?, 'active')")
+                .params(user, t.tenantId(), "Test Admin 0" + i, "test.admin" + i + "." + user + "@example.invalid")
+                .update();
+        TestDatabase.owner()
+                .sql("INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, granted_by)"
+                        + " VALUES (?, ?, ?, 'tenant_admin', ?)")
+                .params(UUID.randomUUID(), t.tenantId(), user, user)
+                .update();
+    }
+
+    /**
+     * FR-RET-55: a write-off waiting for a second administrator, whose fee is paid meanwhile, is not approved for the old amount:
+     * the request is superseded (stale), the sale is free again, and a fresh request for what is owed now is accepted.
+     */
+    @Test
+    void aWriteOffWhoseFeeIsPaidMeanwhileIsSupersededAndCanBeAskedAgain() {
+        UUID[] ids = feeOnAccountSale("Test Buyer 14");
+        RetailTestSupport checker = new RetailTestSupport(http, t);
+        tenantAdmin(api.userId(), 0);
+        tenantAdmin(checker.userId(), 1);
+        ResponseEntity<JsonNode> asked = writeOff(ids[1]);
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        String approval = asked.getBody().get("approval_id").asString();
+        assertThat(payFee(ids[0], UUID.randomUUID().toString(), ORDERS).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        ResponseEntity<JsonNode> approved = http.exchange(
+                "/api/v1/approvals/" + approval + "/approve",
+                HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(
+                        Map.of("note", "Checked the debt"),
+                        checker.headers(WRITER + ",core.approvals.read", "*", Map.of())),
+                JsonNode.class);
+        assertThat(approved.getStatusCode()).as("%s", approved.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(code(approved)).isEqualTo("write_off_changed");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM approval_requests WHERE id = ?::uuid")
+                        .param(approval)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("stale");
+        assertThat(api.get("/sales/" + ids[1], ADMIN).getBody().has("write_off"))
+                .isFalse();
+
+        ResponseEntity<JsonNode> again = writeOff(ids[1]);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(again.getBody().get("approval_id").asString()).isNotEqualTo(approval);
+    }
 }
