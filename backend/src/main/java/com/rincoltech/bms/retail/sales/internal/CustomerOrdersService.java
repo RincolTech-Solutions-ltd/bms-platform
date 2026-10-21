@@ -635,6 +635,21 @@ class CustomerOrdersService {
         after.put("paid_now_minor", paidAtDoor);
         after.put("delivery_fee_minor", fee);
         after.put("fee_on_account", feeOnAccount);
+        // A price changed when the order was taken is carried to the sale as an override of the person who changed it.
+        List<Map<String, Object>> carried = new ArrayList<>();
+        for (StoredLine l : lines) {
+            if ("override".equals(l.priceSource())) {
+                Map<String, Object> o = new LinkedHashMap<>();
+                o.put("line_no", l.lineNo());
+                o.put("product_id", l.productId());
+                o.put("overridden_by", l.overriddenBy());
+                o.put("reason", l.overrideReason());
+                carried.add(o);
+            }
+        }
+        if (!carried.isEmpty()) {
+            after.put("price_overrides_carried", carried);
+        }
         audit.record(new AuditLog.Entry(
                 "retail.order.delivered", ORDER, id, h.branchId(), Map.of("status", h.status()), after));
         return new Delivered(

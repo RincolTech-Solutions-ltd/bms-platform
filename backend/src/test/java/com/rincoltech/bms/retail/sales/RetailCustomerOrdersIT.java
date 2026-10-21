@@ -1015,11 +1015,13 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         }
         assertThat(listed).isNotNull();
         assertThat(listed.get("balance_minor").asLong()).isEqualTo(2_000);
-        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
-                        .getBody()
-                        .get("balance_minor")
-                        .asLong())
-                .isEqualTo(2_000);
+        JsonNode owing = api.get("/customers/" + buyer + "/balance", ADMIN).getBody();
+        assertThat(owing.get("balance_minor").asLong()).isZero();
+        assertThat(owing.get("delivery_fees_owed_minor").asLong()).isEqualTo(2_000);
+        JsonNode accountPage =
+                api.get("/customers/" + buyer + "/account", ADMIN).getBody();
+        assertThat(accountPage.get("delivery_fees").get(0).get("order_id").asString())
+                .isEqualTo(id.toString());
         String ageing = api.get("/reports/customer-ageing", ADMIN + ",retail.credit.manage")
                 .getBody()
                 .toString();
@@ -1061,11 +1063,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         // Paid once: the sale and the fee are both settled in trade debtors.
         assertThat(account("trade_debtors", true)).isZero();
         assertThat(side("trade_debtors", false)).isEqualTo(12_000);
-        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
-                        .getBody()
-                        .get("balance_minor")
-                        .asLong())
-                .isZero();
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN).getBody().has("delivery_fees_owed_minor"))
+                .isFalse();
         JsonNode day = api.get(
                         "/reports/cash/daily?branch_id=" + hq + "&from=" + today() + "&to=" + today(),
                         "retail.cashbook.read")
@@ -1097,11 +1096,8 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         // void.
         assertThat(side("delivery_income", true)).isEqualTo(2_000);
         assertThat(side("trade_debtors", false)).isEqualTo(12_000);
-        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN)
-                        .getBody()
-                        .get("balance_minor")
-                        .asLong())
-                .isZero();
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN).getBody().has("delivery_fees_owed_minor"))
+                .isFalse();
         assertThat(payFee(id, UUID.randomUUID().toString(), ORDERS).getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
@@ -1220,5 +1216,130 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(sold.get("description").asString()).isEqualTo("Test Romper (0-3m, Blue)");
         assertThat(balance(hq, blue)[0]).isEqualByComparingTo("0");
         assertKeptMatchesOpenOrders();
+    }
+
+    /**
+     * FR-RET-55: a payment on account for the balance the account page shows is taken, oldest first or on chosen sales: it pays
+     * the sales; the fee on the account is shown apart and paid on its order, never taken by such a payment.
+     */
+    @Test
+    void aPaymentOnAccountPaysTheSalesAndTheFeeIsPaidOnItsOrder() {
+        api.stockUp(hq, product, "5");
+        UUID buyer = creditBuyer("Test Buyer 09");
+        UUID[] orders = new UUID[2];
+        String[] sales = new String[2];
+        for (int n = 0; n < 2; n++) {
+            Map<String, Object> b = body(hq, "phone", 1_000, List.of(line(product, "1")));
+            b.put("customer_id", buyer);
+            orders[n] = RetailTestSupport.id(order(b));
+            Map<String, Object> pay = new LinkedHashMap<>();
+            pay.put("payment_method", "credit");
+            pay.put("fee_on_account", true);
+            sales[n] = deliver(orders[n], pay).getBody().get("sale_id").asString();
+        }
+        JsonNode account = api.get("/customers/" + buyer + "/account", ADMIN).getBody();
+        assertThat(account.get("balance_minor").asLong()).isEqualTo(20_000);
+        assertThat(account.get("delivery_fees_owed_minor").asLong()).isEqualTo(2_000);
+        // Oldest first, the balance shown: taken.
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("branch_id", hq);
+        first.put("amount_minor", 10_000);
+        first.put("method", "cash");
+        ResponseEntity<JsonNode> oldest = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                first,
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(oldest.getStatusCode()).as("%s", oldest.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(oldest.getBody().get("allocations").get(0).get("sale_id").asString())
+                .isEqualTo(sales[0]);
+        // On a chosen sale: taken.
+        Map<String, Object> chosen = new LinkedHashMap<>(first);
+        chosen.put("allocations", List.of(Map.of("sale_id", sales[1], "amount_minor", 10_000)));
+        ResponseEntity<JsonNode> manual = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                chosen,
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(manual.getStatusCode()).as("%s", manual.getBody()).isEqualTo(HttpStatus.CREATED);
+        // Nothing is left for a payment on account: the fees are not taken by one.
+        ResponseEntity<JsonNode> more = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                Map.of("branch_id", hq, "amount_minor", 2_000, "method", "cash"),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(more.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(more)).isEqualTo("payment_exceeds_allocatable");
+        JsonNode after = api.get("/customers/" + buyer + "/account", ADMIN).getBody();
+        assertThat(after.get("balance_minor").asLong()).isZero();
+        assertThat(after.get("delivery_fees_owed_minor").asLong()).isEqualTo(2_000);
+        for (UUID o : orders) {
+            assertThat(payFee(o, UUID.randomUUID().toString(), ORDERS).getStatusCode())
+                    .isEqualTo(HttpStatus.OK);
+        }
+        assertThat(api.get("/customers/" + buyer + "/account", ADMIN).getBody().has("delivery_fees_owed_minor"))
+                .isFalse();
+        assertThat(account("trade_debtors", true)).isZero();
+    }
+
+    /**
+     * FR-RET-55: writing off a credit sale writes off its fee on the account too (Dr bad debt loss, Cr trade debtors), the fee is
+     * settled, and the shop can then be closed.
+     */
+    @Test
+    void writingOffASaleWritesOffItsFeeAndFreesTheBranch() {
+        UUID shop = t.secondBranch();
+        api.stockUp(shop, product, "5");
+        UUID buyer = creditBuyer("Test Buyer 10");
+        Map<String, Object> b = body(shop, "phone", 2_000, List.of(line(product, "1")));
+        b.put("customer_id", buyer);
+        UUID id = RetailTestSupport.id(order(b));
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("fee_on_account", true);
+        pay.put("paid_now_minor", 10_000);
+        pay.put("paid_now_method", "cash");
+        String sale = deliver(id, pay).getBody().get("sale_id").asString();
+        assertThat(account("trade_debtors", true)).isEqualTo(2_000);
+
+        String perms = "core.branches.manage,core.branches.read";
+        java.util.function.Supplier<ResponseEntity<JsonNode>> close = () -> {
+            String etag = http.exchange(
+                            "/api/v1/branches/" + shop,
+                            HttpMethod.GET,
+                            new org.springframework.http.HttpEntity<>(api.headers(perms, "*", Map.of())),
+                            JsonNode.class)
+                    .getHeaders()
+                    .getETag();
+            return http.exchange(
+                    "/api/v1/branches/" + shop + "/close",
+                    HttpMethod.POST,
+                    new org.springframework.http.HttpEntity<>(
+                            Map.of("reason", "Test shop shut"), api.headers(perms, "*", Map.of("If-Match", etag))),
+                    JsonNode.class);
+        };
+        ResponseEntity<JsonNode> refused = close.get();
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(refused)).isEqualTo("branch_has_open_orders");
+
+        ResponseEntity<JsonNode> written = api.postKeyed(
+                "/sales/" + sale + "/write-off",
+                Map.of("reason", "Test buyer left town"),
+                ADMIN + ",retail.credit.write_off,retail.credit.manage",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(written.getBody().get("write_off").get("unpaid_minor").asLong())
+                .isEqualTo(2_000);
+        assertThat(account("trade_debtors", true)).isZero();
+        assertThat(side("bad_debt_loss", true)).isEqualTo(2_000);
+        assertThat(api.get("/customers/" + buyer + "/balance", ADMIN).getBody().has("delivery_fees_owed_minor"))
+                .isFalse();
+        JsonNode history = api.get("/orders/" + id, ORDERS).getBody().get("history");
+        assertThat(history.get(history.size() - 1).get("note").asString()).contains("written off");
+        assertThat(close.get().getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }

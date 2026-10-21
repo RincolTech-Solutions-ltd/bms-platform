@@ -68,7 +68,10 @@ Controls page all read `retail_sales`.
    buyer on the list (a wholesale or account customer) may have it put on the account instead (`fee_on_account`, credit only): the entry
    debits trade debtors with the sale as subledger, and until it is paid the fee is owed with that sale wherever a buyer's debt is read
    (the credit limit exposure, the buyer list and balance, the account statement as its own lines, credit control, the customer ageing,
-   the credit counted when the buyer pays, and the check that refuses to make the shop a Store or to close it); it is paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
+   the credit counted when the buyer pays, and the check that refuses to make the shop a Store or to close it). The buyer's balance and
+   the account page show it apart from what a payment on account can settle, each fee with its order, because it is paid on the order;
+   a payment on account never takes it. Writing off the sale writes the fee off too (all of it a loss, Dr bad debt loss, Cr trade
+   debtors, in the write-off's entry) and marks it settled (`fee_paid_method` written_off). It is paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
    sale of a delivered order reverses its fee entry in the same transaction and writes `sale_voided` in the history; a sale whose fee on
    account was already paid is not voided here (422 `order_fee_paid`). The cash book counts a cash fee as takings on the day of delivery
    (or of its later payment) and, when the sale is voided, among the voids of the day of the void, as it does a voided cash sale, so a past
@@ -93,9 +96,10 @@ balance row and not by the screens; the fee is visible on its own in the ledger 
 when, where the orders come from and why they were cancelled.
 
 **Worse:** a balance column that every guarded movement now reads; a stock-take can leave a balance below what orders keep, which the order
-then shows when it is delivered and refused; a fee on account is owed in the ledger and on the order, but not in the customer statement or
-the ageing; it is paid through its own route, not by a payment on account; writing off a credit sale leaves its fee on account owed; the order's lines are fixed
-(editing them is a follow-up issue); item photos in the order picker come with item variants (#384).
+then shows when it is delivered and refused; a fee on account is paid on its order (the account page lists it apart and links to
+it), not by a payment on account; the Controls rate of a person counts a change carried from an order they took against the sales
+they entered themselves; the order's lines are fixed (editing them is a follow-up issue); item photos in the order picker come with
+#392.
 
 **Watch for:** `reserved_qty` must always equal the base quantities of the open orders of that branch and product; a test proves it after
 every step, and a nightly check beside the balance reconciliation is a follow-up. A future path that moves stock out must go through

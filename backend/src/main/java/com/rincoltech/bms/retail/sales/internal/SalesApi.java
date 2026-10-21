@@ -280,7 +280,35 @@ final class SalesApi {
             Boolean countedWhenPaid) {}
 
     @Schema(name = "RetailCustomerBalance", description = "Credit sales in the caller's branch scope")
-    record CustomerBalance(UUID customerId, String currency, long balanceMinor, List<OpenSale> openSales) {}
+    record CustomerBalance(
+            UUID customerId,
+            String currency,
+
+            @Schema(description = "Owed on the open credit sales: what a payment on account can settle")
+            long balanceMinor,
+
+            List<OpenSale> openSales,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #385: delivery fees of customer orders left on the account and not yet paid, owed"
+                                    + " besides balance_minor and paid on each order (POST /retail/orders/{order_id}/fee-payment)")
+            Long deliveryFeesOwedMinor,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) List<FeeOwed> deliveryFees) {}
+
+    @Schema(
+            name = "RetailDeliveryFeeOwed",
+            description = "A delivery fee left on the buyer's account, paid on its order")
+    record FeeOwed(
+            UUID orderId,
+            String orderNo,
+            UUID saleId,
+            String saleNo,
+            UUID branchId,
+            LocalDate deliveredOn,
+            long feeMinor) {}
 
     @Schema(name = "RetailPaymentRequest")
     record PaymentRequest(

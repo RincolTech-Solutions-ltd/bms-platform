@@ -566,6 +566,48 @@ class SalesRepository {
                 .optional();
     }
 
+    /**
+     * The delivery fees of a buyer's customer orders left on the account and not yet paid, whose sale stands, in the given
+     * branches (null: every branch), oldest first (issue #385). They are owed with the buyer's sales but paid on the order, so a
+     * payment on account never takes them.
+     */
+    List<SalesApi.FeeOwed> unpaidOrderFees(UUID customerId, List<UUID> branchIds) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("customer", customerId);
+        String branchFilter = "";
+        if (branchIds != null) {
+            branchFilter = " AND o.branch_id IN (:branchIds)";
+            params.put("branchIds", branchIds);
+        }
+        return jdbc.sql("""
+                        SELECT o.id, o.order_no, o.sale_id, s.sale_no, o.branch_id, o.delivered_on, o.delivery_fee_minor
+                          FROM retail_customer_orders o JOIN retail_sales s ON s.id = o.sale_id
+                         WHERE s.customer_id = :customer AND s.status = 'completed' AND o.fee_method = 'account'
+                           AND o.fee_paid_at IS NULL""" + branchFilter + " ORDER BY o.delivered_on, o.delivered_at, o.id")
+                .params(params)
+                .query((rs, n) -> new SalesApi.FeeOwed(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("order_no"),
+                        rs.getObject("sale_id", UUID.class),
+                        rs.getString("sale_no"),
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getDate("delivered_on").toLocalDate(),
+                        rs.getLong("delivery_fee_minor")))
+                .list();
+    }
+
+    /** A fee left on the account cleared by the write-off of its sale (issue #385): settled, once, by that entry. */
+    int markOrderFeeWrittenOff(UUID orderId, UUID by, LocalDate on, UUID entryId) {
+        return jdbc.sql("""
+                        UPDATE retail_customer_orders SET fee_paid_at = now(), fee_paid_on = ?, fee_paid_method = 'written_off',
+                               fee_paid_by = ?, fee_payment_entry_id = ?, updated_at = now(), version = version + 1
+                         WHERE id = ? AND status = 'delivered' AND fee_method = 'account' AND fee_paid_at IS NULL
+                        """).params(Date.valueOf(on), by, entryId, orderId).update();
+    }
+
     /** One line of a customer order's history (append-only), written by the sale path when the sale is voided. */
     void orderEvent(UUID orderId, String step, String note, UUID by) {
         jdbc.sql("""
@@ -712,12 +754,11 @@ class SalesRepository {
             branchFilter = " AND branch_id IN (:branchIds)";
             params.put("branchIds", branchIds);
         }
-        return jdbc.sql(
-                        "SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical, created_at, "
-                                + feeOwed("retail_sales") + " AS fee_owed FROM retail_sales"
-                                + " WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'"
-                                + " AND (paid_minor < total_minor OR " + feeOwed("retail_sales") + " > 0)"
-                                + branchFilter + " ORDER BY sale_date, created_at, id")
+        return jdbc.sql("""
+                        SELECT id, sale_no, branch_id, sale_date, due_date, total_minor, paid_minor, historical, created_at
+                          FROM retail_sales
+                         WHERE customer_id = :customer AND payment_method = 'credit' AND status = 'completed'
+                           AND paid_minor < total_minor""" + branchFilter + " ORDER BY sale_date, created_at, id")
                 .params(params)
                 .query((rs, n) -> {
                     Date due = rs.getDate("due_date");
@@ -730,7 +771,7 @@ class SalesRepository {
                                     due == null ? null : due.toLocalDate(),
                                     rs.getLong("total_minor"),
                                     rs.getLong("paid_minor"),
-                                    rs.getLong("total_minor") - rs.getLong("paid_minor") + rs.getLong("fee_owed"),
+                                    rs.getLong("total_minor") - rs.getLong("paid_minor"),
                                     rs.getBoolean("historical") ? Boolean.TRUE : null,
                                     null),
                             rs.getTimestamp("created_at").toInstant());

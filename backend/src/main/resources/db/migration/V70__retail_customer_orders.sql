@@ -2,8 +2,8 @@
 -- the counter, recorded without payment, that keeps its stock aside, moves through packed and out for delivery, and on delivery
 -- becomes an ordinary sale through the sale path, with the delivery fee posted on its own.
 --
--- Numbered V70: main is at V67, the installable app (#380) takes V68 and item variants (#384) is expected to take V69. Flyway runs
--- with outOfOrder off, so the file is renamed at merge to the next free number in merge order.
+-- Numbered V70: main is at V69 (the installable app, #380, took V68; item variants, #384, took V69). Flyway runs with outOfOrder
+-- off, so the file is renamed at merge if another number lands first.
 --
 -- Expand only, safe on a populated database. Three new tables, one new column on retail_stock_balances, one nullable column and a
 -- wider price check on retail_sale_lines, one chart account and one permission. No existing row changes and a tenant that never takes
@@ -17,8 +17,10 @@
 -- journal_entries) until the commit, which blocks writes to them, not reads; the new tables are empty. The chart seed touches only
 -- gl_accounts.
 --
--- retail_sale_lines (a large table): ADD COLUMN without a default is a catalogue change; the price check is dropped and added again
--- NOT VALID under the same short ACCESS EXCLUSIVE lock (no scan), then validated with SHARE UPDATE EXCLUSIVE, which lets sales go on.
+-- retail_sale_lines: ADD COLUMN without a default is a catalogue change; the price check is dropped and added again NOT VALID (no
+-- scan), then validated. Flyway runs the file in one transaction, so the ACCESS EXCLUSIVE lock the ALTERs take is held until the
+-- commit, through the VALIDATE scan: sales wait for it. On staging the table is about 22 thousand rows (11 MB), a scan of well under
+-- a second, so that is accepted; a much larger table would want the check validated in a migration of its own.
 --
 -- The first statement sets lock_timeout to five seconds (as V26, V48, V49, V59 and V64 do): if a lock cannot be had the migration
 -- fails and is retried, rather than every writer on the table queueing behind it. SET LOCAL lasts to the commit.
@@ -125,7 +127,8 @@ ON CONFLICT DO NOTHING;
 -- status moves forward only (the guard below): ordered, packed, out_for_delivery, then delivered (sale_id set) or cancelled (with
 -- a reason). delivered_by is who takes it out (a rider's name, often not a staff user). fee_method and fee_entry_id say how the fee
 -- was paid and its journal entry: cash, mobile money or bank at the door, or account (a credit buyer's account, debiting trade
--- debtors against the sale); a fee on account is paid later once (fee_paid_*, its own entry crediting trade debtors).
+-- debtors against the sale); a fee on account is paid later once (fee_paid_*, its own entry crediting trade debtors), or settled
+-- by the write-off of its sale (fee_paid_method written_off, the write-off's entry).
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE retail_customer_orders (
@@ -163,7 +166,7 @@ CREATE TABLE retail_customer_orders (
     fee_entry_id       uuid,
     fee_paid_at        timestamptz,
     fee_paid_on        date,
-    fee_paid_method    text         CHECK (fee_paid_method IN ('cash', 'mobile_money', 'bank')),
+    fee_paid_method    text         CHECK (fee_paid_method IN ('cash', 'mobile_money', 'bank', 'written_off')),
     fee_paid_by        uuid,
     fee_payment_entry_id uuid,
     cancelled_at       timestamptz,

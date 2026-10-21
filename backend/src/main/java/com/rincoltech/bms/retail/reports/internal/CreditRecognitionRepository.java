@@ -201,7 +201,8 @@ class CreditRecognitionRepository {
      * when the buyer pays, imported sales included; less a payment on account when it is reversed, on the day of the reversal; less the
      * money paid back on any return, cash sale or credit sale, on the day of the return and at the refund branch, and given back on the
      * day a return is voided. A payment dated earlier than it was entered counts on the day it was entered, so a day already reported is
-     * not rewritten. Voiding a cash sale does rewrite that sale's own day, as it always did (the sale leaves its day).
+     * not rewritten. Voiding a cash sale does rewrite that sale's own day, as it always did (the sale leaves its day). A delivery fee
+     * left on a buyer's account and paid later (issue #385) counts on the day it was paid.
      */
     List<ReportsRepository.DayFigures> collections(List<UUID> branchIds, LocalDate from, LocalDate to) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -246,6 +247,14 @@ class CreditRecognitionRepository {
                         + " SELECT r.refund_branch_id, r.voided_on, r.refund_minor"
                         + " FROM retail_sale_returns r"
                         + " WHERE r.status = 'voided' AND r.refund_minor > 0 AND r.voided_on BETWEEN :from AND :to"
+                        // Issue #385: a delivery fee left on a buyer's account and paid later, on the day it was
+                        // entered and at
+                        // the order's branch, as the cash book counts it (a fee written off is no money received).
+                        + " UNION ALL"
+                        + " SELECT o.branch_id, CAST((o.fee_paid_at AT TIME ZONE :zone) AS date), o.delivery_fee_minor"
+                        + " FROM retail_customer_orders o"
+                        + " WHERE o.fee_method = 'account' AND o.fee_paid_method IN ('cash', 'mobile_money', 'bank')"
+                        + " AND o.fee_paid_at >= :fromTs AND o.fee_paid_at < :toTs"
                         + ") x" + branch + " GROUP BY x.br, x.d")
                 .params(params)
                 .query((rs, n) -> new ReportsRepository.DayFigures(

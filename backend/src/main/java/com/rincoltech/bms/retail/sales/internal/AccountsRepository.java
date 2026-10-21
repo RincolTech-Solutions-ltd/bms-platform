@@ -413,7 +413,8 @@ class AccountsRepository {
                 SELECT o.fee_paid_on, 9, o.fee_paid_at, o.id, 'delivery_fee_paid', o.order_no, s.id, CAST(NULL AS uuid),
                        o.fee_paid_method, CAST(0 AS bigint), o.delivery_fee_minor
                   FROM retail_customer_orders o JOIN retail_sales s ON s.id = o.sale_id
-                 WHERE s.customer_id = :customer AND o.fee_method = 'account' AND o.fee_paid_at IS NOT NULL""" + sb + """
+                 WHERE s.customer_id = :customer AND o.fee_method = 'account' AND o.fee_paid_at IS NOT NULL
+                   AND o.fee_paid_method <> 'written_off'""" + sb + """
 
                 UNION ALL
                 SELECT CAST((s.voided_at AT TIME ZONE :zone) AS date), 10, s.voided_at, o.id, 'delivery_fee_void', o.order_no,

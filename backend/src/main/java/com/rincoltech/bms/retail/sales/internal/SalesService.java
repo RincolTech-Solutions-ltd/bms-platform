@@ -1123,7 +1123,15 @@ class SalesService {
                                     : null);
                 })
                 .toList();
-        return new CustomerBalance(customerId, tenant.profile().currency(), owed, open);
+        List<SalesApi.FeeOwed> fees = repo.unpaidOrderFees(customerId, filter);
+        long feesOwed = fees.stream().mapToLong(SalesApi.FeeOwed::feeMinor).reduce(0, Math::addExact);
+        return new CustomerBalance(
+                customerId,
+                tenant.profile().currency(),
+                owed,
+                open,
+                fees.isEmpty() ? null : feesOwed,
+                fees.isEmpty() ? null : fees);
     }
 
     /**
