@@ -153,7 +153,7 @@ Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in bo
 | `--color-text-muted` | `#5c6370` | `#a9b4c3` |
 | `--color-link`, `--color-focus` | `#0077b6` | `#5cc0f2` |
 | `--color-accent` (tenant stripe, active tab, chosen card edge; 3:1) | `--brand` | `--brand` 45% mixed into white |
-| `--color-primary-hover` / `-active` (primary button) | `--color-primary` mixed toward black | `--color-primary` mixed toward white |
+| `--color-primary-hover` / `-active` (primary button, label stays 4.5:1) | `--color-primary` mixed toward black | unchanged: still toward black, because the label is white |
 | `--color-accent-tint`, `--color-info-tint` | `#eef9fe` | `#10283a` |
 | `--color-danger` / `-tint` | `#b42318` / `#fef3f2` | `#f97066` / `#3b1614` |
 | `--color-success` / `-tint` | `#067647` / `#ecfdf3` | `#47cd89` / `#0f2c1e` |
