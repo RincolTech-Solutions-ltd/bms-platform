@@ -110,17 +110,18 @@
           },
           "monthly_minor" : {
             "format" : "int64",
-            "maximum" : 1000000000000,
+            "maximum" : 50000000,
             "minimum" : 0,
             "type" : "integer"
           },
           "reason" : {
+            "description" : "Why, kept with the price and in the audit log",
             "maxLength" : 300,
-            "minLength" : 0,
+            "minLength" : 5,
             "type" : "string"
           }
         },
-        "required" : [ "annual_months", "monthly_minor" ]
+        "required" : [ "annual_months", "monthly_minor", "reason" ]
       },
       "AddRetailVariantsRequest" : {
         "description" : "Issue #384: more sizes or colours for an item; a combination it has already is skipped. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made",
@@ -5910,6 +5911,10 @@
             "format" : "date",
             "type" : "string"
           },
+          "pilot" : {
+            "description" : "A pilot or complimentary business: free, no free month end (ADR-024 decision 6)",
+            "type" : "boolean"
+          },
           "plan_code" : {
             "type" : "string"
           },
@@ -5925,6 +5930,10 @@
           },
           "subscription_status" : {
             "description" : "trial, active, past_due, suspended or cancelled",
+            "type" : "string"
+          },
+          "suspended_from" : {
+            "description" : "While suspended or cancelled: the status a resume brings back (trial, active or past_due)",
             "type" : "string"
           },
           "timezone" : {
@@ -17285,19 +17294,19 @@
           "max_active_members" : {
             "format" : "int32",
             "maximum" : 10000000,
-            "minimum" : 1,
+            "minimum" : 0,
             "type" : "integer"
           },
           "max_branches" : {
             "format" : "int32",
             "maximum" : 100000,
-            "minimum" : 1,
+            "minimum" : 0,
             "type" : "integer"
           },
           "max_staff_users" : {
             "format" : "int32",
             "maximum" : 100000,
-            "minimum" : 1,
+            "minimum" : 0,
             "type" : "integer"
           },
           "name" : {
@@ -17308,7 +17317,7 @@
           "reason" : {
             "description" : "Why, kept in the platform audit log",
             "maxLength" : 300,
-            "minLength" : 0,
+            "minLength" : 5,
             "type" : "string"
           },
           "sort_order" : {
@@ -17318,7 +17327,7 @@
             "type" : "integer"
           }
         },
-        "required" : [ "active", "allowed_modules", "name" ]
+        "required" : [ "active", "allowed_modules", "name", "reason" ]
       },
       "SaveSmsTemplateRequest" : {
         "properties" : {
@@ -18814,6 +18823,14 @@
       "SubscriptionDatesRequest" : {
         "description" : "Send one or both dates",
         "properties" : {
+          "clear_paid_until" : {
+            "description" : "True clears what is paid (the last day paid for and the start of the paid period)",
+            "type" : "boolean"
+          },
+          "clear_trial_ends_on" : {
+            "description" : "True clears the last day of the free month (the clock starts again at the next sign-in)",
+            "type" : "boolean"
+          },
           "paid_until" : {
             "description" : "The new last day paid for",
             "format" : "date",
@@ -18889,11 +18906,15 @@
         "description" : "A payment received by mobile money or bank transfer",
         "properties" : {
           "amount_minor" : {
-            "description" : "Minor units; whole shillings for UGX",
+            "description" : "Minor units; whole shillings for UGX; at most 50,000,000",
             "format" : "int64",
-            "maximum" : 1000000000000,
+            "maximum" : 50000000,
             "minimum" : 1,
             "type" : "integer"
+          },
+          "confirm_unusual_amount" : {
+            "description" : "True when the operator checked an amount more than 25% away from the plan's price for these months, or a plan with no price (422 payment_amount_unusual otherwise)",
+            "type" : "boolean"
           },
           "method" : {
             "minLength" : 1,
@@ -19051,9 +19072,15 @@
               "type" : "string"
             },
             "type" : "array"
+          },
+          "reason" : {
+            "description" : "Why; kept in the platform audit log (issue #407)",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
           }
         },
-        "required" : [ "modules" ]
+        "required" : [ "modules", "reason" ]
       },
       "TenantPaymentAccountStatus" : {
         "properties" : {
@@ -19070,6 +19097,20 @@
             "type" : "string"
           }
         }
+      },
+      "TenantPilotRequest" : {
+        "properties" : {
+          "pilot" : {
+            "description" : "True: a pilot or complimentary business, free with no end (ADR-024 decision 6)",
+            "type" : "boolean"
+          },
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "pilot", "reason" ]
       },
       "TenantPlanRequest" : {
         "properties" : {
@@ -26821,6 +26862,44 @@
         "tags" : [ "platform" ]
       }
     },
+    "/api/v1/platform/tenants/{tenant_id}/pilot" : {
+      "put" : {
+        "operationId" : "platformSetTenantPilot",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TenantPilotRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformTenant"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Mark or unmark a pilot (complimentary) business, with a reason: free, no free month end; the same mark again changes nothing (ADR-024 decision 6)",
+        "tags" : [ "platform" ]
+      }
+    },
     "/api/v1/platform/tenants/{tenant_id}/plan" : {
       "put" : {
         "operationId" : "platformSetTenantPlan",
@@ -26893,7 +26972,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Resume a suspended tenant with a reason; already active changes nothing (FR-TEN-06)",
+        "summary" : "Resume a suspended tenant with a reason, back to the status it had before (a free month stays a free month); a tenant that is not suspended changes nothing (FR-TEN-06)",
         "tags" : [ "platform" ]
       }
     },

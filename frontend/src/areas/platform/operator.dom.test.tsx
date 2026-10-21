@@ -22,6 +22,7 @@ const api = {
   recordPayment: vi.fn(),
   addPlanPrice: vi.fn(),
   savePlan: vi.fn(),
+  setBusinessPilot: vi.fn(),
 };
 
 vi.mock('../../api/operator', async (original) => {
@@ -40,6 +41,7 @@ vi.mock('../../api/operator', async (original) => {
     recordPayment: forward('recordPayment'),
     addPlanPrice: forward('addPlanPrice'),
     savePlan: forward('savePlan'),
+    setBusinessPilot: forward('setBusinessPilot'),
   };
 });
 
@@ -158,6 +160,35 @@ describe('the Business page', () => {
     expect(body).toMatchObject({ amount_minor: 110000, method: 'mtn_momo', months: 12 });
   });
 
+  it('asks to confirm an unusual amount and sends it again with a new key', async () => {
+    const { OperatorError } = await import('../../api/operator');
+    api.recordPayment
+      .mockRejectedValueOnce(new OperatorError('The plan price is far from this amount. Check it, then confirm it.', 'payment_amount_unusual'))
+      .mockResolvedValueOnce({ id: 'p-2' });
+    shell(<BusinessScreen tenantId="t-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record a payment' }));
+    fireEvent.change(screen.getByLabelText('Amount received (UGX)'), { target: { value: '90000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, record it' }));
+    await waitFor(() => expect(api.recordPayment).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByLabelText('I checked it: this amount is right'));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, record it' }));
+    await waitFor(() => expect(api.recordPayment).toHaveBeenCalledTimes(2));
+    const [first, second] = api.recordPayment.mock.calls as [string, string, Record<string, unknown>][];
+    expect(second?.[1]).not.toBe(first?.[1]);
+    expect(second?.[2]).toMatchObject({ amount_minor: 90000, confirm_unusual_amount: true });
+  });
+
+  it('marks a pilot with a reason', async () => {
+    api.setBusinessPilot.mockResolvedValue({ ...DETAIL.tenant, pilot: true });
+    shell(<BusinessScreen tenantId="t-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark as a pilot' }));
+    expect(screen.getByText(/free with no end date/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Why (kept with the change)'), { target: { value: 'Test: pilot until paid' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, mark as a pilot' }));
+    await waitFor(() => expect(api.setBusinessPilot).toHaveBeenCalledWith('t-1', true, 'Test: pilot until paid'));
+  });
+
   it('shows the owner sign-in help, the emails sent and the history', async () => {
     shell(<BusinessScreen tenantId="t-1" />);
     expect(await screen.findByRole('button', { name: 'Make a reset link' })).toBeTruthy();
@@ -179,7 +210,15 @@ describe('Plans and prices', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review' }));
     expect(screen.getByText(/Test Small will cost UGX 12,000 a month and UGX 132,000 a year, from today/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Yes, save the price' }));
+    expect(api.addPlanPrice).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Why (kept with the change)'), { target: { value: 'Test: new price agreed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, save the price' }));
     await waitFor(() => expect(api.addPlanPrice).toHaveBeenCalledTimes(1));
-    expect(api.addPlanPrice.mock.calls[0]?.[1]).toMatchObject({ currency: 'UGX', monthly_minor: 12000, annual_months: 11 });
+    expect(api.addPlanPrice.mock.calls[0]?.[1]).toMatchObject({
+      currency: 'UGX',
+      monthly_minor: 12000,
+      annual_months: 11,
+      reason: 'Test: new price agreed',
+    });
   });
 });

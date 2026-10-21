@@ -216,7 +216,7 @@ Prices are commercial and are not stored in this repository's seed data: the ope
 | `id` | `uuid` PK | |
 | `plan_id` | `uuid NOT NULL` | FK `plans`. |
 | `currency` | `char(3) NOT NULL` | FK `currencies`. |
-| `monthly_minor` | `bigint NOT NULL` | 0 or more. |
+| `monthly_minor` | `bigint NOT NULL` | 0 to 50,000,000. |
 | `annual_months` | `integer NOT NULL` | 1 to 12: the months charged for a year. |
 | `effective_from` | `date NOT NULL` | The price in force on a day is the newest row starting on or before it. |
 | `reason` | `varchar(300)` | |
@@ -404,7 +404,7 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 (`UNIQUE (tenant_id)`); history is in `platform_audit_log`. `trial_ends_on` is the last day of
 the free month: since `V75` the trigger `start_trial_clock` on `auth_sessions` sets it once, one
 month from the first session of a staff user, in the tenant's time zone (FR-SUB-02).
-`current_period_start` and `current_period_end` are the first and the last day paid for, moved by
+`suspended_from` (`V75`) is the status a resume brings back, kept while the subscription is suspended or cancelled; `is_pilot` (`V75`, ADR-024 decision 6) marks a pilot or complimentary business with no free month end, which the clock and the scheduled transitions skip. `current_period_start` and `current_period_end` are the first and the last day paid for, moved by
 `platform_record_subscription_payment`; the operator can also set the two dates by hand with
 `platform_set_subscription_dates` and the plan with `platform_set_tenant_plan` (ADR-056).
 
@@ -413,11 +413,11 @@ month from the first session of a staff user, in the tenant's time zone (FR-SUB-
 (std, no `version`, no `updated_at`) `subscription_id uuid NOT NULL` (composite FK
 `subscriptions`), `plan_id uuid NOT NULL`, `status text NOT NULL DEFAULT 'confirmed'`
 [`claimed`, `confirmed`, `rejected`; only `confirmed` is written in this release],
-`amount_minor bigint NOT NULL` (above 0), `currency char(3) NOT NULL` (the tenant's),
+`amount_minor bigint NOT NULL` (1 to 50,000,000), `currency char(3) NOT NULL` (the tenant's),
 `method text NOT NULL` [`mtn_momo`, `airtel_money`, `bank_transfer`, `other`],
 `reference varchar(100)`, `paid_on date NOT NULL`, `months integer NOT NULL` (1 to 24),
 `period_start date NOT NULL`, `period_end date NOT NULL` (the first and last day covered),
-`note varchar(500)`, `recorded_by_platform_user_id uuid NOT NULL`. Index
+`note varchar(500)`, `recorded_by_platform_user_id uuid NOT NULL` (FK `platform_users`). Index
 `(tenant_id, created_at DESC)`. Written only through
 `platform_record_subscription_payment`, which reads the tenant from `app.tenant_id` inside the
 transaction the platform console binds to it (`TenantContext.callAs`), in one transaction with

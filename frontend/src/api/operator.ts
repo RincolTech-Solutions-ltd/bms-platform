@@ -107,7 +107,7 @@ export async function setBusinessPlan(tenantId: string, planCode: string, reason
 
 export async function setSubscriptionDates(
   tenantId: string,
-  dates: { trial_ends_on?: string; paid_until?: string },
+  dates: { trial_ends_on?: string; paid_until?: string; clear_trial_ends_on?: boolean; clear_paid_until?: boolean },
   reason: string,
 ): Promise<Business> {
   const { data, error } = await api.PUT('/api/v1/platform/tenants/{tenant_id}/subscription-dates', {
@@ -118,12 +118,22 @@ export async function setSubscriptionDates(
   return data;
 }
 
-export async function setBusinessModules(tenantId: string, modules: string[]): Promise<Business> {
+export async function setBusinessModules(tenantId: string, modules: string[], reason: string): Promise<Business> {
   const { data, error } = await api.PUT('/api/v1/platform/tenants/{tenant_id}/modules', {
     params: tenantPath(tenantId),
-    body: { modules },
+    body: { modules, reason },
   });
   if (error || !data) fail(error, 'Could not change the modules');
+  return data;
+}
+
+/** A pilot (complimentary) business is free with no free month end (ADR-024 decision 6). */
+export async function setBusinessPilot(tenantId: string, pilot: boolean, reason: string): Promise<Business> {
+  const { data, error } = await api.PUT('/api/v1/platform/tenants/{tenant_id}/pilot', {
+    params: tenantPath(tenantId),
+    body: { pilot, reason },
+  });
+  if (error || !data) fail(error, 'Could not change the pilot mark');
   return data;
 }
 

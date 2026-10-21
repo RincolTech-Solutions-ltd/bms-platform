@@ -201,10 +201,6 @@ export function PriceFormView({ plan, form, problems, onChange, onSubmit, onCanc
         <input id="price-from" type="date" value={form.from} onChange={(e) => set({ from: e.target.value })} aria-invalid={Boolean(problems.from)} />
         {problem('from')}
       </div>
-      <div>
-        <label htmlFor="price-reason">Why (optional, kept with the price)</label>
-        <input id="price-reason" value={form.reason} maxLength={300} onChange={(e) => set({ reason: e.target.value })} />
-      </div>
       <div className="cluster">
         <button type="submit" className="btn-primary">
           Review
@@ -227,7 +223,7 @@ export function PlansScreen() {
   const query = useQuery({ queryKey: ['price-plans', 'all'], queryFn: () => listPricePlans(true) });
   const [open, setOpen] = useState<Open>({ kind: 'none' });
   const [planForm, setPlanForm] = useState<PlanForm>(EMPTY_PLAN);
-  const [priceForm, setPriceForm] = useState<PriceForm>({ monthly: '', annualMonths: '12', from: '', reason: '' });
+  const [priceForm, setPriceForm] = useState<PriceForm>({ monthly: '', annualMonths: '12', from: '' });
   const [problems, setProblems] = useState<Problems>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -311,7 +307,6 @@ export function PlansScreen() {
               monthly: p.current_price?.monthly_minor != null ? String(p.current_price.monthly_minor) : '',
               annualMonths: String(p.current_price?.annual_months ?? 12),
               from: today,
-              reason: '',
             });
             setProblems({});
             setDone(null);
@@ -356,12 +351,11 @@ export function PlansScreen() {
             allowed_modules: planForm.modules,
           })}; ${planForm.active ? 'offered to new businesses' : 'not offered to new businesses'}.${open.isNew ? '' : ' Businesses on it get the new limits at once.'}`}
           confirm={open.isNew ? 'Yes, add the plan' : 'Yes, save the plan'}
-          needsReason={false}
           busy={busy}
           error={error}
-          onConfirm={() =>
+          onConfirm={(reason) =>
             void run(
-              () => savePlan(planForm.code.trim(), toSavePlan(planForm, '')),
+              () => savePlan(planForm.code.trim(), toSavePlan(planForm, reason)),
               open.isNew ? `${planForm.name.trim()} is added. Set its price next.` : `${planForm.name.trim()} is saved.`,
             )
           }
@@ -376,10 +370,9 @@ export function PlansScreen() {
           id="price-save"
           sentence={priceSentence(open.plan.name ?? open.plan.code ?? '', priceForm, today)}
           confirm="Yes, save the price"
-          needsReason={false}
           busy={busy}
           error={error}
-          onConfirm={() =>
+          onConfirm={(reason) =>
             void run(
               () =>
                 addPlanPrice(open.plan.code ?? '', {
@@ -387,7 +380,7 @@ export function PlansScreen() {
                   monthly_minor: parseMinor(priceForm.monthly, 'UGX') ?? 0,
                   annual_months: Number(priceForm.annualMonths),
                   effective_from: priceForm.from,
-                  reason: priceForm.reason.trim() || undefined,
+                  reason,
                 }),
               `The price of ${open.plan.name ?? ''} is saved.`,
             )

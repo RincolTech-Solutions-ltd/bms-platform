@@ -119,6 +119,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 /** The one line under a business's name: where its subscription stands today. */
 export function subscriptionLine(b: Business, today: string): string {
   const status = b.subscription_status as SubscriptionStatus | undefined;
+  if (b.pilot && !b.paid_until) return 'Pilot: free, with no end date.';
   if (status === 'trial') {
     if (!b.trial_ends_on) return 'Free month: it starts when the owner first signs in.';
     const left = daysBetween(today, b.trial_ends_on);
@@ -201,11 +202,11 @@ export type Problems = Partial<Record<string, string>>;
 
 const LIMIT = /^\d{1,7}$/;
 
-/** A blank limit is unlimited; anything else is a whole number from 1. */
+/** A blank limit is unlimited; anything else is a whole number from 0. */
 function limit(text: string): number | null | 'bad' {
   const t = text.trim().replace(/,/g, '');
   if (t === '') return null;
-  if (!LIMIT.test(t) || Number(t) < 1) return 'bad';
+  if (!LIMIT.test(t)) return 'bad';
   return Number(t);
 }
 
@@ -223,7 +224,7 @@ export function planProblems(form: PlanForm, isNew: boolean): Problems {
     ['staff', form.staff],
     ['members', form.members],
   ] as const) {
-    if (limit(text) === 'bad') out[key] = 'A whole number from 1, or leave it empty for unlimited.';
+    if (limit(text) === 'bad') out[key] = 'A whole number from 0, or leave it empty for unlimited.';
   }
   if (!/^\d{1,4}$/.test(form.sort.trim()) || Number(form.sort) > 1000) out.sort = 'A number from 0 to 1000.';
   return out;
@@ -243,7 +244,7 @@ export function toSavePlan(form: PlanForm, reason: string): SavePlanRequest {
     max_active_members: form.modules.includes('lending') ? (value(form.members) ?? undefined) : undefined,
     active: form.active,
     sort_order: Number(form.sort.trim() || '0'),
-    reason: reason.trim() || undefined,
+    reason: reason.trim(),
   };
 }
 
@@ -251,12 +252,16 @@ export interface PriceForm {
   monthly: string;
   annualMonths: string;
   from: string;
-  reason: string;
 }
+
+/** The cap on a monthly price and on a payment, in minor units (UGX 50 million), as the server. */
+export const MAX_MINOR = 50_000_000;
 
 export function priceProblems(form: PriceForm, today: string): Problems {
   const out: Problems = {};
-  if (parseMinor(form.monthly, 'UGX') === null) out.monthly = 'Type the monthly price in shillings, for example 30000.';
+  const monthly = parseMinor(form.monthly, 'UGX');
+  if (monthly === null) out.monthly = 'Type the monthly price in shillings.';
+  else if (monthly > MAX_MINOR) out.monthly = 'At most UGX 50,000,000 a month. Check the zeros.';
   const months = Number(form.annualMonths);
   if (!/^\d{1,2}$/.test(form.annualMonths.trim()) || months < 1 || months > 12) {
     out.annualMonths = 'The months charged for a year: a number from 1 to 12.';
@@ -311,6 +316,7 @@ export function paymentProblems(form: PaymentForm, currency: string, today: stri
   const out: Problems = {};
   const amount = parseMinor(form.amount, currency);
   if (amount === null || amount <= 0) out.amount = 'Type the amount received, in shillings.';
+  else if (amount > MAX_MINOR) out.amount = 'At most 50,000,000. Check the zeros.';
   const months = Number(form.months);
   if (!/^\d{1,2}$/.test(form.months.trim()) || months < 1 || months > 24) out.months = 'From 1 to 24 months.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.paidOn)) out.paidOn = 'Choose the day the money came in.';
@@ -321,12 +327,16 @@ export function paymentProblems(form: PaymentForm, currency: string, today: stri
 }
 
 /** The period a payment will cover, worked out as the server does: from the day after what is already covered, or today. */
-export function coverFor(b: Business, months: number, today: string): { start: string; end: string } {
+export function coverFor(b: Business, months: number, today: string): { start: string; end: string; freeMonthEnds?: string } {
   const candidates = [today];
   if (b.paid_until) candidates.push(addDays(b.paid_until, 1));
-  if (b.subscription_status === 'trial' && b.trial_ends_on) candidates.push(addDays(b.trial_ends_on, 1));
+  // A free month that has not started (nobody signed in, not a pilot) starts at the payment; the paid months follow it.
+  const freeMonthEnds =
+    b.subscription_status === 'trial' && !b.trial_ends_on && !b.pilot ? addDays(addMonths(today, 1), -1) : undefined;
+  const trialEnd = b.subscription_status === 'trial' ? (b.trial_ends_on ?? freeMonthEnds) : undefined;
+  if (trialEnd) candidates.push(addDays(trialEnd, 1));
   const start = candidates.sort().at(-1) ?? today;
-  return { start, end: addDays(addMonths(start, months), -1) };
+  return { start, end: addDays(addMonths(start, months), -1), freeMonthEnds };
 }
 
 export function paymentSentence(b: Business, form: PaymentForm, today: string): string {
@@ -341,12 +351,13 @@ export function paymentSentence(b: Business, form: PaymentForm, today: string): 
       : status === 'active'
         ? ''
         : ' It becomes Paying.';
-  return `Record ${formatMinor(amount, currency)} by ${methodLabel(form.method)} from ${b.name}, covering ${formatDay(cover.start)} to ${formatDay(cover.end)} (${plural(months, 'month', 'months')}).${after}`;
+  const free = cover.freeMonthEnds ? ` Its free month starts today and runs to ${formatDay(cover.freeMonthEnds)} first.` : '';
+  return `Record ${formatMinor(amount, currency)} by ${methodLabel(form.method)} from ${b.name}, covering ${formatDay(cover.start)} to ${formatDay(cover.end)} (${plural(months, 'month', 'months')}).${free}${after}`;
 }
 
 // ---- the actions on a business ---------------------------------------------------------------------------
 
-export type Action = 'suspend' | 'resume' | 'status' | 'plan' | 'trial' | 'paid' | 'modules';
+export type Action = 'suspend' | 'resume' | 'status' | 'plan' | 'trial' | 'paid' | 'modules' | 'pilot';
 
 /** The sentence the operator reads before confirming an action; it says what will happen, in plain words. */
 export function actionSentence(action: Action, b: Business, value?: string, planName?: string): string {
@@ -355,7 +366,11 @@ export function actionSentence(action: Action, b: Business, value?: string, plan
     case 'suspend':
       return `Suspend ${name}? Its staff can still sign in, look and export, but nothing can be changed until you resume it. Nothing is deleted.`;
     case 'resume':
-      return `Resume ${name}? Its staff can work normally again and the status becomes Paying.`;
+      return `Resume ${name}? Its staff can work normally again and it goes back to ${statusLabel(b.suspended_from ?? 'active')}, as before the suspension.`;
+    case 'pilot':
+      return b.pilot
+        ? `Stop treating ${name} as a pilot? Its free month starts at its next sign-in if it is still on a free month.`
+        : `Mark ${name} as a pilot? It is free with no end date, and nothing will suspend it by itself. Its free month end is cleared.`;
     case 'status':
       return `Change ${name} from ${statusLabel(b.subscription_status)} to ${statusLabel(value)}? ${STATUS_MEANING[(value ?? 'active') as SubscriptionStatus] ?? ''}`;
     case 'plan':
@@ -399,7 +414,8 @@ const HISTORY_LABEL: Record<string, string> = {
   'platform.tenant.subscription_dates_changed': 'Dates changed',
   'platform.tenant.payment_recorded': 'Payment recorded',
   'platform.tenant.modules_changed': 'Modules changed',
-  'platform.tenant.trial_started': 'Free month started (first sign-in)',
+  'platform.tenant.trial_started': 'Free month started',
+  'platform.tenant.pilot_changed': 'Pilot mark changed',
   'platform.tenant_admin.sign_in_reset': 'Owner sign-in reset link made',
   'platform.tenant_admin.mfa_reset': 'Owner two-step sign-in reset',
 };

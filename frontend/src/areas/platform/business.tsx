@@ -13,6 +13,7 @@ import {
   resetOwnerTwoStep,
   resumeBusiness,
   setBusinessModules,
+  setBusinessPilot,
   setBusinessPlan,
   setSubscriptionDates,
   setSubscriptionStatus,
@@ -104,7 +105,9 @@ export function SubscriptionFacts({ detail, today }: { detail: BusinessDetail; t
         {b.plan_name ?? b.plan_code}: {priceLine(detail.plan_price)} (<Link to="/platform/plans">Plans and prices</Link>)
       </dd>
       <dt>Free month ends</dt>
-      <dd>{b.trial_ends_on ? formatDay(b.trial_ends_on) : 'Starts at the first sign-in'}</dd>
+      <dd>{b.pilot ? 'Never: a pilot' : b.trial_ends_on ? formatDay(b.trial_ends_on) : 'Starts at the first sign-in or the first payment'}</dd>
+      <dt>Pilot</dt>
+      <dd>{b.pilot ? 'Yes: free, with no end date, never suspended by itself' : 'No'}</dd>
       <dt>Paid until</dt>
       <dd>{b.paid_until ? formatDay(b.paid_until) : 'Nothing paid yet'}</dd>
     </dl>
@@ -290,6 +293,9 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
   const [planPick, setPlanPick] = useState('');
   const [statusPick, setStatusPick] = useState<SubscriptionStatus>('active');
   const [datePick, setDatePick] = useState('');
+  const [clearDate, setClearDate] = useState(false);
+  const [unusual, setUnusual] = useState<string | null>(null);
+  const [confirmUnusual, setConfirmUnusual] = useState(false);
   const [modules, setModules] = useState<string[] | null>(null);
   const [payment, setPayment] = useState<PaymentForm | null>(null);
   const [problems, setProblems] = useState<Problems>({});
@@ -297,6 +303,14 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
   const [link, setLink] = useState<string | null>(null);
   const key = useRef<string>(newKey());
   const today = todayInKampala();
+
+  /** Any change to the payment form is a new request, so it gets a new Idempotency-Key (a repeat of the same one does not). */
+  function changePayment(next: PaymentForm) {
+    key.current = newKey();
+    setUnusual(null);
+    setConfirmUnusual(false);
+    setPayment(next);
+  }
 
   const detail = query.data;
   const b: Business = detail?.tenant ?? {};
@@ -342,18 +356,26 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
       case 'plan':
         return run(() => setBusinessPlan(tenantId, value ?? '', reason), `${name} is on the new plan.`);
       case 'trial':
-        return run(() => setSubscriptionDates(tenantId, { trial_ends_on: value }, reason), `The free month now ends on ${formatDay(value)}.`);
+        return clearDate
+          ? run(() => setSubscriptionDates(tenantId, { clear_trial_ends_on: true }, reason), 'The free month now starts at the next sign-in.')
+          : run(() => setSubscriptionDates(tenantId, { trial_ends_on: value }, reason), `The free month now ends on ${formatDay(value)}.`);
       case 'paid':
-        return run(() => setSubscriptionDates(tenantId, { paid_until: value }, reason), `Paid until is now ${formatDay(value)}.`);
+        return clearDate
+          ? run(() => setSubscriptionDates(tenantId, { clear_paid_until: true }, reason), 'Nothing is shown as paid any more.')
+          : run(() => setSubscriptionDates(tenantId, { paid_until: value }, reason), `Paid until is now ${formatDay(value)}.`);
       case 'modules':
-        return run(() => setBusinessModules(tenantId, shownModules), 'The modules are saved.');
+        return run(() => setBusinessModules(tenantId, shownModules, reason), 'The modules are saved.');
+      case 'pilot':
+        return run(
+          () => setBusinessPilot(tenantId, !b.pilot, reason),
+          b.pilot ? `${name} is no longer a pilot.` : `${name} is a pilot: free, with no end date.`,
+        );
     }
   }
 
   function startPayment() {
-    setPayment(paymentFormFor(detail?.plan_price, today));
+    changePayment(paymentFormFor(detail?.plan_price, today));
     setProblems({});
-    key.current = newKey();
     setDone(null);
     setOpen({ kind: 'payment', reviewing: false });
   }
@@ -378,6 +400,10 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
           paid_on: payment.paidOn,
           months: Number(payment.months),
           note: payment.note.trim() || undefined,
+          confirm_unusual_amount: confirmUnusual || undefined,
+        }).catch((err: unknown) => {
+          if (err instanceof OperatorError && err.code === 'payment_amount_unusual') setUnusual(err.message);
+          throw err;
         }),
       'The payment is recorded.',
     );
@@ -474,12 +500,14 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
               </button>
               <button type="button" onClick={() => {
                 setDatePick(b.trial_ends_on ?? today);
+                setClearDate(false);
                 setOpen({ kind: 'confirm', action: 'trial' });
               }}>
                 Change free month end
               </button>
               <button type="button" onClick={() => {
                 setDatePick(b.paid_until ?? today);
+                setClearDate(false);
                 setOpen({ kind: 'confirm', action: 'paid' });
               }}>
                 Correct paid until
@@ -492,6 +520,9 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                 }}
               >
                 Change status
+              </button>
+              <button type="button" onClick={() => setOpen({ kind: 'confirm', action: 'pilot' })}>
+                {b.pilot ? 'Stop being a pilot' : 'Mark as a pilot'}
               </button>
               {readOnly ? (
                 <button type="button" data-tour="biz-suspend" onClick={() => setOpen({ kind: 'confirm', action: 'resume' })}>
@@ -509,7 +540,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                 business={b}
                 form={payment}
                 problems={problems}
-                onChange={setPayment}
+                onChange={changePayment}
                 onReview={reviewPayment}
                 onCancel={close}
                 expected={(months) => expectedAmount(detail.plan_price, months)}
@@ -525,7 +556,21 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                 error={error}
                 onConfirm={sendPayment}
                 onCancel={() => setOpen({ kind: 'payment', reviewing: false })}
-              />
+              >
+                {unusual && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={confirmUnusual}
+                      onChange={(e) => {
+                        key.current = newKey();
+                        setConfirmUnusual(e.target.checked);
+                      }}
+                    />
+                    I checked it: this amount is right
+                  </label>
+                )}
+              </ConfirmPanel>
             )}
 
             {open.kind === 'confirm' && open.action === 'plan' && (
@@ -561,8 +606,14 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
             {open.kind === 'confirm' && (open.action === 'trial' || open.action === 'paid') && (
               <ConfirmPanel
                 id="date-confirm"
-                sentence={actionSentence(open.action, b, datePick)}
-                confirm="Yes, change the date"
+                sentence={
+                  clearDate
+                    ? open.action === 'trial'
+                      ? `Clear the end of the free month of ${b.name ?? 'this business'}? It starts again at the next sign-in.`
+                      : `Clear what is paid for ${b.name ?? 'this business'}? Use this only to correct a mistake.`
+                    : actionSentence(open.action, b, datePick)
+                }
+                confirm={clearDate ? 'Yes, clear it' : 'Yes, change the date'}
                 busy={busy}
                 error={error}
                 onConfirm={(reason) => void confirmAction(open.action, reason, datePick)}
@@ -570,8 +621,12 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
               >
                 <div>
                   <label htmlFor="date-pick">{open.action === 'trial' ? 'Last day of the free month' : 'Last day paid for'}</label>
-                  <input id="date-pick" type="date" value={datePick} onChange={(e) => setDatePick(e.target.value)} />
+                  <input id="date-pick" type="date" value={datePick} disabled={clearDate} onChange={(e) => setDatePick(e.target.value)} />
                 </div>
+                <label>
+                  <input type="checkbox" checked={clearDate} onChange={(e) => setClearDate(e.target.checked)} />
+                  Clear this date instead
+                </label>
               </ConfirmPanel>
             )}
 
@@ -597,6 +652,18 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                   </select>
                 </div>
               </ConfirmPanel>
+            )}
+
+            {open.kind === 'confirm' && open.action === 'pilot' && (
+              <ConfirmPanel
+                id="pilot-confirm"
+                sentence={actionSentence('pilot', b)}
+                confirm={b.pilot ? 'Yes, stop the pilot' : 'Yes, mark as a pilot'}
+                busy={busy}
+                error={error}
+                onConfirm={(reason) => void confirmAction('pilot', reason)}
+                onCancel={close}
+              />
             )}
 
             {open.kind === 'confirm' && (open.action === 'suspend' || open.action === 'resume') && (
@@ -642,10 +709,9 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                 id="modules-confirm"
                 sentence={actionSentence('modules', b, shownModules.map(moduleLabel).join(' and '))}
                 confirm="Yes, save the modules"
-                needsReason={false}
                 busy={busy}
                 error={error}
-                onConfirm={() => void confirmAction('modules', '')}
+                onConfirm={(reason) => void confirmAction('modules', reason)}
                 onCancel={() => {
                   close();
                   setModules(null);

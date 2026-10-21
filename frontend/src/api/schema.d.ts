@@ -2756,6 +2756,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/pilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark or unmark a pilot (complimentary) business, with a reason: free, no free month end; the same mark again changes nothing (ADR-024 decision 6) */
+        put: operations["platformSetTenantPilot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/plan": {
         parameters: {
             query?: never;
@@ -2782,7 +2799,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resume a suspended tenant with a reason; already active changes nothing (FR-TEN-06) */
+        /** Resume a suspended tenant with a reason, back to the status it had before (a free month stays a free month); a tenant that is not suspended changes nothing (FR-TEN-06) */
         post: operations["platformResumeTenant"];
         delete?: never;
         options?: never;
@@ -6065,7 +6082,8 @@ export interface components {
             effective_from?: string;
             /** Format: int64 */
             monthly_minor: number;
-            reason?: string;
+            /** @description Why, kept with the price and in the audit log */
+            reason: string;
         };
         /** @description Issue #384: more sizes or colours for an item; a combination it has already is skipped. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
         AddRetailVariantsRequest: {
@@ -8474,6 +8492,8 @@ export interface components {
              * @description The last day paid for, or null when nothing was paid
              */
             paid_until?: string;
+            /** @description A pilot or complimentary business: free, no free month end (ADR-024 decision 6) */
+            pilot?: boolean;
             plan_code?: string;
             plan_name?: string;
             slug?: string;
@@ -8481,6 +8501,8 @@ export interface components {
             status?: string;
             /** @description trial, active, past_due, suspended or cancelled */
             subscription_status?: string;
+            /** @description While suspended or cancelled: the status a resume brings back (trial, active or past_due) */
+            suspended_from?: string;
             timezone?: string;
             /**
              * Format: date
@@ -14315,7 +14337,7 @@ export interface components {
             max_staff_users?: number;
             name: string;
             /** @description Why, kept in the platform audit log */
-            reason?: string;
+            reason: string;
             /** Format: int32 */
             sort_order?: number;
         };
@@ -14972,6 +14994,10 @@ export interface components {
         };
         /** @description Send one or both dates */
         SubscriptionDatesRequest: {
+            /** @description True clears what is paid (the last day paid for and the start of the paid period) */
+            clear_paid_until?: boolean;
+            /** @description True clears the last day of the free month (the clock starts again at the next sign-in) */
+            clear_trial_ends_on?: boolean;
             /**
              * Format: date
              * @description The new last day paid for
@@ -15017,9 +15043,11 @@ export interface components {
         SubscriptionPaymentRequest: {
             /**
              * Format: int64
-             * @description Minor units; whole shillings for UGX
+             * @description Minor units; whole shillings for UGX; at most 50,000,000
              */
             amount_minor: number;
+            /** @description True when the operator checked an amount more than 25% away from the plan's price for these months, or a plan with no price (422 payment_amount_unusual otherwise) */
+            confirm_unusual_amount?: boolean;
             method: string;
             /**
              * Format: int32
@@ -15085,6 +15113,8 @@ export interface components {
         };
         TenantModulesRequest: {
             modules: string[];
+            /** @description Why; kept in the platform audit log (issue #407) */
+            reason: string;
         };
         TenantPaymentAccountStatus: {
             /** @description A closed word: invalid_credentials or registration_refused */
@@ -15093,6 +15123,11 @@ export interface components {
             last_checked_at?: string;
             /** @description not_connected, verified or failed */
             status?: string;
+        };
+        TenantPilotRequest: {
+            /** @description True: a pilot or complimentary business, free with no end (ADR-024 decision 6) */
+            pilot: boolean;
+            reason: string;
         };
         TenantPlanRequest: {
             plan_code: string;
@@ -20202,6 +20237,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubscriptionPayment"];
+                };
+            };
+        };
+    };
+    platformSetTenantPilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPilotRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenant"];
                 };
             };
         };

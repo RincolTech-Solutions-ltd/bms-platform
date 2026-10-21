@@ -37,20 +37,39 @@ repository: the operator types them in the portal.
    late payment, the move to `active`, behind the `Idempotency-Key` protocol, so a second tap records nothing. The paid period starts
    the day after what is already covered (a free month still running, an earlier payment) or today, so no free or paid day is lost.
    A suspended or cancelled business stays read only until the operator resumes it. A mistake is corrected by moving the paid-until
-   date by hand with a reason; a confirmed payment is never edited.
-4. **The free month starts at the first staff sign-in.** A trigger on `auth_sessions` sets the last day of the trial once, one month
-   from the first session a staff user of the business opens, in the business's own time zone, and writes a platform audit row;
-   existing trials are backfilled from their first session. Nothing happens when the month ends: the reminders and the guarded
+   date by hand with a reason; a confirmed payment is never edited. A payment and a monthly price are at most 50,000,000 minor units
+   (UGX 50 million), in the database and in the API. A payment more than 25% away from the plan's price for those months (each
+   whole year at the yearly price, the months left at the monthly price), or on a plan with no price entered, is refused with
+   `payment_amount_unusual` until the operator sends `confirm_unusual_amount` after checking it.
+4. **The free month starts at the first staff sign-in, or at a payment that comes first.** A trigger on `auth_sessions` sets the last
+   day of the trial once, one month from the first session a staff user of the business opens, in the business's own time zone, and
+   writes a platform audit row; existing trials are backfilled from their first session, with an audit row each. **A payment recorded
+   before anyone has signed in never burns the free month:** the free month starts on the day of the payment (audited as started by
+   the payment), and the paid months start the day after it ends; a later first sign-in changes nothing. Nothing happens when the month ends: the reminders and the guarded
    scheduled transitions of ADR-024 decision 6 are still to come, and the operator can move the last day by hand.
 5. **Every operator change carries a reason and changes nothing when repeated.** Suspend, resume, a status move, a plan move and a
    date change take a reason of 5 to 300 characters that the platform audit log keeps with the operator's id; a request that would
-   change nothing writes nothing. Suspended means read only and never delete (FR-TEN-06, unchanged).
+   change nothing writes nothing. Suspended means read only and never delete (FR-TEN-06, unchanged). The same holds for saving a
+   plan, adding a price, switching modules on or off and the pilot mark. **A resume restores the status from before the suspension**
+   (`subscriptions.suspended_from`, kept while the business moves between suspended and cancelled): a business suspended in its free
+   month comes back to its free month with the same last day, and a late one comes back late. Dates set by hand are from 2026-01-01
+   to five years ahead, and either date can be cleared.
 6. **The screens.** The portal gains Businesses (search by name, address or owner email, filters by status and module, one card per
    business so a phone reads it), a Business page (details and owner, subscription, modules, a payment, the plan, the dates, suspend
    and resume, the owner sign-in rescue through the existing routes, the emails the outbox holds for it and the operator history),
    and Plans and prices. Every change is confirmed in a plain-words sentence first. Each page has a page tour that starts only from
    its own button and saves nothing, breadcrumbs and links to the pages it refers to (ADR-049).
-7. **Platform permissions are unchanged.** Reads need `platform.tenants.read`, changes `platform.tenants.manage`, which no tenant role
+7. **Pilot (complimentary) businesses (ADR-024 decision 6).** `subscriptions.is_pilot` marks a business that is free with no free month
+   end until a paid start is agreed: marking it (on the Business page, with a reason, audited as `platform.tenant.pilot_changed`)
+   clears the last day of the free month, the first sign-in starts no clock, and the scheduled transitions to come must skip it.
+   On the owner's decision of 21 Oct 2026, V75 marks the three businesses agreed as pilots on staging, by slug and only where a
+   tenant with that slug exists, with an audit row each; no other database is touched.
+8. **Commissions are deferred.** ADR-024 decision 5 (agents, effective-dated commission rules and the commission line stored when a
+   payment is confirmed) and the tenant's own claim and the operator's confirm step of decision 4 are not built. A payment confirmed
+   now gets its commission line later from the same record: when agents arrive, a one-off job applies the rule in force on each
+   payment's `paid_on` to the confirmed `subscription_payments` rows that have no commission line yet, and stores the line with the
+   rule's snapshot, exactly as a confirmation will from then on. Nothing is lost by recording payments before then.
+9. **Platform permissions are unchanged.** Reads need `platform.tenants.read`, changes `platform.tenants.manage`, which no tenant role
    holds; the routes are served only on the platform host. Reads that cross tenants (the overview with owner and last sign-in, a
    tenant's administrators, its outbox rows) are definer functions owned by `bms_owner`; a payment is read and written only inside
    a transaction bound to its own tenant.

@@ -69,12 +69,13 @@ describe('payments', () => {
     expect(coverFor({ ...base, subscription_status: 'trial', trial_ends_on: '2026-10-30' }, 1, TODAY)).toEqual({
       start: '2026-10-31',
       end: '2026-11-29',
+      freeMonthEnds: undefined,
     });
-    expect(coverFor({ ...base, subscription_status: 'active', paid_until: '2026-12-20' }, 12, TODAY)).toEqual({
+    expect(coverFor({ ...base, subscription_status: 'active', paid_until: '2026-12-20' }, 12, TODAY)).toMatchObject({
       start: '2026-12-21',
       end: '2027-12-20',
     });
-    expect(coverFor({ ...base, subscription_status: 'past_due', paid_until: '2026-09-30' }, 1, TODAY)).toEqual({
+    expect(coverFor({ ...base, subscription_status: 'past_due', paid_until: '2026-09-30' }, 1, TODAY)).toMatchObject({
       start: TODAY,
       end: '2026-11-20',
     });
@@ -93,6 +94,15 @@ describe('payments', () => {
     expect(Object.keys(paymentProblems({ ...ok, amount: '' }, 'UGX', TODAY))).toEqual(['amount']);
     expect(Object.keys(paymentProblems({ ...ok, paidOn: '2026-10-22' }, 'UGX', TODAY))).toEqual(['paidOn']);
     expect(Object.keys(paymentProblems({ ...ok, months: '25' }, 'UGX', TODAY))).toEqual(['months']);
+    expect(Object.keys(paymentProblems({ ...ok, amount: '50000001' }, 'UGX', TODAY))).toEqual(['amount']);
+  });
+
+  it('starts the free month at a payment made before anyone signed in, and pays after it', () => {
+    const early = { ...base, subscription_status: 'trial' };
+    expect(coverFor(early, 1, TODAY)).toEqual({ start: '2026-11-21', end: '2026-12-20', freeMonthEnds: '2026-11-20' });
+    const form = { amount: '10000', method: 'mtn_momo', reference: '', paidOn: TODAY, months: '1', note: '' };
+    expect(paymentSentence(early, form, TODAY)).toContain('Its free month starts today and runs to 20 Nov 2026 first.');
+    expect(coverFor({ ...early, pilot: true }, 1, TODAY)).toEqual({ start: TODAY, end: '2026-11-20', freeMonthEnds: undefined });
   });
 
   it('says in plain words what will be recorded, and that a suspended business stays read only', () => {
@@ -108,6 +118,10 @@ describe('actions', () => {
   it('explains suspension as read only and never deleted', () => {
     const words = actionSentence('suspend', base);
     expect(words).toContain('can still sign in, look and export');
+    expect(actionSentence('resume', { ...base, subscription_status: 'suspended', suspended_from: 'trial' })).toContain(
+      'goes back to Free month',
+    );
+    expect(subscriptionLine({ ...base, subscription_status: 'trial', pilot: true }, TODAY)).toBe('Pilot: free, with no end date.');
     expect(words).toContain('Nothing is deleted.');
   });
 
@@ -134,14 +148,17 @@ describe('plans and prices', () => {
     const form = { ...EMPTY_PLAN, code: 'test-small', name: 'Test Small', branches: '1', staff: '', members: '50' };
     expect(planProblems(form, true)).toEqual({});
     expect(toSavePlan(form, '')).toMatchObject({ name: 'Test Small', max_branches: 1, max_staff_users: undefined, max_active_members: undefined });
-    expect(planProblems({ ...form, branches: '0' }, true).branches).toBeDefined();
+    expect(planProblems({ ...form, branches: '0' }, true)).toEqual({});
+    expect(planProblems({ ...form, branches: '-1' }, true).branches).toBeDefined();
+    expect(toSavePlan(form, 'Test: new plan').reason).toBe('Test: new plan');
   });
 
   it('never lets a price start before today and says what it does', () => {
-    const form = { monthly: '10000', annualMonths: '11', from: TODAY, reason: '' };
+    const form = { monthly: '10000', annualMonths: '11', from: TODAY };
     expect(priceProblems(form, TODAY)).toEqual({});
     expect(priceProblems({ ...form, from: '2026-10-20' }, TODAY).from).toBeDefined();
     expect(priceProblems({ ...form, annualMonths: '13' }, TODAY).annualMonths).toBeDefined();
+    expect(priceProblems({ ...form, monthly: '50000001' }, TODAY).monthly).toBeDefined();
     expect(priceSentence('Test Small', form, TODAY)).toBe(
       'Test Small will cost UGX 10,000 a month and UGX 110,000 a year, from today. Businesses already paid are not changed.',
     );
