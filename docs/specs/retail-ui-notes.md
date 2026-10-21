@@ -1004,7 +1004,7 @@ therefore as far as the existing routes go: Stock, and Past restocks and Stock m
 | `/staff/lending/savings/products` | Savings products | `page-savings-products` v1 (added) | the account count opens the savings list |
 | `/staff/payments` | Receive payments | `page-payments` v1 (added) | none added |
 | `/staff/reports` | Reports | `page-reports` v1 (added) | none added |
-| `/staff/retail` | Retail | `page-retail-home` v1 (added) | none added |
+| `/staff/retail` | Retail | `page-retail-home` v2 (the seller's own sales, ADR-055) | none added |
 | `/staff/retail/accounts` | Customer accounts | `page-accounts` v1 (existing) | none added |
 | `/staff/retail/accounts/$customerId` | Account | `page-account` v1 (added) | none added |
 | `/staff/retail/advances` | Advances | `page-advances` v1 (added) | link to Cash summary |
@@ -1193,7 +1193,7 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Tours: `page-orders`, `page-order`, `page-orders-report` (`frontend/src/tour/tours-retail-orders.ts`). The retail menu has an Orders
   shortcut right after Sale, and the retail home an Orders tile, for whoever holds `retail.order.manage`.
 
-## Slow movers on Stock health (issue #414, FR-RET-62)
+## Slow movers on Stock health (issue #414, FR-RET-64)
 
 - Stock health has a Slow movers section between Days of cover and Dead stock: items that sold in the branch in the last 90
   days, but whose stock lasts more than the business's months at that pace (or that sold fewer than its minimum). The title
