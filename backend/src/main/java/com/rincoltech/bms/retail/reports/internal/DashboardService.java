@@ -170,10 +170,12 @@ class DashboardService {
         // The when-paid fields appear once the rule has started, not while its start day is still ahead.
         boolean onPay = periods.contains(today);
         LocalDate windowStart = today.minusDays(29);
-        // One read of each dated query covers the last 30 days and the range with the period before it.
-        LocalDate first = range == null || range.first().isAfter(windowStart) ? windowStart : range.first();
-        LocalDate last = range == null || range.to().isBefore(today) ? today : range.to();
-        Book book = book(filter, first, last, periods, onPay);
+        // The last 30 days (today, the 7 and 30 day figures, the shops) and, apart, the range with the period before it: a
+        // range far in the past is read for its own days and the 30 before them, never for everything up to today.
+        Book book = book(filter, windowStart, today, periods, onPay);
+        Book ranged = range == null
+                ? null
+                : range.first().isBefore(windowStart) ? book(filter, range.first(), range.to(), periods, onPay) : book;
         Map<UUID, Map<LocalDate, long[]>> byBranch = book.byBranch();
         Map<LocalDate, long[]> byDay = book.byDay();
         Map<LocalDate, long[]> profitDay = book.profitDay();
@@ -246,6 +248,9 @@ class DashboardService {
         book.recBranch().keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         // A branch that only took payments on credit sales has money collected today and needs its row.
         book.collBranch().keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
+        if (ranged != null && ranged != book) {
+            ranged.byBranch().keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
+        }
         positions.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         branches.sort(null);
         List<Shop> shops = new ArrayList<>();
@@ -264,15 +269,17 @@ class DashboardService {
                         s7 += e.getValue()[0];
                     }
                 }
-                if (range != null && range.contains(day)) {
-                    rs += e.getValue()[0];
-                } else if (range != null && range.inPrevious(day)) {
-                    rp += e.getValue()[0];
-                }
             }
             if (range != null) {
+                for (Map.Entry<LocalDate, long[]> e : ranged.byBranch().getOrDefault(b, Map.of()).entrySet()) {
+                    if (range.contains(e.getKey())) {
+                        rs += e.getValue()[0];
+                    } else if (range.inPrevious(e.getKey())) {
+                        rp += e.getValue()[0];
+                    }
+                }
                 for (Map.Entry<LocalDate, long[]> e :
-                        book.profitBranch().getOrDefault(b, Map.of()).entrySet()) {
+                        ranged.profitBranch().getOrDefault(b, Map.of()).entrySet()) {
                     if (range.contains(e.getKey())) {
                         rProfit += e.getValue()[0] - e.getValue()[1];
                     }
@@ -284,7 +291,7 @@ class DashboardService {
             boolean sold = principal.may(SALE_READ, b);
             boolean cost = sold && principal.may(PROFIT_READ, b);
             Position p = principal.may(STOCK_READ, b) ? positions.get(b) : null;
-            boolean ranged = range != null && sold;
+            boolean inRange = range != null && sold;
             shops.add(new Shop(
                     b,
                     sold ? t[0] : null,
@@ -298,9 +305,9 @@ class DashboardService {
                     onPay && sold
                             ? book.collBranch().getOrDefault(b, Map.of()).getOrDefault(today, new long[3])[0]
                             : null,
-                    ranged ? rs : null,
-                    ranged && range.hasPrevious() ? rp : null,
-                    ranged && cost ? rProfit : null));
+                    inRange ? rs : null,
+                    inRange && range.hasPrevious() ? rp : null,
+                    inRange && cost ? rProfit : null));
         }
         long[] rToday = collDay.getOrDefault(today, new long[3]);
         long[] owed = onPay ? credit.onCredit(filter, periods) : new long[2];
@@ -329,7 +336,7 @@ class DashboardService {
                 onPay ? received7 : null,
                 onPay ? received30 : null,
                 periods.from(),
-                range == null ? null : range(range, book, filter, principal, profit, onPay));
+                range == null ? null : range(range, ranged, filter, principal, profit, onPay));
     }
 
     /** The range part (issue #428): its figures against the period before, the chart, and who and what did best. */
@@ -411,9 +418,10 @@ class DashboardService {
                 series,
                 busiestDay,
                 bestShop(range, book, principal),
-                leader(Dimension.PRODUCT, filter, range),
+                // Over more than a year the two rankings, which scan every sale line of the span, are left out (ADR-060).
+                range.leaders() ? leader(Dimension.PRODUCT, filter, range) : null,
                 // A ranking of colleagues is management information, as the salesperson level of the sales summary.
-                profit ? leader(Dimension.SELLER, filter, range) : null);
+                profit && range.leaders() ? leader(Dimension.SELLER, filter, range) : null);
     }
 
     /** More sales, or as many on an earlier day. */

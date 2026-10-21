@@ -192,7 +192,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   rules live in the `retail` settings group (`/retail/settings/capabilities`). The PWA: the Slow movers section, a Move link that
   opens Move stock filled in (`from`, `to`, `product`, `code`, `qty` in the address), the Slow movers card on Retail settings;
   tours `page-stock-health` v2 and `page-retail-settings` v4 (`docs/specs/retail-ui-notes.md`).
-- **Built (the Retail home range, issue #428, FR-RET-65, ADR-058):** reports only, no migration, no permission:
+- **Built (the Retail home range, issue #428, FR-RET-65, ADR-060):** reports only, no migration, no permission:
   `GET /retail/reports/dashboard` takes `period` (`today`, `7d`, `30d`, `ytd`, `1y`, `all`) or `period=custom` with `from` and
   `to` (at most 366 days) and then answers `range`: the figures, average sale and number of sales against the period before (as many
   days before; This year against the same days of last year; All, from the first sale in scope, against nothing), the chart in steps
@@ -695,7 +695,7 @@ Accepted (this list is the ADR index):
   administrator never limited by branch (a database check), sellers who see only their own figures (proposed, #399; FR-RET-59 to FR-RET-61; renumbered at merge if needed)
 - ADR-057 Everyday push notices (new orders, delivery, low stock, credit due, the daily summary) with per-business switches, a one-tap
   turn-on card, and a low-stock minimum per item and branch beside the pace rule, whichever trips first (proposed, #412; renumbered at merge if needed)
-- ADR-058 The Retail home follows one chosen range against the period before (as many days before, This year against last
+- ADR-060 The Retail home follows one chosen range against the period before (as many days before, This year against last
   year, All against nothing), from the dashboard's own dated queries; the choice kept per person per device (proposed, #428;
   FR-RET-65; renumbered at merge if needed)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace

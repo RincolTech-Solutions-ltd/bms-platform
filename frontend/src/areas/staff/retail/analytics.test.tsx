@@ -364,6 +364,29 @@ describe('owner dashboard', () => {
     expect(html).not.toContain('style=');
   });
 
+  it('keeps the Today card above the range picker: today, cash against credit and profit for a profit reader', () => {
+    const html = renderToString(<DashboardView data={full} nameOf={nameOf} choice={{ period: '7d' }} />);
+    expect(html).toContain('Today, 2026-10-07');
+    expect(html).toContain('Sales today');
+    expect(html).toContain('UGX 3,600');
+    expect(html).toContain('Cash and mobile money');
+    expect(html).toContain('UGX 2,100');
+    expect(html).toContain('On credit');
+    expect(html).toContain('UGX 1,500');
+    expect(html).toContain('Profit today');
+    expect(html).toContain('UGX 1,200');
+    expect(html.indexOf('Today, 2026-10-07')).toBeLessThan(html.indexOf('data-tour="home-range"'));
+  });
+
+  it('keeps the Today card for a caller without profit read, with no profit in it', () => {
+    const html = renderToString(<DashboardView data={seller()} nameOf={nameOf} choice={{ period: '7d' }} />);
+    expect(html).toContain('Today, 2026-10-07');
+    expect(html).toContain('Cash and mobile money');
+    expect(html).toContain('UGX 3,600');
+    expect(html).not.toContain('Profit today');
+    expect(html).not.toContain('1,200');
+  });
+
   it('shows the sales parts and nothing of cost, profit, stock value or a ranking of colleagues without profit read', () => {
     const html = renderToString(<DashboardView data={seller()} nameOf={nameOf} choice={{ period: '7d' }} />);
     expect(html).toContain('UGX 6,600');
@@ -394,5 +417,6 @@ describe('owner dashboard', () => {
     expect(html).toContain('Since 1 Oct 2026');
     expect(html).not.toContain(' on the ');
     expect(html).not.toContain('class="rc-prev"');
+    expect(html).toContain('All shows up to the last 3 years.');
   });
 });

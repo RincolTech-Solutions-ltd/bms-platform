@@ -123,7 +123,7 @@ describe('the owner dashboard range', () => {
     dashboard.mockImplementation(async (q: { period: 'today' | '7d' }) => body(q.period));
     cashDaily.mockResolvedValue({ items: [] });
     show(<RetailDashboard />, mockMe('admin'));
-    const chart = await screen.findByRole('img');
+    const chart = await screen.findByRole('slider');
     const readout = () => document.querySelector('.rc-readout')?.textContent ?? '';
     expect(readout()).toContain('Wed 21 Oct');
     expect(readout()).toContain('UGX 3,600');
@@ -133,6 +133,9 @@ describe('the owner dashboard range', () => {
     expect(readout()).toContain('UGX 2,000');
     fireEvent.keyDown(chart, { key: 'Home' });
     expect(readout()).toContain('Mon 19 Oct');
+    expect(chart.getAttribute('aria-valuetext')).toContain('Mon 19 Oct');
+    // The caption is not a live region (it changes on every move of a drag); the spoken one settles after a pause.
+    expect(document.querySelector('.rc-readout')?.getAttribute('aria-live')).toBeNull();
   });
 
   it('adds up the cash book of the range for a person who closes the till', async () => {

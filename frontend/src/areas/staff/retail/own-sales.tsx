@@ -70,8 +70,32 @@ export function ownSeries(level: OwnLevel, days: RangeDays, now: SalesSummaryGro
   }));
 }
 
-/** Every group of a level from one day to another, following the summary's pages (at most a few on any range offered). */
+/** A page of the summary is 31 days, 12 months or 20 years. */
+const MONTHS_A_PAGE = 12;
+
+/**
+ * Every group of a level from one day to another. A page ends at the day before its oldest group, so pages that follow each other
+ * cannot be asked for together; but a month range is split here into chunks of 12 months, each one page, and the chunks are read
+ * at the same time (a year and a bit is two round trips at once, not two in a row). Days (up to 31) and years are one page, and
+ * anything that still has more is followed page by page.
+ */
 async function ownGroups(level: OwnLevel, from: string | undefined, to: string): Promise<SalesSummaryGroup[]> {
+  if (level === 'month' && from) {
+    const chunks: { from: string; to: string }[] = [];
+    let end = to;
+    while (end >= from) {
+      const y = Number(end.slice(0, 4));
+      const m = Number(end.slice(5, 7)) - (MONTHS_A_PAGE - 1);
+      const start = new Date(Date.UTC(y, m - 1, 1)).toISOString().slice(0, 10);
+      chunks.push({ from: start > from ? start : from, to: end });
+      end = daysBefore(start, 1);
+    }
+    return (await Promise.all(chunks.map((c) => pages(level, c.from, c.to)))).flat();
+  }
+  return pages(level, from, to);
+}
+
+async function pages(level: OwnLevel, from: string | undefined, to: string): Promise<SalesSummaryGroup[]> {
   const out: SalesSummaryGroup[] = [];
   let until: string | undefined = to;
   for (let page = 0; page < 6 && until; page++) {
@@ -88,7 +112,9 @@ export function OwnSales() {
   const { me } = useStaff();
   const userId = me?.user_id ?? '';
   const [choice, setChoice] = useState<RangeChoice>(() => readRange(userId));
-  const days = rangeDays(choice, businessToday());
+  // The business's own day, as DashboardService counts it, so the two cards of the page cannot disagree about today.
+  const today = businessToday(new Date(), me?.tenant_timezone || undefined);
+  const days = rangeDays(choice, today);
   const level = ownLevel(days);
   const now = useQuery({
     queryKey: ['retail', 'own-sales', level, days.from ?? '', days.to],
@@ -111,7 +137,7 @@ export function OwnSales() {
   return (
     <section className="rt-card stack" aria-label="Your sales" data-tour="own-sales">
       <h2>Your sales, {title}</h2>
-      <RangePicker value={choice} onChange={pick} />
+      <RangePicker value={choice} onChange={pick} today={today} />
       {now.isPending && <p className="loading">Adding up your sales</p>}
       {now.isError && <p className="hint">Your figures could not be loaded. Open your sales below.</p>}
       {figures && (

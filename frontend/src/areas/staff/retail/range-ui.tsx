@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { RANGE_CHOICES, changeOf, customProblem, stepWords, type RangeChoice } from './range-state';
 import { money } from './ui';
 
@@ -6,14 +6,14 @@ import { money } from './ui';
 // CSP refuses inline styles): a line of the range and, dashed, the same steps of the period before. Hover, tap or the arrow keys
 // pick a step, and its value is read out under the chart.
 
-export function RangePicker({ value, onChange }: { value: RangeChoice; onChange: (choice: RangeChoice) => void }) {
+export function RangePicker({ value, onChange, today }: { value: RangeChoice; onChange: (choice: RangeChoice) => void; /** The business's day: no range may end after it. */ today?: string }) {
   const [custom, setCustom] = useState(value.period === 'custom');
   const [from, setFrom] = useState(value.from ?? '');
   const [to, setTo] = useState(value.to ?? '');
   const [problem, setProblem] = useState<string | null>(null);
   const show = (e: FormEvent) => {
     e.preventDefault();
-    const p = customProblem(from, to);
+    const p = customProblem(from, to, today);
     setProblem(p);
     if (!p) onChange({ period: 'custom', from, to });
   };
@@ -45,8 +45,8 @@ export function RangePicker({ value, onChange }: { value: RangeChoice; onChange:
       </div>
       {custom && (
         <form className="rc-custom" onSubmit={show} noValidate>
-          <label>From <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} /></label>
-          <label>To <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></label>
+          <label>From <input type="date" value={from} max={to || today || undefined} onChange={(e) => setFrom(e.target.value)} /></label>
+          <label>To <input type="date" value={to} min={from || undefined} max={today} onChange={(e) => setTo(e.target.value)} /></label>
           <button type="submit" className="btn-sm">Show these days</button>
           {problem && <p role="alert" className="rt-flag">{problem}</p>}
         </form>
@@ -102,8 +102,27 @@ export function RangeChart({ points, group, label, beforeWords, legend }: { poin
   const step = n > 1 ? (W - 2 * SIDE) / (n - 1) : 0;
   const x = n > 1 ? SIDE + at * step : W / 2;
   const y = (v: number) => TOP + (1 - v / max) * (H - TOP - BOTTOM);
+  // The chart's box is read once, on pointerdown (or the first move of a hover), not on every move: reading it forces a layout.
+  // A resize or a scroll drops it, as either moves the chart under the pointer.
+  const rect = useRef<DOMRect | null>(null);
+  useEffect(() => {
+    const drop = () => { rect.current = null; };
+    window.addEventListener('resize', drop);
+    window.addEventListener('scroll', drop, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener('resize', drop);
+      window.removeEventListener('scroll', drop, { capture: true });
+    };
+  }, []);
+  // What a screen reader hears follows the pick a moment after it settles, not every step of a drag.
+  const [spoken, setSpoken] = useState<number | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => setSpoken(active), 600);
+    return () => clearTimeout(t);
+  }, [active]);
   const pick = (e: PointerEvent<SVGSVGElement>) => {
-    const box = e.currentTarget.getBoundingClientRect();
+    if (e.type === 'pointerdown' || rect.current === null) rect.current = e.currentTarget.getBoundingClientRect();
+    const box = rect.current;
     if (box.width <= 0) return;
     setActive(Math.max(0, Math.min(n - 1, Math.round(((e.clientX - box.left) / box.width) * (n - 1)))));
   };
@@ -121,8 +140,13 @@ export function RangeChart({ points, group, label, beforeWords, legend }: { poin
     <figure className="rc-chart">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        role="img"
+        role="slider"
         aria-label={`${label}. Use the arrow keys to read each step.`}
+        aria-orientation="horizontal"
+        aria-valuemin={0}
+        aria-valuemax={n - 1}
+        aria-valuenow={at}
+        aria-valuetext={`${stepWords(p.start, group)}, ${money(p.value)}`}
         tabIndex={0}
         onPointerMove={pick}
         onPointerDown={pick}
@@ -139,7 +163,10 @@ export function RangeChart({ points, group, label, beforeWords, legend }: { poin
         <span>{stepWords(first.start, group)}</span>
         {n > 1 && <span>{stepWords(last.start, group)}</span>}
       </div>
-      <figcaption className="rc-readout" aria-live="polite">
+      <span className="visually-hidden" aria-live="polite" data-testid="rc-spoken">
+        {spoken === null ? '' : `${stepWords((points[Math.min(spoken, n - 1)] ?? first).start, group)}, ${money((points[Math.min(spoken, n - 1)] ?? first).value)}`}
+      </span>
+      <figcaption className="rc-readout">
         <strong>{stepWords(p.start, group)}</strong> <span className="num">{money(p.value)}</span>
         {p.previous !== undefined && beforeWords && <span className="hint"> ({beforeWords}: {money(p.previous)})</span>}
       </figcaption>

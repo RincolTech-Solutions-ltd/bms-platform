@@ -82,11 +82,13 @@ class DashboardRepository {
             params.put("branchIds", branchIds);
             branch = " AND branch_id IN (:branchIds)";
         }
-        Date first = jdbc.sql("SELECT min(sale_date) FROM retail_sales WHERE status = 'completed'" + branch)
+        // min() over no rows is one row holding NULL, which single() refuses; optional() maps it to no value.
+        return jdbc.sql("SELECT min(sale_date) FROM retail_sales WHERE status = 'completed'" + branch)
                 .params(params)
                 .query(Date.class)
-                .single();
-        return first == null ? null : first.toLocalDate();
+                .optional()
+                .map(Date::toLocalDate)
+                .orElse(null);
     }
 
     /**

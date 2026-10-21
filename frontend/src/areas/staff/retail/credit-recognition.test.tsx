@@ -137,6 +137,10 @@ describe('the home cards', () => {
     expect(html).toContain('Up UGX 1,000, 25% on yesterday');
     expect(html).not.toContain('Money collected');
     expect(html).not.toContain('not paid yet');
+    // The Today card keeps its figures exactly under the default way.
+    expect(html).toContain('Cash and mobile money');
+    expect(html).toContain('UGX 3,000');
+    expect(html).toContain('Profit today');
   });
 
   it('say Sold, money collected, On credit now and profit of the money received when the buyer pays', () => {
@@ -150,6 +154,12 @@ describe('the home cards', () => {
     expect(html).toContain('2 sales not paid yet');
     expect(html).toContain('From the money received');
     expect(html).toContain('UGX 800');
+    // The Today card under the rule: Sales today including credit, Money received today, On credit, Profit today.
+    expect(html).toContain('Sales today');
+    expect(html).toContain('including credit');
+    expect(html).toContain('Money received today');
+    expect(html).toContain('Profit today');
+    expect(html).not.toContain('UGX 3,000');
   });
 
   it('show no profit to a caller without it, and the money collected still', () => {

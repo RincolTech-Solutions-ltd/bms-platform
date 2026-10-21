@@ -214,6 +214,16 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
         assertThat(mixed.getBody().get("today").get("sales_minor").asLong()).isEqualTo(21_000);
         assertThat(get("/reports/dashboard?branch_id=" + t.secondBranch(), both).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
+        // Issue #428: a range does not widen it. A Supervisor asking for a branch outside the supervision is refused with a
+        // period, whatever the period.
+        for (String period : List.of("period=7d", "period=all", "period=today")) {
+            ResponseEntity<JsonNode> outside =
+                    get("/reports/dashboard?" + period + "&branch_id=" + t.secondBranch(), supervisor);
+            assertThat(outside.getStatusCode()).as("%s: %s", period, outside.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(get("/reports/dashboard?" + period + "&branch_id=" + t.secondBranch(), both).getStatusCode())
+                    .as("also for the supervisor who sells at branch two: %s", period)
+                    .isEqualTo(HttpStatus.FORBIDDEN);
+        }
         // A seller at the same branch still sees only their own.
         assertThat(ids(get("/sales?limit=100", tokenA).getBody().get("items"))).containsExactly(saleA.toString());
     }

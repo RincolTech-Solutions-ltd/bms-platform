@@ -347,7 +347,7 @@ Each screen is a date range (the last 30 days, at most 366, checked on the scree
   tiles of the screens follow, each only with its permission. For an owner (a profit reader) the dashboard comes first. For a
   seller the tiles come first (Record a sale is one tap away) and the sales and stock parts follow. Two dashed slots,
   "Banked against expected" and "Savings", were placeholders for the cash book until the range of #428 filled them.
-- **The home follows one range (#428, ADR-058).** A row of buttons under the heading: Today, 7 days, 30 days, This year,
+- **The home follows one range (#428, ADR-060).** A row of buttons under the heading: Today, 7 days, 30 days, This year,
   1 year, All and Choose days (two dates and Show these days; at most 366 days, checked before asking). The choice is kept per
   person in this browser (`bms.homeRange.<host>.<user>`), 7 days at first. Under it: the total of the range in large type with
   Up or Down, the amount and the percent on the period before (green up, red down, with an arrow and the words); the chart,

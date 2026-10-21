@@ -39,9 +39,10 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /** Why two typed days are not a range, or null when they are. */
-export function customProblem(from: string, to: string): string | null {
+export function customProblem(from: string, to: string, today?: string): string | null {
   if (!validDate(from) || !validDate(to)) return 'Pick both days.';
   if (from > to) return 'The first day is after the last day.';
+  if (today && to > today) return 'The last day cannot be after today.';
   if (daysBetween(from, to) > MAX_CUSTOM_DAYS) return 'Pick at most 366 days.';
   return null;
 }

@@ -320,6 +320,90 @@ class RetailDashboardRangeIT extends IntegrationTest {
         assertThat(scoped.getBody().toString()).doesNotContain(t.headOffice().toString());
     }
 
+    /** A tenant that has sold nothing: every range answers with zeros, none of them is a 500 (min() over no sale is a NULL row). */
+    @Test
+    void aScopeWithNoCompletedSaleAnswersEveryRangeWithZeros() {
+        TestDatabase.Fixture empty = TestDatabase.tenant("retail-dsr-none", false, true);
+        RetailTestSupport none = new RetailTestSupport(http, empty);
+        String first = empty.headOffice().toString();
+        for (String q : List.of(
+                "period=all",
+                "period=all&branch_id=" + first,
+                "period=all&branch_id=" + empty.secondBranch(),
+                "period=7d",
+                "period=today",
+                "period=ytd",
+                "period=1y",
+                "period=custom&from=" + today().minusDays(20) + "&to=" + today().minusDays(10))) {
+            ResponseEntity<JsonNode> r = none.get("/reports/dashboard?" + q, ADMIN);
+            assertThat(r.getStatusCode()).as("%s: %s", q, r.getBody()).isEqualTo(HttpStatus.OK);
+            JsonNode range = r.getBody().get("range");
+            figures(range.get("current"), 0, 0, 0);
+            assertThat(range.has("busiest_day")).as(q).isFalse();
+            assertThat(range.has("best_shop")).as(q).isFalse();
+            assertThat(range.has("best_seller")).as(q).isFalse();
+            assertThat(range.has("top_salesperson")).as(q).isFalse();
+        }
+        JsonNode all = none.get("/reports/dashboard?period=all", ADMIN).getBody().get("range");
+        assertThat(all.get("from").asString()).isEqualTo(today().toString());
+        assertThat(all.has("previous")).isFalse();
+    }
+
+    /** A branch with no sale in a tenant that has sales elsewhere: All for it is the single day today, not an error. */
+    @Test
+    void allForABranchWithNoSaleIsNotAnError() {
+        TestDatabase.Fixture one = TestDatabase.tenant("retail-dsr-one", false, true);
+        RetailTestSupport mine = new RetailTestSupport(http, one);
+        AnalyticsData data = new AnalyticsData(one, mine);
+        data.products();
+        data.stock();
+        data.sell(one.headOffice(), "cash", data.p1, "1", 2);
+        ResponseEntity<JsonNode> r = mine.call(
+                HttpMethod.GET,
+                "/reports/dashboard?period=all",
+                null,
+                ADMIN,
+                one.secondBranch().toString(),
+                Map.of());
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        figures(r.getBody().get("range").get("current"), 0, 0, 0);
+    }
+
+    /** A range far in the past is read for its own days and the days before it; today's card and the fixed windows are unchanged. */
+    @Test
+    void anOldCustomRangeReadsItsOwnDaysAndKeepsTodayAsItWas() {
+        JsonNode body = range(
+                "period=custom&from=" + today().minusDays(410) + "&to=" + today().minusDays(390), ADMIN);
+        figures(body.get("range").get("current"), 300, 1, 100);
+        figures(body.get("range").get("previous"), 0, 0, 0);
+        assertThat(body.get("today").get("sales_minor").asLong()).isEqualTo(3_600);
+        assertThat(body.get("last30_sales_minor").asLong()).isEqualTo(9_000);
+        // The shop of today is still listed beside the shop of the range.
+        assertThat(shop(body, t.headOffice()).get("today_sales_minor").asLong()).isEqualTo(2_100);
+        assertThat(shop(body, t.headOffice()).get("range_sales_minor").asLong()).isEqualTo(300);
+    }
+
+    @Test
+    void aRangeEndingAfterTodayIsRefused() {
+        for (String q : List.of(
+                "period=custom&from=" + today().plusDays(30) + "&to=" + today().plusDays(60),
+                "period=custom&from=" + today().minusDays(2) + "&to=" + today().plusDays(1))) {
+            ResponseEntity<JsonNode> r = api.get("/reports/dashboard?" + q, ADMIN);
+            assertThat(r.getStatusCode()).as("%s: %s", q, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+    }
+
+    /** A Storekeeper reads stock, not sales: the dashboard is refused with a range as without one. */
+    @Test
+    void aStorekeeperIsRefusedWithARangeToo() {
+        String storekeeper = "retail.stock.read,retail.stock.transfer,retail.stocktake.commit,retail.usage.report";
+        assertThat(api.get("/reports/dashboard", storekeeper).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        for (String q : List.of("period=7d", "period=all", "period=custom&from=" + today().minusDays(3) + "&to=" + today())) {
+            ResponseEntity<JsonNode> r = api.get("/reports/dashboard?" + q, storekeeper);
+            assertThat(r.getStatusCode()).as("%s: %s", q, r.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+        }
+    }
+
     JsonNode shop(JsonNode report, UUID id) {
         for (JsonNode s : report.get("shops")) {
             if (s.get("branch_id").asString().equals(id.toString())) {

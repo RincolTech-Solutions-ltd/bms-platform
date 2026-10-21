@@ -54,6 +54,8 @@ describe('the stored choice', () => {
     expect(customProblem('2026-10-02', '2026-10-01')).toBe('The first day is after the last day.');
     expect(customProblem('2025-01-01', '2026-10-01')).toBe('Pick at most 366 days.');
     expect(customProblem('2025-10-21', '2026-10-21')).toBeNull();
+    expect(customProblem('2026-10-01', '2026-10-22', '2026-10-21')).toBe('The last day cannot be after today.');
+    expect(customProblem('2026-10-01', '2026-10-21', '2026-10-21')).toBeNull();
   });
 });
 

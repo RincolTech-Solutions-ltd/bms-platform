@@ -887,7 +887,7 @@ FR-RET-53 to FR-RET-57 are customer orders with delivery (ADR-052, issue #385, m
 FR-RET-59 to FR-RET-61 are the retail roles (ADR-055, issue #399, migration `V73`): staff per shop or store, the Storekeeper and Purchasing roles; they add no permission. FR-RET-62, sellers who see only their own figures, is slice 2 (migration `V74`); it adds the permission `retail.sale.all_sellers`.
 FR-RET-63 is the low-stock level of an item (ADR-057, issue #412, migration `V76`, directly after `V75` of #413); it adds no permission.
 FR-RET-64 is the slow movers section of Stock health (issue #414); reports only, no migration and no permission added.
-FR-RET-65 is the range of the Retail home (ADR-058, issue #428); reports only, no migration and no permission added.
+FR-RET-65 is the range of the Retail home (ADR-060, issue #428); reports only, no migration and no permission added.
 
 FR-RET-44 to FR-RET-46 are the corrections of entry mistakes inside the app (ADR-044, issues #351 and #352): one name per item, void a restock, correct a quantity. They add no permission.
 

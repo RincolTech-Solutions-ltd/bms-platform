@@ -92,9 +92,40 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
   // ADR-043: with credit sales counted when the buyer pays, the cards say Sold, Money collected and On credit, and profit is
   // that of the money received. The default way (when the sale is made) keeps its words.
   const onPayment = data.credit_sale_recognition === 'on_payment';
-  const picker = <RangePicker value={choice} onChange={onChoice ?? (() => undefined)} />;
+  const picker = <RangePicker value={choice} onChange={onChoice ?? (() => undefined)} today={data.date} />;
+  // Today stays above the range picker whatever days are picked (issue #428): the split by the way of paying, and profit.
+  const withProfit = data.profit_visible === true;
+  const todayCard = (
+    <>
+      <h2 id="today-title">Today, {data.date}</h2>
+      <ul className="an-stats" aria-labelledby="today-title" data-testid="today-card">
+        {onPayment ? (
+          <>
+            <Stat label="Sales today" value={money(today?.sales_minor ?? 0)} hint={`${today?.sale_count ?? 0} ${today?.sale_count === 1 ? 'sale' : 'sales'} sold, including credit`} />
+            <Stat label="Money collected" value={money(today?.received_minor ?? 0)} hint="Money received today by any method, with payments on earlier credit sales, less money paid back" />
+            <Stat label="On credit" value={money(today?.on_credit_minor ?? 0)} hint={`${today?.on_credit_count ?? 0} ${today?.on_credit_count === 1 ? 'sale' : 'sales'} not paid yet. Not counted as profit`} />
+            {withProfit && today?.gross_profit_minor !== undefined && <Stat label="Profit today" value={money(today.gross_profit_minor)} hint="From the money received" />}
+          </>
+        ) : (
+          <>
+            <Stat label="Sales today" value={money(today?.sales_minor ?? 0)} hint={`${today?.sale_count ?? 0} ${today?.sale_count === 1 ? 'sale' : 'sales'}`} />
+            <Stat label="Cash and mobile money" value={money(today?.cash_minor ?? 0)} />
+            <Stat label="On credit" value={money(today?.credit_minor ?? 0)} />
+            {withProfit && today?.gross_profit_minor !== undefined && <Stat label="Profit today" value={money(today.gross_profit_minor)} />}
+          </>
+        )}
+      </ul>
+      {data.credit_recognition_starts_on && (
+        <p className="hint" data-testid="credit-starts-on">
+          {onPayment
+            ? `Credit sales entered and dated before ${data.credit_recognition_starts_on} count as they did, on the day of the sale.`
+            : `From ${data.credit_recognition_starts_on}, credit sales will count when the buyer pays.`}
+        </p>
+      )}
+    </>
+  );
   if (!range) {
-    return <section aria-labelledby="dash-title" className="an-dashboard"><h2 id="dash-title">Sales</h2>{picker}<p className="empty-state">No figures for these days.</p></section>;
+    return <section aria-labelledby="dash-title" className="an-dashboard">{todayCard}<h2 id="dash-title">Sales</h2>{picker}<p className="empty-state">No figures for these days.</p></section>;
   }
   // The words follow the figures on screen, which are those of the range the server answered.
   const shown: RangeChoice = { period: range.period ?? choice.period, from: range.from, to: range.to };
@@ -109,6 +140,7 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
   const points = (range.series ?? []).map((p) => ({ start: p.start ?? '', value: p.sales_minor ?? 0, previous: p.previous_sales_minor }));
   return (
     <section aria-labelledby="dash-title" className="an-dashboard">
+      {todayCard}
       <h2 id="dash-title">{onPayment ? 'Sold' : 'Sales'}, {title}</h2>
       {picker}
       {updating && <p className="loading">Loading the days you picked</p>}
@@ -117,6 +149,8 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
         <ChangeLine now={cur.sales_minor ?? 0} before={prev?.sales_minor} words={before} />
       </div>
       {onPayment && <p className="hint">Everything sold, credit included.</p>}
+      {range.period === 'all' && <p className="hint" data-testid="all-cap">All shows up to the last 3 years.</p>}
+      {range.from && range.to && daysBetween(range.from, range.to) > 731 && <p className="hint" data-testid="no-leaders">The best seller and top salesperson show for ranges of two years or less.</p>}
       <RangeChart
         points={points}
         group={range.group ?? 'day'}
@@ -124,13 +158,6 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
         beforeWords={withBefore ? 'before' : undefined}
         legend={<ChartLegend before={withBefore ? before.replace(/^the /, 'The ') : undefined} />}
       />
-      {data.credit_recognition_starts_on && (
-        <p className="hint" data-testid="credit-starts-on">
-          {onPayment
-            ? `Credit sales entered and dated before ${data.credit_recognition_starts_on} count as they did, on the day of the sale.`
-            : `From ${data.credit_recognition_starts_on}, credit sales will count when the buyer pays.`}
-        </p>
-      )}
 
       <ul className="an-stats" data-testid="range-detail">
         <Stat label="Number of sales" value={cur.sale_count ?? 0} change={<ChangeLine now={cur.sale_count ?? 0} before={prev?.sale_count} words={before} format={count} />} />

@@ -18,6 +18,10 @@ record DashboardRange(
 
     static final Set<String> PERIODS = Set.of("today", "7d", "30d", "ytd", "1y", "all", "custom");
     static final int DAY_STEPS_UP_TO = 62;
+    /** All reaches back at most this many years (ADR-060): the figures of a longer history are read in whole, never in one request. */
+    static final int ALL_YEARS = 3;
+    /** Beyond this many days (two years) the best product and best seller are not worked out (ADR-060): they scan every line of the span. */
+    static final int LEADERS_UP_TO_DAYS = 731;
 
     /**
      * The range of a request, or null when it asks for none (the dashboard of issue #149 as it was). Dates without a period
@@ -54,13 +58,21 @@ record DashboardRange(
                 LocalDate start = today.minusYears(1).plusDays(1);
                 yield new DashboardRange(p, start, today, start.minusYears(1), start.minusDays(1), group(start, today));
             }
-            // Everything since the first sale in scope: nothing comes before it to compare with.
+            // Everything since the first sale in scope, at most three years: nothing comes before it to compare with.
             case "all" -> {
+                LocalDate floor = today.minusYears(ALL_YEARS).plusDays(1);
                 LocalDate start = firstSale == null || firstSale.isAfter(today) ? today : firstSale;
+                if (start.isBefore(floor)) {
+                    start = floor;
+                }
                 yield new DashboardRange(p, start, today, null, null, group(start, today));
             }
             default -> {
                 AnalyticsSupport.Window w = AnalyticsSupport.window(from, to, today);
+                if (w.to().isAfter(today)) {
+                    throw ApiException.validation(
+                            List.of(new FieldProblem("to", "invalid", "to must not be after today.")));
+                }
                 yield before(p, w.from(), w.to());
             }
         };
@@ -79,6 +91,11 @@ record DashboardRange(
 
     boolean hasPrevious() {
         return previousFrom != null;
+    }
+
+    /** Whether the best product and best seller are worked out: not over a span longer than two years. */
+    boolean leaders() {
+        return ChronoUnit.DAYS.between(from, to) + 1 <= LEADERS_UP_TO_DAYS;
     }
 
     /** The first day the figures need: the period before when there is one. */
