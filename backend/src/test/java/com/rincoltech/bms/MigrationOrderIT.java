@@ -1480,7 +1480,7 @@ class MigrationOrderIT {
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
-                                        + " 'retail.order.manage')")
+                                        + " 'retail.order.manage', 'retail.sale.all_sellers')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")

@@ -775,7 +775,6 @@ class CustomerOrdersService {
                 rows);
     }
 
-    @Transactional(readOnly = true)
     /**
      * ADR-055: the fees, the value of everybody's orders and who cancelled them are the owner's figures; a seller who sees only
      * their own sales is refused (403), as for the dashboard.
@@ -790,6 +789,7 @@ class CustomerOrdersService {
         }
     }
 
+    @Transactional(readOnly = true)
     CancellationsReport cancellations(List<UUID> branchIds, LocalDate from, LocalDate to) {
         LocalDate[] range = range(from, to);
         Principal principal = CurrentPrincipal.require();
