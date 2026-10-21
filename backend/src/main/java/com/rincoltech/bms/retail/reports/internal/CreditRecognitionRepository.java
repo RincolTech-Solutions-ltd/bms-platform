@@ -126,7 +126,10 @@ class CreditRecognitionRepository {
             params.put("branchIds", branchIds);
             branch = " AND w.branch_id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT w.branch_id, w.written_off_on AS day, sum(w.loss_minor) AS loss"
+        // Issue #385: a delivery fee written off is not a loss on the goods sold; the profit of goods never held the
+        // fee, so it is
+        // left out here (the fee's own income and loss are in the ledger, 4120 and bad debt loss).
+        return jdbc.sql("SELECT w.branch_id, w.written_off_on AS day, sum(w.loss_minor - w.fee_minor) AS loss"
                         + "  FROM retail_sale_writeoffs w"
                         + " WHERE w.written_off_on BETWEEN :from AND :to" + branch
                         + " GROUP BY w.branch_id, w.written_off_on")

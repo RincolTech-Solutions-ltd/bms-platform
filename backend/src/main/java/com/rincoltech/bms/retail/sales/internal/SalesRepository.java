@@ -37,7 +37,10 @@ class SalesRepository {
                    (SELECT l.name FROM retail_price_lists l WHERE l.id = retail_sales.price_list_id) AS price_list,
                    (SELECT w.written_off_on FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_on,
                    (SELECT w.unpaid_minor FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_unpaid_minor,
-                   (SELECT w.reason FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_reason
+                   (SELECT w.reason FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_reason,
+                   (SELECT w.fee_minor FROM retail_sale_writeoffs w WHERE w.sale_id = retail_sales.id) AS written_off_fee_minor,
+                   (SELECT o.delivery_fee_minor FROM retail_customer_orders o WHERE o.sale_id = retail_sales.id
+                       AND o.fee_method = 'account' AND o.fee_paid_at IS NULL AND retail_sales.status = 'completed') AS fee_owed
               FROM retail_sales
             """;
 
@@ -403,7 +406,8 @@ class SalesRepository {
                 s.voidReason(),
                 s.version(),
                 s.writeOff(),
-                s.countedWhenPaid());
+                s.countedWhenPaid(),
+                s.deliveryFeeOwedMinor());
     }
 
     private static Sale header(ResultSet rs) throws SQLException {
@@ -444,8 +448,10 @@ class SalesRepository {
                         : new WriteOffInfo(
                                 rs.getDate("written_off_on").toLocalDate(),
                                 rs.getLong("written_off_unpaid_minor"),
-                                rs.getString("written_off_reason")),
-                false);
+                                rs.getString("written_off_reason"),
+                                rs.getLong("written_off_fee_minor") > 0 ? rs.getLong("written_off_fee_minor") : null),
+                false,
+                rs.getObject("fee_owed", Long.class));
     }
 
     // ---- Payments --------------------------------------------------------------------------

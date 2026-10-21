@@ -1342,4 +1342,132 @@ class RetailCustomerOrdersIT extends IntegrationTest {
         assertThat(history.get(history.size() - 1).get("note").asString()).contains("written off");
         assertThat(close.get().getStatusCode()).isEqualTo(HttpStatus.OK);
     }
+
+    static final String WRITER = ADMIN + ",retail.credit.write_off,retail.credit.manage";
+
+    /** A credit sale of one order with its fee of 2,000 on the account and nothing paid; the order and the sale. */
+    UUID[] feeOnAccountSale(String buyerName) {
+        api.stockUp(hq, product, "5");
+        UUID buyer = creditBuyer(buyerName);
+        Map<String, Object> b = body(hq, "phone", 2_000, List.of(line(product, "1")));
+        b.put("customer_id", buyer);
+        UUID order = RetailTestSupport.id(order(b));
+        Map<String, Object> pay = new LinkedHashMap<>();
+        pay.put("payment_method", "credit");
+        pay.put("fee_on_account", true);
+        UUID sale = UUID.fromString(deliver(order, pay).getBody().get("sale_id").asString());
+        return new UUID[] {order, sale, buyer};
+    }
+
+    ResponseEntity<JsonNode> writeOff(UUID sale) {
+        return api.postKeyed(
+                "/sales/" + sale + "/write-off",
+                Map.of("reason", "Test buyer left town"),
+                WRITER,
+                "*",
+                UUID.randomUUID().toString());
+    }
+
+    long todaysBadDebt() {
+        JsonNode report = api.get("/reports/profit/daily?from=" + today() + "&to=" + today(), ADMIN)
+                .getBody();
+        return report.get("bad_debt_minor").asLong();
+    }
+
+    /**
+     * FR-RET-55: the items and the fee are written off together: the sale shows the fee owed before and the fee written off
+     * after, the statement has the sale, the fee and the write-off and closes at nothing, and the daily profit of goods counts
+     * the items only as bad debt.
+     */
+    @Test
+    void theItemsAndTheFeeAreWrittenOffTogether() {
+        UUID[] ids = feeOnAccountSale("Test Buyer 11");
+        JsonNode before = api.get("/sales/" + ids[1], ADMIN).getBody();
+        assertThat(before.get("balance_minor").asLong()).isEqualTo(10_000);
+        assertThat(before.get("delivery_fee_owed_minor").asLong()).isEqualTo(2_000);
+        ResponseEntity<JsonNode> written = writeOff(ids[1]);
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(written.getBody().get("write_off").get("unpaid_minor").asLong())
+                .isEqualTo(12_000);
+        JsonNode after = api.get("/sales/" + ids[1], ADMIN).getBody();
+        assertThat(after.has("delivery_fee_owed_minor")).isFalse();
+        assertThat(after.get("write_off").get("delivery_fee_minor").asLong()).isEqualTo(2_000);
+        JsonNode statement =
+                api.get("/customers/" + ids[2] + "/statement", ADMIN).getBody();
+        List<String> kinds = new ArrayList<>();
+        statement.get("lines").forEach(l -> kinds.add(l.get("kind").asString()));
+        assertThat(kinds).contains("sale", "delivery_fee", "write_off").doesNotContain("delivery_fee_paid");
+        assertThat(statement.get("closing_minor").asLong()).isZero();
+        assertThat(account("trade_debtors", true)).isZero();
+        assertThat(side("bad_debt_loss", true)).isEqualTo(12_000);
+        assertThat(todaysBadDebt()).isEqualTo(10_000);
+        JsonNode history = api.get("/orders/" + ids[0], ORDERS).getBody().get("history");
+        assertThat(history.get(history.size() - 1).get("step").asString()).isEqualTo("fee_written_off");
+    }
+
+    /** FR-RET-55: under "counted when the buyer pays" the goods lose their cost share and the fee all of itself. */
+    @Test
+    void aFeeOnTheAccountOfASaleCountedWhenPaidIsWrittenOffWhole() {
+        String etag = api.get("/settings/capabilities", "core.settings.manage")
+                .getHeaders()
+                .getETag();
+        assertThat(api.call(
+                                HttpMethod.PUT,
+                                "/settings/capabilities",
+                                Map.of("credit_sale_recognition", "on_payment"),
+                                "core.settings.manage",
+                                "*",
+                                etag == null ? Map.of() : Map.of("If-Match", etag))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        TestDatabase.owner()
+                .sql("UPDATE tenant_settings SET settings = jsonb_set(settings,"
+                        + " '{module_groups,retail,credit_recognition_effective_from}', '\"1970-01-01\"'::jsonb)"
+                        + " WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        UUID[] ids = feeOnAccountSale("Test Buyer 12");
+        ResponseEntity<JsonNode> written = writeOff(ids[1]);
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        // The goods: their cost (6,000) is the loss and the 4,000 of profit never counted leaves sales revenue; the
+        // fee: 2,000.
+        assertThat(side("bad_debt_loss", true)).isEqualTo(8_000);
+        assertThat(side("sales_revenue", true)).isEqualTo(4_000);
+        assertThat(account("trade_debtors", true)).isZero();
+        assertThat(todaysBadDebt()).isEqualTo(6_000);
+    }
+
+    /** FR-RET-55: a fee payment and a write-off at the same moment settle the fee once, whichever comes first. */
+    @Test
+    void aFeePaymentRacingAWriteOffSettlesTheFeeOnce() throws Exception {
+        UUID[] ids = feeOnAccountSale("Test Buyer 13");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch go = new CountDownLatch(1);
+        ResponseEntity<JsonNode> paid;
+        ResponseEntity<JsonNode> written;
+        try {
+            Future<ResponseEntity<JsonNode>> p = pool.submit(() -> {
+                go.await();
+                return payFee(ids[0], UUID.randomUUID().toString(), ORDERS);
+            });
+            Future<ResponseEntity<JsonNode>> w = pool.submit(() -> {
+                go.await();
+                return writeOff(ids[1]);
+            });
+            go.countDown();
+            paid = p.get(60, TimeUnit.SECONDS);
+            written = w.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(written.getStatusCode()).as("%s", written.getBody()).isEqualTo(HttpStatus.CREATED);
+        long cleared = written.getBody().get("write_off").get("unpaid_minor").asLong();
+        if (paid.getStatusCode().equals(HttpStatus.OK)) {
+            assertThat(cleared).isEqualTo(10_000);
+        } else {
+            assertThat(paid.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+            assertThat(cleared).isEqualTo(12_000);
+        }
+        assertThat(account("trade_debtors", true)).isZero();
+    }
 }

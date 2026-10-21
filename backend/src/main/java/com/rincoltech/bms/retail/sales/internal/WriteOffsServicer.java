@@ -207,17 +207,25 @@ class WriteOffsServicer {
                 approvalId,
                 checkerId,
                 makerId,
-                clock.now());
+                clock.now(),
+                plan.feeMinor());
         repo.insert(row);
         if (itemsUnpaid > 0) {
             sales.addPaid(s.id(), itemsUnpaid);
         }
         if (plan.feeOrderId() != null) {
             // The fee on the account is settled by this entry: no longer owed, no longer holding the branch open.
-            sales.markOrderFeeWrittenOff(plan.feeOrderId(), makerId, today, entry.entryId());
+            if (sales.markOrderFeeWrittenOff(plan.feeOrderId(), makerId, today, entry.entryId()) != 1) {
+                // The fee was paid or settled by someone else after the plan was made: nothing is written off twice.
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "write_off_changed",
+                        "The debt changed",
+                        "The delivery fee of this sale was paid or settled meanwhile. Open the sale again and check what is owed.");
+            }
             sales.orderEvent(
                     plan.feeOrderId(),
-                    "fee_paid",
+                    "fee_written_off",
                     "Delivery fee of " + plan.feeMinor() + " written off with sale " + s.saleNo() + ".",
                     makerId);
         }

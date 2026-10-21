@@ -263,7 +263,8 @@ class SalesService {
                 null,
                 1,
                 null,
-                false);
+                false,
+                null);
         repo.insert(header);
         lines.forEach(l -> repo.insertLine(id, l));
         stock.record(
@@ -1206,7 +1207,8 @@ class SalesService {
                 s.voidReason(),
                 s.version(),
                 s.writeOff(),
-                counted);
+                counted,
+                s.deliveryFeeOwedMinor());
     }
 
     /** 409 {@code sale_written_off}: what a sale whose unpaid part was written off refuses (ADR-043). */

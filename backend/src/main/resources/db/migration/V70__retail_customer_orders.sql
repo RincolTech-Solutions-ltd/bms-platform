@@ -294,7 +294,7 @@ CREATE TABLE retail_customer_order_events (
     created_at timestamptz  NOT NULL DEFAULT now(),
     order_id   uuid         NOT NULL,
     step       text         NOT NULL CHECK (step IN ('ordered', 'changed', 'packed', 'out_for_delivery', 'delivered', 'cancelled',
-                                                     'fee_paid', 'sale_voided')),
+                                                     'fee_paid', 'fee_written_off', 'sale_voided')),
     note       varchar(500),
     by_user    uuid         NOT NULL,
     UNIQUE (tenant_id, id),
@@ -334,3 +334,13 @@ ALTER TABLE retail_sale_lines
             AND char_length(price_override_reason) <= 300
             AND (price_list_id IS NULL) = (price_break_min_qty IS NULL))) NOT VALID;
 ALTER TABLE retail_sale_lines VALIDATE CONSTRAINT retail_sale_lines_price_chk;
+
+-- ---------------------------------------------------------------------------------------------
+-- retail_sale_writeoffs: the part of a write-off that was a customer order's delivery fee left on the account (issue #385), so the
+-- daily profit of goods leaves it out of its bad debt. 0 on every existing row. A small, append-only table; ADD COLUMN with a constant
+-- default rewrites nothing, and the check is validated at once.
+-- ---------------------------------------------------------------------------------------------
+
+ALTER TABLE retail_sale_writeoffs ADD COLUMN fee_minor bigint NOT NULL DEFAULT 0;
+ALTER TABLE retail_sale_writeoffs ADD CONSTRAINT retail_sale_writeoffs_fee_chk
+    CHECK (fee_minor >= 0 AND fee_minor <= unpaid_minor AND fee_minor <= loss_minor);

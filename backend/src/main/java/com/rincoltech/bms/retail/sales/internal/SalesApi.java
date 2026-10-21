@@ -196,10 +196,27 @@ final class SalesApi {
                             "True for a credit sale counted when the buyer pays (ADR-043): the later of its date and the day it was"
                                     + " entered is on or after the first day of the rule on_payment, so a backdated sale entered after the"
                                     + " start counts too; its payments are dated the day they are entered")
-            boolean countedWhenPaid) {}
+            boolean countedWhenPaid,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(
+                    description =
+                            "Issue #385: the delivery fee of the customer order this credit sale came from, left on the"
+                                    + " buyer's account and not yet paid: owed besides balance_minor, and written off with the sale")
+            Long deliveryFeeOwedMinor) {}
 
     @Schema(name = "RetailSaleWriteOffInfo", description = "A credit sale whose unpaid part was written off as a loss")
-    record WriteOffInfo(LocalDate writtenOffOn, long unpaidMinor, String reason) {}
+    record WriteOffInfo(
+            LocalDate writtenOffOn,
+
+            @Schema(description = "Everything the write-off cleared, a delivery fee on the account included")
+            long unpaidMinor,
+
+            String reason,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            @Schema(description = "Issue #385: the part of unpaid_minor that was a delivery fee left on the account")
+            Long deliveryFeeMinor) {}
 
     @Schema(name = "RetailSalePage")
     record SalePage(List<Sale> items, String nextCursor) {}

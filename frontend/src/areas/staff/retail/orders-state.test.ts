@@ -3,6 +3,7 @@ import type { Product } from '../../../api/retail';
 import {
   blankDeliver, blankOrder, keptWords, payChoicesFor, buildDeliverRequest, buildOrderRequest, deliverFigures, deliverProblem, feeOf, lookupKey, nextSteps, orderProblem, sourceLabel, stepOf,
 } from './orders-state';
+import { canWriteOff, writeOffAmount, writeOffWarning } from './sale-actions-state';
 import { newLine } from './sale-state';
 
 // The rules of the customer order screens (issue #385). Names, phones and amounts are fabricated.
@@ -90,5 +91,14 @@ describe('fees on the account and stock kept aside', () => {
     expect(keptWords('10.000', undefined)).toBeNull();
     expect(keptWords('10.000', '2.000')).toBe('8 free, 2 kept for orders');
     expect(keptWords('1.000', '2.000')).toBe('0 free, 2 kept for orders');
+  });
+});
+
+describe('writing off a sale with a fee on the account', () => {
+  it('counts the fee in what is cleared, so a fee alone can be written off', () => {
+    const sale = { payment_method: 'credit', status: 'completed', balance_minor: 0, delivery_fee_owed_minor: 2000 } as const;
+    expect(writeOffAmount(sale)).toBe(2000);
+    expect(canWriteOff(sale)).toBe(true);
+    expect(writeOffWarning(12000, 2000)).toContain('of which UGX 2,000 is the delivery fee');
   });
 });

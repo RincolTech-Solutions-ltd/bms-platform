@@ -71,7 +71,10 @@ Controls page all read `retail_sales`.
    the credit counted when the buyer pays, and the check that refuses to make the shop a Store or to close it). The buyer's balance and
    the account page show it apart from what a payment on account can settle, each fee with its order, because it is paid on the order;
    a payment on account never takes it. Writing off the sale writes the fee off too (all of it a loss, Dr bad debt loss, Cr trade
-   debtors, in the write-off's entry) and marks it settled (`fee_paid_method` written_off). It is paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
+   debtors, in the write-off's entry), keeps the fee part on the write-off (`fee_minor`) so the daily profit of goods counts only the
+   goods as bad debt (the fee's income and its loss stay in the ledger), and marks it settled (`fee_paid_method` written_off); the
+   sale shows the fee owed beside its balance, so a fee-only write-off can be made in the app, and an approved write-off is refused
+   when the amount owed changed since it was asked for. It is paid once later (`POST /retail/orders/{id}/fee-payment`, debit the method's account, credit trade debtors against the sale). Voiding the
    sale of a delivered order reverses its fee entry in the same transaction and writes `sale_voided` in the history; a sale whose fee on
    account was already paid is not voided here (422 `order_fee_paid`). The cash book counts a cash fee as takings on the day of delivery
    (or of its later payment) and, when the sale is voided, among the voids of the day of the void, as it does a voided cash sale, so a past

@@ -1,6 +1,7 @@
 package com.rincoltech.bms.retail.sales.internal;
 
 import com.rincoltech.bms.core.approvals.ApprovalAction;
+import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.retail.sales.internal.WriteOffsServicer.Plan;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,6 +20,8 @@ class SaleWriteOffAction implements ApprovalAction {
 
     static final String TYPE = "retail_sale_write_off";
     static final String REASON = "reason";
+    /** The amount the maker asked to write off, which the checker approved (issue #385: a fee on the account can change it). */
+    static final String UNPAID = "unpaid_minor";
 
     private final WriteOffsServicer servicer;
     private final SalesRepository sales;
@@ -61,6 +64,15 @@ class SaleWriteOffAction implements ApprovalAction {
     @Override
     public void execute(Execution e) {
         Plan plan = servicer.plan(e.subjectId());
+        // The checker approved an amount: a debt that changed since (a payment, a fee paid or now owed) is not written
+        // off.
+        Object approved = e.payload().get(UNPAID);
+        if (approved instanceof Number n && n.longValue() != plan.unpaidMinor()) {
+            throw ApiException.rule(
+                    "write_off_changed",
+                    "The amount owed changed from " + n.longValue() + " to " + plan.unpaidMinor()
+                            + " since the write-off was asked for. Ask for it again.");
+        }
         servicer.record(plan, (String) e.payload().get(REASON), e.makerId(), e.approvalId(), e.checkerId(), null);
     }
 }
