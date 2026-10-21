@@ -10648,6 +10648,10 @@
           "sale_no" : {
             "type" : "string"
           },
+          "sale_voided" : {
+            "description" : "True when the sale this order became was voided (its delivery fee was reversed with it)",
+            "type" : "boolean"
+          },
           "sent_at" : {
             "format" : "date-time",
             "type" : "string"
@@ -13475,7 +13479,7 @@
             "type" : "integer"
           },
           "source" : {
-            "description" : "retail (the product's sell price), list (a price list item) or override (the seller's price instead of the resolved one)",
+            "description" : "retail (the product's sell price), list (a price list item), override (the seller's price instead of the resolved one) or order_agreed (the price agreed on a customer order that today's list would price otherwise, issue #385)",
             "type" : "string"
           }
         }

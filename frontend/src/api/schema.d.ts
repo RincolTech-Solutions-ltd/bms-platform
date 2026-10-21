@@ -10726,6 +10726,8 @@ export interface components {
             /** Format: uuid */
             sale_id?: string;
             sale_no?: string;
+            /** @description True when the sale this order became was voided (its delivery fee was reversed with it) */
+            sale_voided?: boolean;
             /** Format: date-time */
             sent_at?: string;
             source?: string;
@@ -12153,7 +12155,7 @@ export interface components {
              * @description What the system resolved, per sale unit (per base unit when no pack), before any override
              */
             resolved_unit_price_minor?: number;
-            /** @description retail (the product's sell price), list (a price list item) or override (the seller's price instead of the resolved one) */
+            /** @description retail (the product's sell price), list (a price list item), override (the seller's price instead of the resolved one) or order_agreed (the price agreed on a customer order that today's list would price otherwise, issue #385) */
             source?: string;
         };
         RetailSaleLineRequest: {
