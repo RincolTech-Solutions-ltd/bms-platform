@@ -99,9 +99,11 @@ services:
       R2_DOCUMENTS_ACCESS_KEY_ID: ${R2_DOCUMENTS_ACCESS_KEY_ID:?}
       R2_DOCUMENTS_SECRET_ACCESS_KEY: ${R2_DOCUMENTS_SECRET_ACCESS_KEY:?}
       R2_DOCUMENTS_BUCKET: ${R2_DOCUMENTS_BUCKET:?}
-      # Outbox senders (spec section 11, chapter 9 section 9.8). Optional: a sender whose values
-      # are empty stays off and its messages wait in the outbox. SMTP is implicit TLS on 465 (587 is
-      # blocked on the staging host).
+      # Outbox senders (spec section 11, chapter 9 section 9.8). A sender whose values are empty
+      # stays off and its messages wait in the outbox, except SMTP in production: with
+      # BMS_ENVIRONMENT=production the API refuses to start unless BMS_SMTP_HOST, BMS_SMTP_USER,
+      # BMS_SMTP_PASSWORD and BMS_MAIL_FROM are set (ADR-058, issue #426). SMTP is implicit TLS on
+      # 465 (587 is blocked on the staging host).
       BMS_SMTP_HOST: ${BMS_SMTP_HOST:-}
       BMS_SMTP_PORT: ${BMS_SMTP_PORT:-465}
       BMS_SMTP_USER: ${BMS_SMTP_USER:-}
