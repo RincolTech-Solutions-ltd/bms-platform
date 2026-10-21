@@ -279,10 +279,14 @@ class OutboxTemplates {
             // Staff who could not find their business's sign-in page ask for it on the platform home page (issue #383).
             // Sent only to the address typed, and only when it is an active staff user's; the links are the
             // businesses' public sign-in addresses, which carry no secret.
-            "identity.find_sign_in", new Template("Your BMS sign-in page", """
+            // No button: there can be several pages, each its own link; only our own hosts become links (ADR-054).
+            "identity.find_sign_in",
+            new Template(
+                    "Your BMS sign-in page",
+                    """
                     Hello,
 
-                    Someone asked for the BMS sign-in page for this email address. Open the page of your business
+                    Someone asked for the BMS sign-in page for this email address. Open the page of your business \
                     and sign in there:
 
                     {links}
@@ -291,8 +295,10 @@ class OutboxTemplates {
 
                     If you did not ask for this, ignore this email: nothing has changed.
 
-                    Rincoltech
-                    """));
+                    Rincol Tech
+                    """,
+                    null,
+                    "You got this email because someone asked for the BMS sign-in page of this address."));
 
     private static final Map<String, Template> EMAIL = emailTemplates();
 
