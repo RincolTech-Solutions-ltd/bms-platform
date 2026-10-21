@@ -48,6 +48,25 @@ class SignInAddressFailures {
     }
 
     /**
+     * The counterpart of {@link Accounts#byIdForUpdate} for an address of nobody: makes sure its row exists, locks it for the
+     * rest of the transaction and says whether it is locked at {@code now}, so parallel failures for one address settle one
+     * after another, as an account's do, and once the lock is set every later one sees it.
+     */
+    boolean lockedForUpdate(String key, Instant now) {
+        jdbc.sql("""
+                        INSERT INTO sign_in_address_failures (address_hash, failed_login_count, last_failed_at)
+                        VALUES (?, 0, ?) ON CONFLICT (address_hash) DO NOTHING
+                        """).params(key, Timestamp.from(now)).update();
+        return jdbc.sql("""
+                        SELECT coalesce(locked_until > ?, false) FROM sign_in_address_failures
+                         WHERE address_hash = ? FOR UPDATE
+                        """)
+                .params(Timestamp.from(now), key)
+                .query(Boolean.class)
+                .single();
+    }
+
+    /**
      * Counts one more failure in a single statement, as {@link Accounts#recordFailure} does for an account: an expired lock
      * starts a new count, the count reaching {@code maxFailures} sets {@code lockUntil}, a failure while locked keeps the
      * current lock. Parallel failures are all counted (the insert and the update are one statement on one key).

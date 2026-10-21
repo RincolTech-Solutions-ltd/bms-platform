@@ -54,7 +54,8 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
     factor 30 attempts in 15 minutes per account. These buckets are in memory, per instance; a bucket that remembers
     anything is never evicted.
   - **Lifting a lock**, audited as `core.auth.unlocked`: a completed password reset; a tenant admin
-    (`POST /users/{user_id}/unlock`); the platform operator with a reason. None lifts an operator's lock.
+    (`POST /users/{user_id}/unlock`) and the platform operator, each with a reason. Once a lock is in force every sign-in
+    answer is 423, the right password included, even for guesses already past the first look. None lifts an operator's lock.
   - **The lock is a denial of service by design**: anyone who knows a sign-in name can keep it locked with five wrong
     passwords every 15 minutes. It is accepted because without it the same person could guess the password; the owner
     gets back in through the reset, an admin or the operator (ADR-059, Consequences).

@@ -311,20 +311,33 @@ class SignInLimitsIT extends IntegrationTest {
         UUID other = Api.staff(t, otherEmail, new Role("cashier", t.headOffice()));
         lockOut(otherEmail);
 
-        assertThat(api.post("/api/v1/users/" + other + "/unlock", null, cashierSession.accessToken())
+        Map<String, String> why = Map.of("reason", "Test: locked out by a stranger");
+        assertThat(api.post("/api/v1/users/" + other + "/unlock", why, cashierSession.accessToken())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         ResponseEntity<JsonNode> unlocked =
-                api.post("/api/v1/users/" + other + "/unlock", null, adminSession.accessToken());
+                api.post("/api/v1/users/" + other + "/unlock", why, adminSession.accessToken());
         assertThat(unlocked.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(unlocked.getBody().get("id").asString()).isEqualTo(other.toString());
         assertThat(unlockAudits(other, "tenant_admin", "staff")).isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT data -> 'after' ->> 'reason' FROM audit_log WHERE tenant_id = ?"
+                                + " AND action = 'core.auth.unlocked' AND entity_id = ?")
+                        .params(t.tenantId(), other)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("Test: locked out by a stranger");
         assertThat(login(api, STAFF_LOGIN, otherEmail, Api.PASSWORD, freshIp()).getStatusCode())
                 .isEqualTo(HttpStatus.OK);
 
         // A platform operator is not a staff user of any tenant: there is nothing to unlock.
         UUID operator = Api.platformUser(Api.email("operator"));
-        assertThat(api.post("/api/v1/users/" + operator + "/unlock", null, adminSession.accessToken())
+        // A reason is required.
+        assertThat(api.post("/api/v1/users/" + other + "/unlock", Map.of("reason", ""), adminSession.accessToken())
+                        .getStatusCode()
+                        .is4xxClientError())
+                .isTrue();
+        assertThat(api.post("/api/v1/users/" + operator + "/unlock", why, adminSession.accessToken())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -373,6 +386,123 @@ class SignInLimitsIT extends IntegrationTest {
         assertThat(platform.post(base + stranger + "/unlock", reason, operator.accessToken())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Delta review of #433: guesses that all passed the first look before the lock was set are settled under the row lock,
+     * and once it is set every one answers 423, the right password among them, so a burst cannot tell the right one from a
+     * 423 among 401s. Every slot is held so all of them queue after the first look; the lock is then set, as parallel
+     * failures would set it, and the slots are given back.
+     */
+    @Test
+    void aBurstSettledAfterTheLockAnswersAlikeRightPasswordIncluded() throws Exception {
+        String real = Api.email("cashier");
+        UUID cashier = Api.staff(t, real, new Role("cashier", t.headOffice()));
+        String nobody = Api.email("nobody");
+        wrongPasswords(nobody, 1);
+        List<String> passwordsSent = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            passwordsSent.add("Wrong-Password-" + i);
+        }
+        passwordsSent.add(Api.PASSWORD);
+
+        int slots = passwords.hashing.drainPermits();
+        ExecutorService callers = Executors.newFixedThreadPool(2 * passwordsSent.size());
+        try {
+            List<Future<ResponseEntity<JsonNode>>> forReal = new ArrayList<>();
+            List<Future<ResponseEntity<JsonNode>>> forNobody = new ArrayList<>();
+            for (String password : passwordsSent) {
+                forReal.add(callers.submit(() -> login(api, STAFF_LOGIN, real, password, freshIp())));
+                forNobody.add(callers.submit(() -> login(api, STAFF_LOGIN, nobody, password, freshIp())));
+            }
+            long deadline = System.nanoTime() + Duration.ofMillis(1_500).toNanos();
+            while (passwords.hashing.getQueueLength() < 2 * passwordsSent.size() && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(passwords.hashing.getQueueLength()).isEqualTo(2 * passwordsSent.size());
+            TestDatabase.owner()
+                    .sql(
+                            "UPDATE users SET failed_login_count = 5, locked_until = now() + interval '15 minutes' WHERE id = ?")
+                    .param(cashier)
+                    .update();
+            TestDatabase.owner()
+                    .sql("UPDATE sign_in_address_failures SET failed_login_count = 5,"
+                            + " locked_until = now() + interval '15 minutes' WHERE address_hash = ?")
+                    .param(addressKey(nobody))
+                    .update();
+            passwords.hashing.release(slots);
+            slots = 0;
+
+            List<String> realAnswers = new ArrayList<>();
+            for (Future<ResponseEntity<JsonNode>> call : forReal) {
+                realAnswers.add(answer(call.get()));
+            }
+            List<String> nobodyAnswers = new ArrayList<>();
+            for (Future<ResponseEntity<JsonNode>> call : forNobody) {
+                nobodyAnswers.add(answer(call.get()));
+            }
+            // The right password (the last one sent) answers exactly as every wrong one, and as an address of nobody.
+            assertThat(realAnswers).allMatch(a -> a.startsWith("423 account_locked "));
+            assertThat(realAnswers).containsOnly(realAnswers.getFirst());
+            assertThat(nobodyAnswers).containsOnly(realAnswers.getFirst());
+            // Nothing was counted while locked, and no session was made.
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT failed_login_count FROM users WHERE id = ?")
+                            .param(cashier)
+                            .query(Integer.class)
+                            .single())
+                    .isEqualTo(5);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM auth_sessions WHERE user_id = ?")
+                            .param(cashier)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+        } finally {
+            if (slots > 0) {
+                passwords.hashing.release(slots);
+            }
+            callers.shutdownNow();
+        }
+    }
+
+    /**
+     * The same burst sent with the slots free, so it races the lock for real: whatever the order, once a 423 is answered
+     * no later guess answers 401, so if the right password is refused as locked exactly five wrong ones got 401.
+     */
+    @Test
+    void aConcurrentBurstWithTheRightPasswordNeverSingsOutTheRightOne() throws Exception {
+        String real = Api.email("cashier");
+        Api.staff(t, real, new Role("cashier", t.headOffice()));
+        List<String> passwordsSent = new ArrayList<>();
+        for (int i = 0; i < 15; i++) {
+            passwordsSent.add("Wrong-Password-" + i);
+        }
+        passwordsSent.add(Api.PASSWORD);
+        ExecutorService callers = Executors.newFixedThreadPool(passwordsSent.size());
+        try {
+            List<Future<ResponseEntity<JsonNode>>> calls = new ArrayList<>();
+            for (String password : passwordsSent) {
+                calls.add(callers.submit(() -> login(api, STAFF_LOGIN, real, password, freshIp())));
+            }
+            List<Integer> wrong = new ArrayList<>();
+            int right = 0;
+            for (int i = 0; i < calls.size(); i++) {
+                int status = calls.get(i).get().getStatusCode().value();
+                if (i == calls.size() - 1) {
+                    right = status;
+                } else {
+                    wrong.add(status);
+                }
+            }
+            assertThat(wrong).allMatch(s -> s == 401 || s == 423);
+            assertThat(right).isIn(200, 423);
+            if (right == 423) {
+                assertThat(wrong.stream().filter(s -> s == 401).count()).isEqualTo(AuthFlow.MAX_FAILURES);
+            }
+        } finally {
+            callers.shutdownNow();
+        }
     }
 
     /**

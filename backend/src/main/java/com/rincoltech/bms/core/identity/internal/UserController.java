@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.identity.internal.UserApi.InvitedUserResponse;
 import com.rincoltech.bms.core.identity.internal.UserApi.ResetSignInRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleAssignmentRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.SignInResetLink;
+import com.rincoltech.bms.core.identity.internal.UserApi.UnlockSignInRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UpdateUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserPage;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserResponse;
@@ -133,10 +134,10 @@ class UserController {
     @RequiresPermission("core.users.manage")
     @Operation(
             summary =
-                    "Lift the sign-in lock of a staff user after too many wrong passwords; audited, changes no password (ADR-059)",
+                    "Lift the sign-in lock of a staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059)",
             operationId = "unlockUserSignIn")
-    UserResponse unlock(@PathVariable("user_id") UUID userId) {
-        return service.unlockSignIn(userId);
+    UserResponse unlock(@PathVariable("user_id") UUID userId, @Valid @RequestBody UnlockSignInRequest request) {
+        return service.unlockSignIn(userId, request.reason());
     }
 
     /**

@@ -19771,6 +19771,17 @@
         },
         "required" : [ "status" ]
       },
+      "UnlockSignInRequest" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why; kept in the tenant's audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
       "UpdateAdvisorSettingsRequest" : {
         "description" : "Omitted fields are unchanged",
         "properties" : {
@@ -37836,6 +37847,16 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UnlockSignInRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -37848,7 +37869,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Lift the sign-in lock of a staff user after too many wrong passwords; audited, changes no password (ADR-059)",
+        "summary" : "Lift the sign-in lock of a staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059)",
         "tags" : [ "users" ]
       }
     },

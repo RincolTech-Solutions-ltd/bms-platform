@@ -12,7 +12,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -86,9 +92,53 @@ class AuthThrottleTest {
             throttle.countingFailures(throttle.signInPerIp, "203.0.113.7", signedIn::incrementAndGet);
         }
         assertThat(signedIn).hasValue(1_000);
-        assertThat(throttle.allows(throttle.signInPerIp, "203.0.113.7")).isTrue();
-        // A success leaves no key behind at all.
-        assertThat(throttle.keys(throttle.signInPerIp)).isZero();
+        // The whole budget of failures is still there.
+        for (int i = 0; i < 3; i++) {
+            fail("203.0.113.7");
+        }
+        assertThat(throttle.allows(throttle.signInPerIp, "203.0.113.7")).isFalse();
+    }
+
+    /**
+     * Review of 433: the token is taken before the work, so requests in flight at once hold the budget between them and
+     * one more is refused at once, before it does any work; when they succeed their tokens come back.
+     */
+    @Test
+    void requestsInFlightHoldTheBudgetSoABurstCannotAllPass() throws Exception {
+        CountDownLatch started = new CountDownLatch(3);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        try {
+            List<Future<Integer>> inFlight = new ArrayList<>();
+            for (int i = 0; i < 3; i++) {
+                inFlight.add(pool.submit(() -> throttle.countingFailures(throttle.signInPerIp, "203.0.113.20", () -> {
+                    started.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return 1;
+                })));
+            }
+            started.await();
+            AtomicInteger ran = new AtomicInteger();
+            assertThatThrownBy(
+                            () -> throttle.countingFailures(throttle.signInPerIp, "203.0.113.20", ran::incrementAndGet))
+                    .isInstanceOfSatisfying(
+                            ApiException.class, e -> assertThat(e.code()).isEqualTo("rate_limited"));
+            assertThat(ran).hasValue(0);
+            release.countDown();
+            for (Future<Integer> call : inFlight) {
+                assertThat(call.get()).isEqualTo(1);
+            }
+            // Three successes later the budget is whole again.
+            assertThat(throttle.countingFailures(throttle.signInPerIp, "203.0.113.20", ran::incrementAndGet))
+                    .isEqualTo(1);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
     }
 
     @Test

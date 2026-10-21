@@ -385,7 +385,7 @@ class PlatformService implements TenantProvisioning {
         TenantContext.callAs(
                 tenantId,
                 () -> transactions.execute(status -> {
-                    tenantAdmins.unlockSignIn(userId, operator);
+                    tenantAdmins.unlockSignIn(userId, operator, reason.trim());
                     platformAudit.record(
                             "platform.tenant_user.sign_in_unlocked",
                             operator,

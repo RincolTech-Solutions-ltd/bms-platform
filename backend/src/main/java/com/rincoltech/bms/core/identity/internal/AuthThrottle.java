@@ -95,23 +95,24 @@ class AuthThrottle {
     }
 
     /**
-     * Runs {@code work} for a caller from {@code ip}, counting only its failures: refused with 429 {@code rate_limited} and
-     * Retry-After, before any work, while the IP's bucket of failures is empty; otherwise the work runs and a token is taken
-     * only when it fails ({@link #isFailure}). A success takes nothing.
+     * Runs {@code work} for a caller from {@code ip}, counting only its failures. A token is taken BEFORE the work, so a
+     * burst sent at once cannot all pass an almost empty bucket together (review of #433): while the bucket is empty the
+     * caller is refused with 429 {@code rate_limited} and Retry-After and no work is done. The token is kept when the work
+     * fails ({@link #isFailure}) and given back otherwise, so a success costs nothing once it is over.
      */
     <T> T countingFailures(Limit limit, String ip, Supplier<T> work) {
         String key = ip(ip);
-        Duration wait = waitFor(limit, key);
-        if (wait != null) {
-            throw limited(wait);
-        }
+        take(limit, key);
+        boolean keep = false;
         try {
             return work.get();
         } catch (ApiException e) {
-            if (isFailure(e)) {
-                failed(limit, key);
-            }
+            keep = isFailure(e);
             throw e;
+        } finally {
+            if (!keep) {
+                giveBack(limit, key);
+            }
         }
     }
 
@@ -200,6 +201,18 @@ class AuthThrottle {
         return bucket.tokens < 1 ? bucket.untilOne(limit) : null;
     }
 
+    /** Returns the token {@link #countingFailures} took for work that did not fail; never above the capacity. */
+    private synchronized void giveBack(Limit limit, String key) {
+        Store store = stores.get(limit.name());
+        Bucket bucket = store == null ? null : store.buckets.get(key);
+        if (bucket == null) {
+            // Not counted (the store was full of live buckets): nothing was taken.
+            return;
+        }
+        bucket.refill(limit, clock.now());
+        bucket.tokens = Math.min(limit.capacity(), bucket.tokens + 1);
+    }
+
     private synchronized void failed(Limit limit, String key) {
         Instant now = clock.now();
         Store store = store(limit);
@@ -213,7 +226,6 @@ class AuthThrottle {
             store.buckets.put(key, bucket);
         }
         bucket.refill(limit, now);
-        // Parallel failures that all passed the check may take it below zero: they are all paid for.
         bucket.tokens -= 1;
     }
 

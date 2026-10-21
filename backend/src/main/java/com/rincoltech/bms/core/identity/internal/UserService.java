@@ -426,22 +426,22 @@ class UserService implements TenantAdmins {
     /**
      * ADR-059: a tenant admin lifts the sign-in lock of a staff user of the tenant (the fifth wrong password in a row locks
      * an account for 15 minutes, and anyone who knows the sign-in name can keep it locked). Audited with what the lock was;
-     * it changes no password, no second factor and no session. The tenant's row policy keeps it to the tenant's own staff,
+     * it changes no password, no second factor and no session; the admin gives a reason, kept in the audit row. The tenant's row policy keeps it to the tenant's own staff,
      * and a platform operator is never a tenant user, so no tenant admin can unlock an operator.
      */
     @Transactional
-    UserResponse unlockSignIn(UUID userId) {
-        unlock(userId, CurrentPrincipal.require().userId(), "staff", "tenant_admin");
+    UserResponse unlockSignIn(UUID userId, String reason) {
+        unlock(userId, CurrentPrincipal.require().userId(), "staff", "tenant_admin", reason);
         return find(userId).orElseThrow();
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void unlockSignIn(UUID userId, UUID platformUserId) {
-        unlock(userId, platformUserId, "platform", "platform");
+    public void unlockSignIn(UUID userId, UUID platformUserId, String reason) {
+        unlock(userId, platformUserId, "platform", "platform", reason);
     }
 
-    private void unlock(UUID userId, UUID actorId, String actorKind, String by) {
+    private void unlock(UUID userId, UUID actorId, String actorKind, String by, String reason) {
         lockUser(userId);
         Instant now = clock.now();
         Accounts.Account account = accounts.byIdForUpdate(userId).orElseThrow(ApiException::notFound);
@@ -453,7 +453,7 @@ class UserService implements TenantAdmins {
                         userId,
                         null,
                         Map.of("locked", account.lockedAt(now), "failed_login_count", account.failedLoginCount()),
-                        Map.of("locked", false, "failed_login_count", 0, "by", by)),
+                        Map.of("locked", false, "failed_login_count", 0, "by", by, "reason", reason.strip())),
                 actorId,
                 actorKind);
     }

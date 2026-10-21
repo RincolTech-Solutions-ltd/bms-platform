@@ -77,6 +77,20 @@ class LogRedactionTest {
                 .isEqualTo("cut {\"password\": \"[redacted]\"");
     }
 
+    /**
+     * Deliberate, pinned by the delta review of #433: a secret key matches at the end of a longer name with no word boundary
+     * (that is how {@code resetToken=} and {@code BMS_SMTP_PASSWORD=} are caught), so a harmless key that happens to end in
+     * one, such as {@code spin=} or {@code shipping_pin=}, loses its value too. A redacted harmless value is the safe
+     * direction; a key that merely contains one inside it ({@code shipping=}, {@code pinned=}) is left alone.
+     */
+    @Test
+    void aKeyEndingInASecretWordLosesItsValueOnPurpose() {
+        assertThat(LogRedaction.redact("spin=3 shipping_pin=4411"))
+                .isEqualTo("spin=[redacted] shipping_pin=[redacted]");
+        assertThat(LogRedaction.redact("shipping=courier pinned=true tokens=4"))
+                .isEqualTo("shipping=courier pinned=true tokens=4");
+    }
+
     /** Review of #433, finding 5: a URL-encoded plus, spaced landlines and NINs in lower case. Fabricated numbers only. */
     @Test
     void ugandaPhoneAndNinFormsAreReplaced() {

@@ -29,8 +29,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Sign-in answers do not say whether an account exists (ADR-059): an address that matches no account is counted and
  * locked in the database ({@link SignInAddressFailures}) after the same five failures, for the same 15 minutes, with the
- * same 423 and words as a real account, and the lock survives a restart. Both paths read the same rows before the hash
- * and write one counter row and the same audit rows after it, and neither lock pays for a hash. What is left, and is
+ * same 423 and words as a real account, and the lock survives a restart. Both paths read the same rows before the hash;
+ * after it both lock their row and read the lock again before looking at the hash's result (so once locked, right and
+ * wrong answer alike), then write one counter row and the same audit rows; neither lock pays for a hash. What is left, and is
  * not hidden: an address of nobody forgets its count after a week without a failure, a real account only at a right
  * password; and a few database round trips more or less are not timed away.
  *
@@ -124,11 +125,20 @@ class AuthFlow {
         return new Attempt(login, key, account);
     }
 
-    /** After the hash: one failure counted (on the address or on the account), or the sign-in. */
+    /**
+     * After the hash: the row of what was typed (the account, or the address of nobody) is locked and its lock read again
+     * BEFORE the result of the hash is looked at, so once a lock is in force every answer is 423, right password or
+     * wrong (review of #433): a burst of guesses that all passed {@link #firstLook} before the lock cannot learn which
+     * one was right from a 423 among 401s. Otherwise one failure is counted, or the sign-in goes on.
+     */
     private Outcome settle(Accounts accounts, Attempt attempt, boolean ok, String issuer, String userAgent) {
         Instant now = clock.now();
         Account seen = attempt.account();
         if (seen == null) {
+            if (addresses.lockedForUpdate(attempt.addressKey(), now)) {
+                accounts.audit("core.auth.sign_in_refused_locked", null, Map.of("login", typed(attempt.login())));
+                throw locked();
+            }
             Accounts.Failures failures =
                     addresses.recordFailure(attempt.addressKey(), now, MAX_FAILURES, now.plus(LOCK));
             accounts.audit(
@@ -143,17 +153,17 @@ class AuthFlow {
             }
             throw invalidCredentials();
         }
-        if (!ok || !seen.active()) {
-            fail(accounts, seen, now, "core.auth.sign_in_failed");
-            throw invalidCredentials();
-        }
         // The first read took no lock: parallel failures may have locked the account since, or the password changed.
         Account account = accounts.byIdForUpdate(seen.id()).orElseThrow(AuthFlow::invalidCredentials);
         if (account.lockedAt(now)) {
             accounts.audit("core.auth.sign_in_refused_locked", account.id(), Map.of());
             throw locked();
         }
-        if (!account.active() || !Objects.equals(account.passwordHash(), seen.passwordHash())) {
+        if (!ok || !account.active()) {
+            fail(accounts, account, now, "core.auth.sign_in_failed");
+            throw invalidCredentials();
+        }
+        if (!Objects.equals(account.passwordHash(), seen.passwordHash())) {
             // A password set while this one was checked: what matched is no longer the password.
             throw invalidCredentials();
         }

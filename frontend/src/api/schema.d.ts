@@ -6229,7 +6229,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Lift the sign-in lock of a staff user after too many wrong passwords; audited, changes no password (ADR-059) */
+        /** Lift the sign-in lock of a staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059) */
         post: operations["unlockUserSignIn"];
         delete?: never;
         options?: never;
@@ -15768,6 +15768,10 @@ export interface components {
              * @description The tour version the user saw; a higher one shows again
              */
             version?: number;
+        };
+        UnlockSignInRequest: {
+            /** @description Why; kept in the tenant's audit log */
+            reason: string;
         };
         /** @description Omitted fields are unchanged */
         UpdateAdvisorSettingsRequest: {
@@ -27074,7 +27078,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnlockSignInRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

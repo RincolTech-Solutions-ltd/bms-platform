@@ -60,15 +60,19 @@ Tomcat's RemoteIpValve takes the right-most untrusted `X-Forwarded-For`; staging
    `sign_in_address_failures` (migration V78), keyed by the SHA-256 of that address, with the same single-statement
    count and lock. So the lock of an address of nobody survives a restart and cannot be evicted, and after five
    failures it answers the same 423 `account_locked` with the same words for the same time as an account. Both paths
-   read the address's row and the account before the hash, write one counter row and the same audit rows after it,
-   and neither lock pays for a hash.
+   read the address's row and the account before the hash, then lock the row (the account's, or the address's) and
+   read its lock again **before looking at the result of the hash**: once a lock is in force every answer is 423,
+   right password or wrong, so a burst of guesses that all passed the first look before the lock cannot single out the
+   right one (delta review of #433). Then one counter row and the same audit rows are written; neither lock pays for a
+   hash.
 2. **In memory, only noise, and only failures per IP.** `AuthThrottle` keeps token buckets, per instance and lost on
    restart:
    - **Failed requests per client IP** (an IPv6 /64, an IPv4 address) on staff and operator sign-in, the second factor
      (verify, enrol, confirm), invitation acceptance and the operator's first password:
      `BMS_AUTH_SIGN_IN_FAILURES_PER_IP` (property `bms.auth.sign-in-failures-per-ip`) in 10 minutes, **300** by
-     default. A success costs nothing, and neither does a 423 lock, a 429 or a 503; a wrong password, code or token or
-     a weak password does. While the bucket is empty the IP gets 429 before any work. The reasoning: under carrier NAT
+     default. A token is taken before the work, so a burst sent at once cannot all pass a nearly empty bucket together,
+     and given back unless the work failed: a success costs nothing, and neither does a 423 lock, a 429 or a 503; a wrong
+     password, code or token or a weak password does. While the bucket is empty the IP gets 429 before any work. The reasoning: under carrier NAT
      one public IPv4 is hundreds of subscribers, so counting their successes punishes them for each other's sign-ins;
      their typing mistakes are what the budget must absorb, and 300 failures in 10 minutes (one every two seconds) is
      far above what one office or one carrier address of honest users makes, while the database lock still allows only
@@ -85,8 +89,8 @@ Tomcat's RemoteIpValve takes the right-most untrusted `X-Forwarded-For`; staging
    token again.
 3. **A lock can be lifted, three ways, all audited.** A completed password reset (the link from the owner's own
    mailbox) lifts the lock and starts the count again (`core.auth.unlocked`, by `password_reset`; amends ADR-042
-   decision 7). A tenant admin lifts the lock of a staff user of the tenant, any role (`POST /users/{user_id}/unlock`,
-   `core.users.manage`). The platform operator lifts the lock of a tenant's staff user with a reason
+   decision 7). A tenant admin lifts the lock of a staff user of the tenant, any role, with a reason (`POST /users/{user_id}/unlock`,
+   `core.users.manage`; the reason is kept in the audit row). The platform operator lifts the lock of a tenant's staff user with a reason
    (`POST /platform/tenants/{tenant_id}/users/{user_id}/unlock`, `platform.tenants.manage`, both audit logs). None
    changes a password, a second factor or a session, so none needs a step-up. Nothing lifts an operator's lock: a
    tenant admin cannot reach an operator and the operator route only reaches a tenant's users; an operator's lock
@@ -112,7 +116,8 @@ Tomcat's RemoteIpValve takes the right-most untrusted `X-Forwarded-For`; staging
    line (the message, the exception text and stack trace, each MDC value) passes through it:
    - the value after a secret key, alone or ending a longer name (`token`, `resetToken`, `invitation_token`,
      `"newPassword"`, `client_secret`, `BMS_SMTP_PASSWORD`, `x-api-key`, `pin`, `otp` and the like), a quoted value up
-     to its closing quote; the credential after `Authorization:`, `Bearer` or `Basic`; signed tokens;
+     to its closing quote; with no word boundary, so a harmless key ending in one (`spin=`, `shipping_pin=`) loses its
+     value too, on purpose; the credential after `Authorization:`, `Bearer` or `Basic`; signed tokens;
    - email addresses; NINs in any letter case; Uganda mobile and landline numbers with spaces or dashes, `+`, a
      URL-encoded `%2B` or a leading 0, and any other standalone run of 9 to 15 digits, **except** a run labelled as an
      amount, time, count or id (`amount=`, `_minor=`, `balance=`, `id=`, `ts=` and the like), an epoch time in
@@ -163,6 +168,11 @@ Tomcat's RemoteIpValve takes the right-most untrusted `X-Forwarded-For`; staging
 - 429 and 503 counts on the sign-in routes, `core.auth.account_locked` and `core.auth.unlocked` in the audit log, and
   the warning that a throttle is full; raise `BMS_AUTH_SIGN_IN_FAILURES_PER_IP` or the hashing bound if real users
   meet them.
+- **The hashing slots can be kept busy.** About 50 client IPs or IPv6 /64s (each within its 300 failures in 10
+  minutes) sending wrong passwords as fast as they can keep all four hashing slots busy, and real users then get 503
+  `sign_in_busy` until it stops. This is inherent to a bounded hash and accepted: the alternative is a heap that fills.
+  Watch the rate of 503 `sign_in_busy` and of `core.auth.sign_in_failed` per minute and the number of distinct client
+  addresses among them; the answers are a Caddy rate limit, proxying production through Cloudflare, or more slots.
 - The size of `sign_in_address_failures` (a spray of made-up addresses adds one row each until the purge).
 - A Caddy rate limit (or proxying production through Cloudflare and trusting `Cf-Connecting-Ip`) is still the
   stronger first line and is not part of this decision.
