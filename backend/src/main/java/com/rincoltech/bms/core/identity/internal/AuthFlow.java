@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
  * family revoked for refresh token reuse) are written before the method throws; the methods do
  * not roll back on {@link ApiException}, so the answer is an error and the record commits.
  *
- * <p>Sign-in answers never say whether an account exists (ADR-058): every address has the same attempt budget
+ * <p>Sign-in answers never say whether an account exists (ADR-059): every address has the same attempt budget
  * ({@link AuthThrottle#SIGN_IN_PER_ADDRESS}), and an address that matches no account is locked after the same failures,
  * for the same time, with the same answer as a real one. Neither lock pays for a hash.
  */

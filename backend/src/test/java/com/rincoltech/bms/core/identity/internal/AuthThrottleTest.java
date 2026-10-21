@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 /**
- * The sign-in limits of ADR-058 (launch readiness M9, issue #426; FR-IAM-05): per client IP, per sign-in address and the lock
+ * The sign-in limits of ADR-059 (launch readiness M9, issue #426; FR-IAM-05): per client IP, per sign-in address and the lock
  * of an address that matches no account, which behaves exactly like the database lock of a real one. Fabricated values only.
  */
 class AuthThrottleTest {

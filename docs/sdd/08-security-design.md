@@ -32,6 +32,18 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
   parallelism 1, tuned so one hash takes about 100 ms on the production host). Passwords are
   10 to 128 characters and are refused when they are on the common password list
   (`backend/src/main/resources/common-passwords.txt`) or equal the sign-in name (ADR-014).
+  Hashing is bounded (ADR-059, issue #426): at most `BMS_AUTH_ARGON2_MAX_CONCURRENT` hashes run at once (4 by default, 256
+  MiB), and a caller that waits two seconds for a slot is answered 503 `sign_in_busy` with Retry-After, so a flood of
+  sign-ins slows sign-in down instead of filling the heap.
+- **Sign-in limits** (ADR-059, issue #426). One in-memory throttle (`AuthThrottle`, bounded, per instance) covers the
+  public sign-in family. Per client IP (an IPv6 /64): every staff and operator sign-in, two-step (verify, enrol,
+  confirm), invitation and first-password route, `BMS_AUTH_SIGN_IN_PER_IP` in 10 minutes (60 by default); the reset
+  routes keep 20 requests an hour and 30 link attempts in 10 minutes. Per sign-in address (email in lower case or phone
+  in E.164, within one tenant and one kind of account): 30 sign-in attempts in 15 minutes and 10 reset requests an hour,
+  from any IP. Per account: 30 second-factor attempts in 15 minutes. Every refusal is the same 429 `rate_limited`.
+  **No answer reveals an account:** an address that matches nobody is locked after the same five failures, for the same
+  15 minutes, with the same 423 `account_locked` and words as a real account (whose lock stays in the database), and
+  neither lock pays for a hash. Member sign-in (FR-IAM-09, P2) is not built; it goes through the same throttle.
 - One-time codes, invitation and setup tokens, recovery codes and refresh tokens are stored as
   SHA-256 hashes only.
 - TOTP secrets are encrypted at rest with the application data key (8.7). TOTP is RFC 6238
@@ -851,7 +863,13 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
   can hold personal data about the member or third parties. It is staff-only: the member area
   never returns it.
 - Application logs never contain request bodies of member endpoints, NINs, phone numbers,
-  tokens or passwords; the logger has a redaction filter with a unit test.
+  tokens or passwords. On staging and production (the `server` profile) every string of every JSON log line (message,
+  exception text and stack trace, MDC values) passes through `kernel.LogRedaction`, named as
+  `logging.structured.json.customizer` (NFR-SEC-08, ADR-059, issue #426): emails, Uganda phone numbers and any standalone
+  run of 9 to 15 digits, NINs, signed tokens, bearer credentials, the value after a secret key (`token=`, `"password":`,
+  `pin=`) and the value after a name key (`full_name=`, `fullName=`) become `[email]`, `[phone]`, `[nin]`, `[redacted]`
+  or `[name]`. `LogRedactionTest` runs Spring Boot's ECS encoder with it. A name in free text has no key to find, so code
+  still never logs one. Container logs are capped and rotated by Docker (chapter 9).
 - Test and development environments never hold production data. Fixtures are fabricated
   (chapter 15 section 15.8).
 
@@ -862,7 +880,8 @@ Detailed requirements are NFR-DP-01 to NFR-DP-08 in chapter 4. Design consequenc
 | A bug omits the tenant filter | RLS fails the query; isolation tests |
 | A staff user moves money alone | Maker-checker, thresholds, audit |
 | A staff user edits history to hide theft | Append-only tables, reversal-only corrections, audit |
-| Credential stuffing on staff sign-in | Lockout, rate limits, MFA for admins |
+| Credential stuffing on staff sign-in | Lockout, limits per IP, per address and per account, MFA for admins; unknown addresses lock like real ones (ADR-059) |
+| A flood of sign-ins exhausting the API's memory with password hashes | At most four argon2id hashes at once, 503 `sign_in_busy` beyond (ADR-059) |
 | The forgotten-password form used to learn which staff have accounts, to flood a mailbox, or to take an account over | One generic answer with a time floor, limits per address and per account, a hashed single-use one hour token sent only to the email on file, every session ended on use, the second factor and the lock untouched; the threat model is section 8.2a and ADR-042 |
 | SIM swap used to take over a member portal | PIN plus OTP only at activation and reset; SMS notice to the member on PIN reset; staff can revoke portal access |
 | Forged payment callback | Signature verification plus status query before booking (FR-PAY-02) |

@@ -7,7 +7,7 @@ import com.rincoltech.bms.core.notifications.internal.NotificationProperties.Smt
 import org.junit.jupiter.api.Test;
 
 /**
- * Launch readiness M10, ADR-058, issue #426: the API refuses to start in production without SMTP, naming the unset
+ * Launch readiness M10, ADR-059, issue #426: the API refuses to start in production without SMTP, naming the unset
  * variables and never a value. Every host, account and address is fabricated.
  */
 class SmtpProductionGuardTest {

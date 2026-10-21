@@ -13,7 +13,7 @@ import org.springframework.boot.logging.logback.StructuredLogEncoder;
 import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
 
-/** NFR-SEC-08, ADR-058, issue #426: personal data never reaches a log line. All values are fabricated. */
+/** NFR-SEC-08, ADR-059, issue #426: personal data never reaches a log line. All values are fabricated. */
 class LogRedactionTest {
 
     @Test

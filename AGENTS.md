@@ -401,6 +401,16 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   `BACKUP_RETENTION_ON_HOST=false` once the R2 lock and lifecycle rules are on (provider steps left for Hillary). Tests:
   `bash deploy/tests/monitor-test.sh` (CI, with shellcheck). Runbooks `docs/runbooks/monitoring-and-alerts.md`,
   `restore-from-backup.md` sections 5 to 7, `security-incident.md` and `support-and-on-call.md` (owner placeholders to fill).
+- **Built (launch hardening A, issue #426, ADR-059):** no migration. `core.identity`: `AuthThrottle` (was `ResetThrottle`) limits
+  every public staff and operator sign-in, two-step, invitation and setup route per client IP (`BMS_AUTH_SIGN_IN_PER_IP`, 60 in 10
+  minutes), sign-in and the forgotten password per sign-in address (30 in 15 minutes, 10 an hour) and the second factor per
+  account (30 in 15 minutes), all answering the same 429; an address that matches no account is locked after five failures with
+  the same 423 as a real one; `Passwords` runs at most `BMS_AUTH_ARGON2_MAX_CONCURRENT` (4) argon2id hashes at once and answers
+  503 `sign_in_busy` after two seconds. Member sign-in is not built yet and will use the same throttle. `core.notifications`:
+  with `BMS_ENVIRONMENT=production` the API refuses to start without `BMS_SMTP_HOST`, `BMS_SMTP_USER`, `BMS_SMTP_PASSWORD` and
+  `BMS_MAIL_FROM`. `kernel.LogRedaction` redacts emails, phones, NINs, tokens, secrets and named name fields from every
+  string of the `server` profile's JSON logs (NFR-SEC-08); both compose files cap and rotate container logs. Tests:
+  `AuthThrottleTest`, `PasswordsBoundTest`, `SignInLimitsIT`, `SmtpProductionGuardTest`, `LogRedactionTest`.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -562,7 +572,8 @@ These are not style preferences. A pull request that breaks one is not merged.
 8. **Every route declares a permission** from the chapter 8 matrix, or is explicitly
    public.
 9. **No personal data in logs.** NIN, phone numbers, tokens, passwords, PINs and member
-   request bodies never appear in logs.
+   request bodies never appear in logs. On staging and production `kernel.LogRedaction` also masks what it
+   recognises (ADR-059), but it is a safety net: names in free text have no pattern, so never log them.
 10. **Fabricated data only** in fixtures, tests, seeds, staging and examples.
 11. **Import never guesses silently** and never drops a row (chapter 13 section 13.2).
 
@@ -708,7 +719,9 @@ Accepted (this list is the ADR index):
 - ADR-057 Everyday push notices (new orders, delivery, low stock, credit due, the daily summary) with per-business switches, a one-tap
   turn-on card, and a low-stock minimum per item and branch beside the pace rule, whichever trips first (proposed, #412; renumbered at merge if needed)
 - ADR-058 Host checks post to the Telegram operator chat on a systemd timer, an external uptime monitor and heartbeat watch the host, the
-  restore drill is timed and scheduled, and R2 lock and lifecycle rules make backups undeletable from the host (proposed, #425; renumbered at merge if needed)
+  restore drill is timed and scheduled, and R2 lock and lifecycle rules make backups undeletable from the host (proposed, #425; renumbered at merge if needed)- ADR-059 Sign-in locks in the database for every address (an unknown one locked like an account), failures-only limits per
+  client IP, audited unlock, at most four password hashes at once and never inside a transaction, SMTP required in production, server logs redacted and container logs capped
+  (proposed, #426; launch readiness M8 to M10; renumbered at merge if needed)
 - ADR-060 The Retail home follows one chosen range against the period before (as many days before, This year against last
   year, All against nothing), from the dashboard's own dated queries; the choice kept per person per device (proposed, #428;
   FR-RET-65; renumbered at merge if needed)

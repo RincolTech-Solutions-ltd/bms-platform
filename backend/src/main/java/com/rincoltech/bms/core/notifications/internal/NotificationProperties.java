@@ -38,7 +38,7 @@ record NotificationProperties(Smtp smtp, Telegram telegram, String supportContac
         }
 
         /**
-         * The production startup guard (launch readiness M10, ADR-058, issue #426): password resets, invitations and
+         * The production startup guard (launch readiness M10, ADR-059, issue #426): password resets, invitations and
          * activation links are email only, so production refuses to start with email off instead of letting them wait
          * unseen in the outbox. Names the unset variables, never a value. Elsewhere unset SMTP stays a quiet off.
          */

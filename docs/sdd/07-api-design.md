@@ -222,9 +222,9 @@ published under the platform host.
 | 422 | Validation and business rule failures (codes below) |
 | 423 | `tenant_suspended`, `account_locked` |
 | 428 | `precondition_required`: a `PATCH`, or a state transition or retail price edit, without `If-Match` (section 7.9) |
-| 429 | Rate limited; `Retry-After` header set where the limiter knows it; `rate_limited` on the public sign-up endpoints and on report runs (section 7.10) |
+| 429 | Rate limited; `Retry-After` header set where the limiter knows it; `rate_limited` on the public sign-up endpoints, the public sign-in family (ADR-059) and report runs (section 7.10) |
 | 500 | `internal_error`; the body carries only the generic title and the `request_id` |
-| 503 | Dependency down (the database); readiness fails; `uploads_busy` (image re-encoding is at capacity, retry shortly); `storage_unavailable` (document storage not configured) |
+| 503 | Dependency down (the database); readiness fails; `uploads_busy` (image re-encoding is at capacity, retry shortly); `storage_unavailable` (document storage not configured); `sign_in_busy` (every password hashing slot is taken, retry shortly; ADR-059) |
 
 Business rule codes used in chapter 3 (each is a 422 unless listed above):
 `validation_failed`, `plan_limit_reached`, `invalid_phone`, `invalid_nin`,
@@ -299,7 +299,10 @@ replaces this before a second API instance is added):
 
 | Scope | Limit |
 |---|---|
-| Staff sign-in per login identifier | 10 per 15 minutes |
+| Staff and operator sign-in per sign-in address, within one tenant, from any client (ADR-059) | 30 per 15 minutes (429); the fifth wrong password in a row locks it for 15 minutes (423), an address of no account exactly as a real one |
+| Sign-in, two-step (verify, enrol, confirm), invitation and operator setup per client address, an IPv6 client by its /64 (ADR-059, `BMS_AUTH_SIGN_IN_PER_IP`) | 60 per 10 minutes by default (429) |
+| Second factor per account (ADR-059) | 30 per 15 minutes (429) |
+| Password hashes running at once (ADR-059, `BMS_AUTH_ARGON2_MAX_CONCURRENT`) | 4 by default; 503 `sign_in_busy` after a 2 second wait |
 | Member OTP request per phone | 3 per hour |
 | Member PIN sign-in per phone | 10 per 15 minutes |
 | Any authenticated user | 600 requests per minute |
@@ -310,6 +313,7 @@ replaces this before a second API instance is added):
 | Sign-up: confirmation emails per mailbox (database) | 3 per 24 hours (202, nothing sent) |
 | Forgot password: requests per client address, an IPv6 client by its /64 (FR-IAM-15) | 20 per hour (429) |
 | Forgot password: using a link per client address | 30 per 10 minutes (429) |
+| Forgot password: requests for one sign-in address, from any client (ADR-059) | 10 per hour (429) |
 | Forgot password: links for one account (database) | 3 per hour (202, nothing sent) |
 | Forgot password: a user whose role needs a second factor not yet set up | no link by email (202, nothing sent); the admin or the operator issues one |
 | Sign-up: new applications, all clients (database, `BMS_SIGNUP_MAX_APPLICATIONS_PER_HOUR`) | 30 per hour by default (202, nothing created; audit row and one Telegram alert per hour) |
@@ -352,13 +356,13 @@ port (8081), which is never published outside the container network.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/auth/staff/login` | public | `{login, password}` returns tokens (`status: signed_in`), or `{status: mfa_required \| mfa_enrolment_required, mfa_token}`. FR-IAM-04, FR-IAM-05 |
-| POST | `/auth/staff/mfa/verify` | public (mfa_token) | `{mfa_token, code}`; `code` is a TOTP code or a recovery code. Returns tokens. FR-IAM-06, FR-IAM-11 |
+| POST | `/auth/staff/login` | public | `{login, password}` returns tokens (`status: signed_in`), or `{status: mfa_required \| mfa_enrolment_required, mfa_token}`. 401 `invalid_credentials`, 423 `account_locked` (the same after five failures whether or not the address is an account), 429 `rate_limited` (per client address or per sign-in address), 503 `sign_in_busy` (ADR-059). FR-IAM-04, FR-IAM-05 |
+| POST | `/auth/staff/mfa/verify` | public (mfa_token) | `{mfa_token, code}`; `code` is a TOTP code or a recovery code. Returns tokens. 429 `rate_limited` per client address or per account (ADR-059). FR-IAM-06, FR-IAM-11 |
 | POST | `/auth/staff/mfa/enrol` | public (mfa_token), or signed in | Returns the TOTP secret and `otpauth` URI once |
 | POST | `/auth/staff/mfa/confirm` | public (mfa_token), or signed in | `{mfa_token?, code}` activates TOTP and returns ten recovery codes once; with the MFA token it also signs in. FR-IAM-11 |
 | POST | `/auth/staff/mfa/recovery-codes` | authenticated staff | `{code}` (a current TOTP code) replaces every recovery code; returns the new ones once. FR-IAM-11 |
 | POST | `/auth/staff/invitations/accept` | public (token) | `{token, password}`; sets the password and signs in: the same body as `/auth/staff/login` (`signed_in` with tokens, or `mfa_enrolment_required` with an MFA token when the role requires a second factor). FR-IAM-01, FR-IAM-13, ADR-025 |
-| POST | `/auth/staff/password/forgot` | public | **Built (#320).** `{login}` (email or phone). Always 202 `{message}` with the same words and after at least the same time (a 400 ms floor) for a known account, an unknown one, a deactivated one, a user still invited and a user with no email; a link goes to the email on file only for an active user, through the outbox (`identity.password_reset`). 429 `rate_limited` per client address; further links for one account in an hour are answered and ignored. FR-IAM-15, ADR-042 |
+| POST | `/auth/staff/password/forgot` | public | **Built (#320).** `{login}` (email or phone). Always 202 `{message}` with the same words and after at least the same time (a 400 ms floor) for a known account, an unknown one, a deactivated one, a user still invited and a user with no email; a link goes to the email on file only for an active user, through the outbox (`identity.password_reset`). 429 `rate_limited` per client address or per sign-in address (ADR-059); further links for one account in an hour are answered and ignored. FR-IAM-15, ADR-042 |
 | POST | `/auth/staff/password/reset` | public (token) | **Built (#320).** `{token, password}`; the token is the fragment of the emailed or admin-issued link. Sets the password under the invitation's rules, ends every session of the user and answers like `/auth/staff/login`: `signed_in` with tokens, `mfa_required` or `mfa_enrolment_required` with an MFA token (a reset never skips the second factor), or `sign_in_required` with no token while the failed-attempt lock holds. 422 `reset_link_invalid` (used, replaced, unknown, other tenant, user not active), 422 `reset_link_expired`, 422 `weak_password` (the link still works), 429 `rate_limited`. FR-IAM-15, ADR-042 |
 | POST | `/auth/member/otp/request` | public | `{phone, purpose}`; always 202. FR-IAM-09 (P2) |
 | POST | `/auth/member/otp/verify` | public | `{phone, code}` returns a short-lived `pin_setup_token` (P2) |
@@ -376,7 +380,7 @@ The refresh token never appears in a response body: it is the `__Host-bms_rt` co
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | POST | `/platform/auth/setup` | public (setup token) | `{token, password}`: first password, with the token from `deploy/sql/create-platform-user.sql` |
-| POST | `/platform/auth/login`, `/platform/auth/mfa/verify`, `/platform/auth/mfa/enrol`, `/platform/auth/mfa/confirm` | public (mfa_token) | As the staff endpoints; TOTP is mandatory and enrolled at first sign-in |
+| POST | `/platform/auth/login`, `/platform/auth/mfa/verify`, `/platform/auth/mfa/enrol`, `/platform/auth/mfa/confirm` | public (mfa_token) | As the staff endpoints, with the same limits (ADR-059); TOTP is mandatory and enrolled at first sign-in |
 | POST | `/platform/auth/refresh` | refresh cookie `__Host-bms_prt` | |
 | POST | `/platform/auth/logout` | authenticated platform | |
 | GET | `/platform/me` | authenticated platform | |

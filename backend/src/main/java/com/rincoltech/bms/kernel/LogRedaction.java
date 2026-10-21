@@ -7,7 +7,7 @@ import org.springframework.boot.json.JsonWriter.ValueProcessor;
 import org.springframework.boot.logging.structured.StructuredLoggingJsonMembersCustomizer;
 
 /**
- * The log redaction filter of NFR-SEC-08 and standing rule 9 (ADR-058, issue #426): every string written to a log line on
+ * The log redaction filter of NFR-SEC-08 and standing rule 9 (ADR-059, issue #426): every string written to a log line on
  * staging and production (the message, the exception text and stack trace, every MDC value) passes through
  * {@link #redact} before it leaves the process. Named in {@code logging.structured.json.customizer} of the {@code server}
  * profile, so it runs inside Spring Boot's ECS JSON formatter; the dev and test profiles log plain text of fabricated data

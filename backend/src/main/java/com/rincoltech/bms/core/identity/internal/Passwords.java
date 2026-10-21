@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
  * string form so the parameters travel with each hash. Passwords are 10 to 128 characters and
  * may not be on the common password list.
  *
- * <p>Hashing is bounded (launch readiness M9, ADR-058): at most {@code bms.auth.argon2-max-concurrent} hashes run at once (4
+ * <p>Hashing is bounded (launch readiness M9, ADR-059): at most {@code bms.auth.argon2-max-concurrent} hashes run at once (4
  * by default, 256 MiB at the production cost), and a caller that waits {@link #WAIT_SECONDS} without a slot is answered
  * 503 {@code sign_in_busy} with Retry-After, so a flood of sign-ins, even for accounts that do not exist, slows sign-in
  * down instead of filling the heap.

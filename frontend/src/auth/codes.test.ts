@@ -68,7 +68,7 @@ describe('branch selection (FR-BR-03, FR-BR-04)', () => {
   });
 });
 
-describe('plainProblem for the sign-in limits (ADR-058)', () => {
+describe('plainProblem for the sign-in limits (ADR-059)', () => {
   it('says the same words for a locked account and an address that matches nobody', () => {
     const locked = { code: 'account_locked', detail: 'Too many failed attempts. Try again in 15 minutes.' };
     expect(plainProblem(locked, 'x')).toBe('Too many tries. Your account is locked for 15 minutes. Try again later.');

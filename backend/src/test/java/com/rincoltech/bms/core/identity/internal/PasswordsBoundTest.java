@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 /**
- * Launch readiness M9, ADR-058, issue #426: argon2id runs a bounded number of hashes at once, and a caller that finds no
+ * Launch readiness M9, ADR-059, issue #426: argon2id runs a bounded number of hashes at once, and a caller that finds no
  * free slot in time is told sign-in is busy (503, Retry-After from the handler) instead of the API filling its heap.
  */
 class PasswordsBoundTest {

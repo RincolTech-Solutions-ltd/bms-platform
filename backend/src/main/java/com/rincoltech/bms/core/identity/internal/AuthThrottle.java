@@ -16,7 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
- * Token buckets for the public sign-in family (FR-IAM-05, FR-IAM-15, ADR-042, ADR-058): per client IP on every public sign-in,
+ * Token buckets for the public sign-in family (FR-IAM-05, FR-IAM-15, ADR-042, ADR-059): per client IP on every public sign-in,
  * two-step, invitation, setup and password reset route, and per sign-in address (the email or phone typed, within one
  * tenant) on sign-in and the forgotten password, and per account on the second factor. In memory and bounded: at most
  * {@link #MAX_KEYS} keys a map, the least recently used dropped first, so a flood cannot grow it. An IPv6 client is keyed

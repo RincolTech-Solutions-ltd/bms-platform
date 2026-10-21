@@ -22,7 +22,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The sign-in limits of ADR-058 through HTTP (launch readiness M9, issue #426; FR-IAM-05, FR-IAM-15): no answer of the
+ * The sign-in limits of ADR-059 through HTTP (launch readiness M9, issue #426; FR-IAM-05, FR-IAM-15): no answer of the
  * sign-in family tells a caller whether an account exists, and one client IP or one address cannot keep going. All users and
  * contacts are fabricated.
  */

@@ -128,6 +128,9 @@ services:
       BMS_DATA_KEY: ${BMS_DATA_KEY:?}
       BMS_DATA_KEY_ID: ${BMS_DATA_KEY_ID:-k1}
       BMS_DATA_KEY_PREVIOUS: ${BMS_DATA_KEY_PREVIOUS:-}
+      # Sign-in limits (ADR-059); two hashes at once on the small staging heap.
+      BMS_AUTH_SIGN_IN_PER_IP: ${BMS_AUTH_SIGN_IN_PER_IP:-60}
+      BMS_AUTH_ARGON2_MAX_CONCURRENT: ${BMS_AUTH_ARGON2_MAX_CONCURRENT:-2}
       # Documents bucket (chapter 12 section 12.5): its own token, never the backup one. The API
       # refuses to start with any of these empty.
       R2_ENDPOINT: ${R2_ENDPOINT:?}
