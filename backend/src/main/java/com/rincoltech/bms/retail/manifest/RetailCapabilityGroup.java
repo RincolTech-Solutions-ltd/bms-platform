@@ -43,6 +43,12 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
 
     static final List<String> CREDIT_RECOGNITIONS = List.of("on_sale", "on_payment");
 
+    /** Months of stock at the recent pace above which an item is a slow mover on Stock health (issue #414); 4 by default. */
+    static final String SLOW_MOVER_MONTHS = "slow_mover_months";
+
+    static final int DEFAULT_SLOW_MOVER_MONTHS = 4;
+    static final int MAX_SLOW_MOVER_MONTHS = 36;
+
     /**
      * The first business day the rule {@code on_payment} counts from: the business day after it was asked for, worked out here, while
      * the settings row is locked, from the business clock, and never given by the caller. Credit sales counted from before it keep counting at the sale (ADR-043). The rule
@@ -84,6 +90,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         String mode =
                 current.get(CREDIT_RECOGNITION) instanceof String c && CREDIT_RECOGNITIONS.contains(c) ? c : "on_sale";
         out.put(CREDIT_RECOGNITION, mode);
+        out.put(
+                SLOW_MOVER_MONTHS,
+                current.get(SLOW_MOVER_MONTHS) instanceof Integer m && validMonths(m) ? m : DEFAULT_SLOW_MOVER_MONTHS);
         String effective = current.get(EFFECTIVE_FROM) instanceof String d && validDate(d) ? d : null;
         if (mode.equals("on_payment") && effective == null) {
             // No start day means no rule: never guess 1970, which would count every sale ever made when the buyer pays.
@@ -107,6 +116,11 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             if (key.equals(CREDIT_RECOGNITION)) {
                 if (!(value instanceof String c && CREDIT_RECOGNITIONS.contains(c))) {
                     problems.add(new FieldProblem(CREDIT_RECOGNITION, "invalid", "Use on_sale or on_payment."));
+                }
+            } else if (key.equals(SLOW_MOVER_MONTHS)) {
+                if (!(value instanceof Integer m && validMonths(m))) {
+                    problems.add(new FieldProblem(
+                            SLOW_MOVER_MONTHS, "invalid", "Use a whole number of months from 1 to 36."));
                 }
             } else if (!key.equals(PROFILE) && !CAPABILITIES.contains(key)) {
                 problems.add(new FieldProblem(key, "unknown", "Not a retail capability."));
@@ -139,6 +153,9 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
             }
             mode = next;
             out.put(CREDIT_RECOGNITION, mode);
+        }
+        if (proposed.get(SLOW_MOVER_MONTHS) instanceof Integer months) {
+            out.put(SLOW_MOVER_MONTHS, months);
         }
         if (effective != null) {
             out.put(EFFECTIVE_FROM, effective);
@@ -180,6 +197,10 @@ class RetailCapabilityGroup implements ModuleSettingsGroup {
         } catch (java.time.format.DateTimeParseException e) {
             return false;
         }
+    }
+
+    private static boolean validMonths(int months) {
+        return months >= 1 && months <= MAX_SLOW_MOVER_MONTHS;
     }
 
     private static boolean isProfile(String p) {

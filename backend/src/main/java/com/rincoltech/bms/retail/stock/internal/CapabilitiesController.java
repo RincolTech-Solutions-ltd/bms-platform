@@ -76,7 +76,13 @@ class CapabilitiesController {
                     description =
                             "Read only: the tenant's approval threshold for customer returns (action retail_sale_return),"
                                     + " present only when one is set; while it is absent a return needs no second administrator")
-            Long returnsApprovalThresholdMinor) {}
+            Long returnsApprovalThresholdMinor,
+
+            @Schema(
+                    description =
+                            "Months of stock at the recent selling pace above which an item is a slow mover on Stock health"
+                                    + " (issue #414), 1 to 36, 4 by default")
+            int slowMoverMonths) {}
 
     /** Omitted fields are unchanged; choosing a profile first writes its preset of the flags. */
     @Schema(name = "UpdateRetailCapabilitiesRequest")
@@ -92,7 +98,10 @@ class CapabilitiesController {
             Boolean returns,
 
             @Schema(allowableValues = {"on_sale", "on_payment"})
-            String creditSaleRecognition) {}
+            String creditSaleRecognition,
+
+            @Schema(description = "Months of stock above which an item is a slow mover, 1 to 36 (issue #414)")
+            Integer slowMoverMonths) {}
 
     @GetMapping
     @RequiresPermission("core.settings.manage")
@@ -120,6 +129,7 @@ class CapabilitiesController {
         put(proposed, "transfer_receipt", r.transferReceipt());
         put(proposed, "returns", r.returns());
         put(proposed, RetailCapabilities.CREDIT_RECOGNITION, r.creditSaleRecognition());
+        put(proposed, RetailCapabilities.SLOW_MOVER_MONTHS, r.slowMoverMonths());
         transfers.guardSwitchOff(proposed);
         CapabilitiesResponse saved = response(capabilities.change(proposed, expected));
         return ResponseEntity.ok().eTag(String.valueOf(capabilities.version())).body(saved);
@@ -145,7 +155,10 @@ class CapabilitiesController {
                 flag(g, "returns"),
                 g.get(RetailCapabilities.CREDIT_RECOGNITION) instanceof String c ? c : RetailCapabilities.ON_SALE,
                 g.get("credit_recognition_effective_from") instanceof String d ? LocalDate.parse(d) : null,
-                threshold > 0 ? threshold : null);
+                threshold > 0 ? threshold : null,
+                g.get(RetailCapabilities.SLOW_MOVER_MONTHS) instanceof Integer m
+                        ? m
+                        : RetailCapabilities.DEFAULT_SLOW_MOVER_MONTHS);
     }
 
     private static boolean flag(Map<String, Object> g, String key) {

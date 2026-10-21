@@ -8884,6 +8884,11 @@ export interface components {
              * @description Read only: the tenant's approval threshold for customer returns (action retail_sale_return), present only when one is set; while it is absent a return needs no second administrator
              */
             returns_approval_threshold_minor?: number;
+            /**
+             * Format: int32
+             * @description Months of stock at the recent selling pace above which an item is a slow mover on Stock health (issue #414), 1 to 36, 4 by default
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
@@ -12765,6 +12770,66 @@ export interface components {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
         };
+        /** @description The slowest first (most months to sell) */
+        RetailSlowMoverItem: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when the months are above 120 and months_to_sell shows 120.0 */
+            capped?: boolean;
+            code?: string;
+            description?: string;
+            /** Format: date */
+            last_sold_on?: string;
+            /** @description Stock divided by the pace of the last 90 days, in months, one place */
+            months_to_sell?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            sells_better_at?: components["schemas"]["RetailSlowMoverMove"];
+            /** @description Units sold in the last 90 days in this branch */
+            sold_last90?: string;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; quantity times the current cost: the money tied up here
+             */
+            value_at_cost_minor?: number;
+        };
+        /** @description Where the same item sells faster, in a branch the caller may read, and how much to move there */
+        RetailSlowMoverMove: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description Units on hand there */
+            qty_on_hand?: string;
+            /** @description Units sold there in the last 90 days */
+            sold_last90?: string;
+            /** @description Units to move there: what it would sell in slow_months, less what it holds, at most what is here */
+            suggested_qty?: string;
+        };
+        /** @description Items that sell but slowly: more than slow_months of stock at the pace of the last 90 days, or fewer than min_sales sales in 90 days. Items with no sale in 90 days are dead stock instead */
+        RetailSlowMovers: {
+            /** Format: int32 */
+            days?: number;
+            /** @description The slowest first (most months to sell) */
+            items?: components["schemas"]["RetailSlowMoverItem"][];
+            /** Format: int32 */
+            items_total?: number;
+            /**
+             * Format: int32
+             * @description An item with fewer sales than this in 90 days is slow whatever its stock
+             */
+            min_sales?: number;
+            /**
+             * Format: int32
+             * @description The business's setting: months of stock above which an item is slow
+             */
+            slow_months?: number;
+            /**
+             * Format: int64
+             * @description All slow items in the branches reported; Present only with retail.profit.read in this branch in every branch reported
+             */
+            value_at_cost_minor?: number;
+        };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
             sales?: components["schemas"]["RetailStatementHistoricalSale"][];
@@ -12870,6 +12935,7 @@ export interface components {
             profit_visible?: boolean;
             reorder?: components["schemas"]["RetailCoverList"];
             shrinkage?: components["schemas"]["RetailShrinkageBranch"][];
+            slow_movers?: components["schemas"]["RetailSlowMovers"];
             /** Format: date */
             to?: string;
             /** Format: int32 */
@@ -14965,6 +15031,11 @@ export interface components {
             profile?: "shop" | "trade";
             purchasing?: boolean;
             returns?: boolean;
+            /**
+             * Format: int32
+             * @description Months of stock above which an item is a slow mover, 1 to 36 (issue #414)
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };

@@ -7066,6 +7066,11 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "slow_mover_months" : {
+            "description" : "Months of stock at the recent selling pace above which an item is a slow mover on Stock health (issue #414), 1 to 36, 4 by default",
+            "format" : "int32",
+            "type" : "integer"
+          },
           "transfer_receipt" : {
             "type" : "boolean"
           },
@@ -14428,6 +14433,111 @@
           }
         }
       },
+      "RetailSlowMoverItem" : {
+        "description" : "The slowest first (most months to sell)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "capped" : {
+            "description" : "True when the months are above 120 and months_to_sell shows 120.0",
+            "type" : "boolean"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "last_sold_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "months_to_sell" : {
+            "description" : "Stock divided by the pace of the last 90 days, in months, one place",
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "type" : "string"
+          },
+          "sells_better_at" : {
+            "$ref" : "#/components/schemas/RetailSlowMoverMove"
+          },
+          "sold_last90" : {
+            "description" : "Units sold in the last 90 days in this branch",
+            "type" : "string"
+          },
+          "unit" : {
+            "type" : "string"
+          },
+          "value_at_cost_minor" : {
+            "description" : "Present only with retail.profit.read in this branch; quantity times the current cost: the money tied up here",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailSlowMoverMove" : {
+        "description" : "Where the same item sells faster, in a branch the caller may read, and how much to move there",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "qty_on_hand" : {
+            "description" : "Units on hand there",
+            "type" : "string"
+          },
+          "sold_last90" : {
+            "description" : "Units sold there in the last 90 days",
+            "type" : "string"
+          },
+          "suggested_qty" : {
+            "description" : "Units to move there: what it would sell in slow_months, less what it holds, at most what is here",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailSlowMovers" : {
+        "description" : "Items that sell but slowly: more than slow_months of stock at the pace of the last 90 days, or fewer than min_sales sales in 90 days. Items with no sale in 90 days are dead stock instead",
+        "properties" : {
+          "days" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "items" : {
+            "description" : "The slowest first (most months to sell)",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSlowMoverItem"
+            },
+            "type" : "array"
+          },
+          "items_total" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "min_sales" : {
+            "description" : "An item with fewer sales than this in 90 days is slow whatever its stock",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "slow_months" : {
+            "description" : "The business's setting: months of stock above which an item is slow",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "value_at_cost_minor" : {
+            "description" : "All slow items in the branches reported; Present only with retail.profit.read in this branch in every branch reported",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailStatementBeforeSystemStart" : {
         "description" : "Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out",
         "properties" : {
@@ -14665,6 +14775,9 @@
               "$ref" : "#/components/schemas/RetailShrinkageBranch"
             },
             "type" : "array"
+          },
+          "slow_movers" : {
+            "$ref" : "#/components/schemas/RetailSlowMovers"
           },
           "to" : {
             "format" : "date",
@@ -19070,6 +19183,11 @@
           },
           "returns" : {
             "type" : "boolean"
+          },
+          "slow_mover_months" : {
+            "description" : "Months of stock above which an item is a slow mover, 1 to 36 (issue #414)",
+            "format" : "int32",
+            "type" : "integer"
           },
           "transfer_receipt" : {
             "type" : "boolean"

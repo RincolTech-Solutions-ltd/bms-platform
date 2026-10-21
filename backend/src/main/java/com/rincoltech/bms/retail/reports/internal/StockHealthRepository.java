@@ -169,6 +169,104 @@ class StockHealthRepository {
                 .list();
     }
 
+    record SlowRow(
+            UUID branchId,
+            UUID productId,
+            String code,
+            String description,
+            String unit,
+            BigDecimal qty,
+            BigDecimal sold,
+            LocalDate lastSold,
+            long atCost,
+            int total,
+            long totalCost) {}
+
+    /**
+     * Items that sold in the window and are slow: stock over the monthly pace above {@code months}, or fewer than
+     * {@code minSales} sales, judged exactly (stock times the window's months against months times units sold). Items
+     * with no sale in the window are dead stock and not here. The slowest first, by months to sell, never by cost.
+     * The count and the cost of every slow item come with each row, so the totals do not depend on the row limit.
+     */
+    List<SlowRow> slowItems(
+            List<UUID> branchIds,
+            LocalDate since,
+            LocalDate today,
+            int windowMonths,
+            int months,
+            int minSales,
+            int limit) {
+        if (branchIds != null && branchIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = deadParams(branchIds, since, today);
+        params.put("windowMonths", windowMonths);
+        params.put("months", months);
+        params.put("minSales", minSales);
+        params.put("limit", limit);
+        return jdbc.sql(
+                        "WITH sold AS (SELECT s.branch_id, l.product_id, sum(l.qty) AS sold, count(DISTINCT s.id) AS sales,"
+                                + " max(s.sale_date) AS last_sold"
+                                + "  FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id"
+                                + " WHERE s.status = 'completed' AND s.sale_date BETWEEN :since AND :today"
+                                + in(branchIds, "s.branch_id") + " GROUP BY s.branch_id, l.product_id)"
+                                + " SELECT sold.branch_id, p.id, p.code, p.description, u.name AS unit, b.qty, sold.sold,"
+                                + " sold.last_sold, round(b.qty * p.cost_minor) AS at_cost, count(*) OVER () AS total,"
+                                + " sum(round(b.qty * p.cost_minor)) OVER () AS total_cost"
+                                + "  FROM sold"
+                                + "  JOIN retail_products p ON p.tenant_id = current_setting('app.tenant_id')::uuid AND p.id = sold.product_id"
+                                + "  JOIN retail_units u ON u.tenant_id = p.tenant_id AND u.id = p.unit_id"
+                                + "  JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id"
+                                + "       AND b.branch_id = sold.branch_id AND b.product_id = sold.product_id"
+                                + " WHERE p.active AND b.qty > 0 AND sold.sold > 0"
+                                + " AND (b.qty * :windowMonths > :months * sold.sold OR sold.sales < :minSales)"
+                                + " ORDER BY b.qty / sold.sold DESC, p.code, sold.branch_id, p.id LIMIT :limit")
+                .params(params)
+                .query((rs, n) -> new SlowRow(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getObject("id", UUID.class),
+                        rs.getString("code"),
+                        rs.getString("description"),
+                        rs.getString("unit"),
+                        rs.getBigDecimal("qty"),
+                        rs.getBigDecimal("sold"),
+                        rs.getObject("last_sold", LocalDate.class),
+                        rs.getLong("at_cost"),
+                        rs.getInt("total"),
+                        rs.getLong("total_cost")))
+                .list();
+    }
+
+    record Seller(UUID branchId, UUID productId, BigDecimal qty, BigDecimal sold) {}
+
+    /**
+     * The branches that sell the given items, with what they sold in the window and what they hold: the places a
+     * slow item could be moved to. Only active branches that keep and sell goods, within {@code branchIds}.
+     */
+    List<Seller> sellers(List<UUID> branchIds, List<UUID> productIds, LocalDate since, LocalDate today) {
+        if ((branchIds != null && branchIds.isEmpty()) || productIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> params = deadParams(branchIds, since, today);
+        params.put("productIds", productIds);
+        return jdbc.sql("SELECT s.branch_id, l.product_id, sum(l.qty) AS sold, coalesce(max(b.qty), 0) AS qty"
+                        + "  FROM retail_sales s JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id"
+                        + "  JOIN branches br ON br.tenant_id = s.tenant_id AND br.id = s.branch_id"
+                        + "       AND br.status = 'active' AND br.stocks_goods AND br.sells_goods"
+                        + "  LEFT JOIN retail_stock_balances b ON b.tenant_id = s.tenant_id"
+                        + "       AND b.branch_id = s.branch_id AND b.product_id = l.product_id"
+                        + " WHERE s.status = 'completed' AND s.sale_date BETWEEN :since AND :today"
+                        + " AND l.product_id IN (:productIds)" + in(branchIds, "s.branch_id")
+                        + " GROUP BY s.branch_id, l.product_id")
+                .params(params)
+                .query((rs, n) -> new Seller(
+                        rs.getObject("branch_id", UUID.class),
+                        rs.getObject("product_id", UUID.class),
+                        rs.getBigDecimal("qty"),
+                        rs.getBigDecimal("sold")))
+                .list();
+    }
+
     record Usage(UUID branchId, String kind, int reports, long cost) {}
 
     List<Usage> usage(List<UUID> branchIds, LocalDate from, LocalDate to) {

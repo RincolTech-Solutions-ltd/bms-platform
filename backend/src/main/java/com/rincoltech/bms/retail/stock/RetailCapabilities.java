@@ -37,6 +37,11 @@ public class RetailCapabilities {
 
     public static final String CREDIT_RECOGNITION = "credit_sale_recognition";
 
+    /** Months of stock above which an item is a slow mover, when the owner never chose (issue #414). */
+    public static final int DEFAULT_SLOW_MOVER_MONTHS = 4;
+
+    public static final String SLOW_MOVER_MONTHS = "slow_mover_months";
+
     private final ModuleSettings settings;
     private final CurrentTenant tenant;
 
@@ -88,6 +93,13 @@ public class RetailCapabilities {
     /** True when credit sales are reported as received money only (ADR-043). */
     public boolean recognisesOnPayment() {
         return ON_PAYMENT.equals(creditRecognition());
+    }
+
+    /** The months of stock at the recent pace above which an item is a slow mover (issue #414), 4 unless the owner chose. */
+    public int slowMoverMonths() {
+        return settings.group(MODULE).get(SLOW_MOVER_MONTHS) instanceof Integer m && m >= 1
+                ? m
+                : DEFAULT_SLOW_MOVER_MONTHS;
     }
 
     /** 404 {@code capability_not_enabled} for a route of a capability that is off. */

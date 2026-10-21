@@ -15,13 +15,19 @@ import com.rincoltech.bms.retail.reports.internal.StockHealthApi.DeadBranch;
 import com.rincoltech.bms.retail.reports.internal.StockHealthApi.DeadItem;
 import com.rincoltech.bms.retail.reports.internal.StockHealthApi.DeadStock;
 import com.rincoltech.bms.retail.reports.internal.StockHealthApi.Report;
+import com.rincoltech.bms.retail.reports.internal.StockHealthApi.SellsBetterAt;
 import com.rincoltech.bms.retail.reports.internal.StockHealthApi.Shrinkage;
+import com.rincoltech.bms.retail.reports.internal.StockHealthApi.SlowItem;
+import com.rincoltech.bms.retail.reports.internal.StockHealthApi.SlowMovers;
 import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.Count;
 import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.DeadRow;
 import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.DeadTotal;
 import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.Pace;
+import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.Seller;
+import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.SlowRow;
 import com.rincoltech.bms.retail.reports.internal.StockHealthRepository.Usage;
 import com.rincoltech.bms.retail.stock.Quantities;
+import com.rincoltech.bms.retail.stock.RetailCapabilities;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -42,16 +48,25 @@ class StockHealthService {
     static final int DEFAULT_LEAD_DAYS = 14;
     static final int DEFAULT_COVER_DAYS = 30;
     static final int MAX_DAYS = 365;
+    /** The months in the dead stock window of 90 days, the pace window of the slow movers (issue #414). */
+    static final int SLOW_WINDOW_MONTHS = DEAD_DAYS / 30;
+    /** An item with fewer sales than this in 90 days is slow however little stock it has (issue #414). */
+    static final int SLOW_MIN_SALES = 3;
+
+    private static final BigDecimal SLOW_CAP = BigDecimal.valueOf(120);
     private static final BigDecimal CAP = BigDecimal.valueOf(MAX_DAYS);
 
     private final StockHealthRepository repo;
     private final CurrentTenant tenant;
     private final BusinessClock clock;
+    private final RetailCapabilities capabilities;
 
-    StockHealthService(StockHealthRepository repo, CurrentTenant tenant, BusinessClock clock) {
+    StockHealthService(
+            StockHealthRepository repo, CurrentTenant tenant, BusinessClock clock, RetailCapabilities capabilities) {
         this.repo = repo;
         this.tenant = tenant;
         this.clock = clock;
+        this.capabilities = capabilities;
     }
 
     @Transactional(readOnly = true)
@@ -120,6 +135,8 @@ class StockHealthService {
                 costEverywhere ? atCost : null,
                 atPrice);
 
+        SlowMovers slow = slowMovers(principal, filter, deadSince, today, top, costEverywhere);
+
         return new Report(
                 w.from(),
                 w.to(),
@@ -132,7 +149,84 @@ class StockHealthService {
                 coverList,
                 reorderList,
                 dead,
+                slow,
                 shrinkage(principal, filter, w));
+    }
+
+    /**
+     * Items that sell but slowly (issue #414), over the same 90 days as dead stock so the two never overlap. The pace is
+     * the units sold in those days over three months. Cost leaves only for a branch where the caller holds
+     * retail.profit.read, and the total only when it holds it in every branch reported. "Sells better at" looks only at
+     * branches the caller may read, so a branch outside the scope is never revealed.
+     */
+    private SlowMovers slowMovers(
+            Principal principal, List<UUID> filter, LocalDate since, LocalDate today, int top, boolean costEverywhere) {
+        int months = capabilities.slowMoverMonths();
+        List<SlowRow> rows = repo.slowItems(filter, since, today, SLOW_WINDOW_MONTHS, months, SLOW_MIN_SALES, top);
+        List<UUID> scope = principal.branchFilter("retail.stock.read", null);
+        List<Seller> sellers = repo.sellers(
+                scope, rows.stream().map(SlowRow::productId).distinct().toList(), since, today);
+        List<SlowItem> items = new ArrayList<>();
+        for (SlowRow r : rows) {
+            BigDecimal to =
+                    r.qty().multiply(BigDecimal.valueOf(SLOW_WINDOW_MONTHS)).divide(r.sold(), 1, RoundingMode.HALF_UP);
+            boolean capped = to.compareTo(SLOW_CAP) > 0;
+            items.add(new SlowItem(
+                    r.branchId(),
+                    r.productId(),
+                    r.code(),
+                    r.description(),
+                    r.unit(),
+                    Quantities.format(r.qty()),
+                    Quantities.format(r.sold()),
+                    r.lastSold(),
+                    AnalyticsSupport.oneDecimal(capped ? SLOW_CAP : to),
+                    capped,
+                    principal.may(PROFIT_READ, r.branchId()) ? r.atCost() : null,
+                    sellsBetter(r, months, sellers)));
+        }
+        return new SlowMovers(
+                DEAD_DAYS,
+                months,
+                SLOW_MIN_SALES,
+                items,
+                rows.isEmpty() ? 0 : rows.getFirst().total(),
+                costEverywhere ? (rows.isEmpty() ? 0L : rows.getFirst().totalCost()) : null);
+    }
+
+    /**
+     * The branch that sells this item fastest above this one's pace and would run short of it, with the units to move:
+     * what it would sell in {@code months}, less what it holds, and never more than this branch has.
+     */
+    private static SellsBetterAt sellsBetter(SlowRow row, int months, List<Seller> sellers) {
+        Seller best = null;
+        BigDecimal move = BigDecimal.ZERO;
+        for (Seller s : sellers) {
+            if (!s.productId().equals(row.productId())
+                    || s.branchId().equals(row.branchId())
+                    || s.sold().compareTo(row.sold()) <= 0) {
+                continue;
+            }
+            BigDecimal need = s.sold()
+                    .multiply(BigDecimal.valueOf(months))
+                    .divide(BigDecimal.valueOf(SLOW_WINDOW_MONTHS), 3, RoundingMode.CEILING)
+                    .subtract(s.qty().max(BigDecimal.ZERO))
+                    .min(row.qty());
+            boolean faster = best == null
+                    || s.sold().compareTo(best.sold()) > 0
+                    || (s.sold().compareTo(best.sold()) == 0 && s.branchId().compareTo(best.branchId()) < 0);
+            if (need.signum() > 0 && faster) {
+                best = s;
+                move = need;
+            }
+        }
+        return best == null
+                ? null
+                : new SellsBetterAt(
+                        best.branchId(),
+                        Quantities.format(best.sold()),
+                        Quantities.format(best.qty().max(BigDecimal.ZERO)),
+                        Quantities.format(move));
     }
 
     private List<Shrinkage> shrinkage(Principal principal, List<UUID> filter, Window w) {
