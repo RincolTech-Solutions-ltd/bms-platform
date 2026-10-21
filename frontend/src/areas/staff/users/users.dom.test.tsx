@@ -106,11 +106,13 @@ function expectNoTokenInCaches() {
   expect(JSON.stringify(lastClient.getMutationCache().getAll().map((m) => [m.state.data, m.state.variables]))).not.toContain(TOKEN);
 }
 
-async function fillInvite(overrides: { name?: string; phone?: string; role?: string } = {}) {
+async function fillInvite(overrides: { name?: string; phone?: string; role?: string; branches?: boolean } = {}) {
   await screen.findByRole('option', { name: 'Cashier' }, { timeout: 5000 });
   fireEvent.change(screen.getByLabelText('Full name'), { target: { value: overrides.name ?? 'Test Cashier 05' } });
   fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: overrides.phone ?? '0700 000 005' } });
   fireEvent.change(screen.getByLabelText('What will this person do?'), { target: { value: overrides.role ?? 'cashier' } });
+  // Where the person works is an explicit choice (ADR-055): every shop and store unless a test ticks branches itself.
+  if (!overrides.branches && (overrides.role ?? 'cashier') !== 'tenant_admin') fireEvent.click(screen.getByRole('checkbox', { name: 'Every shop and store' }));
 }
 
 describe('the invite form', () => {
@@ -135,11 +137,16 @@ describe('the invite form', () => {
     expect(screen.getByText(/Takes and records money at the counter/)).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Where does this person work?' })).toBeTruthy();
     expect((screen.getByRole('checkbox', { name: 'Every shop and store' }) as HTMLInputElement).checked).toBe(true);
+    // Taking every one off leaves nothing chosen, which is refused, never every branch.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Every shop and store' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Invite' }));
+    expect(await screen.findByText('Tick where this person works, or every one.')).toBeTruthy();
+    expect(api.invite).not.toHaveBeenCalled();
     expect(screen.getByRole('checkbox', { name: 'Test Branch Two (KLA)' })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Test Store (ST), a store' })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('What will this person do?'), { target: { value: 'tenant_admin' } });
     expect(screen.queryByRole('group', { name: 'Where does this person work?' })).toBeNull();
-    expect(screen.getByText(/An administrator works in every shop and store and sees everything/)).toBeTruthy();
+    expect(screen.getByText(/An administrator works everywhere and sees everything/)).toBeTruthy();
   });
 
   it('sends the phone as stored, with the chosen branch', async () => {
@@ -156,7 +163,7 @@ describe('the invite form', () => {
   it('sends a role for each shop and store ticked, and Purchasing in the same places when it is ticked', async () => {
     api.invite.mockResolvedValue({ user: { id: 'u-new', full_name: 'Test Cashier 05', phone_e164: '+256700000005' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
     shell(<InviteScreen />);
-    await fillInvite({ role: 'retail_sales' });
+    await fillInvite({ role: 'retail_sales', branches: true });
     expect(screen.queryByRole('option', { name: 'Purchasing' })).toBeNull();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Test Branch Two (KLA)' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Test Store (ST), a store' }));

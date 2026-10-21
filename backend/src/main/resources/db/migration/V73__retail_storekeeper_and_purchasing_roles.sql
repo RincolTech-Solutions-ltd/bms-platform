@@ -42,10 +42,21 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
 -- ---------------------------------------------------------------------------------------------
 -- An administrator covers every branch. An active administrator assignment limited to a branch is widened: where the same
 -- person already holds the administrator role for every branch the limited row is revoked (the unique index allows one active
--- row per role and branch), otherwise it is changed to every branch. Then a check, added NOT VALID and validated once the
--- rows are right, keeps it so. It only reads the role key and the branch of a row, so validating it takes a SHARE UPDATE
--- EXCLUSIVE lock and blocks no reader or writer of the table for longer than the scan of a small table.
+-- row per role and branch), otherwise it is changed to every branch. Then a check keeps it so. Flyway runs the file in one
+-- transaction, so the check is added in one step: its ACCESS EXCLUSIVE lock is held until commit either way, over the scan of
+-- a table of a few rows per staff member (the lock_timeout above bounds the wait for it). The number of rows widened and
+-- revoked is reported as a NOTICE in the migration log, since no person made the change and no audit row is written for it.
 -- ---------------------------------------------------------------------------------------------
+
+DO $$
+DECLARE
+    limited integer;
+BEGIN
+    SELECT count(*) INTO limited FROM user_role_assignments
+     WHERE role_key = 'tenant_admin' AND branch_id IS NOT NULL AND revoked_at IS NULL;
+    RAISE NOTICE 'V73: % active administrator assignment(s) limited to a branch are widened or revoked', limited;
+END
+$$;
 
 UPDATE user_role_assignments a
    SET revoked_at = now(), updated_at = now(), version = version + 1
@@ -71,5 +82,4 @@ UPDATE user_role_assignments
 
 ALTER TABLE user_role_assignments
     ADD CONSTRAINT user_role_assignments_admin_every_branch
-    CHECK (role_key <> 'tenant_admin' OR branch_id IS NULL OR revoked_at IS NOT NULL) NOT VALID;
-ALTER TABLE user_role_assignments VALIDATE CONSTRAINT user_role_assignments_admin_every_branch;
+    CHECK (role_key <> 'tenant_admin' OR branch_id IS NULL OR revoked_at IS NOT NULL);

@@ -32,13 +32,20 @@ own figures.
 2. **A Storekeeper role (`retail_storekeeper`, migration `V73`)** holds `retail.stock.read`, `retail.stock.transfer`,
    `retail.stocktake.commit` and `retail.usage.report`: it sends stock from its branches, receives what arrives there (the two-step transfer),
    counts and corrects stock and reports usage and damage, at its own branches only. It holds no sale, price, purchase, cash book, payable,
-   document or profit permission, so it cannot sell, set a price, touch money or see a cost. It reads the item list with the selling price
-   that a seller also sees; it never changes one.
+   document or profit permission, so it cannot sell, set a price, touch money or see a cost. The value of the stock, even at the selling
+   price, is absent for it as for a seller (the valuation, the stock summary and stock health give quantities only without
+   `retail.profit.read`). It reads what a shop assistant reads: the items with their selling price (a shelf price it never changes), the
+   price history, and the stock movements of its branches with their quantities. Whether a storekeeper should not see selling prices
+   at all is left to the owner; hiding them would need a new permission over every item and stock response.
 3. **Purchasing is a role the owner gives (`retail_purchasing`, migration `V73`)**, holding `retail.stock.read` and
    `retail.purchase.create`, given on top of another role (for example a seller who also buys) at the branches it applies in. By default
-   only the tenant administrator holds `retail.purchase.create`, as before. A holder sees the buying prices it types, as every holder of
-   `retail.purchase.create` does; supplier invoices and payments stay with `retail.payable.manage`. A role, not a per-user permission
-   grant, because roles are the one way permissions reach a person today and a second way would be the parallel mechanism this ADR avoids.
+   only the tenant administrator holds `retail.purchase.create`, as before. What the owner gives with it, at those branches: recording
+   restocks (and purchase orders and goods received with the purchasing capability), reading every restock, order and receipt there with
+   its buying prices and totals, money out of the branch's cash or bank for a restock paid that way, and the item's cost for the whole
+   business, since the latest purchase sets it (ADR-020 decision 5). A new selling price applies in every shop, so a restock or a goods
+   receipt that sets one also needs `retail.price.edit` (the unchanged price may be sent back, as the restock form does). Supplier
+   invoices and payments stay with `retail.payable.manage`. A role, not a per-user permission grant, because roles are the one way
+   permissions reach a person today and a second way would be the parallel mechanism this ADR avoids.
 4. **The owner and the administrators are never limited by branch or by the new roles.** The tenant admin assignment has no branch: the API
    has always refused one, and `V73` widens any limited administrator row found in the data (revoked where the person already covers every
    branch) and adds the check `user_role_assignments_admin_every_branch`, so the database refuses it too. An administrator therefore does
@@ -62,12 +69,16 @@ own figures.
 
 **Better:**
 - The owner chooses, per person, the shops and stores they work in and what they do there, with the scope enforced where it always was.
-- Store staff can do the stock work of a store without any access to sales, money, prices or cost.
+- Store staff can do the stock work of a store without selling, setting prices, handling money, or seeing cost or the value of the
+  stock; they still read shelf prices and quantities.
 - Purchasing can be given to one trusted seller without making them an administrator.
 - No owner or administrator can be locked out of a branch or a report by an assignment, by code or by data.
 
 **Worse:**
-- A role per branch per person means a person in five shops has five rows; the Users screen groups them, the API lists them.
+- A role per branch per person means a person in five shops has five rows; the Users screen groups them, the API lists them. Taking
+  off a person's last branch leaves nothing chosen, which the screen will not save, so it never widens them to every branch.
+- `V73` widens any administrator row limited to a branch without a person or an audit row behind it; the migration log reports the
+  count. The API never allowed such a row, so none is expected outside hand-edited data.
 - Purchasing as a role means the owner gives it per branch; a person who buys for every branch gets one assignment for every branch.
 - Seeded roles are global: a business cannot rename them or make its own mix; a custom role remains future work.
 

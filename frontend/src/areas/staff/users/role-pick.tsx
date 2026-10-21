@@ -1,31 +1,39 @@
 import { useId } from 'react';
 import type { StaffBranch } from '../../../api/users';
-import { TENANT_ADMIN, branchUnavailable, type RoleChoice } from './state';
+import { EVERY_BRANCH, TENANT_ADMIN, branchUnavailable, needsBranches, type RoleChoice } from './state';
 
-// One role and, unless it is the administrator, the shops and stores it applies in (FR-IAM-01, ADR-017, ADR-055). The administrator
-// works in every shop and store, so no branch is asked for; any other role is ticked for the branches the person works in, or for
-// every shop and store. The server scopes everything the role does to the ticked branches.
+// One role and, unless it is the administrator, the branches it applies in (FR-IAM-01, ADR-017, ADR-055). The administrator works
+// in every branch, so no branch is asked for; any other role is ticked for the branches the person works in, or for every one. The
+// server scopes everything the role does to the ticked branches. Taking off the last branch leaves nothing chosen, which cannot be
+// saved, so it never turns into every branch. A business with the retail module calls its branches shops and stores.
 
-export function RolePick({ roles, branches, roleKey, branchIds, onChange, disabled, label = 'What will this person do?', problem }: {
+export function RolePick({ roles, branches, roleKey, branchIds, onChange, disabled, label = 'What will this person do?', problem, retail = true, showMissing = false }: {
   roles: RoleChoice[];
   branches: StaffBranch[];
   roleKey: string;
-  /** Empty means every shop and store. */
+  /** [EVERY_BRANCH] for every branch; empty means none chosen yet. */
   branchIds: string[];
   onChange: (next: { roleKey: string; branchIds: string[] }) => void;
   disabled?: boolean;
   label?: string;
   problem?: string;
+  /** The business has the retail module: say shops and stores. */
+  retail?: boolean;
+  /** Say that a branch is still to be chosen (after a first try to send). */
+  showMissing?: boolean;
 }) {
   const id = useId();
   const chosen = roles.find((r) => r.key === roleKey);
   const open = branches.filter((b) => b.id && (b.status ?? 'active') === 'active');
+  const every = branchIds.includes(EVERY_BRANCH);
   // A branch the person has that is closed now (or gone from the list): shown ticked, so it can be taken off before saving.
   const gone = branchIds.filter((b) => branchUnavailable(b, branches));
-  const every = branchIds.length === 0;
-  const toggle = (branch: string, on: boolean) =>
-    onChange({ roleKey, branchIds: on ? [...branchIds, branch] : branchIds.filter((b) => b !== branch) });
-  const name = (b: StaffBranch) => `${b.name ?? b.code}${b.code && b.name ? ` (${b.code})` : ''}${b.sells_goods === false ? ', a store' : ''}`;
+  const toggle = (branch: string, on: boolean) => {
+    const rest = branchIds.filter((b) => b !== branch && b !== EVERY_BRANCH);
+    onChange({ roleKey, branchIds: on ? [...rest, branch] : rest });
+  };
+  const all = retail ? 'Every shop and store' : 'Every branch';
+  const name = (b: StaffBranch) => `${b.name ?? b.code}${b.code && b.name ? ` (${b.code})` : ''}${retail && b.sells_goods === false ? ', a store' : ''}`;
   return (
     <div className="stack">
       <label htmlFor={`${id}-role`}>{label}</label>
@@ -38,14 +46,14 @@ export function RolePick({ roles, branches, roleKey, branchIds, onChange, disabl
       {chosen && chosen.key !== TENANT_ADMIN && (
         <fieldset className="stack">
           <legend>Where does this person work?</legend>
-          <p className="hint">Tick the shops and stores. They see and do this only there.</p>
+          <p className="hint">{retail ? 'Tick the shops and stores.' : 'Tick the branches.'} They see and do this only there.</p>
           <label className="check">
-            <input type="checkbox" checked={every} disabled={disabled} onChange={(e) => { if (e.target.checked) onChange({ roleKey, branchIds: [] }); }} />
-            Every shop and store
+            <input type="checkbox" checked={every} disabled={disabled} onChange={(e) => onChange({ roleKey, branchIds: e.target.checked ? [EVERY_BRANCH] : [] })} />
+            {all}
           </label>
           {open.map((b) => (
             <label key={b.id} className="check">
-              <input type="checkbox" checked={branchIds.includes(b.id ?? '')} disabled={disabled} onChange={(e) => toggle(b.id ?? '', e.target.checked)} />
+              <input type="checkbox" checked={!every && branchIds.includes(b.id ?? '')} disabled={disabled} onChange={(e) => toggle(b.id ?? '', e.target.checked)} />
               {name(b)}
             </label>
           ))}
@@ -58,10 +66,11 @@ export function RolePick({ roles, branches, roleKey, branchIds, onChange, disabl
               </label>
             );
           })}
-          {gone.length > 0 && <p role="alert" className="field-error">This branch is closed. Take it off, and tick another branch or every shop and store, before you save.</p>}
+          {gone.length > 0 && <p role="alert" className="field-error">This branch is closed. Take it off, and tick another one or every one, before you save.</p>}
+          {gone.length === 0 && showMissing && needsBranches(roleKey, branchIds) && <p role="alert" className="field-error">Tick where this person works, or every one.</p>}
         </fieldset>
       )}
-      {chosen?.key === TENANT_ADMIN && <p className="hint">An administrator works in every shop and store and sees everything, profit and costs included.</p>}
+      {chosen?.key === TENANT_ADMIN && <p className="hint">An administrator works everywhere and sees everything, profit and costs included.</p>}
     </div>
   );
 }

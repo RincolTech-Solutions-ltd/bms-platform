@@ -106,6 +106,9 @@ export function supplierOptions(all: Supplier[], chosenId: string): Supplier[] {
 export function RestockForm({ onSaved, draftName, initial, again = false }: { onSaved?: (p: Purchase, context: RestockContext) => void; draftName?: string; initial?: RestockDraft; again?: boolean }) {
   const { me, branch } = useStaff();
   const canProfit = useProfitAccess();
+  // A new selling price applies in every shop, so only someone who may change prices sets it here (ADR-055); Purchasing given
+  // to a seller keeps the item's price, which the form sends back unchanged.
+  const canPrice = (me.permissions ?? []).includes('retail.price.edit');
   const queryClient = useQueryClient();
   const branches = (me.branches ?? []).filter((b) => b.id && b.stocks_goods !== false);
   // A restock entered again after a void (issue #351) has a draft of its own, so a restock in progress is never overwritten.
@@ -235,7 +238,8 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
               </div>
               <div>
                 <label htmlFor={`sell-${i}`}>Sell price each{pack ? ` (per ${l.product.unit})` : ''}</label>
-                <input id={`sell-${i}`} inputMode="numeric" value={l.sell} onChange={(e) => patch(i, { sell: e.target.value })} />
+                <input id={`sell-${i}`} inputMode="numeric" value={l.sell} disabled={!canPrice} onChange={(e) => patch(i, { sell: e.target.value })} />
+                {!canPrice && <p className="hint">Only the owner changes selling prices.</p>}
               </div>
             </div>
             <fieldset>

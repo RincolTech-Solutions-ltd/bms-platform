@@ -60,7 +60,7 @@ final class ReportsApi {
     @Schema(name = "RetailValuationBranch")
     record BranchTotal(
             UUID branchId,
-            long expectedSalesMinor,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,
@@ -87,7 +87,7 @@ final class ReportsApi {
     record CategoryTotal(
             UUID categoryId,
             String category,
-            long expectedSalesMinor,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,
@@ -105,7 +105,7 @@ final class ReportsApi {
             List<ValuationRow> rows,
             List<BranchTotal> branches,
             List<CategoryTotal> categories,
-            long expectedSalesMinor,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Long expectedSalesMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
             Long valueAtCostMinor,

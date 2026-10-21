@@ -40,6 +40,8 @@ export function InviteScreen() {
   }
 
   const problems = inviteProblems(draft);
+  // A business with the retail module calls its branches shops and stores.
+  const retail = !me.modules || me.modules.includes('retail');
   const set = (patch: Partial<InviteDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
   async function submit() {
@@ -124,6 +126,8 @@ export function InviteScreen() {
           branchIds={draft.branchIds}
           onChange={(next) => set(next)}
           problem={shown('roleKey')}
+          retail={retail}
+          showMissing={touched}
         />
         </div>
         {purchasingOffered(draft.roleKey, roleChoices(roles.data ?? [], me.modules)) && (

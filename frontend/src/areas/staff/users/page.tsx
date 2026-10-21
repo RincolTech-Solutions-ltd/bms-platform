@@ -187,7 +187,7 @@ export function UsersScreen() {
                       </p>
                     )}
                     {mode?.id === u.id && mode?.kind === 'roles' && (
-                      <RoleEditor user={u} self={u.id === me.user_id} roles={choices} branches={branchList} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
+                      <RoleEditor user={u} self={u.id === me.user_id} roles={choices} branches={branchList} retail={!me.modules || me.modules.includes('retail')} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
                     )}
                     {mode?.id === u.id && mode?.kind === 'reset' && (
                       <ResetPanel user={u} mfaEnabled={me.mfa_enabled === true} onSend={(credential) => resetSignIn(u, credential)} onCancel={() => setMode(null)} />

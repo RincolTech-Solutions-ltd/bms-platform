@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { planLimitWords } from '../../../api/users';
 import {
-  assignmentFor, assignmentsFor, branchUnavailable, purchasingOffered, roleRows, canManageUsers, canResetSignIn, contactLine, resetProofProblem, emptyInvite, hasProblems, inviteBody, inviteProblems, matchesSearch, roleChoice, roleChoices, roleLines, showUsers, whatsappLink,
+  EVERY_BRANCH, assignmentFor, assignmentsFor, branchUnavailable, purchasingOffered, roleRows, canManageUsers, canResetSignIn, contactLine, resetProofProblem, emptyInvite, hasProblems, inviteBody, inviteProblems, matchesSearch, roleChoice, roleChoices, roleLines, showUsers, whatsappLink,
 } from './state';
 
 // The rules of the Users screen (issue #319), with fabricated people and numbers only.
 
-const good = { ...emptyInvite(), fullName: 'Test Cashier 01', phone: '0700 000 001', roleKey: 'cashier' };
+const good = { ...emptyInvite(), fullName: 'Test Cashier 01', phone: '0700 000 001', roleKey: 'cashier', branchIds: [EVERY_BRANCH] };
 
 describe('who sees the screen', () => {
   it('shows the page to a reader and the actions to a manager only', () => {
@@ -65,7 +65,11 @@ describe('the invite form', () => {
       { role_key: 'retail_storekeeper', branch_id: 's1' },
       { role_key: 'retail_storekeeper', branch_id: 'h1' },
     ]);
-    expect(assignmentsFor('retail_storekeeper', [])).toEqual([{ role_key: 'retail_storekeeper' }]);
+    expect(assignmentsFor('retail_storekeeper', [EVERY_BRANCH])).toEqual([{ role_key: 'retail_storekeeper' }]);
+    // Nothing ticked is nothing sent, never every branch; the form refuses it first.
+    expect(assignmentsFor('retail_storekeeper', [])).toEqual([]);
+    expect(inviteProblems({ ...good, branchIds: [] }).branches).toMatch(/Tick where this person works/);
+    expect(inviteProblems({ ...good, roleKey: 'tenant_admin', branchIds: [] }).branches).toBeUndefined();
     expect(assignmentsFor('tenant_admin', ['s1'])).toEqual([{ role_key: 'tenant_admin' }]);
   });
 
@@ -112,7 +116,7 @@ describe('roles in plain words', () => {
     const branches = [{ id: 's1', name: 'Test Store', sells_goods: false }, { id: 'h1', name: 'Test Shop' }];
     expect(roleLines(user, branches, [])).toEqual(['Storekeeper, Test Store (store), Test Shop']);
     expect(roleRows(user)).toEqual([{ roleKey: 'retail_storekeeper', branchIds: ['s1', 'h1'] }]);
-    expect(roleRows({ roles: [{ role_key: 'cashier', branch_id: 'b1' }, { role_key: 'cashier' }] })).toEqual([{ roleKey: 'cashier', branchIds: [] }]);
+    expect(roleRows({ roles: [{ role_key: 'cashier', branch_id: 'b1' }, { role_key: 'cashier' }] })).toEqual([{ roleKey: 'cashier', branchIds: [EVERY_BRANCH] }]);
   });
 
   it('names the Storekeeper and Purchasing roles in plain words, and leaves retail roles out of a business without retail', () => {

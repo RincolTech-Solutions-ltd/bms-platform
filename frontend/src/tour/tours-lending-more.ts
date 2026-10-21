@@ -670,7 +670,7 @@ export const inviteUserPage: Tour = {
       id: 'role',
       target: 'invite-role',
       title: 'Their role',
-      body: 'Pick the role. It decides what the person can see and do: a storekeeper moves and counts stock but never sells or sees money. Then tick the shops and stores they work in; they see and do things only there. Tick purchases and restocks only for people you trust with buying. An administrator always works everywhere.',
+      body: 'Pick the role. It decides what the person can see and do. Then tick where they work, or every one: they see and do things only there. An administrator always works everywhere.',
     },
     {
       id: 'send',

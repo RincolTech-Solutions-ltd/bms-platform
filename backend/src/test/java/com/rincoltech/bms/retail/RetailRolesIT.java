@@ -157,11 +157,19 @@ class RetailRolesIT extends IntegrationTest {
         }
     }
 
+    /** No cost, profit, margin or stock value under any key; a flag saying the figure is hidden is not a figure. */
     static void noCost(ResponseEntity<JsonNode> r, String what) {
         allowed(r, what);
         List<String> keys = new ArrayList<>();
         collectKeys(r.getBody(), keys);
-        assertThat(keys).as(what).noneMatch(k -> k.contains("cost") || k.contains("profit") || k.contains("margin"));
+        assertThat(keys)
+                .as(what)
+                .filteredOn(k -> !k.endsWith("_visible"))
+                .noneMatch(k -> k.contains("cost")
+                        || k.contains("profit")
+                        || k.contains("margin")
+                        || k.contains("value")
+                        || k.contains("expected_sales"));
     }
 
     static Set<String> branchIds(JsonNode items) {
@@ -186,6 +194,45 @@ class RetailRolesIT extends IntegrationTest {
         noCost(get("/stock?branch_id=" + t.headOffice(), keeper), "stock of its store, without cost");
         noCost(get("/stock/movements", keeper), "movements, without cost");
         outsideScope(get("/stock?branch_id=" + t.secondBranch(), keeper), "stock of another branch");
+        // No stock value either, even at the selling price; the quantities stay.
+        noCost(get("/reports/valuation", keeper), "valuation, without value");
+        noCost(get("/stock/summary?group_by=branch", keeper), "stock summary, without value");
+        noCost(get("/reports/stock-health", keeper), "stock health, without value");
+        assertThat(get("/reports/valuation", keeper).getBody().get("rows")).isNotEmpty();
+    }
+
+    @Test
+    void aStorekeeperReceivesAtItsStoreAndCountsAStoreThatDoesNotSell() {
+        // The second branch is a store (ADR-048) and the business uses two-step transfers.
+        TestDatabase.owner()
+                .sql("UPDATE branches SET sells_goods = false WHERE id = ?")
+                .param(t.secondBranch())
+                .update();
+        String settings = "core.settings.manage";
+        String etag =
+                retail.get("/settings/capabilities", settings).getHeaders().getETag();
+        ResponseEntity<JsonNode> on = retail.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("transfer_receipt", true),
+                settings,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+        UUID sent = RetailTestSupport.id(retail.postKeyed(
+                "/transfers",
+                move(t.headOffice(), t.secondBranch()),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString()));
+
+        String store = signIn("store-keeper", new Role("retail_storekeeper", t.secondBranch()));
+        String shop = signIn("shop-keeper", new Role("retail_storekeeper", t.headOffice()));
+        outsideScope(post("/transfers/" + sent + "/receive", Map.of(), shop), "receive at another branch");
+        allowed(post("/transfers/" + sent + "/receive", Map.of(), store), "receive at its store");
+        ResponseEntity<JsonNode> counted = post("/stocktakes", count(t.secondBranch()), store);
+        allowed(counted, "count the store");
+        allowed(post("/stocktakes/" + RetailTestSupport.id(counted) + "/commit", Map.of(), store), "commit the count");
     }
 
     @Test
@@ -230,6 +277,24 @@ class RetailRolesIT extends IntegrationTest {
         allowed(post("/sales", sale(t.headOffice()), buyer), "still sells");
         forbidden(get("/reports/profit/daily?from=" + today() + "&to=" + today(), buyer), "no profit for a buyer");
         forbidden(post("/supplier-payments", Map.of(), buyer), "no supplier payments for a buyer");
+        // A new selling price applies in every shop, so a restock may set one only with the price permission; the price
+        // the
+        // item already has may be sent back unchanged, as the restock form does.
+        Map<String, Object> line = new java.util.LinkedHashMap<>();
+        line.put("product_id", product);
+        line.put("cost_minor", 4_000);
+        line.put("sell_minor", 9_000);
+        line.put("qty_by_branch", List.of(Map.of("branch_id", t.headOffice(), "qty", "1")));
+        Map<String, Object> repriced =
+                Map.of("purchased_on", today().toString(), "payment_method", "cash", "lines", List.of(line));
+        forbidden(post("/purchases", repriced, buyer), "a buyer sets a new selling price");
+        line.put("sell_minor", 7_000);
+        allowed(post("/purchases", repriced, buyer), "a buyer sends the price unchanged");
+        assertThat(retail.get("/products/" + product, ADMIN)
+                        .getBody()
+                        .get("sell_minor")
+                        .asLong())
+                .isEqualTo(7_000);
     }
 
     // ---- The administrator -----------------------------------------------------------------------------------

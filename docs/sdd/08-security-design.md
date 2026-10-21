@@ -389,11 +389,20 @@ Notes:
   corrects a counted quantity, and reports usage and damage, each at its own branches only (the scope rules of
   `retail.stock.transfer` above: the source for a send, a void and a cancel, the destination for a receipt). It holds no
   sale, price, purchase, cash book, payable, document or profit permission, so it cannot sell, set a price, touch money or
-  see a cost: every cost field is already absent without `retail.profit.read`. Purchasing (`retail_purchasing`) holds
-  `retail.stock.read` and `retail.purchase.create` and is given on top of another role to the people the owner chooses
-  (by default only the tenant admin holds `retail.purchase.create`); it records restocks, and with the `purchasing`
-  capability purchase orders and goods received, at its branches, and sees the buying prices it enters, as every holder
-  of `retail.purchase.create` does. Supplier invoices and payments stay with `retail.payable.manage`. Neither role is
+  see a cost: every cost field is already absent without `retail.profit.read`, and so, since ADR-055, is the value of the
+  stock at the selling price (`expected_sales_minor` of the valuation, `value_minor` of the stock summary, the dead stock
+  `value_at_price_minor` of stock health), which is the owner's figure. Through `retail.stock.read` it still reads what a
+  shop assistant reads: the items with their selling price (a shelf price, never changed by it), the price history, and the
+  stock movements of its branches with their quantities (a sale movement says how many left the shelf, not for how much).
+  Purchasing (`retail_purchasing`) holds `retail.stock.read` and `retail.purchase.create` and is given on top of another
+  role to the people the owner chooses (by default only the tenant admin holds `retail.purchase.create`). At its branches it
+  records restocks, and with the `purchasing` capability purchase orders and goods received; it reads every restock, order
+  and receipt of those branches with their buying prices and totals (`GET /retail/purchases`, `/purchases/summary`,
+  `/purchase-orders`, `/goods-receipts`); a restock paid in cash or by bank posts that money out of the branch's cash or
+  bank account, as any restock does; and a restock's buying price becomes the item's cost for the whole business (the
+  latest purchase sets the cost, ADR-020 decision 5). A new selling price on a restock or a goods receipt applies in every
+  shop, so it needs `retail.price.edit` too (403 otherwise; the price the item already has may be sent back unchanged, as
+  the restock form does). Supplier invoices and payments stay with `retail.payable.manage`. Neither role is
   limited by a role name in code: every check is the permission and its branch scope, so a role given to an
   administrator adds nothing and takes nothing away. Tests: `RetailRolesIT` (a signed-in user of each role, allowed or
   refused per route and branch, and an administrator with no branch assignment seeing every branch), `PermissionMatrixIT`,

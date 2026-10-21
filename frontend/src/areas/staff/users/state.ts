@@ -72,7 +72,7 @@ export interface InviteDraft {
   phone: string;
   email: string;
   roleKey: string;
-  /** The shops and stores the person works in; empty means every one. Ignored for the administrator. */
+  /** The branches the person works in, or [EVERY_BRANCH]; empty means none chosen yet. Ignored for the administrator. */
   branchIds: string[];
   /** Also records purchases and restocks there (the Purchasing role, ADR-055). */
   purchasing: boolean;
@@ -80,7 +80,17 @@ export interface InviteDraft {
 
 export const emptyInvite = (): InviteDraft => ({ fullName: '', phone: '', email: '', roleKey: '', branchIds: [], purchasing: false });
 
-export type InviteProblems = Partial<Record<'fullName' | 'contact' | 'phone' | 'email' | 'roleKey', string>>;
+export type InviteProblems = Partial<Record<'fullName' | 'contact' | 'phone' | 'email' | 'roleKey' | 'branches', string>>;
+
+/**
+ * The choice "every branch" (every shop and store), kept apart from "none chosen yet" so that taking off a person's last branch never
+ * widens them to every branch (ADR-055): an empty choice cannot be saved.
+ */
+export const EVERY_BRANCH = '*';
+
+/** A role other than the administrator needs a branch, or every branch, chosen. */
+export const needsBranches = (roleKey: string, branchIds: string[]): boolean =>
+  roleKey !== '' && roleKey !== TENANT_ADMIN && branchIds.filter((b) => b !== '').length === 0;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -100,6 +110,7 @@ export function inviteProblems(draft: InviteDraft): InviteProblems {
   if (email) out.email = email;
   if (draft.phone.trim() === '' && draft.email.trim() === '') out.contact = 'Give a phone number or an email address, so the person can be reached.';
   if (draft.roleKey === '') out.roleKey = 'Choose what this person will do.';
+  if (needsBranches(draft.roleKey, draft.branchIds)) out.branches = 'Tick where this person works, or every one.';
   return out;
 }
 
@@ -116,7 +127,7 @@ export function assignmentFor(roleKey: string, branchId: string): RoleAssignment
  */
 export function assignmentsFor(roleKey: string, branchIds: string[]): RoleAssignmentRequest[] {
   const ids = [...new Set(branchIds.filter((b) => b !== ''))];
-  if (roleKey === TENANT_ADMIN || ids.length === 0) return [{ role_key: roleKey }];
+  if (roleKey === TENANT_ADMIN || ids.includes(EVERY_BRANCH)) return [{ role_key: roleKey }];
   return ids.map((b) => assignmentFor(roleKey, b));
 }
 
@@ -150,7 +161,7 @@ export function branchLabel(branchId: string | undefined, branches: StaffBranch[
 /** A user's roles, one row per role with the shops and stores it applies in, in the order the server lists them. */
 export interface RoleRow {
   roleKey: string;
-  /** Empty means every shop and store. */
+  /** [EVERY_BRANCH] for every branch; empty means none chosen yet. */
   branchIds: string[];
 }
 
@@ -160,9 +171,9 @@ export function roleRows(user: Pick<StaffUser, 'roles'>): RoleRow[] {
     const key = r.role_key ?? '';
     const row = rows.find((x) => x.roleKey === key);
     const every = !r.branch_id;
-    if (!row) rows.push({ roleKey: key, branchIds: every ? [] : [r.branch_id ?? ''] });
-    else if (every) row.branchIds = [];
-    else if (row.branchIds.length > 0) row.branchIds.push(r.branch_id ?? '');
+    if (!row) rows.push({ roleKey: key, branchIds: every ? [EVERY_BRANCH] : [r.branch_id ?? ''] });
+    else if (every) row.branchIds = [EVERY_BRANCH];
+    else if (!row.branchIds.includes(EVERY_BRANCH)) row.branchIds.push(r.branch_id ?? '');
   }
   return rows;
 }
@@ -173,7 +184,7 @@ export function roleLines(user: StaffUser, branches: StaffBranch[], roles: Staff
     const found = roles.find((x) => x.key === r.roleKey);
     const assigned = (user.roles ?? []).find((x) => x.role_key === r.roleKey);
     const name = ROLE_WORDS[r.roleKey]?.title ?? found?.name ?? assigned?.role_name ?? r.roleKey;
-    const where = r.branchIds.length === 0 ? branchLabel(undefined, branches) : r.branchIds.map((b) => branchLabel(b, branches)).join(', ');
+    const where = r.branchIds.includes(EVERY_BRANCH) ? branchLabel(undefined, branches) : r.branchIds.map((b) => branchLabel(b, branches)).join(', ');
     return `${name}, ${where}`;
   });
 }
@@ -202,7 +213,7 @@ export function matchesSearch(user: StaffUser, rawTerm: string): boolean {
 
 /** A role's branch that is closed, or no longer on the list of branches: it cannot be kept when the roles are saved. */
 export function branchUnavailable(branchId: string, branches: StaffBranch[]): boolean {
-  if (branchId === '' || branches.length === 0) return false;
+  if (branchId === '' || branchId === EVERY_BRANCH || branches.length === 0) return false;
   return !branches.some((b) => b.id === branchId && (b.status ?? 'active') === 'active');
 }
 

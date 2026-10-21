@@ -118,7 +118,8 @@ class ReportsService {
                     Quantities.format(h.qty()),
                     h.qty().signum() < 0,
                     h.sellMinor(),
-                    expected,
+                    // ADR-055: the value of the stock, even at the selling price, is the owner's figure.
+                    cost ? expected : null,
                     expected == null,
                     cost ? h.costMinor() : null,
                     cost ? atCost : null,
@@ -151,7 +152,7 @@ class ReportsService {
             long account = inventory.getOrDefault(branch, 0L);
             branches.add(new BranchTotal(
                     branch,
-                    t[0],
+                    cost ? t[0] : null,
                     cost ? t[1] : null,
                     cost ? account : null,
                     cost ? Math.subtractExact(t[1], account) : null,
@@ -168,7 +169,7 @@ class ReportsService {
                     categories.add(new CategoryTotal(
                             e.getKey(),
                             c.name,
-                            c.sales,
+                            cost ? c.sales : null,
                             cost ? c.cost : null,
                             cost ? Math.subtractExact(c.sales, c.cost) : null,
                             cost ? basisPoints(Math.subtractExact(c.sales, c.cost), c.cost) : null));
@@ -179,7 +180,7 @@ class ReportsService {
                 rows,
                 branches,
                 categories,
-                expectedTotal,
+                costTotal ? expectedTotal : null,
                 costTotal ? atCostTotal : null,
                 costTotal ? Math.subtractExact(expectedTotal, atCostTotal) : null,
                 costTotal ? basisPoints(Math.subtractExact(expectedTotal, atCostTotal), atCostTotal) : null);
