@@ -2920,7 +2920,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12) */
+        /** Reset the lost second factor of a tenant admin, with a reason; needs a current code from the operator's own authenticator (FR-IAM-12) */
         post: operations["platformResetAdminMfa"];
         delete?: never;
         options?: never;
@@ -2937,7 +2937,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15) */
+        /** Issue a one-time password reset link for a tenant admin, with a reason; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15) */
         post: operations["platformResetAdminSignIn"];
         delete?: never;
         options?: never;
@@ -6073,6 +6073,8 @@ export interface components {
         AddPlanPriceRequest: {
             /** Format: int32 */
             annual_months: number;
+            /** @description True when the operator checked a monthly price more than 25% away from the one in force (422 price_change_unusual otherwise) */
+            confirm_large_change?: boolean;
             /** @description Default UGX */
             currency?: string;
             /**
@@ -8459,6 +8461,8 @@ export interface components {
             url?: string;
         };
         PlatformStepUpRequest: {
+            /** @description Why; kept in the platform audit log (issue #407) */
+            reason: string;
             /** @description A current 6 digit code from the operator's own authenticator app */
             totp_code: string;
         };
@@ -14364,6 +14368,8 @@ export interface components {
         SavePlanRequest: {
             active: boolean;
             allowed_modules: string[];
+            /** @description True when the operator was warned that businesses on the plan already use more than a lowered limit, and keeps it (422 plan_limit_below_use otherwise) */
+            confirm_below_use?: boolean;
             description?: string;
             /** Format: int32 */
             max_active_members?: number;
@@ -15093,6 +15099,8 @@ export interface components {
             note?: string;
             /** Format: date */
             paid_on: string;
+            /** @description Why it is recorded (who confirmed it, how it was checked); kept in the platform audit log */
+            reason: string;
             /** @description The sender's transaction reference */
             reference?: string;
         };

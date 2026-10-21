@@ -408,13 +408,16 @@ class PlatformIT extends IntegrationTest {
         assertThat(tenant.login(email, Api.PASSWORD).getBody().get("status").asString())
                 .isEqualTo("mfa_required");
 
-        // JUSTIFICATION-A3: the platform reset routes now need the operator's own fresh authenticator code (ADR-042),
-        // so this
-        // existing call sends one; the case itself is unchanged.
+        // JUSTIFICATION-A3: the platform reset routes now need the operator's own fresh authenticator code (ADR-042)
+        // and a reason (issue #407), so this existing call sends both; the case itself is unchanged.
         Api.allowTotpReuse(operatorId);
         ResponseEntity<JsonNode> reset = platform.post(
                 "/api/v1/platform/tenants/" + tenantId + "/users/" + adminId + "/mfa/reset",
-                Map.of("totp_code", Api.totp(operator.totpSecret(), java.time.Instant.now())),
+                Map.of(
+                        "totp_code",
+                        Api.totp(operator.totpSecret(), java.time.Instant.now()),
+                        "reason",
+                        "Test: the owner lost the phone"),
                 operator.accessToken());
         assertThat(reset.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(tenant.login(email, Api.PASSWORD).getBody().get("status").asString())

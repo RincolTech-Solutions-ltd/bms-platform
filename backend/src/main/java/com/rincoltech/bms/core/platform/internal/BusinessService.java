@@ -21,6 +21,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -157,6 +158,12 @@ class BusinessService {
                         "plan_too_small_staff",
                         "This business has more staff than that plan allows. Deactivate some first, or choose a bigger plan.");
             }
+            if (message.contains("plan_members")) {
+                throw ApiException.rule(
+                        "plan_too_small_members",
+                        "This business has more active lending members than that plan allows. Close some memberships"
+                                + " first, or choose a bigger plan.");
+            }
             throw ApiException.rule("plan_unknown", "There is no active plan with that code.");
         }
         Map<String, Object> data = new LinkedHashMap<>();
@@ -187,6 +194,13 @@ class BusinessService {
                     "trial_ends_on",
                     "required",
                     "Give the new last day of the free month, or the last day paid for, or clear one.")));
+        }
+        if (before.pilot() && trialEndsOn != null) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "trial_ends_on",
+                    "pilot",
+                    "A pilot business has no last day of the free month. Unmark it as a pilot first if its free month"
+                            + " should end.")));
         }
         LocalDate latest = clock.today(ZoneId.of(before.timezone())).plusYears(5);
         for (Map.Entry<String, LocalDate> date : dates(trialEndsOn, paidUntil).entrySet()) {
@@ -254,7 +268,7 @@ class BusinessService {
 
     /**
      * ADR-024 decision 6: a pilot (complimentary) business is free with no free month end; marking clears the last day of
-     * the free month and the clock never starts. The same mark again changes nothing.
+     * the free month and any scheduled status change, and the clock never starts. The same mark again changes nothing.
      */
     @Transactional
     TenantResponse setPilot(UUID tenantId, boolean pilot, String reason) {
@@ -270,6 +284,7 @@ class BusinessService {
         data.put("before", before.pilot());
         data.put("after", pilot);
         data.put("trial_ends_on_before", text(before.trialEndsOn()));
+        data.put("next_status_change_on_before", text(before.nextStatusChangeOn()));
         data.put("reason", reason.trim());
         audit.record("platform.tenant.pilot_changed", CurrentPrincipal.require().userId(), tenantId, data);
         return platform.tenant(tenantId);
@@ -340,7 +355,7 @@ class BusinessService {
                             data.put("period_start", payment.periodStart().toString());
                             data.put("period_end", payment.periodEnd().toString());
                             data.put("before", tenant.subscriptionStatus());
-                            data.put("reason", PriceBookService.blankToNull(request.note()));
+                            data.put("reason", request.reason().trim());
                             audit.record("platform.tenant.payment_recorded", operator, tenantId, data);
                             return payment;
                         })));
@@ -374,8 +389,7 @@ class BusinessService {
             throw ApiException.rule(
                     "payment_amount_unusual",
                     "The plan's price for " + request.months() + (request.months() == 1 ? " month" : " months") + " is "
-                            + String.format("%,d", expected) + " " + currency + " minor units, and this payment is "
-                            + String.format("%,d", amount)
+                            + money(currency, expected) + ", and this payment is " + money(currency, amount)
                             + ". That is more than a quarter away. Check it, then confirm it.");
         }
     }
@@ -402,6 +416,17 @@ class BusinessService {
                 rs.getString("note"),
                 rs.getString("recorded_by_name"),
                 rs.getTimestamp("created_at").toInstant());
+    }
+
+    /**
+     * An amount as people write it: "UGX 30,000". UGX has no minor unit, so its minor units are whole shillings; any other
+     * currency is shown with two decimals.
+     */
+    static String money(String currency, long minor) {
+        if ("UGX".equals(currency)) {
+            return String.format(Locale.ROOT, "UGX %,d", minor);
+        }
+        return String.format(Locale.ROOT, "%s %,.2f", currency, minor / 100.0);
     }
 
     private static String text(LocalDate date) {

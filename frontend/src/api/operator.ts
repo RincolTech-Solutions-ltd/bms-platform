@@ -137,7 +137,10 @@ export async function setBusinessPilot(tenantId: string, pilot: boolean, reason:
   return data;
 }
 
-/** The key is made once per form, so a second tap or a retry of the same payment records it once (chapter 7 section 7.8). */
+/**
+ * The key is made once per form and kept while only the confirmation box changes, so a second tap, a retry, or a resend
+ * after a lost answer records the payment once (chapter 7 section 7.8).
+ */
 export async function recordPayment(tenantId: string, idempotencyKey: string, body: PaymentRequest): Promise<Payment> {
   const { data, error } = await api.POST('/api/v1/platform/tenants/{tenant_id}/payments', {
     params: { ...tenantPath(tenantId), header: { 'Idempotency-Key': idempotencyKey } },
@@ -147,19 +150,25 @@ export async function recordPayment(tenantId: string, idempotencyKey: string, bo
   return data;
 }
 
-export async function resetOwnerSignIn(tenantId: string, userId: string, totpCode: string): Promise<{ url?: string; expires_at?: string }> {
+/** Both owner rescues need the operator's own code and a reason, kept in the platform audit log. */
+export async function resetOwnerSignIn(
+  tenantId: string,
+  userId: string,
+  totpCode: string,
+  reason: string,
+): Promise<{ url?: string; expires_at?: string }> {
   const { data, error } = await api.POST('/api/v1/platform/tenants/{tenant_id}/users/{user_id}/reset-sign-in', {
     params: { path: { tenant_id: tenantId, user_id: userId } },
-    body: { totp_code: totpCode },
+    body: { totp_code: totpCode, reason },
   });
   if (error || !data) fail(error, 'Could not make the link');
   return data;
 }
 
-export async function resetOwnerTwoStep(tenantId: string, userId: string, totpCode: string): Promise<void> {
+export async function resetOwnerTwoStep(tenantId: string, userId: string, totpCode: string, reason: string): Promise<void> {
   const { error } = await api.POST('/api/v1/platform/tenants/{tenant_id}/users/{user_id}/mfa/reset', {
     params: { path: { tenant_id: tenantId, user_id: userId } },
-    body: { totp_code: totpCode },
+    body: { totp_code: totpCode, reason },
   });
   if (error) fail(error, 'Could not reset the two-step sign-in');
 }

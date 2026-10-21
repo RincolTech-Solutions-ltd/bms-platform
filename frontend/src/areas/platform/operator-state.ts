@@ -279,6 +279,17 @@ export function priceSentence(planName: string, form: PriceForm, today: string):
   return `${planName} will cost ${formatMinor(monthly, 'UGX')} a month and ${formatMinor(monthly * months, 'UGX')} a year, ${when}. Businesses already paid are not changed.`;
 }
 
+/**
+ * A new monthly price more than a quarter away from the one in force (a slip of a zero) is shown again for a second look;
+ * the server refuses it without the confirmation too (422 price_change_unusual). Undefined when the change is usual.
+ */
+export function largePriceChange(current: PlanPrice | null | undefined, monthly: number): string | undefined {
+  if (!current || current.monthly_minor == null) return undefined;
+  const now = current.monthly_minor;
+  if (Math.abs(monthly - now) * 4 <= now) return undefined;
+  return `The price in force is ${formatMinor(now, current.currency ?? 'UGX')} a month, and the new price is ${formatMinor(monthly, 'UGX')}. That is more than a quarter away. Check it, then confirm it.`;
+}
+
 // ---- payments -----------------------------------------------------------------------------------------
 
 export const METHODS: { key: string; label: string }[] = [

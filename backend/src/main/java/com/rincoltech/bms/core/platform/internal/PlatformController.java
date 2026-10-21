@@ -139,7 +139,12 @@ class PlatformController {
             @NotBlank
             @Size(max = 20)
             @Schema(description = "A current 6 digit code from the operator's own authenticator app")
-            String totpCode) {}
+            String totpCode,
+
+            @NotBlank
+            @Size(min = 5, max = 300)
+            @Schema(description = "Why; kept in the platform audit log (issue #407)")
+            String reason) {}
 
     @Schema(
             name = "PlatformSignInResetLink",
@@ -230,6 +235,13 @@ class PlatformController {
             Integer months,
 
             @Size(max = 500) String note,
+
+            @NotBlank
+            @Size(min = 5, max = 300)
+            @Schema(
+                    description =
+                            "Why it is recorded (who confirmed it, how it was checked); kept in the platform audit log")
+            String reason,
 
             @Schema(
                     description =
@@ -448,7 +460,7 @@ class PlatformController {
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary =
-                    "Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
+                    "Issue a one-time password reset link for a tenant admin, with a reason; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
             operationId = "platformResetAdminSignIn")
     SignInResetLink resetAdminSignIn(
             @PathVariable("tenant_id") UUID tenantId,
@@ -458,7 +470,7 @@ class PlatformController {
         NoStore.apply(response);
         service.requireResettableAdmin(tenantId, userId);
         security.requireTotp(request.totpCode());
-        TenantAdmins.ResetLink link = service.resetAdminSignIn(tenantId, userId);
+        TenantAdmins.ResetLink link = service.resetAdminSignIn(tenantId, userId, request.reason());
         return new SignInResetLink(link.url(), link.expiresAt());
     }
 
@@ -466,7 +478,7 @@ class PlatformController {
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary =
-                    "Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12)",
+                    "Reset the lost second factor of a tenant admin, with a reason; needs a current code from the operator's own authenticator (FR-IAM-12)",
             operationId = "platformResetAdminMfa")
     ResponseEntity<Void> resetAdminMfa(
             @PathVariable("tenant_id") UUID tenantId,
@@ -474,7 +486,7 @@ class PlatformController {
             @Valid @RequestBody StepUpRequest request) {
         service.requireTenantAdmin(tenantId, userId);
         security.requireTotp(request.totpCode());
-        service.resetAdminMfa(tenantId, userId);
+        service.resetAdminMfa(tenantId, userId, request.reason());
         return ResponseEntity.noContent().build();
     }
 }

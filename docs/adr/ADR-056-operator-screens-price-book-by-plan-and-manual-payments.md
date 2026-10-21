@@ -36,11 +36,15 @@ repository: the operator types them in the portal.
    definer function in a transaction bound to the tenant: the row, the subscription's paid-until date and, for a free month or a
    late payment, the move to `active`, behind the `Idempotency-Key` protocol, so a second tap records nothing. The paid period starts
    the day after what is already covered (a free month still running, an earlier payment) or today, so no free or paid day is lost.
-   A suspended or cancelled business stays read only until the operator resumes it. A mistake is corrected by moving the paid-until
+   A suspended or cancelled business stays read only until the operator resumes it, and the payment sets the status the resume
+   brings back to `active`, so a business that pays while suspended comes back active, not late and not in its free month. A
+   payment carries a reason (5 to 300 characters) that the audit row keeps, as every operator change does. A mistake is corrected by moving the paid-until
    date by hand with a reason; a confirmed payment is never edited. A payment and a monthly price are at most 50,000,000 minor units
    (UGX 50 million), in the database and in the API. A payment more than 25% away from the plan's price for those months (each
    whole year at the yearly price, the months left at the monthly price), or on a plan with no price entered, is refused with
-   `payment_amount_unusual` until the operator sends `confirm_unusual_amount` after checking it.
+   `payment_amount_unusual` until the operator sends `confirm_unusual_amount` after checking it; the message gives both amounts as
+   people write them ("UGX 30,000"). The Business page keeps the same `Idempotency-Key` while only that confirmation box changes, so
+   a resend after a lost answer is answered from the first and never recorded twice.
 4. **The free month starts at the first staff sign-in, or at a payment that comes first.** A trigger on `auth_sessions` sets the last
    day of the trial once, one month from the first session a staff user of the business opens, in the business's own time zone, and
    writes a platform audit row; existing trials are backfilled from their first session, with an audit row each. **A payment recorded
@@ -53,7 +57,13 @@ repository: the operator types them in the portal.
    plan, adding a price, switching modules on or off and the pilot mark. **A resume restores the status from before the suspension**
    (`subscriptions.suspended_from`, kept while the business moves between suspended and cancelled): a business suspended in its free
    month comes back to its free month with the same last day, and a late one comes back late. Dates set by hand are from 2026-01-01
-   to five years ahead, and either date can be cleared.
+   to five years ahead, and either date can be cleared. Resetting a tenant admin's sign-in or second factor (the rescue routes of
+   ADR-042) takes a reason too, besides the operator's own fresh authenticator code, kept in `platform_audit_log`. A plan move is
+   refused when the business has more open shops and stores, staff or active lending members than the plan allows
+   (`plan_too_small_branches`, `plan_too_small_staff`, `plan_too_small_members`). Lowering a plan's shop, staff or member limit
+   below what businesses on it already use is refused with `plan_limit_below_use`, naming how many are over, until the operator
+   confirms it (`confirm_below_use`); the audit row keeps the counts. A new monthly price more than 25% away from the one in force
+   is refused with `price_change_unusual` until the operator confirms it (`confirm_large_change`), so a slip of a zero is caught.
 6. **The screens.** The portal gains Businesses (search by name, address or owner email, filters by status and module, one card per
    business so a phone reads it), a Business page (details and owner, subscription, modules, a payment, the plan, the dates, suspend
    and resume, the owner sign-in rescue through the existing routes, the emails the outbox holds for it and the operator history),
@@ -61,9 +71,10 @@ repository: the operator types them in the portal.
    its own button and saves nothing, breadcrumbs and links to the pages it refers to (ADR-049).
 7. **Pilot (complimentary) businesses (ADR-024 decision 6).** `subscriptions.is_pilot` marks a business that is free with no free month
    end until a paid start is agreed: marking it (on the Business page, with a reason, audited as `platform.tenant.pilot_changed`)
-   clears the last day of the free month, the first sign-in starts no clock, and the scheduled transitions to come must skip it.
-   On the owner's decision of 21 Oct 2026, V75 marks the three businesses agreed as pilots on staging, by slug and only where a
-   tenant with that slug exists, with an audit row each; no other database is touched.
+   clears the last day of the free month and any scheduled status change, the first sign-in starts no clock, the dates screen refuses
+   a free month end on a pilot, and the scheduled transitions to come must skip it. On the owner's decision of 21 Oct 2026, V75 marks
+   the three businesses agreed as pilots, by slug, on every database it runs on (staging and production alike) wherever a tenant with
+   that slug exists, with an audit row each; a slug with no tenant is skipped with a NOTICE in the migration log.
 8. **Commissions are deferred.** ADR-024 decision 5 (agents, effective-dated commission rules and the commission line stored when a
    payment is confirmed) and the tenant's own claim and the operator's confirm step of decision 4 are not built. A payment confirmed
    now gets its commission line later from the same record: when agents arrive, a one-off job applies the rule in force on each
@@ -83,7 +94,7 @@ twice; the free month no longer burns while an owner has not started.
 **Worse:** the operator still confirms every payment by hand and a trial that ends unpaid does not suspend by itself; a wrong
 payment is corrected by moving a date, not by a reversing entry; the price of a plan is shown in UGX only in this release.
 
-**Watch for:** a plan whose limits are lowered below what its businesses already use (they keep working; the next branch or staff
-user is refused); prices or agent terms appearing in the repository, logs or tests (tests use fabricated round figures only); the
+**Watch for:** a plan whose limits are lowered below what its businesses already use, once the operator confirmed the warning (they
+keep working; the next branch or staff user is refused); prices or agent terms appearing in the repository, logs or tests (tests use fabricated round figures only); the
 tenant billing screen, the reminders and the scheduled transitions, which must read the same `plan_prices` and
 `subscription_payments` rows rather than add a second record.

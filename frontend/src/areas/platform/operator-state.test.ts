@@ -7,6 +7,7 @@ import {
   EMPTY_PLAN,
   expectedAmount,
   formatDay,
+  largePriceChange,
   limitsLine,
   paymentProblems,
   paymentSentence,
@@ -162,5 +163,20 @@ describe('plans and prices', () => {
     expect(priceSentence('Test Small', form, TODAY)).toBe(
       'Test Small will cost UGX 10,000 a month and UGX 110,000 a year, from today. Businesses already paid are not changed.',
     );
+  });
+});
+
+describe('a large price change', () => {
+  const now: PlanPrice = { currency: 'UGX', monthly_minor: 30000, annual_months: 12 };
+  it('asks for a second look beyond a quarter of the price in force, in shillings', () => {
+    expect(largePriceChange(now, 300000)).toBe(
+      'The price in force is UGX 30,000 a month, and the new price is UGX 300,000. That is more than a quarter away. Check it, then confirm it.',
+    );
+    expect(largePriceChange(now, 20000)).toBeDefined();
+  });
+  it('lets a usual change through, and a first price', () => {
+    expect(largePriceChange(now, 36000)).toBeUndefined();
+    expect(largePriceChange(now, 24000)).toBeUndefined();
+    expect(largePriceChange(undefined, 30000)).toBeUndefined();
   });
 });

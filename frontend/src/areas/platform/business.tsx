@@ -43,6 +43,7 @@ import {
   paymentSentence,
   type Problems,
   priceLine,
+  reasonProblem,
   STATUS_MEANING,
   STATUSES,
   statusBadge,
@@ -300,11 +301,16 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
   const [payment, setPayment] = useState<PaymentForm | null>(null);
   const [problems, setProblems] = useState<Problems>({});
   const [code, setCode] = useState('');
+  const [rescueReason, setRescueReason] = useState('');
   const [link, setLink] = useState<string | null>(null);
   const key = useRef<string>(newKey());
   const today = todayInKampala();
 
-  /** Any change to the payment form is a new request, so it gets a new Idempotency-Key (a repeat of the same one does not). */
+  /**
+   * A change to the payment form is a new request, so it gets a new Idempotency-Key. Ticking or unticking the box that
+   * confirms an unusual amount keeps the key: the business and the amount are the same, so a resend after a lost answer is
+   * answered from the first and never recorded twice.
+   */
   function changePayment(next: PaymentForm) {
     key.current = newKey();
     setUnusual(null);
@@ -321,6 +327,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     setOpen({ kind: 'none' });
     setError(null);
     setCode('');
+    setRescueReason('');
   }
 
   async function run(action: () => Promise<unknown>, message: string) {
@@ -388,7 +395,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     if (Object.keys(found).length === 0) setOpen({ kind: 'payment', reviewing: true });
   }
 
-  function sendPayment() {
+  function sendPayment(reason: string) {
     if (!payment) return;
     const amount = parseMinor(payment.amount, b.currency ?? 'UGX') ?? 0;
     void run(
@@ -400,6 +407,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
           paid_on: payment.paidOn,
           months: Number(payment.months),
           note: payment.note.trim() || undefined,
+          reason,
           confirm_unusual_amount: confirmUnusual || undefined,
         }).catch((err: unknown) => {
           if (err instanceof OperatorError && err.code === 'payment_amount_unusual') setUnusual(err.message);
@@ -415,18 +423,24 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
       setError('Type the 6 digit code from your own authenticator app.');
       return;
     }
+    const why = reasonProblem(rescueReason);
+    if (why) {
+      setError(why);
+      return;
+    }
     setBusy(true);
     setError(null);
     const call =
       what === 'sign-in'
-        ? resetOwnerSignIn(tenantId, admin.id ?? '', code.trim()).then((r) => setLink(r.url ?? null))
-        : resetOwnerTwoStep(tenantId, admin.id ?? '', code.trim()).then(() =>
+        ? resetOwnerSignIn(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then((r) => setLink(r.url ?? null))
+        : resetOwnerTwoStep(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then(() =>
             setDone(`${admin.full_name ?? 'The owner'} can sign in with the password and set up two-step sign-in again.`),
           );
     call
       .then(() => {
         setOpen({ kind: 'none' });
         setCode('');
+        setRescueReason('');
         return client.invalidateQueries({ queryKey: ['business', tenantId] });
       })
       .catch((err: unknown) => setError(errorText(err)))
@@ -498,13 +512,15 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
               <button type="button" data-tour="biz-plan" onClick={() => setOpen({ kind: 'confirm', action: 'plan' })}>
                 Change plan
               </button>
-              <button type="button" onClick={() => {
-                setDatePick(b.trial_ends_on ?? today);
-                setClearDate(false);
-                setOpen({ kind: 'confirm', action: 'trial' });
-              }}>
-                Change free month end
-              </button>
+              {!b.pilot && (
+                <button type="button" onClick={() => {
+                  setDatePick(b.trial_ends_on ?? today);
+                  setClearDate(false);
+                  setOpen({ kind: 'confirm', action: 'trial' });
+                }}>
+                  Change free month end
+                </button>
+              )}
               <button type="button" onClick={() => {
                 setDatePick(b.paid_until ?? today);
                 setClearDate(false);
@@ -551,7 +567,6 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                 id="pay-confirm"
                 sentence={paymentSentence(b, payment, today)}
                 confirm="Yes, record it"
-                needsReason={false}
                 busy={busy}
                 error={error}
                 onConfirm={sendPayment}
@@ -562,10 +577,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                     <input
                       type="checkbox"
                       checked={confirmUnusual}
-                      onChange={(e) => {
-                        key.current = newKey();
-                        setConfirmUnusual(e.target.checked);
-                      }}
+                      onChange={(e) => setConfirmUnusual(e.target.checked)}
                     />
                     I checked it: this amount is right
                   </label>
@@ -776,6 +788,16 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                           maxLength={6}
                           value={code}
                           onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`why-${a.id}`}>Why (kept in the history)</label>
+                        <textarea
+                          id={`why-${a.id}`}
+                          rows={2}
+                          maxLength={300}
+                          value={rescueReason}
+                          onChange={(e) => setRescueReason(e.target.value)}
                         />
                       </div>
                       {error && (

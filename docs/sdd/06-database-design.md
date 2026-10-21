@@ -404,9 +404,9 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 (`UNIQUE (tenant_id)`); history is in `platform_audit_log`. `trial_ends_on` is the last day of
 the free month: since `V75` the trigger `start_trial_clock` on `auth_sessions` sets it once, one
 month from the first session of a staff user, in the tenant's time zone (FR-SUB-02).
-`suspended_from` (`V75`) is the status a resume brings back, kept while the subscription is suspended or cancelled; `is_pilot` (`V75`, ADR-024 decision 6) marks a pilot or complimentary business with no free month end, which the clock and the scheduled transitions skip. `current_period_start` and `current_period_end` are the first and the last day paid for, moved by
+`suspended_from` (`V75`) is the status a resume brings back, kept while the subscription is suspended or cancelled, and set to `active` by a payment recorded meanwhile; `is_pilot` (`V75`, ADR-024 decision 6) marks a pilot or complimentary business with no free month end and no scheduled status change (marking clears both), which the clock and the scheduled transitions skip. `current_period_start` and `current_period_end` are the first and the last day paid for, moved by
 `platform_record_subscription_payment`; the operator can also set the two dates by hand with
-`platform_set_subscription_dates` and the plan with `platform_set_tenant_plan` (ADR-056).
+`platform_set_subscription_dates` and the plan with `platform_set_tenant_plan`, which refuses a plan the business is over on open shops and stores, staff or active lending members (ADR-056). `platform_plan_tenants_over` counts the businesses on a plan that a lowered limit would leave over it, for the warning before a plan is saved.
 
 ### `subscription_payments` (RLS; `bms_app` SELECT only; append-only; `V75`, ADR-024 decision 4, ADR-056)
 

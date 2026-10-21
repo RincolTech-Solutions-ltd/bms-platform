@@ -2,8 +2,8 @@
 -- subscription payments, the trial clock started at the first sign-in, the plan and the trial end of a tenant changed by the
 -- operator, and the reads behind the Businesses list and the Business page.
 --
--- V75 is the first free number above every open branch: main is at V72 and the retail roles pull requests (#403, #404) claim
--- V73 and V74. Flyway runs with outOfOrder off (AGENTS.md), so this file is renamed at merge if the numbers below it land in
+-- V75 comes directly after V74: main is at V73 (#403, the retail roles) and V74 is #404 (sellers see only their own
+-- figures). Flyway runs with outOfOrder off (AGENTS.md), so this file is renamed at merge if the numbers below it land in
 -- another order.
 --
 -- Expand only. No price, no limit and no plan is written here: prices are configuration the operator enters in the portal,
@@ -91,6 +91,24 @@ BEGIN
 END
 $$;
 
+-- How many businesses on the plan would be over the limits given: open shops and stores, staff (invited or active) and
+-- active lending members. A null limit is unlimited and counts nobody. The service asks this before it lowers a limit, so
+-- the operator is warned, and must confirm with a reason, before a business ends up over its plan.
+CREATE FUNCTION platform_plan_tenants_over(
+    p_code text, p_max_branches integer, p_max_staff_users integer, p_max_active_members integer)
+RETURNS TABLE (over_branches bigint, over_staff bigint, over_members bigint)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT count(*) FILTER (WHERE p_max_branches IS NOT NULL AND c.branches > p_max_branches),
+           count(*) FILTER (WHERE p_max_staff_users IS NOT NULL AND c.staff > p_max_staff_users),
+           count(*) FILTER (WHERE p_max_active_members IS NOT NULL AND c.members > p_max_active_members)
+      FROM (SELECT (SELECT count(*) FROM branches b WHERE b.tenant_id = t.id AND b.status = 'active') AS branches,
+                   (SELECT count(*) FROM users u WHERE u.tenant_id = t.id AND u.kind = 'staff'
+                       AND u.status IN ('invited', 'active')) AS staff,
+                   (SELECT count(*) FROM lending_members lm WHERE lm.tenant_id = t.id AND lm.status = 'active') AS members
+              FROM tenants t JOIN plans p ON p.id = t.plan_id
+             WHERE p.code = p_code) c
+$$;
+
 CREATE FUNCTION platform_add_plan_price(
     p_id uuid, p_plan_code text, p_currency text, p_monthly_minor bigint, p_annual_months integer,
     p_effective_from date, p_reason text, p_platform_user_id uuid)
@@ -154,8 +172,8 @@ BEGIN
 END
 $$;
 
--- Marks or unmarks a pilot (complimentary) business. Marking clears the last day of the free month: a pilot has none.
--- Returns the previous mark.
+-- Marks or unmarks a pilot (complimentary) business. Marking clears the last day of the free month and any scheduled
+-- status change: a pilot has neither, so no job can later suspend it. Returns the previous mark.
 CREATE FUNCTION platform_set_pilot(p_tenant_id uuid, p_pilot boolean, p_platform_user_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -169,6 +187,7 @@ BEGIN
     UPDATE subscriptions s
        SET is_pilot = p_pilot,
            trial_ends_on = CASE WHEN p_pilot THEN NULL ELSE s.trial_ends_on END,
+           next_status_change_on = CASE WHEN p_pilot THEN NULL ELSE s.next_status_change_on END,
            updated_by_platform_user_id = p_platform_user_id, updated_at = now()
      WHERE s.tenant_id = p_tenant_id;
     RETURN v_previous;
@@ -213,7 +232,8 @@ SELECT bms_make_append_only('subscription_payments');
 -- whichever is latest, so no free or paid day is lost. A free month that has not started (nobody has signed in yet, and the
 -- business is not a pilot) starts at the payment, so paying first never burns it: the paid months follow it. A trial or a
 -- past due subscription becomes active; a suspended or cancelled one keeps its status (the operator resumes it, with a
--- reason). Returns the period covered.
+-- reason), and the status a resume brings back becomes active: the business has just paid, so it does not come back past
+-- due or in its free month. Returns the period covered.
 CREATE FUNCTION platform_record_subscription_payment(
     p_id uuid, p_amount_minor bigint, p_method text, p_reference text, p_paid_on date, p_months integer,
     p_note text, p_today date, p_platform_user_id uuid)
@@ -252,6 +272,7 @@ BEGIN
                                        THEN v_start ELSE s.current_period_start END,
            current_period_end = v_end,
            status = CASE WHEN s.status IN ('trial', 'past_due', 'active') THEN 'active' ELSE s.status END,
+           suspended_from = CASE WHEN s.status IN ('suspended', 'cancelled') THEN 'active' ELSE s.suspended_from END,
            updated_by_platform_user_id = p_platform_user_id, updated_at = now()
      WHERE s.tenant_id = v_tenant;
     period_start := v_start;
@@ -265,7 +286,8 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 
 -- Moves the tenant (and its subscription) onto an active plan. Refused when the plan does not allow a module the tenant has
--- on, or when the tenant already has more open branches or staff than the plan allows. Returns the previous plan code.
+-- on, or when the tenant already has more open branches, staff or active lending members than the plan allows. Returns the
+-- previous plan code.
 CREATE FUNCTION platform_set_tenant_plan(p_tenant_id uuid, p_plan_code text, p_platform_user_id uuid)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -293,6 +315,11 @@ BEGIN
        AND (SELECT count(*) FROM users u WHERE u.tenant_id = p_tenant_id AND u.kind = 'staff'
                AND u.status IN ('invited', 'active')) > v_plan.max_staff_users THEN
         RAISE EXCEPTION 'plan_staff' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_plan.max_active_members IS NOT NULL
+       AND (SELECT count(*) FROM lending_members lm WHERE lm.tenant_id = p_tenant_id AND lm.status = 'active')
+           > v_plan.max_active_members THEN
+        RAISE EXCEPTION 'plan_members' USING ERRCODE = 'check_violation';
     END IF;
     UPDATE tenants SET plan_id = v_plan.id, updated_at = now() WHERE id = p_tenant_id;
     UPDATE subscriptions
@@ -361,12 +388,13 @@ REVOKE ALL ON FUNCTION bms_start_trial_clock() FROM PUBLIC;
 
 CREATE TRIGGER start_trial_clock AFTER INSERT ON auth_sessions FOR EACH ROW EXECUTE FUNCTION bms_start_trial_clock();
 
--- The owner's decision (21 Oct 2026): three businesses on staging are pilots until a paid start is agreed: no free month end
--- and never suspended by a job. They are marked here only where a tenant with that slug exists, so another database is not
--- touched; each mark writes a platform audit row as the Business page's own mark does.
+-- The owner's decision (21 Oct 2026): three businesses are pilots until a paid start is agreed: no free month end, no
+-- scheduled status change, and never suspended by a job. This block runs on every database the migration reaches, staging
+-- and production alike: a tenant with one of these slugs is marked wherever it exists, and a slug with no tenant is skipped
+-- with a NOTICE in the migration log. Each mark writes a platform audit row as the Business page's own mark does.
 WITH marked AS (
         UPDATE subscriptions s
-           SET is_pilot = true, trial_ends_on = NULL, updated_at = now()
+           SET is_pilot = true, trial_ends_on = NULL, next_status_change_on = NULL, updated_at = now()
           FROM tenants t
          WHERE t.id = s.tenant_id AND t.slug IN ('hats', 'yasad', 'dodos') AND NOT s.is_pilot
         RETURNING s.tenant_id)
@@ -375,6 +403,18 @@ SELECT gen_random_uuid(), 'platform.tenant.pilot_changed', m.tenant_id,
        jsonb_build_object('before', false, 'after', true,
                           'reason', 'V75: a pilot until a paid start is agreed (owner decision, 21 Oct 2026)')
   FROM marked m;
+
+DO $$
+DECLARE
+    v_slug text;
+BEGIN
+    FOREACH v_slug IN ARRAY ARRAY['hats', 'yasad', 'dodos'] LOOP
+        IF NOT EXISTS (SELECT 1 FROM tenants t WHERE t.slug = v_slug) THEN
+            RAISE NOTICE 'V75: no tenant with slug %, so no pilot was marked for it', v_slug;
+        END IF;
+    END LOOP;
+END
+$$;
 
 -- A tenant already in its trial whose staff have signed in (not a pilot): its clock starts from that first session, with one
 -- platform.tenant.trial_started audit row per tenant dated here, as the trigger writes one.
@@ -455,6 +495,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 $$;
 
 REVOKE ALL ON FUNCTION platform_save_plan(text, text, text, integer, integer, integer, text[], boolean, integer, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_plan_tenants_over(text, integer, integer, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_add_plan_price(uuid, text, text, bigint, integer, date, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_record_subscription_payment(uuid, bigint, text, text, date, integer, text, date, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_set_tenant_plan(uuid, text, uuid) FROM PUBLIC;
@@ -464,6 +505,7 @@ REVOKE ALL ON FUNCTION platform_set_pilot(uuid, boolean, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenant_admins(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenant_outbox(uuid, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform_save_plan(text, text, text, integer, integer, integer, text[], boolean, integer, uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_plan_tenants_over(text, integer, integer, integer) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_add_plan_price(uuid, text, text, bigint, integer, date, text, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_record_subscription_payment(uuid, bigint, text, text, date, integer, text, date, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_set_tenant_plan(uuid, text, uuid) TO bms_app;

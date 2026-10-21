@@ -8,6 +8,7 @@ import { ConfirmPanel, TourButton } from './operator-parts';
 import {
   EMPTY_PLAN,
   formatDay,
+  largePriceChange,
   limitsLine,
   MODULES,
   moduleLabel,
@@ -228,13 +229,47 @@ export function PlansScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // A second look the server or this screen asks for: a lowered limit that businesses on the plan are already over, or a
+  // price more than a quarter away from the one in force. The box must be ticked before the change is sent again.
+  const [warning, setWarning] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   const today = todayInKampala();
 
   function close() {
     setOpen({ kind: 'none' });
     setError(null);
     setProblems({});
+    setWarning(null);
+    setConfirmed(false);
   }
+
+  /** Keeps the server's warning on screen for the confirmation box, then fails as usual. */
+  function warnOn(code: string) {
+    return (err: unknown): never => {
+      if (err instanceof OperatorError && err.code === code) setWarning(err.message);
+      throw err;
+    };
+  }
+
+  function needsTick(): boolean {
+    if (warning && !confirmed) {
+      setError('Tick the box to confirm, or go back and change it.');
+      return true;
+    }
+    return false;
+  }
+
+  const warningBox = warning && (
+    <div className="form-stack">
+      <p role="alert" className="alert alert-warning">
+        {warning}
+      </p>
+      <label>
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+        I checked it: this is right
+      </label>
+    </div>
+  );
 
   async function run(action: () => Promise<unknown>, message: string) {
     if (busy) return;
@@ -256,6 +291,8 @@ export function PlansScreen() {
     e.preventDefault();
     const found = planProblems(planForm, isNew);
     setProblems(found);
+    setWarning(null);
+    setConfirmed(false);
     if (Object.keys(found).length === 0) setOpen({ kind: 'plan', isNew, reviewing: true });
   }
 
@@ -263,6 +300,8 @@ export function PlansScreen() {
     e.preventDefault();
     const found = priceProblems(priceForm, today);
     setProblems(found);
+    setConfirmed(false);
+    setWarning(largePriceChange(plan.current_price, parseMinor(priceForm.monthly, 'UGX') ?? 0) ?? null);
     if (Object.keys(found).length === 0) setOpen({ kind: 'price', plan, reviewing: true });
   }
 
@@ -352,15 +391,21 @@ export function PlansScreen() {
           })}; ${planForm.active ? 'offered to new businesses' : 'not offered to new businesses'}.${open.isNew ? '' : ' Businesses on it get the new limits at once.'}`}
           confirm={open.isNew ? 'Yes, add the plan' : 'Yes, save the plan'}
           busy={busy}
-          error={error}
-          onConfirm={(reason) =>
+          error={error === warning ? null : error}
+          onConfirm={(reason) => {
+            if (needsTick()) return;
             void run(
-              () => savePlan(planForm.code.trim(), toSavePlan(planForm, reason)),
+              () =>
+                savePlan(planForm.code.trim(), { ...toSavePlan(planForm, reason), confirm_below_use: confirmed || undefined }).catch(
+                  warnOn('plan_limit_below_use'),
+                ),
               open.isNew ? `${planForm.name.trim()} is added. Set its price next.` : `${planForm.name.trim()} is saved.`,
-            )
-          }
+            );
+          }}
           onCancel={() => setOpen({ kind: 'plan', isNew: open.isNew, reviewing: false })}
-        />
+        >
+          {warningBox}
+        </ConfirmPanel>
       )}
       {open.kind === 'price' && !open.reviewing && (
         <PriceFormView plan={open.plan} form={priceForm} problems={problems} onChange={setPriceForm} onSubmit={(e) => reviewPrice(e, open.plan)} onCancel={close} />
@@ -371,8 +416,9 @@ export function PlansScreen() {
           sentence={priceSentence(open.plan.name ?? open.plan.code ?? '', priceForm, today)}
           confirm="Yes, save the price"
           busy={busy}
-          error={error}
-          onConfirm={(reason) =>
+          error={error === warning ? null : error}
+          onConfirm={(reason) => {
+            if (needsTick()) return;
             void run(
               () =>
                 addPlanPrice(open.plan.code ?? '', {
@@ -381,12 +427,15 @@ export function PlansScreen() {
                   annual_months: Number(priceForm.annualMonths),
                   effective_from: priceForm.from,
                   reason,
-                }),
+                  confirm_large_change: confirmed || undefined,
+                }).catch(warnOn('price_change_unusual')),
               `The price of ${open.plan.name ?? ''} is saved.`,
-            )
-          }
+            );
+          }}
           onCancel={() => setOpen({ kind: 'price', plan: open.plan, reviewing: false })}
-        />
+        >
+          {warningBox}
+        </ConfirmPanel>
       )}
     </main>
   );

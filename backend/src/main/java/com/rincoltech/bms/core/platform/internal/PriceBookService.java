@@ -131,6 +131,10 @@ class PriceBookService {
         if (before.isPresent() && before.get().equals(wanted)) {
             return new Saved(detail(code), false);
         }
+        Map<String, Long> over = before.map(b -> overLimit(code, b, wanted)).orElse(Map.of());
+        if (!over.isEmpty() && !Boolean.TRUE.equals(request.confirmBelowUse())) {
+            throw ApiException.rule("plan_limit_below_use", belowUseMessage(over));
+        }
         boolean created;
         try {
             created = Boolean.TRUE.equals(jdbc.sql("SELECT platform_save_plan(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -160,6 +164,9 @@ class PriceBookService {
         data.put("plan_code", code);
         before.ifPresent(b -> data.put("before", snapshot(b)));
         data.put("after", snapshot(wanted));
+        if (!over.isEmpty()) {
+            data.put("businesses_over_limit", over);
+        }
         data.put("reason", blankToNull(request.reason()));
         audit.record(
                 created ? "platform.plan.created" : "platform.plan.changed",
@@ -184,6 +191,18 @@ class PriceBookService {
                 && inForce.get().monthlyMinor() == request.monthlyMinor()
                 && inForce.get().annualMonths() == request.annualMonths()) {
             return detail(code);
+        }
+        if (inForce.isPresent()
+                && !Boolean.TRUE.equals(request.confirmLargeChange())
+                && Math.abs(request.monthlyMinor() - inForce.get().monthlyMinor()) * 4
+                        > inForce.get().monthlyMinor()) {
+            throw ApiException.rule(
+                    "price_change_unusual",
+                    "The price in force is "
+                            + BusinessService.money(currency, inForce.get().monthlyMinor())
+                            + " a month, and the new price is "
+                            + BusinessService.money(currency, request.monthlyMinor())
+                            + ". That is more than a quarter away. Check it, then confirm it.");
         }
         UUID id = UUID.randomUUID();
         try {
@@ -214,6 +233,47 @@ class PriceBookService {
         data.put("reason", blankToNull(request.reason()));
         audit.record("platform.plan.price_added", CurrentPrincipal.require().userId(), null, data);
         return new PlanDetail(response(plan, today), prices(plan.id(), null));
+    }
+
+    /**
+     * The businesses on the plan that would be over a limit this change lowers, by limit (branches, staff, members); empty
+     * when no limit goes down or nobody is over. A limit that stays or rises is not checked.
+     */
+    private Map<String, Long> overLimit(String code, PlanRow before, PlanRow wanted) {
+        Integer branches = lowered(before.maxBranches(), wanted.maxBranches());
+        Integer staff = lowered(before.maxStaffUsers(), wanted.maxStaffUsers());
+        Integer members = lowered(before.maxActiveMembers(), wanted.maxActiveMembers());
+        if (branches == null && staff == null && members == null) {
+            return Map.of();
+        }
+        return jdbc.sql("SELECT * FROM platform_plan_tenants_over(?, ?, ?, ?)")
+                .params(code, branches, staff, members)
+                .query((rs, n) -> {
+                    Map<String, Long> out = new LinkedHashMap<>();
+                    for (String key : List.of("branches", "staff", "members")) {
+                        long count = rs.getLong("over_" + key);
+                        if (count > 0) {
+                            out.put(key, count);
+                        }
+                    }
+                    return out;
+                })
+                .single();
+    }
+
+    private static Integer lowered(Integer before, Integer after) {
+        return after != null && (before == null || after < before) ? after : null;
+    }
+
+    private static String belowUseMessage(Map<String, Long> over) {
+        Map<String, String> what =
+                Map.of("branches", "open shops and stores", "staff", "staff", "members", "active lending members");
+        String parts = over.entrySet().stream()
+                .map(e -> e.getValue() + (e.getValue() == 1 ? " business has" : " businesses have") + " more "
+                        + what.get(e.getKey()))
+                .collect(Collectors.joining(", "));
+        return "On this plan, " + parts + " than the new limit allows. They keep working but are over their plan until"
+                + " they are moved. Check it, then confirm it.";
     }
 
     // ---- reads ---------------------------------------------------------------------------------

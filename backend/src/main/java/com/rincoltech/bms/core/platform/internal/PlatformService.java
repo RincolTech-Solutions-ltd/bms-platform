@@ -359,7 +359,7 @@ class PlatformService implements TenantProvisioning {
     }
 
     /** FR-IAM-12, platform path: for a tenant whose only admin lost their second factor. */
-    void resetAdminMfa(UUID tenantId, UUID userId) {
+    void resetAdminMfa(UUID tenantId, UUID userId, String reason) {
         UUID operator = CurrentPrincipal.require().userId();
         transactions.execute(status -> tenant(tenantId));
         TenantContext.callAs(
@@ -367,7 +367,10 @@ class PlatformService implements TenantProvisioning {
                 () -> transactions.execute(status -> {
                     tenantAdmins.resetAdminMfa(userId, operator);
                     platformAudit.record(
-                            "platform.tenant_admin.mfa_reset", operator, tenantId, Map.of("user_id", userId));
+                            "platform.tenant_admin.mfa_reset",
+                            operator,
+                            tenantId,
+                            Map.of("user_id", userId, "reason", reason.trim()));
                     return null;
                 }));
     }
@@ -395,7 +398,7 @@ class PlatformService implements TenantProvisioning {
     }
 
     /** FR-IAM-15, platform path: a tenant admin who forgot the password; nobody in the tenant may reset an admin. */
-    TenantAdmins.ResetLink resetAdminSignIn(UUID tenantId, UUID userId) {
+    TenantAdmins.ResetLink resetAdminSignIn(UUID tenantId, UUID userId, String reason) {
         UUID operator = CurrentPrincipal.require().userId();
         transactions.execute(status -> tenant(tenantId));
         return TenantContext.callAs(
@@ -403,7 +406,10 @@ class PlatformService implements TenantProvisioning {
                 () -> transactions.execute(status -> {
                     TenantAdmins.ResetLink link = tenantAdmins.resetAdminSignIn(userId, operator);
                     platformAudit.record(
-                            "platform.tenant_admin.sign_in_reset", operator, tenantId, Map.of("user_id", userId));
+                            "platform.tenant_admin.sign_in_reset",
+                            operator,
+                            tenantId,
+                            Map.of("user_id", userId, "reason", reason.trim()));
                     return link;
                 }));
     }

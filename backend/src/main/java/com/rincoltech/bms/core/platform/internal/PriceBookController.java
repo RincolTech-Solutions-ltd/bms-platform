@@ -117,7 +117,12 @@ class PriceBookController {
             @Min(0) @Max(1000) Integer sortOrder,
 
             @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why, kept in the platform audit log")
-            String reason) {}
+            String reason,
+
+            @Schema(
+                    description =
+                            "True when the operator was warned that businesses on the plan already use more than a lowered limit, and keeps it (422 plan_limit_below_use otherwise)")
+            Boolean confirmBelowUse) {}
 
     @Schema(name = "AddPlanPriceRequest")
     record AddPriceRequest(
@@ -133,7 +138,12 @@ class PriceBookController {
             LocalDate effectiveFrom,
 
             @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why, kept with the price and in the audit log")
-            String reason) {}
+            String reason,
+
+            @Schema(
+                    description =
+                            "True when the operator checked a monthly price more than 25% away from the one in force (422 price_change_unusual otherwise)")
+            Boolean confirmLargeChange) {}
 
     @GetMapping
     @RequiresPermission("platform.tenants.read")

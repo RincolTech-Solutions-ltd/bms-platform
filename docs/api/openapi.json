@@ -98,6 +98,10 @@
             "minimum" : 1,
             "type" : "integer"
           },
+          "confirm_large_change" : {
+            "description" : "True when the operator checked a monthly price more than 25% away from the one in force (422 price_change_unusual otherwise)",
+            "type" : "boolean"
+          },
           "currency" : {
             "description" : "Default UGX",
             "pattern" : "^[A-Z]{3}$",
@@ -5850,6 +5854,12 @@
       },
       "PlatformStepUpRequest" : {
         "properties" : {
+          "reason" : {
+            "description" : "Why; kept in the platform audit log (issue #407)",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
           "totp_code" : {
             "description" : "A current 6 digit code from the operator's own authenticator app",
             "maxLength" : 20,
@@ -5857,7 +5867,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "totp_code" ]
+        "required" : [ "reason", "totp_code" ]
       },
       "PlatformTenant" : {
         "properties" : {
@@ -17298,6 +17308,10 @@
             "minItems" : 0,
             "type" : "array"
           },
+          "confirm_below_use" : {
+            "description" : "True when the operator was warned that businesses on the plan already use more than a lowered limit, and keeps it (422 plan_limit_below_use otherwise)",
+            "type" : "boolean"
+          },
           "description" : {
             "maxLength" : 500,
             "minLength" : 0,
@@ -18949,6 +18963,12 @@
             "format" : "date",
             "type" : "string"
           },
+          "reason" : {
+            "description" : "Why it is recorded (who confirmed it, how it was checked); kept in the platform audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
           "reference" : {
             "description" : "The sender's transaction reference",
             "maxLength" : 100,
@@ -18956,7 +18976,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "amount_minor", "method", "months", "paid_on" ]
+        "required" : [ "amount_minor", "method", "months", "paid_on", "reason" ]
       },
       "SubscriptionStatusRequest" : {
         "properties" : {
@@ -27297,7 +27317,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12)",
+        "summary" : "Reset the lost second factor of a tenant admin, with a reason; needs a current code from the operator's own authenticator (FR-IAM-12)",
         "tags" : [ "platform" ]
       }
     },
@@ -27343,7 +27363,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
+        "summary" : "Issue a one-time password reset link for a tenant admin, with a reason; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15)",
         "tags" : [ "platform" ]
       }
     },
