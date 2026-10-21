@@ -8,6 +8,8 @@ import { money } from './ui';
 export type PhoneCheck = { ok: true; digits: string } | { ok: false; problem: string };
 
 const UGANDA = '256';
+/** A landline or any other national number that is not a mobile: WhatsApp runs on a mobile number. */
+const WHATSAPP_UGANDA = 'A WhatsApp number in Uganda starts with 07, like 0700 000 000. Check it and type it again.';
 
 /**
  * A phone number as WhatsApp takes it: E.164 digits without the plus (`256` and 9 digits for Uganda), or the reason it is
@@ -29,12 +31,13 @@ export function normalisePhone(typed: string): PhoneCheck {
   if (!/^\d+$/.test(s)) return { ok: false, problem: 'A phone number has digits only, and a + only at the start.' };
   if (/^2560\d{9}$/.test(s)) s = UGANDA + s.slice(4);
   else if (!international && /^07\d{8}$/.test(s)) s = UGANDA + s.slice(1);
+  else if (!international && /^0[1-689]\d{8}$/.test(s)) return { ok: false, problem: WHATSAPP_UGANDA };
   else if (!international && /^\d{9}$/.test(s)) {
     // A bare 9 digits is a Uganda mobile without its 0 only when it starts with 7. "256" and six digits is a number
     // with digits missing, and any other 9 digits could be anything: refused, never guessed.
     if (s.startsWith(UGANDA)) return { ok: false, problem: 'This looks like 256 with digits missing. A Uganda number is 256 and 9 digits, like 0700 000 000.' };
     if (s.startsWith('7')) s = UGANDA + s;
-    else if (!s.startsWith('0')) return { ok: false, problem: 'A Uganda mobile number starts with 07, like 0700 000 000. Check it and type it again.' };
+    else if (!s.startsWith('0')) return { ok: false, problem: WHATSAPP_UGANDA };
   }
   if (s.startsWith('0') || s.startsWith(`${UGANDA}0`)) return { ok: false, problem: 'This number has a 0 where it cannot be: at the start, or right after 256. Check it and type it again.' };
   if (s.startsWith(UGANDA)) {

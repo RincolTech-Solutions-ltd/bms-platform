@@ -40,7 +40,8 @@ describe('normalisePhone', () => {
 
   it('refuses 256 typed with digits missing, and 9 digits that are not a Uganda mobile', () => {
     expect(refused('256700000')).toMatch(/256 with digits missing/);
-    expect(refused('123456789')).toMatch(/starts with 07/);
+    expect(refused('123456789')).toMatch(/A WhatsApp number in Uganda starts with 07/);
+    expect(refused('0312345678')).toMatch(/A WhatsApp number in Uganda starts with 07/);
   });
 
   it('keeps a full Uganda number as it is', () => {

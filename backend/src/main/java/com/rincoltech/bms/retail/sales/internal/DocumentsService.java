@@ -687,11 +687,8 @@ class DocumentsService {
     }
 
     // JUSTIFICATION-A3: the receipt to share (issue #439): one check of who may share it, its facts and its PDF.
-    /** How long a receipt waits for a render place before 503 {@code documents_busy}, as a statement does. */
-    static final long RECEIPT_WAIT_MILLIS = 3000;
-
     /** A sale whose receipt may be shared, with its completed returns. */
-    private record Receipt(Sale sale, List<ReturnsRepository.Row> returned, long returnedMinor) {}
+    private record Receipt(Sale sale, UUID madeBy, List<ReturnsRepository.Row> returned, long returnedMinor) {}
 
     /**
      * The sale behind a receipt to share (issue #439, ADR-061), in the caller's read transaction. Stricter than reading
@@ -702,7 +699,9 @@ class DocumentsService {
     private Receipt receipt(UUID saleId) {
         Principal principal = CurrentPrincipal.require();
         Sale sale = sales.get(saleId);
-        boolean own = principal.userId() != null && principal.userId().equals(sale.createdBy());
+        // The maker as stored: the sale read through the API hides it from some callers (ADR-055).
+        UUID madeBy = repo.saleMadeBy(sale.id()).orElse(null);
+        boolean own = principal.userId() != null && principal.userId().equals(madeBy);
         if (!own && !principal.may(SalesSummaryService.ALL_SELLERS, sale.branchId())) {
             throw ApiException.notFound();
         }
@@ -722,7 +721,7 @@ class DocumentsService {
             throw ApiException.rule(
                     "sale_fully_returned", "Every item of this sale was taken back, so it has no receipt to share.");
         }
-        return new Receipt(sale, done, returnedMinor);
+        return new Receipt(sale, madeBy, done, returnedMinor);
     }
 
     /** The facts of the receipt to share: what the screen's caption says, the same figures as the PDF. */
@@ -771,40 +770,25 @@ class DocumentsService {
      * The receipt of a sale as a PDF, for the seller to share from their own phone (issue #439, ADR-061): the invoice
      * layout titled RECEIPT under the sale's own number, with the balance the sale carries, the returns and the net, and
      * the seller who made the sale. Rendered now and never stored, numbered in no series and written to no table, so it
-     * needs neither the documents capability nor {@code retail.document.issue}. The model is built only once a report
-     * render place is held, so a burst of receipts always leaves one place for the documents an administrator issues.
+     * needs neither the documents capability nor {@code retail.document.issue}. Who may have it and whether the sale has a
+     * receipt are checked first, holding no render place, so a wrong or foreign sale is a quick 404 or 422; the model is
+     * then built inside the receipt's own render place, apart from the documents and the reports.
      */
     byte[] receiptPdf(UUID saleId) {
-        java.nio.file.Path file = null;
-        try {
-            file = java.nio.file.Files.createTempFile("bms-receipt-", ".pdf");
-            documents.renderPdf(
-                    "invoice",
-                    () -> reading.execute(status -> {
-                        Receipt r = receipt(saleId);
-                        Sale sale = r.sale();
-                        DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
-                        return models.receipt(
-                                snapshot,
-                                repo.userName(sale.createdBy()),
-                                sale.balanceMinor(),
-                                r.returned(),
-                                sale.totalMinor() - r.returnedMinor());
-                    }),
-                    file,
-                    RECEIPT_WAIT_MILLIS);
-            return java.nio.file.Files.readAllBytes(file);
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-        } finally {
-            if (file != null) {
-                try {
-                    java.nio.file.Files.deleteIfExists(file);
-                } catch (java.io.IOException ignored) {
-                    // A temporary file the host cleans; nothing in it outlives the request.
-                }
-            }
-        }
+        reading.executeWithoutResult(status -> receipt(saleId));
+        return documents.renderSharedPdf(
+                "invoice",
+                () -> reading.execute(status -> {
+                    Receipt r = receipt(saleId);
+                    Sale sale = r.sale();
+                    DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
+                    return models.receipt(
+                            snapshot,
+                            repo.userName(r.madeBy()),
+                            sale.balanceMinor(),
+                            r.returned(),
+                            sale.totalMinor() - r.returnedMinor());
+                }));
     }
 
     LocalDate today() {

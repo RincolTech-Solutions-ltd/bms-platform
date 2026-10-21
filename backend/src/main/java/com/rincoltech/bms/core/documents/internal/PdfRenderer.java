@@ -43,6 +43,7 @@ class PdfRenderer {
 
     private final Semaphore slots;
     private final Semaphore reportSlots;
+    private final Semaphore sharingSlots;
     private final long waitMillis;
     private final CmapLookup glyphs;
 
@@ -58,6 +59,11 @@ class PdfRenderer {
         this.slots = new Semaphore(Math.max(1, maxConcurrent), true);
         // Reports take at most all but one place, so a receipt asked for while reports are made is not turned away.
         this.reportSlots = new Semaphore(Math.max(1, maxConcurrent - 1), true);
+        // A receipt a seller shares from the phone (ADR-061) has its own place, apart from the documents and the
+        // reports: a
+        // report never makes a seller wait, and a burst of receipts never takes a place an administrator's documents
+        // need.
+        this.sharingSlots = new Semaphore(SHARING_PLACES, true);
         this.waitMillis = waitMillis;
         this.glyphs = loadGlyphs();
         ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
@@ -107,6 +113,33 @@ class PdfRenderer {
 
     byte[] render(String template, Map<String, Object> model) {
         return withSlot(() -> renderNow(template, model));
+    }
+
+    /** The render places of shared receipts (ADR-061), apart from {@link #slots}: one receipt is laid out at a time. */
+    static final int SHARING_PLACES = 1;
+
+    // JUSTIFICATION-A3: the receipt pool of ADR-061; the same wait, 503 and layout as the document places.
+    /**
+     * A PDF shared from a phone (a sale's receipt, ADR-061) in its own place, never one of the document or report places.
+     * The model is built only once the place is held. When the place stays taken for the wait the answer is 503
+     * {@code documents_busy}.
+     */
+    byte[] renderShared(String template, java.util.function.Supplier<Map<String, Object>> model) {
+        boolean acquired;
+        try {
+            acquired = sharingSlots.tryAcquire(waitMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            acquired = false;
+        }
+        if (!acquired) {
+            throw busy();
+        }
+        try {
+            return renderNow(template, model.get());
+        } finally {
+            sharingSlots.release();
+        }
     }
 
     /**

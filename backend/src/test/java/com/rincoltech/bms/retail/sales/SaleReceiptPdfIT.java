@@ -116,7 +116,8 @@ class SaleReceiptPdfIT extends IntegrationTest {
 
     static String text(ResponseEntity<byte[]> r) throws Exception {
         isPdf(r);
-        return RetailDocumentsIT.text(r.getBody());
+        // Lines of the PDF may wrap anywhere: the words are compared with every run of white space as one space.
+        return RetailDocumentsIT.text(r.getBody()).replaceAll("\\s+", " ");
     }
 
     static void refused(ResponseEntity<?> r, String code) {
@@ -291,29 +292,55 @@ class SaleReceiptPdfIT extends IntegrationTest {
     @Test
     void aReturnOffTheBalanceIsPrintedWithItsCreditNoteTheNetAndTheBalanceTheSaleCarries() throws Exception {
         capability("returns", true);
+        // A 10,000 credit sale, nothing paid, one piece of 5,000 taken back off the balance: 5,000 is still owed.
         UUID sale = sellAs(sellerA, "credit");
         takeBack(sale, "1", "account");
-        long balance = admin.get("/sales/" + sale, ADMIN)
-                .getBody()
-                .get("balance_minor")
-                .asLong();
+        assertThat(admin.get("/sales/" + sale, ADMIN)
+                        .getBody()
+                        .get("balance_minor")
+                        .asLong())
+                .isEqualTo(5_000);
         JsonNode f = facts(sellerA, sale, SALES).getBody();
         assertThat(f.get("returned_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("net_minor").asLong()).isEqualTo(5_000);
-        assertThat(f.get("balance_minor").asLong()).isEqualTo(balance);
+        assertThat(f.get("balance_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("credit_notes")).hasSize(1);
         String text = text(receipt(sellerA, sale, SALES));
         assertThat(text)
                 .contains("RECEIPT AFTER RETURNS")
                 .contains("Credit note " + f.get("credit_notes").get(0).asString())
-                .contains("taken off the balance")
-                .contains("Net after returns (UGX): 5,000");
-        if (balance > 0) {
-            assertThat(text).contains(String.format(java.util.Locale.ENGLISH, "%,d UGX", balance));
-        } else {
-            assertThat(text).contains("Paid in full.");
-        }
-        assertThat(text).doesNotContain("10,000 UGX");
+                .contains("5,000 taken off the balance")
+                .contains("Net after returns (UGX): 5,000")
+                .contains("Sold on credit.")
+                .contains("5,000 UGX")
+                .doesNotContain("10,000 UGX")
+                .doesNotContain("paid back");
+    }
+
+    void aPartReturnPaidBackShowsWhatWasPaidBackAndTheNet(String method) throws Exception {
+        capability("returns", true);
+        UUID sale = sellAs(sellerA, method);
+        takeBack(sale, "1", method);
+        JsonNode f = facts(sellerA, sale, SALES).getBody();
+        assertThat(f.get("paid_minor").asLong()).isEqualTo(10_000);
+        assertThat(f.get("returned_minor").asLong()).isEqualTo(5_000);
+        assertThat(f.get("net_minor").asLong()).isEqualTo(5_000);
+        assertThat(f.get("balance_minor").asLong()).isZero();
+        assertThat(text(receipt(sellerA, sale, SALES)))
+                .contains("RECEIPT AFTER RETURNS")
+                .contains("goods worth 5,000 taken back, 5,000 paid back.")
+                .contains("Net after returns (UGX): 5,000")
+                .doesNotContain("taken off the balance");
+    }
+
+    @Test
+    void aPartReturnRefundedInCashShowsWhatWasPaidBackAndTheNet() throws Exception {
+        aPartReturnPaidBackShowsWhatWasPaidBackAndTheNet("cash");
+    }
+
+    @Test
+    void aPartReturnRefundedByMobileMoneyShowsWhatWasPaidBackAndTheNet() throws Exception {
+        aPartReturnPaidBackShowsWhatWasPaidBackAndTheNet("mobile_money");
     }
 
     @Test

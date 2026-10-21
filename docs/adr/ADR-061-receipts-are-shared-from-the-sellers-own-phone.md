@@ -32,9 +32,13 @@ the `documents` capability on, so a seller could not reach any PDF of their own 
    /retail/sales/{sale_id}/receipt` returns the same facts as JSON (number, business name, buyer and number, paid, balance,
    returns, net, credit notes, the sale's version) for the caption, so the words sent and the PDF never disagree. Neither is
    stored, numbered in a series or written to a table, so they work with the `documents` capability on or off and need no
-   `retail.document.issue`. The numbered invoice of ADR-033 is unchanged. The PDF builds its model only once it holds a report
-   render place (at most all but one of the places), so a seller asking for receipts in a loop cannot take the last place an
-   administrator's documents need.
+   `retail.document.issue`. The numbered invoice of ADR-033 is unchanged. Who may have the receipt and whether the sale has one
+   are checked first, holding no render place, so a wrong or foreign sale id is a quick 404 or 422. The PDF is then laid out in a
+   render place of its own (`Documents.renderSharedPdf`), one place for the whole platform, apart from the document places
+   (`bms.documents.max-concurrent-renders`, two by default) and the report places (all but one of those): a report never makes a
+   seller wait, and a burst of receipts never takes a place an administrator's documents need. Its model is built only once
+   that place is held. At most three PDFs are laid out at once on the smallest host instead of two; a receipt is one or two
+   pages.
 3. **Who may share.** Only someone who can already view the sale may fetch its receipt, enforced on the server and mirrored in the
    screen: `retail.sale.read` at the sale's branch, and without `retail.sale.all_sellers` there only a sale the caller made (a
    caller with no user, such as a service token, never counts as its maker). This is stricter than reading the sale itself:
