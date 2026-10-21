@@ -174,6 +174,24 @@ describe('the dark theme tokens', () => {
     }
   });
 
+  it('the primary button label stays 4.5:1 on hover and press in both themes (the fill darkens, never lightens toward a white label)', () => {
+    expect(dark).not.toMatch(/--color-primary-(hover|active):/);
+    const black = parseHex('#000000') as Rgb;
+    const hover = css.match(/--color-primary-hover:\s*color-mix\(in srgb, var\(--color-primary\) (\d+)%, #000\)/);
+    const active = css.match(/--color-primary-active:\s*color-mix\(in srgb, var\(--color-primary\) (\d+)%, #000\)/);
+    expect(hover).not.toBeNull();
+    expect(active).not.toBeNull();
+    // Brands that carry a white label (--brand-contrast #fff, 4.5:1 or more at rest).
+    for (const brand of ['#000000', '#0d5c75', '#7a0019', '#004d40', '#0077b6', '#00695c']) {
+      const fill = parseHex(brand) as Rgb;
+      expect(contrast(WHITE, fill), `${brand} at rest`).toBeGreaterThanOrEqual(4.5);
+      for (const m of [hover, active]) {
+        const pressed = mix(fill, Number(m?.[1]) / 100, black);
+        expect(contrast(WHITE, pressed), `${brand} ${m?.[0]}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it('a tenant accent (stripe, active tab, chosen card edge) is 3:1 on the dark surface for any colour', () => {
     expect(brandBlock()).toMatch(/--color-accent:\s*color-mix\(in srgb, var\(--brand\) 45%, #fff\)/);
     for (const brand of ['#000000', '#0d5c75', '#7a0019', '#004d40', '#ffffff', '#00adef']) {

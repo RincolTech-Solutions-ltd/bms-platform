@@ -151,12 +151,12 @@ describe('the pre-paint script (no flash of the wrong theme)', () => {
   });
 
   it.each([
-    ['nothing saved, light system', null, false, 'system', 'light'],
-    ['nothing saved, dark system', null, true, 'system', 'dark'],
-    ['saved dark, light system', 'dark', false, 'dark', 'dark'],
-    ['saved light, dark system', 'light', true, 'light', 'light'],
-    ['an unknown value', 'purple', true, 'system', 'dark'],
-  ])('%s', (_name, saved, systemDark, _choice, theme) => {
+    ['nothing saved, light system', null, false, 'light'],
+    ['nothing saved, dark system', null, true, 'dark'],
+    ['saved dark, light system', 'dark', false, 'dark'],
+    ['saved light, dark system', 'light', true, 'light'],
+    ['an unknown value', 'purple', true, 'dark'],
+  ])('%s', (_name, saved, systemDark, theme) => {
     if (saved) window.localStorage.setItem(THEME_KEY, saved);
     dark = systemDark;
     run();

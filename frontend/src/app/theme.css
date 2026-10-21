@@ -262,8 +262,6 @@ body {
   --color-on-inverse: #0e141b;
   --color-logo-plate: #ffffff;
   --color-hover: #1b2430;
-  --color-primary-hover: color-mix(in srgb, var(--color-primary) 86%, #fff); /* lighter, not darker, toward the dark page */
-  --color-primary-active: color-mix(in srgb, var(--color-primary) 76%, #fff);
   --viz-1-value: var(--rt-viz-blue-dark);
   --viz-2-value: var(--rt-viz-orange-dark);
   --viz-3-value: var(--rt-viz-green-dark);
