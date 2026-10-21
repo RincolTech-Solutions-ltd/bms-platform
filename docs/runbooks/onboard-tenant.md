@@ -55,7 +55,7 @@ Set these in `/opt/bms/.env` (never in git; `.env.example` lists them empty), th
 | `BMS_SMTP_HOST` | The provider's SMTP host |
 | `BMS_SMTP_PORT` | `465` (implicit TLS; port 587 is blocked on the staging host) |
 | `BMS_SMTP_USER`, `BMS_SMTP_PASSWORD` | The sending account and its app password |
-| `BMS_MAIL_FROM` | The sender address, for example `no-reply@<your domain>` |
+| `BMS_MAIL_FROM` | The sender address, for example `no-reply@<your domain>`, or with a display name: `BMS by Rincol Tech <no-reply@<your domain>>` (quote the whole value in `.env`) |
 | `BMS_SUPPORT_CONTACT` | Optional. The support line in the footer of every email, shown as typed, for example `support@<your domain> or <phone>`; empty leaves the line out |
 | `BMS_TELEGRAM_BOT_TOKEN` | The bot's token from BotFather |
 | `BMS_TELEGRAM_OPERATOR_CHAT_ID` | The chat that receives operator alerts |

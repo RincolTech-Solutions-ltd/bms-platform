@@ -221,8 +221,12 @@ class EmailLayoutTest {
         OutboxChannel.Delivery delivery = delivery("identity.password_reset", params());
         SmtpEmailChannel.Body body = SmtpEmailChannel.body(templates, delivery, platform(), "");
         MimeMessage message = SmtpEmailChannel.compose(
-                Session.getInstance(new Properties()), "no-reply@example.test", delivery, body);
+                Session.getInstance(new Properties()), "BMS by Rincol Tech <no-reply@example.test>", delivery, body);
         message.saveChanges();
+        // BMS_MAIL_FROM may carry a display name.
+        jakarta.mail.internet.InternetAddress from = (jakarta.mail.internet.InternetAddress) message.getFrom()[0];
+        assertThat(from.getPersonal()).isEqualTo("BMS by Rincol Tech");
+        assertThat(from.getAddress()).isEqualTo("no-reply@example.test");
         assertThat(message.getContentType()).startsWith("multipart/alternative");
         assertThat(message.getHeader("Message-ID")[0]).isEqualTo(SmtpEmailChannel.messageId(delivery.idempotencyKey()));
         MimeMultipart parts = (MimeMultipart) message.getContent();
