@@ -12092,6 +12092,11 @@ export interface components {
             currency?: string;
             /** Format: uuid */
             customer_id?: string;
+            /**
+             * Format: int64
+             * @description Issue #385: the delivery fee of the customer order this credit sale came from, left on the buyer's account and not yet paid: owed besides balance_minor, and written off with the sale
+             */
+            delivery_fee_owed_minor?: number;
             /** Format: date */
             due_date?: string;
             historical?: boolean;
@@ -12307,8 +12312,16 @@ export interface components {
         };
         /** @description A credit sale whose unpaid part was written off as a loss */
         RetailSaleWriteOffInfo: {
+            /**
+             * Format: int64
+             * @description Issue #385: the part of unpaid_minor that was a delivery fee left on the account
+             */
+            delivery_fee_minor?: number;
             reason?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Everything the write-off cleared, a delivery fee on the account included
+             */
             unpaid_minor?: number;
             /** Format: date */
             written_off_on?: string;

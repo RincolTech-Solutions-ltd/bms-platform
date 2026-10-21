@@ -13370,6 +13370,11 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "delivery_fee_owed_minor" : {
+            "description" : "Issue #385: the delivery fee of the customer order this credit sale came from, left on the buyer's account and not yet paid: owed besides balance_minor, and written off with the sale",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "due_date" : {
             "format" : "date",
             "type" : "string"
@@ -13758,10 +13763,16 @@
       "RetailSaleWriteOffInfo" : {
         "description" : "A credit sale whose unpaid part was written off as a loss",
         "properties" : {
+          "delivery_fee_minor" : {
+            "description" : "Issue #385: the part of unpaid_minor that was a delivery fee left on the account",
+            "format" : "int64",
+            "type" : "integer"
+          },
           "reason" : {
             "type" : "string"
           },
           "unpaid_minor" : {
+            "description" : "Everything the write-off cleared, a delivery fee on the account included",
             "format" : "int64",
             "type" : "integer"
           },
