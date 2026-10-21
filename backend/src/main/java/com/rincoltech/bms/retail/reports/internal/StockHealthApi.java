@@ -35,8 +35,24 @@ final class StockHealthApi {
             @Schema(description = "True when the cover is above 365 days and days_of_cover shows 365.0")
             boolean capped,
 
-            @Schema(description = "Reorder rows only: units to buy to reach cover_days of cover at this pace")
-            String suggestedQty) {}
+            @Schema(
+                    description =
+                            "Reorder rows only: units to buy to reach cover_days of cover at this pace, and at least the minimum")
+            String suggestedQty,
+
+            @Schema(
+                    description =
+                            "Reorder rows only: the low-stock minimum that applies at this branch, when one is set (issue #412)")
+            String minQty,
+
+            @Schema(
+                    description =
+                            "Reorder rows only: which rule says it is low, minimum (below the level set) or pace (fewer than lead_days of cover)",
+                    allowableValues = {"minimum", "pace"})
+            String lowBy,
+
+            @Schema(description = "Reorder rows only: the rule in words, for example below your minimum of 10")
+            String lowWords) {}
 
     @Schema(name = "RetailCoverList")
     record CoverList(
@@ -50,7 +66,9 @@ final class StockHealthApi {
     record DeadBranch(
             UUID branchId,
             int itemCount,
-            long valueAtPriceMinor,
+
+            @Schema(description = COST_ONLY + " (ADR-055); quantity times the current sell price")
+            Long valueAtPriceMinor,
 
             @Schema(description = COST_ONLY + "; quantity times the current cost")
             Long valueAtCostMinor) {}
@@ -64,7 +82,10 @@ final class StockHealthApi {
             String description,
             String unit,
             String qtyOnHand,
-            long valueAtPriceMinor,
+
+            @Schema(description = COST_ONLY + " (ADR-055); quantity times the current sell price")
+            Long valueAtPriceMinor,
+
             @Schema(description = COST_ONLY) Long valueAtCostMinor) {}
 
     @Schema(name = "RetailDeadStock", description = "Stock on hand with no sale in the branch in the last 90 days")
@@ -81,7 +102,83 @@ final class StockHealthApi {
             @Schema(description = "All reported branches; " + COST_ONLY + " in every branch reported")
             Long valueAtCostMinor,
 
-            long valueAtPriceMinor) {}
+            @Schema(description = "All reported branches; " + COST_ONLY + " in every branch reported (ADR-055)")
+            Long valueAtPriceMinor) {}
+
+    @Schema(
+            name = "RetailSellsBetterAt",
+            description =
+                    "Another branch in the caller's scope where the same item sells faster, and what to move there")
+    record SellsBetterAt(
+            UUID branchId,
+
+            @Schema(description = "Units sold there in the last 90 days, or since the item first came there")
+            String soldLast90,
+
+            @Schema(
+                    description = "Whole units to move: what that branch sells in cover_days, less its stock, at most"
+                            + " what this branch holds above slow_months of its own sales")
+            String suggestedQty) {}
+
+    @Schema(name = "RetailSlowMover", description = "An item that sold in the branch in the last 90 days, but slowly")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record SlowItem(
+            UUID branchId,
+            UUID productId,
+            String code,
+            String description,
+            String unit,
+            String qtyOnHand,
+
+            @Schema(description = "Units sold in this branch in the last 90 days, or in days_counted for a newer item")
+            String soldLast90,
+
+            @Schema(description = "The last day the item sold in this branch")
+            LocalDate lastSoldOn,
+
+            @Schema(
+                    description = "The days the pace is taken over: 90, or fewer for an item that came to this branch"
+                            + " (its first stock movement or sale there) less than 90 days ago, today included")
+            int daysCounted,
+
+            @Schema(
+                    description = "Months of stock: the stock over the monthly pace of days_counted (30 days a month),"
+                            + " one place")
+            String monthsOfStock,
+
+            @Schema(description = "True when the months are above 120 and months_of_stock shows 120.0")
+            boolean capped,
+
+            @Schema(description = COST_ONLY + "; the money tied up: quantity times the current cost")
+            Long valueAtCostMinor,
+
+            @Schema(description = "Absent when no other branch in the caller's scope sells it faster")
+            SellsBetterAt betterAt) {}
+
+    @Schema(
+            name = "RetailSlowMovers",
+            description = "Items that sell, but slowly: more than slow_months of stock at the pace of the last 90 days,"
+                    + " or fewer than min_sold units sold in 90 days. Never dead stock (no sale in 90 days)")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record SlowMovers(
+            int days,
+
+            @Schema(description = "The business's setting slow_mover_months")
+            int slowMonths,
+
+            @Schema(description = "The business's setting slow_mover_min_sold; 0 means the rule is off")
+            int minSold,
+
+            @Schema(description = "The longest to sell first")
+            List<SlowItem> items,
+
+            @Schema(description = "Rows before the row limit")
+            int total,
+
+            @Schema(
+                    description = "Money tied up in all slow stock reported, at cost; present only for a caller with"
+                            + " retail.profit.read in every branch of the business (an administrator)")
+            Long valueAtCostMinor) {}
 
     @Schema(name = "RetailShrinkageBranch")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -127,9 +224,12 @@ final class StockHealthApi {
             @Schema(description = "The lowest cover first, over items sold in the last 30 days")
             CoverList cover,
 
-            @Schema(description = "Items with cover below lead_days, the lowest first, with a suggested quantity")
+            @Schema(
+                    description =
+                            "Items below their low-stock minimum or with cover below lead_days, whichever trips first, the most urgent first, with a suggested quantity (issue #412)")
             CoverList reorder,
 
             DeadStock deadStock,
+            SlowMovers slowMovers,
             List<Shrinkage> shrinkage) {}
 }

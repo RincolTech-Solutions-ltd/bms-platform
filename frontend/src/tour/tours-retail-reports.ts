@@ -21,7 +21,7 @@ const rangeStep = (target: string, what: string): TourStep =>
 
 export const retailHomePage: Tour = {
   id: 'page-retail-home',
-  version: 1,
+  version: 2,
   title: 'This page: Retail',
   audience: (me) => (me.permissions ?? []).some((p) => p.startsWith('retail.')),
   autoStart: false,
@@ -31,6 +31,8 @@ export const retailHomePage: Tour = {
     retail({ id: 'sale', target: 'retail-sale', needs: [SELL], optional: true, title: 'Record a sale', body: 'Tap here when a customer pays. Pick the items, then save the sale.' }),
     retail({ id: 'restock', target: 'retail-restock', needs: [RESTOCK], optional: true, title: 'Restock', body: 'Tap here when new goods arrive. Stock goes up and the cost is saved.' }),
     retail({ id: 'stock', target: 'retail-stock', needs: [STOCK_READ], optional: true, title: 'Check your stock', body: 'Tap here to see how much of each item you hold, shop by shop.' }),
+    // ADR-055: a seller sees their own figures; everybody's sales, profit and the value of the stock are the owner's.
+    retail({ id: 'own-sales', target: 'own-sales', needs: [SALES_READ], unless: ['retail.sale.all_sellers'], optional: true, title: 'Your sales', body: 'What you sold today and in the last 7 days. Only your own sales are counted. All sales lists them one by one.' }),
   ],
 };
 
@@ -148,7 +150,8 @@ export const marginsPage: Tour = {
 
 export const stockHealthPage: Tour = {
   id: 'page-stock-health',
-  version: 1,
+  // Version 2 added the slow movers step (issue #414), version 3 the why-low step (issue #412).
+  version: 3,
   title: 'This page: stock health',
   audience: (me) => held(me, STOCK_READ),
   autoStart: false,
@@ -157,6 +160,9 @@ export const stockHealthPage: Tour = {
     rangeStep('health-range', 'It sets the days for used, damaged and missing stock.'),
     retail({ id: 'buy', target: 'health-buy', title: 'When to buy', body: 'Choose how many days of stock is too low, and how many days you want to buy for.' }),
     retail({ id: 'results', target: 'health-results', title: 'What to buy and what is stuck', body: 'See what to reorder, how long each item lasts, and what has not sold for 90 days. Tap an item to open it in Stock.' }),
+    // Issue #412: why a row is on the reorder list, and where its level is set.
+    retail({ id: 'why-low', target: 'health-results', title: 'Why it needs buying', body: 'Each item to reorder says why. It is below the minimum you set, or it runs out soon at the pace it sells. Tap Set a level to choose "Warn me when stock is below" for it.' }),
+    retail({ id: 'slow', target: 'health-slow', title: 'Slow movers', body: 'Items that sell, but slowly: the months it takes to sell what you hold. If it sells better at another branch, tap Move to send some there. Managers who see costs also see the money tied up.' }),
   ],
 };
 

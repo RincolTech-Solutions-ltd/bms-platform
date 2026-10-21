@@ -330,6 +330,18 @@ class RlsIsolationIT {
                         INSERT INTO push_subscriptions (id, tenant_id, user_id, endpoint, endpoint_hash, p256dh, auth)
                         VALUES (?, ?, ?, 'https://fcm.googleapis.com/fcm/send/test-rls', repeat('c', 64), repeat('A', 87), repeat('B', 22))
                         """).params(UUID.randomUUID(), t.tenantId(), user).update();
+        // A subscription payment the operator recorded (migration V75, issue #407), by a fabricated operator.
+        UUID recorder = UUID.randomUUID();
+        owner.sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator 09')")
+                .params(recorder, "rls-op-" + recorder + "@example.test")
+                .update();
+        owner.sql("""
+                        INSERT INTO subscription_payments (id, tenant_id, subscription_id, plan_id, amount_minor, currency, method,
+                                                           paid_on, months, period_start, period_end, recorded_by_platform_user_id)
+                        SELECT ?, s.tenant_id, s.id, s.plan_id, 1000, 'UGX', 'other', DATE '2026-01-01', 1, DATE '2026-01-01',
+                               DATE '2026-01-31', ?
+                          FROM subscriptions s WHERE s.tenant_id = ?
+                        """).params(UUID.randomUUID(), recorder, t.tenantId()).update();
         owner.sql(
                         "INSERT INTO audit_log (id, tenant_id, actor_kind, action, entity_type) VALUES (?, ?, 'system', 'test.fixture.created', 'test')")
                 .params(UUID.randomUUID(), t.tenantId())
@@ -921,6 +933,17 @@ class RlsIsolationIT {
                         VALUES (?, ?, ?, 'ordered', ?)
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), customerOrder, user)
+                .update();
+        // The low-stock level of an item and the record of the daily notices (migration V76, #412).
+        owner.sql("""
+                        INSERT INTO retail_stock_minimums (id, tenant_id, product_id, branch_id, min_qty, updated_by)
+                        VALUES (?, ?, ?, ?, 5, ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), retailProduct, t.headOffice(), user)
+                .update();
+        owner.sql(
+                        "INSERT INTO retail_notice_runs (tenant_id, kind, run_on) VALUES (?, 'daily_summary', DATE '2026-01-15')")
+                .param(t.tenantId())
                 .update();
     }
 

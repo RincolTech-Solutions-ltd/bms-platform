@@ -9,6 +9,7 @@ import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import { useStaff } from '../context';
 import { LinkBox, type ShownLink } from './link-box';
 import { RoleEditor } from './role-editor';
+import { WhoCanDoWhat } from './who-can-do-what';
 import { ResetPanel } from './reset-panel';
 import { canManageUsers, canResetSignIn, contactLine, matchesSearch, roleChoices, roleLines, showUsers, statusWords } from './state';
 
@@ -119,7 +120,7 @@ export function UsersScreen() {
   const shown = search.term === '' ? all : all.filter((u) => matchesSearch(u, search.term));
   const roleList = roles.data ?? [];
   const branchList = branches.data ?? [];
-  const choices = roleChoices(roleList);
+  const choices = roleChoices(roleList, me.modules);
 
   return (
     <main className="rt ln stack">
@@ -132,6 +133,7 @@ export function UsersScreen() {
       ) : (
         <p className="hint">Only an administrator can invite people or change roles.</p>
       )}
+      <WhoCanDoWhat roles={roleList} modules={me.modules} />
       {link && <LinkBox link={link} business={brand.name} onDone={() => setLink(null)} doneLabel="I have sent it" />}
       {notice && <p role="status" className="alert alert-success">{notice}</p>}
       {error && mode?.kind !== 'deactivate' && <p role="alert" className="alert alert-danger">{error}</p>}
@@ -187,7 +189,7 @@ export function UsersScreen() {
                       </p>
                     )}
                     {mode?.id === u.id && mode?.kind === 'roles' && (
-                      <RoleEditor user={u} self={u.id === me.user_id} roles={choices} branches={branchList} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
+                      <RoleEditor user={u} self={u.id === me.user_id} roles={choices} branches={branchList} retail={!me.modules || me.modules.includes('retail')} onSave={(next) => saveRoles(u, next)} onCancel={() => setMode(null)} />
                     )}
                     {mode?.id === u.id && mode?.kind === 'reset' && (
                       <ResetPanel user={u} mfaEnabled={me.mfa_enabled === true} onSend={(credential) => resetSignIn(u, credential)} onCancel={() => setMode(null)} />

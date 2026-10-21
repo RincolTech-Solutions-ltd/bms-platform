@@ -64,7 +64,7 @@ class DashboardService {
     @Transactional(readOnly = true)
     Report dashboard(List<UUID> branchIds) {
         Principal principal = CurrentPrincipal.require();
-        List<UUID> filter = principal.branchFilter(SALE_READ, branchIds);
+        List<UUID> filter = AnalyticsSupport.everySellerFilter(principal, branchIds);
         LocalDate today = clock.today(tenant.profile().timezone());
         boolean profit = AnalyticsSupport.profitVisible(principal, filter);
 
@@ -182,9 +182,11 @@ class DashboardService {
             }
             // As the stock list judges All branches: one balance per item, summed over the branches.
             int[] counts = repo.counts(stockFilter, LOW_STOCK);
+            boolean stockValue = AnalyticsSupport.profitVisible(principal, stockFilter);
             stock = new Stock(
-                    price,
-                    AnalyticsSupport.profitVisible(principal, stockFilter) ? cost : null,
+                    // ADR-055: the value of the stock, even at the selling price, goes with the cost permission.
+                    stockValue ? price : null,
+                    stockValue ? cost : null,
                     counts[0],
                     counts[1],
                     Quantities.format(LOW_STOCK));
@@ -220,7 +222,7 @@ class DashboardService {
                     sold ? s7 : null,
                     sold ? s30 : null,
                     cost ? rt[0] - rt[1] : null,
-                    p == null ? null : p.atPrice(),
+                    p != null && principal.may(PROFIT_READ, b) ? p.atPrice() : null,
                     p != null && cost ? p.atCost() : null,
                     p == null ? null : p.out(),
                     p == null ? null : p.low(),
