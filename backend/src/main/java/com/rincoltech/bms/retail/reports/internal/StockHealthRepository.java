@@ -96,7 +96,7 @@ class StockHealthRepository {
     }
 
     /**
-     * Issue #412, ADR-056: items low by either rule of {@code LowStockRule}, whichever trips first. An item is below its minimum
+     * Issue #412, ADR-057: items low by either rule of {@code LowStockRule}, whichever trips first. An item is below its minimum
      * at the branch (the branch's own level, else the item's level for every branch), or it sold in the window and its stock
      * times the window is under lead days times units sold. An item with no minimum is judged by the pace alone, one that did
      * not sell by its minimum alone. The most urgent first: the smaller share of its minimum or of the lead days that is left.

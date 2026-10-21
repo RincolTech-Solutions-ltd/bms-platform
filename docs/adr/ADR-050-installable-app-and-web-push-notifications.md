@@ -8,7 +8,7 @@ sessions) and ADR-015 (maker-checker). Does not supersede any of them. The contr
 chapter 6 section 6.5 (`push_subscriptions`) and the threat model in chapter 8 section 8.2b. The operations note is
 `docs/runbooks/push-notifications.md`.
 
-Extended by ADR-056 (issue #412): five everyday notices with per-business switches, a one-tap turn-on card, and two new audiences
+Extended by ADR-057 (issue #412): five everyday notices with per-business switches, a one-tap turn-on card, and two new audiences
 (`BranchStaff`, `AnyOf`). No decision here changes.
 
 ## Context

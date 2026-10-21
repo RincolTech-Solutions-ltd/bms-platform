@@ -1,7 +1,7 @@
 import { api, problemOf } from './client';
 import type { components } from './schema';
 
-// What the business sends by push (issue #412, ADR-056): a switch per everyday notice and the time of the daily summary, in the
+// What the business sends by push (issue #412, ADR-057): a switch per everyday notice and the time of the daily summary, in the
 // tenant settings group "notifications". One version for the whole settings row: the ETag of the read is sent back as If-Match.
 
 export type NotificationSettings = components['schemas']['NotificationSettings'];

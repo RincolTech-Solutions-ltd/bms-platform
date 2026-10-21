@@ -22,7 +22,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The low-stock push (issue #412, ADR-056). After stock leaves a branch (a sale, usage, damage, a transfer out, goods sent
+ * The low-stock push (issue #412, ADR-057). After stock leaves a branch (a sale, usage, damage, a transfer out, goods sent
  * back, a correction down), each item it touched is judged by {@link LowStockRule}: below its minimum at that branch, or
  * running out within the lead days at the pace of the last 30 days. A low item is told to the staff of that branch who read
  * stock and to the administrators, at most once per item, branch and day (the outbox key carries the day).
@@ -118,12 +118,18 @@ class LowStockAlerts {
                                 "path", "/staff/retail/stock-health"))));
     }
 
-    /** Units sold at the branch over the pace window, net of voids, from the movements (indexed by branch and item). */
+    /**
+     * Units sold at the branch over the pace window, read as the Stock health report reads them (StockHealthRepository): the
+     * lines of completed sales, so a voided sale does not count. The sale being recorded is already completed here: its lines
+     * are written before its stock moves.
+     */
     private BigDecimal soldInPace(Touched t, LocalDate today) {
         return jdbc.sql("""
-                        SELECT coalesce(-sum(qty), 0) FROM retail_stock_movements
-                         WHERE branch_id = ? AND product_id = ? AND kind = 'sale'
-                           AND business_date BETWEEN ? AND ?
+                        SELECT coalesce(sum(l.qty), 0)
+                          FROM retail_sales s
+                          JOIN retail_sale_lines l ON l.tenant_id = s.tenant_id AND l.sale_id = s.id
+                         WHERE s.branch_id = ? AND l.product_id = ? AND s.status = 'completed'
+                           AND s.sale_date BETWEEN ? AND ?
                         """)
                 .params(
                         t.branchId(),

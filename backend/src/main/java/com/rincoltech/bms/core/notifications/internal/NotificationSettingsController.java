@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code /api/v1/settings/notifications} (chapter 7 section 7.11.7, issue #412, ADR-056): which everyday push notices the
+ * {@code /api/v1/settings/notifications} (chapter 7 section 7.11.7, issue #412, ADR-057): which everyday push notices the
  * business sends (all on until switched off) and when the daily closing summary goes. One version for the whole tenant
  * settings row, sent back as the {@code ETag} and required as {@code If-Match} on a change, as for the other settings groups.
  * Each person still turns notifications on for their own device; this only says what the business sends.
@@ -83,8 +83,8 @@ class NotificationSettingsController {
             Boolean creditDue,
             Boolean dailySummary,
 
-            @Pattern(regexp = "^([01][0-9]|2[0-3]):[0-5][0-9]$")
-            @Schema(description = "HH:mm on the business's clock", example = "20:00")
+            @Pattern(regexp = "^(([01][0-9]|2[0-2]):(00|15|30|45)|23:(00|15|30))$")
+            @Schema(description = "HH:mm on the business's clock, a quarter hour up to 23:30", example = "20:00")
             String dailySummaryTime) {}
 
     @GetMapping

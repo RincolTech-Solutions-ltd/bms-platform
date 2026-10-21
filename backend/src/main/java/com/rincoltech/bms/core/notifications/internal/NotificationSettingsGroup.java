@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 /**
- * The tenant settings group {@code notifications} (issue #412, ADR-056): a switch per everyday push notice, all on by default,
+ * The tenant settings group {@code notifications} (issue #412, ADR-057): a switch per everyday push notice, all on by default,
  * and the time of the daily closing summary ({@code HH:mm} on the business's clock, 20:00 by default). Stored in the tenant
  * settings row, versioned and audited with it, like the {@code sms} group. The safeguard notices of ADR-050 (a sale voided, a
  * write-off alone, an approval limit raised, two-step sign-in relaxed, an approval waiting, stock on its way) have no switch.
@@ -31,7 +31,11 @@ class NotificationSettingsGroup implements ModuleSettingsGroup {
             PushPreferences.CREDIT_DUE,
             PushPreferences.DAILY_SUMMARY);
 
-    private static final Pattern CLOCK = Pattern.compile("^([01][0-9]|2[0-3]):[0-5][0-9]$");
+    /**
+     * A quarter hour up to 23:30: the job wakes on every quarter hour, so a time between two is never met exactly, and 23:45
+     * would leave no tick before midnight should one be late.
+     */
+    static final Pattern CLOCK = Pattern.compile("^(([01][0-9]|2[0-2]):(00|15|30|45)|23:(00|15|30))$");
 
     @Override
     public String moduleKey() {
@@ -68,7 +72,8 @@ class NotificationSettingsGroup implements ModuleSettingsGroup {
                 if (value instanceof String t && CLOCK.matcher(t).matches()) {
                     out.put(key, t);
                 } else {
-                    problems.add(new FieldProblem(key, "invalid", "Use a time such as 20:00."));
+                    problems.add(new FieldProblem(
+                            key, "invalid", "Use a quarter hour up to 23:30, such as 20:00 or 18:45."));
                 }
             } else {
                 problems.add(new FieldProblem(key, "unknown", "Not a notification setting."));

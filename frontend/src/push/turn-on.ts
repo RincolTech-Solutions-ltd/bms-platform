@@ -1,4 +1,4 @@
-// When the turn-on card asks (issue #412, ADR-056). The card offers notifications the first time someone opens the installed app,
+// When the turn-on card asks (issue #412, ADR-057). The card offers notifications the first time someone opens the installed app,
 // or right after they accept the install. "Not now" asks again after a few days, at most a few times; turning on, or the browser
 // saying no, ends the asking on this device. What was answered is remembered on this device only, like the install offer: the
 // question is about this device. The Notifications and app page always has the switch, whatever was answered here.

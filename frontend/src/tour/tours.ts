@@ -888,7 +888,7 @@ export const usersPage: Tour = {
 // tour in this file is; the new screen needs exactly this one.
 export const notificationsPage: Tour = {
   id: 'page-notifications',
-  version: 1,
+  version: 2,
   title: 'This page: notifications and the app',
   audience: () => true,
   autoStart: false,
@@ -912,6 +912,12 @@ export const notificationsPage: Tour = {
       optional: true,
       title: 'Your devices',
       body: 'Each device that tells you things is listed here. Remove one you no longer use.',
+    },
+    {
+      // Issue #412: the turn-on card shows in the staff area of the installed app, not on this page, so this step points at nothing.
+      id: 'turn-on-card',
+      title: 'Asked once, with one tap',
+      body: 'When you open the installed app, a card asks "Get told when something needs you?". Tap Turn on and your phone asks once. Not now asks again in a few days, at most three times.',
     },
   ],
 };

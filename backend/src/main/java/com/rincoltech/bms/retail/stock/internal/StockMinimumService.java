@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The low-stock minimum of an item (issue #412, ADR-056): "Warn me when stock is below", for every shop and store, with a
+ * The low-stock minimum of an item (issue #412, ADR-057): "Warn me when stock is below", for every shop and store, with a
  * different level for a chosen branch if wanted. Read with {@code retail.stock.read} (the branch levels of the branches the
  * caller reads); the level for every branch is set by holders of {@code retail.catalogue.manage}, a branch's own level also
  * by whoever may commit a stock-take at that branch ({@code retail.stocktake.commit}, the storekeeper's permission), since
@@ -110,6 +110,19 @@ class StockMinimumService {
     @Transactional
     View setEveryBranch(UUID productId, SetRequest r) {
         requireProduct(productId);
+        // The level for every branch reaches branches a branch-scoped catalogue manager does not cover: refused for
+        // them.
+        boolean everywhere = CurrentPrincipal.require()
+                .scopeOf(CATALOGUE)
+                .map(Principal.BranchScope::all)
+                .orElse(false);
+        if (!everywhere) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "Only someone who manages the catalogue in every branch can set the level for every shop and store.");
+        }
         write(productId, null, r.minQty());
         return view(productId);
     }
@@ -150,6 +163,10 @@ class StockMinimumService {
                     new FieldProblem("min_qty", "invalid", "Use a quantity above 0 with at most three places.")));
         }
         BigDecimal before = level(productId, branchId);
+        if (minQty == null ? before == null : before != null && before.compareTo(minQty) == 0) {
+            // Nothing changes: no write and no audit row (removing a level that never existed, or saving the same one).
+            return;
+        }
         UUID by = CurrentPrincipal.require().userId();
         if (minQty == null) {
             jdbc.sql("DELETE FROM retail_stock_minimums WHERE product_id = ? AND branch_id IS NOT DISTINCT FROM ?")

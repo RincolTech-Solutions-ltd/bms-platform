@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { type NotificationSettings, type NotificationSettingsChange, notificationSettingsApi } from '../../../api/notification-settings';
 import { useStaff } from '../context';
 
-// Business set-up > Notifications (issue #412, ADR-056): what the business sends by push, each everyday notice on or off, and when
+// Business set-up > Notifications (issue #412, ADR-057): what the business sends by push, each everyday notice on or off, and when
 // the daily closing summary goes. Everyone still turns notifications on for their own device in Notifications and app; this page only
 // says what the business sends. The safeguard notices (a sale voided, a write-off alone, an approval limit raised, two-step sign-in
 // relaxed, an approval waiting, stock on its way) are always sent and are not listed here.
@@ -18,6 +18,9 @@ export const SWITCHES: { key: Switch; title: string; words: string }[] = [
   { key: 'credit_due', title: 'Credit payments to collect', words: 'Each morning when a credit sale falls due or becomes overdue, to the administrators and the supervisors of that shop.' },
   { key: 'daily_summary', title: 'Daily closing summary', words: 'The number of sales at each shop today, to the owner and the administrators.' },
 ];
+
+/** The job wakes on every quarter hour, so the summary time is a quarter hour, at the latest 23:30. */
+export const QUARTER_HOUR = /^(([01][0-9]|2[0-2]):(00|15|30|45)|23:(00|15|30))$/;
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Try again.');
 
@@ -99,19 +102,20 @@ export function BusinessNotificationsScreen() {
       <section className="rt-card stack" aria-labelledby="business-notify-time" data-tour="business-notify-time">
         <h2 id="business-notify-time">When the daily summary goes</h2>
         <label htmlFor="summary-time">Time ({current.timezone ?? 'Africa/Kampala'})</label>
-        <input id="summary-time" type="time" value={shownTime} disabled={!canChange || busy} onChange={(e) => setTime(e.target.value)} />
+        <input id="summary-time" type="time" step={900} max="23:30" value={shownTime} disabled={!canChange || busy} onChange={(e) => setTime(e.target.value)} />
         {canChange && (
           <p>
             <button
               type="button"
               className="rt-primary"
-              disabled={busy || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(shownTime) || shownTime === current.daily_summary_time}
+              disabled={busy || !QUARTER_HOUR.test(shownTime) || shownTime === current.daily_summary_time}
               onClick={() => void save({ daily_summary_time: shownTime }, `The daily summary now goes at ${shownTime}.`)}
             >
               Save the time
             </button>
           </p>
         )}
+        <p className="hint">A quarter hour, at the latest 23:30. If the server was down at that time, the summary comes the next morning as yesterday's.</p>
         {!canChange && <p className="hint">Only an administrator can change these.</p>}
       </section>
     </main>

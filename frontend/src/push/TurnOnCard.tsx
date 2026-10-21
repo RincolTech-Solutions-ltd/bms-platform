@@ -4,7 +4,7 @@ import { getServerState, getState, subscribe } from '../install/install';
 import { type PushState, createPush } from './push';
 import { dueToAsk, readAsk, recordDone, recordNotNow } from './turn-on';
 
-// "Get told when something needs you?" (issue #412, ADR-056). A one-tap card in the staff area, shown the first time someone opens
+// "Get told when something needs you?" (issue #412, ADR-057). A one-tap card in the staff area, shown the first time someone opens
 // the installed app or right after they accept the install, while this device can have notifications and does not yet. The Turn on
 // button is the tap a browser requires before it may ask for permission: nothing is asked when the card appears. Not now asks again
 // after a few days, at most a few times (turn-on.ts). Once allowed, the staff area re-registers the device quietly on every visit

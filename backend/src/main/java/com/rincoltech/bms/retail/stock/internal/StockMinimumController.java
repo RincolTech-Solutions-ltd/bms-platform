@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** {@code /api/v1/retail/products/{product_id}/stock-minimum}: the low-stock level of an item (issue #412, ADR-056). */
+/** {@code /api/v1/retail/products/{product_id}/stock-minimum}: the low-stock level of an item (issue #412, ADR-057). */
 @RestController
 @RequestMapping(
         path = "/api/v1/retail/products/{product_id}/stock-minimum",

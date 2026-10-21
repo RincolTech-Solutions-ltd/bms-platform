@@ -1,11 +1,11 @@
-# ADR-056: Everyday push notices, a one-tap turn-on card, and a low-stock minimum per item with the pace rule beside it
+# ADR-057: Everyday push notices, a one-tap turn-on card, and a low-stock minimum per item with the pace rule beside it
 
 ## Status
 
 Proposed (owner request, issue #412, 21 Oct 2026). Extends ADR-050 (Web Push) without changing any of its decisions, and
 supersedes the "per-product reorder level can follow" part of ADR-029 (the fixed threshold of 5 on the Stock list's Low stock tab
 is unchanged). Builds on ADR-008 (db-scheduler), ADR-017 (per-permission branch scope), ADR-033 (tenant settings groups), ADR-048
-(stores) and ADR-052 (customer orders). The number is the next free one; if another pull request takes 056 first, this file is
+(stores) and ADR-052 (customer orders). The number is the next free one; if another pull request takes 057 first, this file is
 renumbered at merge. The migration is `V76` and is renamed at merge in the same way.
 
 ## Context
@@ -41,13 +41,17 @@ sales has no pace at all; and neither rule alone catches both.
    - `retail.order_out_for_delivery` and `retail.order_delivered`: to the person who took the order, unless they did the step.
    - `retail.low_stock`: an item below its level at a branch (decision 4), to the holders of `retail.stock.read` at that branch
      and the administrators, at most once per item, branch and day (the outbox key carries the day). Judged after any movement
-     that takes stock out, inside a savepoint, so a failure never fails the sale.
-   - `retail.credit_due` and `retail.credit_due_branch`: each morning from 08:00 on the business's clock, when a credit sale falls
-     due today or fell overdue yesterday: one notice to the administrators over the whole business, and one per shop to the
+     that takes stock out, inside a savepoint, so a failure never fails the sale. A branch with nothing left reads "out of stock"
+     whichever rule tripped.
+   - `retail.credit_due` and `retail.credit_due_branch`: each morning between 08:00 and 12:00 on the business's clock (the
+     notice says "today", so a server down all morning does not send it late; the next morning's counts carry what is overdue),
+     when a credit sale falls due today or fell overdue yesterday: one notice to the administrators over the whole business, and one per shop to the
      holders of `retail.sale.all_sellers` given for that shop (the Supervisor of #404; no role holds it before that lands). Counts
      only.
-   - `retail.daily_summary`: at the time the business sets (20:00 by default), to the administrators: the number of sales of the
-     day at each shop. No amount, because a notification lies on a lock screen; a tap opens the day's sales, where the totals show
+   - `retail.daily_summary`: at the time the business sets (a quarter hour up to 23:30, 20:00 by default), to the
+     administrators: the number of sales of the day at each shop. A summary whose time passed while the server was down goes after
+     midnight, before 12:00, as `retail.daily_summary_late` ("Yesterday's sales"), only for a business that has had a summary
+     before, so a first release sends none. No amount, because a notification lies on a lock screen; a tap opens the day's sales, where the totals show
      to those who may see them, and cost and profit never appear in any of these notices.
 3. **Per-business settings** are the tenant settings group `notifications` (ADR-033's mechanism, stored in the settings row,
    versioned and audited): `new_orders`, `order_updates`, `low_stock`, `credit_due`, `daily_summary` (on unless switched off) and
@@ -58,15 +62,19 @@ sales has no pace at all; and neither rule alone catches both.
    a branch's own level, which wins. A variant is a product (ADR-051), so each size and colour has its own. An item at a branch is
    low when **either** rule trips, whichever comes first (`LowStockRule`, shared by the push and Stock health): below the level
    that applies, or, at the pace of the last 30 days, fewer than the lead days of cover (14 unless Stock health asks for another
-   number). No level means the pace rule alone, no sales means the level alone, so nothing goes silent. The words say which rule
+   number), the pace read as Stock health reads it, from the lines of completed sales, so a voided sale never counts. No level
+   means the pace rule alone, no sales means the level alone, so nothing goes silent. The words say which rule
    tripped: "below your minimum of 10", "about 4 days from running out at this pace". The level for every branch is set by holders
-   of `retail.catalogue.manage`; a branch's own level also by whoever may commit a stock-take at that branch
+   of `retail.catalogue.manage` in every branch (a branch-scoped holder is refused, since the level reaches branches they do not
+   cover); a branch's own level also by whoever may commit a stock-take at that branch
    (`retail.stocktake.commit`, the Storekeeper's permission in #403). Routes `GET`, `PUT /retail/products/{id}/stock-minimum` and
-   `PUT .../branches/{branch_id}`; the item's page and each reorder row on Stock health have "Warn me when stock is below".
+   `PUT .../branches/{branch_id}`; removing a level that does not exist, or saving the same one, writes nothing and no audit row;
+   the item's page and each reorder row on Stock health have "Warn me when stock is below".
 5. **Stock health's reorder list** uses the same rule and says which rule put each row there (`low_by`, `low_words`, `min_qty`);
    the suggestion reaches the cover days at the pace and at least the level. The days-of-cover list is unchanged.
-6. **Each daily notice is prepared once a day.** The job `retail.daily-notices` wakes every 15 minutes (nothing at all while the
-   server has no push keys) and, per active retail tenant, takes a row of `retail_notice_runs` (tenant, kind, day) before it
+6. **Each daily notice is prepared once a day.** The job `retail.daily-notices` runs on a cron of every quarter hour on the
+   Kampala clock, so a quarter-hour time is always met and never skipped by a drifting delay (nothing at all while the server
+   has no push keys) and, per active retail tenant, takes a row of `retail_notice_runs` (tenant, kind, day) before it
    prepares a notice, so later ticks of the day cost one insert that does nothing.
 
 ## Consequences

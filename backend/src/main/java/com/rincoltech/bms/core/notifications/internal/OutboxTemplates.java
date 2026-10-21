@@ -349,7 +349,7 @@ class OutboxTemplates {
                     new Template(
                             "An approval is waiting for you",
                             "{action_label} is waiting for your decision. Open Approvals to see it.")),
-            // Issue #412, ADR-056: the everyday notices. Same lock-screen rule: no customer's name or phone, no amount.
+            // Issue #412, ADR-057: the everyday notices. Same lock-screen rule: no customer's name or phone, no amount.
             Map.entry(
                     "retail.order_new",
                     new Template(
@@ -382,7 +382,11 @@ class OutboxTemplates {
                                     + " all. Open Credit control to follow them up.")),
             Map.entry(
                     "retail.daily_summary",
-                    new Template("Today's sales, {day}", "{shops}. Open the day's sales to see the totals.")));
+                    new Template("Today's sales, {day}", "{shops}. Open the day's sales to see the totals.")),
+            // The summary of a day whose closing time passed while the server was down, sent the next morning.
+            Map.entry(
+                    "retail.daily_summary_late",
+                    new Template("Yesterday's sales, {day}", "{shops}. Open the sales to see the totals.")));
 
     private static final Map<String, Template> TELEGRAM = Map.of(
             "onboarding.operator_alert",

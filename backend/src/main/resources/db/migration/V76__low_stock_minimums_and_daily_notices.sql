@@ -1,5 +1,5 @@
 -- V76: the low-stock minimum of an item, per shop or store if wanted, and the record of the daily push notices
--- (issue #412, ADR-056).
+-- (issue #412, ADR-057).
 --
 -- Main is at V72; V73 and V74 are claimed by the retail roles (#403, #404) and V75 possibly by the operator screens (#407),
 -- so this takes V76. Flyway runs with outOfOrder off (AGENTS.md): at merge this file is renamed to the highest number on main

@@ -2001,7 +2001,7 @@ Built: customer orders (migration `V70`, renamed at merge in merge order). Three
 
 `retail_stock_balances` gains `reserved_qty numeric(14,3) NOT NULL DEFAULT 0` with the check `retail_stock_balances_reserved_positive` (added `NOT VALID`, then validated): what open orders keep aside of the balance, changed only by `StockLedger.reserve` and `release` under the balance row's lock in the transaction of the order step. A sale, usage, damage, transfer out or goods sent back to a supplier may not take `qty` below `reserved_qty` (422 `insufficient_stock`); a stock-take may. Reservations post nothing and add no movement, so the reconciliation of balances against movements is unchanged. The chart gains 4120 `delivery_income` (income, credit normal) through the seed function of V64 with one row added; tenants that switched retail on earlier get it in the same migration. On delivery the fee is one entry of its own, source type `retail.customer_order`: debit the account of the method it was paid by (cash on hand, mobile money or bank), credit `delivery_income`; the items are an ordinary sale (`retail_sales`) with its two entries. The file sets `lock_timeout` to five seconds as its first statement. ADD COLUMN with a constant default rewrites nothing but holds an access exclusive lock on the balances until the commit; the new tables are empty.
 
-### 6.11.3d Low-stock levels and the daily notices (FR-RET-63, FR-NTF-24, issue #412, ADR-056, V76)
+### 6.11.3d Low-stock levels and the daily notices (FR-RET-63, FR-NTF-24, issue #412, ADR-057, V76)
 
 Built: migration `V76` (renamed at merge in merge order). Two tables, forced row-level security with the standard policy.
 

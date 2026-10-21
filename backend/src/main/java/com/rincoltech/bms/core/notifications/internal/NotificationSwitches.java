@@ -22,7 +22,8 @@ class NotificationSwitches implements PushPreferences {
             "retail.low_stock", LOW_STOCK,
             "retail.credit_due", CREDIT_DUE,
             "retail.credit_due_branch", CREDIT_DUE,
-            "retail.daily_summary", DAILY_SUMMARY);
+            "retail.daily_summary", DAILY_SUMMARY,
+            "retail.daily_summary_late", DAILY_SUMMARY);
 
     private final ModuleSettings settings;
     private final VapidKeys keys;

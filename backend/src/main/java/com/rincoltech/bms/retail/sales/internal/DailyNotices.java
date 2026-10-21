@@ -19,7 +19,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
- * The two daily push notices of retail (issue #412, ADR-056), prepared for the bound tenant by the job {@link DailyNoticeJobs}
+ * The two daily push notices of retail (issue #412, ADR-057), prepared for the bound tenant by the job {@link DailyNoticeJobs}
  * every 15 minutes, each at most once a day (a row in {@code retail_notice_runs} is taken first):
  *
  * <ul>
@@ -36,6 +36,9 @@ import org.springframework.stereotype.Component;
 class DailyNotices {
 
     static final int CREDIT_HOUR = 8;
+    /** Neither the morning notice nor a missed summary of yesterday is sent from this hour on. */
+    static final int CREDIT_CUTOFF_HOUR = 12;
+
     static final String ADMINS = "core.settings.manage";
     static final String SUPERVISORS = "retail.sale.all_sellers";
 
@@ -65,16 +68,39 @@ class DailyNotices {
         ZoneId zone = tenant.profile().timezone();
         LocalDate today = LocalDate.ofInstant(now, zone);
         LocalTime time = LocalTime.ofInstant(now, zone);
+        // The morning notice says "today": after the cut-off (a server down all morning) it is not sent late that day;
+        // the
+        // next morning's counts still carry what is overdue.
         if (!time.isBefore(LocalTime.of(CREDIT_HOUR, 0))
+                && time.isBefore(LocalTime.of(CREDIT_CUTOFF_HOUR, 0))
                 && preferences.on(PushPreferences.CREDIT_DUE)
                 && claim("credit_due", today)) {
             creditDue(today);
         }
-        if (!time.isBefore(preferences.dailySummaryTime())
-                && preferences.on(PushPreferences.DAILY_SUMMARY)
-                && claim("daily_summary", today)) {
-            summary(today);
+        if (!preferences.on(PushPreferences.DAILY_SUMMARY)) {
+            return;
         }
+        // A summary that was due yesterday and never prepared (the server was down at closing time) goes after
+        // midnight, as
+        // yesterday's, until the cut-off; only for a business that has had a summary before, so a first release sends
+        // none.
+        LocalDate yesterday = today.minusDays(1);
+        if (time.isBefore(LocalTime.of(CREDIT_CUTOFF_HOUR, 0))
+                && hadASummaryBefore(yesterday)
+                && claim("daily_summary", yesterday)) {
+            summary(yesterday, true);
+        }
+        if (!time.isBefore(preferences.dailySummaryTime()) && claim("daily_summary", today)) {
+            summary(today, false);
+        }
+    }
+
+    /** True when a summary was prepared for this business on a day before {@code day}. */
+    private boolean hadASummaryBefore(LocalDate day) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM retail_notice_runs WHERE kind = 'daily_summary' AND run_on < ?)")
+                .param(Date.valueOf(day))
+                .query(Boolean.class)
+                .single();
     }
 
     /** True for the one run that records the day; every later tick of the day finds the row and does nothing. */
@@ -140,7 +166,7 @@ class DailyNotices {
 
     record ShopDay(String name, int sales) {}
 
-    private void summary(LocalDate today) {
+    private void summary(LocalDate today, boolean late) {
         List<ShopDay> shops = jdbc.sql("""
                         SELECT b.name, count(s.id) AS sales
                           FROM branches b
@@ -157,7 +183,7 @@ class DailyNotices {
             return;
         }
         events.publishEvent(new PushNotice(
-                "retail.daily_summary",
+                late ? "retail.daily_summary_late" : "retail.daily_summary",
                 today.toString(),
                 new PushNotice.Holders(ADMINS, null, null),
                 Map.of("day", DAY.format(today), "shops", shopsLine(shops), "path", "/staff/retail/sales")));

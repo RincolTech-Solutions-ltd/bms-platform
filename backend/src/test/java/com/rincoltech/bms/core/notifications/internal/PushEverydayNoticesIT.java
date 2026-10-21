@@ -32,7 +32,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The everyday push notices of issue #412 (ADR-056), each publisher driven through its own route or job, and each recipient
+ * The everyday push notices of issue #412 (ADR-057), each publisher driven through its own route or job, and each recipient
  * rule: a new remote order to the staff of its shop only (not other shops, not the administrators, not the taker, never for a
  * walk-in order); out for delivery and delivered to the person who took the order, unless they did it; low stock by the
  * minimum (the branch's own level first) or by the pace, to that branch's stock readers and the administrators, once per item
@@ -336,6 +336,40 @@ class PushEverydayNoticesIT extends IntegrationTest {
     }
 
     @Test
+    void aVoidedSaleDoesNotCountInThePaceAsStockHealthDoesNot() {
+        UUID product = stocked("EV-LOW-7", "10");
+        ResponseEntity<JsonNode> first = retail.sell(t.headOffice(), "cash", product, "6");
+        assertThat(first.getStatusCode()).as("%s", first.getBody()).isEqualTo(HttpStatus.CREATED);
+        // 4 left after 6 sold: 4 x 30 is not under 14 x 6, so nobody is told yet.
+        assertThat(told("retail.low_stock")).isEmpty();
+        ResponseEntity<JsonNode> voided = retail.post(
+                "/sales/" + RetailTestSupport.id(first) + "/void", Map.of("reason", "Test wrong item"), ADMIN);
+        assertThat(voided.getStatusCode()).as("%s", voided.getBody()).isEqualTo(HttpStatus.OK);
+        sell(t.headOffice(), product, "6");
+        // 4 left after 6 sold that count (the voided 6 do not): still not low. Counting the void would make it 12 sold,
+        // low.
+        assertThat(told("retail.low_stock")).isEmpty();
+    }
+
+    @Test
+    void anEmptyShelfReadsOutOfStock() {
+        UUID product = stocked("EV-LOW-8", "10");
+        minimum(product, null, "5");
+        sell(t.headOffice(), product, "10");
+        assertThat(param("retail.low_stock", "reason")).isEqualTo("out of stock");
+    }
+
+    @Test
+    void salesAtTheSameMomentQueueOneLowStockRowForEachPerson() throws Exception {
+        UUID product = stocked("EV-LOW-9", "20");
+        minimum(product, null, "15");
+        List<org.springframework.http.HttpStatusCode> statuses =
+                Api.race(4, () -> retail.sell(t.headOffice(), "cash", product, "2"));
+        assertThat(Api.count(statuses, HttpStatus.CREATED)).isEqualTo(4);
+        assertThat(told("retail.low_stock")).containsExactlyInAnyOrder(user(hqSeller), user(admin));
+    }
+
+    @Test
     void aBusinessThatSwitchedLowStockOffTellsNobody() {
         UUID product = stocked("EV-LOW-6", "10");
         minimum(product, null, "5");
@@ -379,6 +413,14 @@ class PushEverydayNoticesIT extends IntegrationTest {
     }
 
     @Test
+    void aServerDownAllMorningSendsNoLateCreditNotice() {
+        creditSaleDue(today());
+        // The first tick of the day comes after the cut-off: the notice says "today" and is not sent late.
+        dailyAt(today(), LocalTime.of(12, 30));
+        assertThat(told("retail.credit_due")).isEmpty();
+    }
+
+    @Test
     void nothingDueTellsNobody() {
         creditSaleDue(today().plusDays(10));
         dailyAt(today(), LocalTime.of(9, 0));
@@ -408,6 +450,40 @@ class PushEverydayNoticesIT extends IntegrationTest {
     }
 
     @Test
+    void aSummaryAtHalfPastElevenGoesBeforeMidnight() {
+        switchSetting(Map.of("daily_summary_time", "23:30"));
+        dailyAt(today(), LocalTime.of(23, 15));
+        assertThat(told("retail.daily_summary")).isEmpty();
+        dailyAt(today(), LocalTime.of(23, 30));
+        assertThat(told("retail.daily_summary")).containsExactly(user(admin));
+        // After midnight nothing is owed: yesterday's went.
+        dailyAt(today().plusDays(1), LocalTime.of(0, 15));
+        assertThat(told("retail.daily_summary_late")).isEmpty();
+    }
+
+    @Test
+    void aSummaryMissedWhileTheServerWasDownGoesNextMorningAsYesterdays() {
+        // A business that had its summary before: day one at closing time.
+        dailyAt(today(), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(1);
+        // Day two: the server is down all evening, so no tick reaches 20:00. It restarts after midnight.
+        dailyAt(today().plusDays(2), LocalTime.of(0, 15));
+        assertThat(told("retail.daily_summary_late")).containsExactly(user(admin));
+        // Once only, and the day after's own summary still goes at its time.
+        dailyAt(today().plusDays(2), LocalTime.of(0, 30));
+        assertThat(told("retail.daily_summary_late")).hasSize(1);
+        dailyAt(today().plusDays(2), LocalTime.of(20, 0));
+        assertThat(told("retail.daily_summary")).hasSize(2);
+    }
+
+    @Test
+    void aFirstReleaseSendsNoLateSummary() {
+        // No summary was ever prepared for this business: nothing is caught up after midnight.
+        dailyAt(today(), LocalTime.of(0, 15));
+        assertThat(told("retail.daily_summary_late")).isEmpty();
+    }
+
+    @Test
     void aBusinessThatSwitchedTheSummaryOffGetsNone() {
         switchSetting(Map.of("daily_summary", false));
         dailyAt(today(), LocalTime.of(21, 0));
@@ -429,6 +505,13 @@ class PushEverydayNoticesIT extends IntegrationTest {
         assertThat(settings(HttpMethod.PUT, Map.of("daily_summary_time", "25:00"), Map.of("If-Match", etag))
                         .getStatusCode())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        // The job wakes on the quarter hour: a time between two, or after 23:30, is refused.
+        for (String time : List.of("20:07", "23:45")) {
+            assertThat(settings(HttpMethod.PUT, Map.of("daily_summary_time", time), Map.of("If-Match", etag))
+                            .getStatusCode())
+                    .as(time)
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        }
         assertThat(settings(HttpMethod.PUT, Map.of("low_stock", false), Map.of())
                         .getStatusCode())
                 .isEqualTo(HttpStatus.PRECONDITION_REQUIRED);

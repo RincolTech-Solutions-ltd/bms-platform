@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { type StockMinimum, type StockMinimumBranch, parseLevel, showLevel, stockMinimumApi } from '../../../api/stock-minimum';
 import { Problem } from './ui';
 
-// "Warn me when stock is below" on an item's page (issue #412, ADR-056). One level for every shop and store, and a different one for a
+// "Warn me when stock is below" on an item's page (issue #412, ADR-057). One level for every shop and store, and a different one for a
 // chosen shop or store. With no level an item is still watched by the pace it sells at (lead days of cover), so nothing goes silent;
 // the low-stock notification and the Stock health page use both rules, whichever trips first. Each size or colour of an item is its
 // own product and has its own level. Not a nested form: the item form around it saves separately.

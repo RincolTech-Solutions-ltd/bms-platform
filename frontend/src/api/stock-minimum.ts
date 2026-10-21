@@ -2,7 +2,7 @@ import { api } from './client';
 import { unwrap } from './retail';
 import type { components } from './schema';
 
-// "Warn me when stock is below" (issue #412, ADR-056): an item's low-stock level for every shop and store, and a branch's own level
+// "Warn me when stock is below" (issue #412, ADR-057): an item's low-stock level for every shop and store, and a branch's own level
 // where it should differ. Read with the stock; the level for every branch is the catalogue manager's, a branch's own level also that
 // of whoever counts the stock there. Quantities travel as strings in the item's unit, three places.
 

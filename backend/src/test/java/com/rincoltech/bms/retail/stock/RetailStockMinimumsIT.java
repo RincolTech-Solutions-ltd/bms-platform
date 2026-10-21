@@ -22,7 +22,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The low-stock minimum of an item (issue #412, ADR-056): set for every branch by a catalogue manager, a branch's own level
+ * The low-stock minimum of an item (issue #412, ADR-057): set for every branch by a catalogue manager, a branch's own level
  * also by whoever may commit a stock-take there (the storekeeper's permission) and by nobody else; the branch's own level
  * wins; and the Stock health page's reorder list judges by both rules of {@link LowStockRule}, whichever trips first, saying
  * which one did. Fabricated items and quantities.
@@ -108,6 +108,37 @@ class RetailStockMinimumsIT extends IntegrationTest {
         assertThat(view.get("can_set_every_branch").asBoolean()).isFalse();
         assertThat(view.get("branches")).hasSize(1);
         assertThat(view.get("branches").get(0).get("can_set").asBoolean()).isTrue();
+    }
+
+    @Test
+    void aCatalogueManagerOfOneBranchCannotSetTheLevelForEveryBranch() {
+        UUID product = api.product("MIN-5", 600, 1_000);
+        String hq = t.headOffice().toString();
+        assertThat(put(product, null, "5", ADMIN, hq).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // Their own branch's level, yes.
+        assertThat(put(product, t.headOffice(), "5", ADMIN, hq).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    long auditRows() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = 'retail.stock_minimum.changed'")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
+    }
+
+    @Test
+    void removingALevelThatNeverExistedOrSavingTheSameOneWritesNoAuditRow() {
+        UUID product = api.product("MIN-6", 600, 1_000);
+        assertThat(put(product, null, null, ADMIN, "*").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(put(product, t.headOffice(), null, ADMIN, "*").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(auditRows()).isZero();
+        put(product, null, "5", ADMIN, "*");
+        put(product, null, "5.000", ADMIN, "*");
+        assertThat(auditRows()).isEqualTo(1);
+        put(product, null, null, ADMIN, "*");
+        assertThat(auditRows()).isEqualTo(2);
     }
 
     @Test

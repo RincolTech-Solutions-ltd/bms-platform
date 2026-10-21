@@ -5,7 +5,7 @@ import java.math.RoundingMode;
 import java.util.Optional;
 
 /**
- * When an item at a shop or store is low (issue #412, ADR-056): two rules, whichever trips first.
+ * When an item at a shop or store is low (issue #412, ADR-057): two rules, whichever trips first.
  *
  * <ul>
  *   <li>the <b>minimum</b>: the stock is below the level set for the item at that branch (the branch's own level, else the
@@ -35,26 +35,32 @@ public final class LowStockRule {
         String words();
     }
 
-    /** Below the level set for the item. */
-    public record BelowMinimum(BigDecimal minQty) implements Verdict {
+    /** Below the level set for the item; {@code empty} when nothing is left at all. */
+    public record BelowMinimum(BigDecimal minQty, boolean empty) implements Verdict {
 
         @Override
         public String words() {
-            return "below your minimum of " + plain(minQty);
+            return empty ? OUT_OF_STOCK : "below your minimum of " + plain(minQty);
         }
     }
 
-    /** At the recent pace it runs out within the lead days; {@code daysLeft} is rounded down. */
-    public record RunningOut(int daysLeft) implements Verdict {
+    /** At the recent pace it runs out within the lead days; {@code daysLeft} is rounded down; {@code empty} when none is left. */
+    public record RunningOut(int daysLeft, boolean empty) implements Verdict {
 
         @Override
         public String words() {
+            if (empty) {
+                return OUT_OF_STOCK;
+            }
             if (daysLeft < 1) {
                 return "about to run out at this pace";
             }
             return "about " + daysLeft + (daysLeft == 1 ? " day" : " days") + " from running out at this pace";
         }
     }
+
+    /** The words for a branch with none left (a balance of zero or below), whichever rule tripped. */
+    public static final String OUT_OF_STOCK = "out of stock";
 
     /**
      * @param qty the stock at the branch (a negative balance counts as none)
@@ -66,7 +72,7 @@ public final class LowStockRule {
     public static Optional<Verdict> judge(BigDecimal qty, BigDecimal minQty, BigDecimal soldInPace, int leadDays) {
         BigDecimal left = qty.max(BigDecimal.ZERO);
         if (minQty != null && qty.compareTo(minQty) < 0) {
-            return Optional.of(new BelowMinimum(minQty));
+            return Optional.of(new BelowMinimum(minQty, left.signum() == 0));
         }
         if (soldInPace != null
                 && soldInPace.signum() > 0
@@ -76,7 +82,7 @@ public final class LowStockRule {
             int days = left.multiply(BigDecimal.valueOf(PACE_DAYS))
                     .divide(soldInPace, 0, RoundingMode.DOWN)
                     .intValueExact();
-            return Optional.of(new RunningOut(days));
+            return Optional.of(new RunningOut(days, left.signum() == 0));
         }
         return Optional.empty();
     }
