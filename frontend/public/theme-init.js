@@ -17,7 +17,7 @@
   var theme = dark ? 'dark' : 'light';
   var root = document.documentElement;
   root.setAttribute('data-theme', theme);
-  root.setAttribute('data-theme-choice', choice);
+  root.style.colorScheme = theme;
   var meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', colours[theme]);
 })();

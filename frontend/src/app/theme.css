@@ -53,7 +53,7 @@ body {
 .brand-bar img,
 .app-footer img {
   background: var(--color-logo-plate);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* The theme selector, at the right of the header (issue #429); the focus ring comes from forms.css. */
@@ -136,6 +136,7 @@ body {
   --color-primary: var(--brand);
   --color-on-primary: var(--brand-contrast);
   --color-primary-hover: color-mix(in srgb, var(--color-primary) 86%, #000);
+  --color-primary-active: color-mix(in srgb, var(--color-primary) 76%, #000);
   --color-accent: var(--rt-blue);
   --color-accent-tint: var(--rt-blue-tint);
   --color-link: var(--rt-blue-strong);
@@ -261,6 +262,8 @@ body {
   --color-on-inverse: #0e141b;
   --color-logo-plate: #ffffff;
   --color-hover: #1b2430;
+  --color-primary-hover: color-mix(in srgb, var(--color-primary) 86%, #fff); /* lighter, not darker, toward the dark page */
+  --color-primary-active: color-mix(in srgb, var(--color-primary) 76%, #fff);
   --viz-1-value: var(--rt-viz-blue-dark);
   --viz-2-value: var(--rt-viz-orange-dark);
   --viz-3-value: var(--rt-viz-green-dark);
@@ -272,6 +275,7 @@ body {
 
 /* A tenant colour in the dark theme: the accent family is lifted toward white so it reads on the dark surface. */
 :root[data-theme='dark'][style*='--brand'] {
+  --color-accent: color-mix(in srgb, var(--brand) 45%, #fff);
   --color-accent-tint: color-mix(in srgb, var(--brand) 18%, var(--color-surface));
   --color-info-tint: color-mix(in srgb, var(--brand) 18%, var(--color-surface));
   --color-link: color-mix(in srgb, var(--brand) 35%, #fff);

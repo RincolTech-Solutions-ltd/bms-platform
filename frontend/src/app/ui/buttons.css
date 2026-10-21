@@ -80,7 +80,7 @@ button[aria-disabled='true'],
 .btn-primary:active:not(:disabled),
 .btn-brand:active:not(:disabled),
 .rt-primary:active:not(:disabled) {
-  background: color-mix(in srgb, var(--color-primary) 76%, var(--rt-black));
+  background: var(--color-primary-active);
 }
 
 .btn-danger {

@@ -19,11 +19,23 @@ export function parseChoice(value: string | null | undefined): ThemeChoice {
   return value === 'light' || value === 'dark' ? value : 'system';
 }
 
+// What this visit chose, for when storage is blocked (some Safari and WebView settings): reads then fall back to it,
+// so the picker, the page and the system-follow listener stay in step. Working storage stays the source of truth.
+let current: ThemeChoice = 'system';
+let pinned = false;
+
+/** Forgets the in-memory choice (tests). */
+export function resetThemeMemory(): void {
+  current = 'system';
+  pinned = false;
+}
+
 export function readChoice(): ThemeChoice {
+  if (pinned) return current;
   try {
     return parseChoice(window.localStorage.getItem(THEME_KEY));
   } catch {
-    return 'system';
+    return current;
   }
 }
 
@@ -44,18 +56,21 @@ export function applyTheme(choice: ThemeChoice, prefersDark = systemPrefersDark(
   const theme = resolveTheme(choice, prefersDark);
   const root = document.documentElement;
   root.setAttribute('data-theme', theme);
-  root.setAttribute('data-theme-choice', choice);
+  root.style.colorScheme = theme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOURS[theme]);
   return theme;
 }
 
 /** Remembers the choice on this device (System forgets it) and applies it. */
 export function saveChoice(choice: ThemeChoice): void {
+  current = choice;
   try {
     if (choice === 'system') window.localStorage.removeItem(THEME_KEY);
     else window.localStorage.setItem(THEME_KEY, choice);
+    pinned = false;
   } catch {
-    // Storage can be blocked; the choice still holds for this visit.
+    // Storage can be blocked; the choice still holds for this visit, from memory.
+    pinned = true;
   }
   applyTheme(choice);
   listeners.forEach((notify) => notify());
@@ -65,6 +80,7 @@ function subscribe(notify: () => void): () => void {
   listeners.add(notify);
   const onStorage = (event: StorageEvent) => {
     if (event.key === THEME_KEY || event.key === null) {
+      pinned = false;
       applyTheme(readChoice());
       notify();
     }

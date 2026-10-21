@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLATFORM_BRAND } from './branding';
 import { BrandBar } from './shell';
-import { THEME_COLOURS, THEME_KEY, applyTheme, parseChoice, resolveTheme } from './theme-mode';
+import { THEME_COLOURS, THEME_KEY, applyTheme, parseChoice, resetThemeMemory, resolveTheme } from './theme-mode';
 
 // The theme selector (issue #429): System, Light and Dark, remembered on the device, following the system
 // setting, set before the first paint (public/theme-init.js) and carried to the installed app's theme colour.
@@ -32,9 +32,10 @@ beforeEach(() => {
   dark = false;
   listeners = [];
   window.localStorage.clear();
+  resetThemeMemory();
   document.head.innerHTML = '<meta name="theme-color" content="#0077b6" />';
   root().removeAttribute('data-theme');
-  root().removeAttribute('data-theme-choice');
+  root().style.colorScheme = '';
   stubSystem();
 });
 afterEach(cleanup);
@@ -120,6 +121,15 @@ describe('the selector in the header', () => {
     render(<BrandBar brand={PLATFORM_BRAND} />);
     fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'dark' } });
     expect(root().getAttribute('data-theme')).toBe('dark');
+    expect(pickerValue()).toBe('dark');
+    // A fresh mount (the next navigation) still shows the choice, and the OS flipping does not throw it away.
+    cleanup();
+    render(<BrandBar brand={PLATFORM_BRAND} />);
+    expect(pickerValue()).toBe('dark');
+    expect(listeners).toHaveLength(0);
+    dark = false;
+    act(() => listeners.forEach((l) => l()));
+    expect(root().getAttribute('data-theme')).toBe('dark');
     vi.restoreAllMocks();
   });
 });
@@ -151,7 +161,7 @@ describe('the pre-paint script (no flash of the wrong theme)', () => {
     dark = systemDark;
     run();
     expect(root().getAttribute('data-theme')).toBe(theme);
-    expect(root().getAttribute('data-theme-choice')).toBe(choice);
+    expect(root().style.colorScheme).toBe(theme);
     expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe(THEME_COLOURS[theme as 'light' | 'dark']);
   });
 
@@ -161,10 +171,10 @@ describe('the pre-paint script (no flash of the wrong theme)', () => {
       if (saved) window.localStorage.setItem(THEME_KEY, saved);
       dark = systemDark;
       run();
-      const fromScript = [root().getAttribute('data-theme'), root().getAttribute('data-theme-choice')];
+      const fromScript = [root().getAttribute('data-theme'), root().style.colorScheme];
       root().removeAttribute('data-theme');
       applyTheme(parseChoice(saved), systemDark);
-      expect(fromScript).toEqual([root().getAttribute('data-theme'), root().getAttribute('data-theme-choice')]);
+      expect(fromScript).toEqual([root().getAttribute('data-theme'), root().style.colorScheme]);
     }
   });
 

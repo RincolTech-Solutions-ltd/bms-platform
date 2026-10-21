@@ -122,8 +122,8 @@ by keyboard, and the welcome tours point at it (`data-tour="theme-select"`, the 
   `dark`; System keeps nothing). It is never sent to the server: a person's browser profile on a device is the person.
 - **Follows the system by default.** While the choice is System the theme follows `prefers-color-scheme`, live.
 - **No flash.** `frontend/public/theme-init.js` is a blocking script in the `<head>` (a file, because the production CSP is
-  `script-src 'self'`). Before the first paint it sets `data-theme="light|dark"` and `data-theme-choice` on `<html>` and the
-  `theme-color` meta tag. The app's `src/app/theme-mode.ts` does the same afterwards and holds the same key and colours.
+  `script-src 'self'`). Before the first paint it sets `data-theme="light|dark"` and the inline `color-scheme` on `<html>` (so the canvas and scrollbars match the choice, not the
+  system, before the stylesheet lands) and the `theme-color` meta tag. The app's `src/app/theme-mode.ts` does the same afterwards and holds the same key and colours.
 - **One dark set.** `theme.css` has a single `:root[data-theme='dark']` block, so nothing repeats in a media query. The
   palette tokens (`--rt-*`) do not change with the theme; a stylesheet draws with the colour roles below, which do, and
   `design-guard.test.ts` fails a stylesheet that uses a palette token other than white text on a strong fill, black for a
@@ -131,11 +131,15 @@ by keyboard, and the welcome tours point at it (`data-tour="theme-select"`, the 
 - **The installed app's theme colour.** The `theme-color` meta tag is `#0077b6` in the light theme and `#0e141b` (the dark
   page) in the dark one, and changes with the choice. The manifest keeps `theme_color: #0077b6` and
   `background_color: #ffffff`, because a manifest is one static file: they colour only the launch splash, and the page's own
-  meta tag replaces the theme colour as soon as it loads.
+  meta tag replaces the theme colour as soon as it loads. **iOS limitation:** an installed iPhone app takes its status bar
+  from `apple-mobile-web-app-status-bar-style`, which stays `default` (a light bar) whatever the choice, so in Dark the
+  status bar of the installed iOS app stays light; Android and desktop browsers follow the `theme-color` meta tag.
+- **Blocked storage.** If the browser blocks `localStorage`, the choice is held in memory for the visit, so the picker, the
+  page and the system-follow listener stay in step until the app is closed.
 - **Logos.** A logo may be dark on transparent, so in the dark theme the brand bar and footer logos sit on a white plate
   (`--color-logo-plate`).
 
-Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in both themes; edges and the focus colour 3:1.
+Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in both themes; edges, the focus colour and the tenant accent 3:1.
 `src/app/ui/tokens.test.ts` proves each pair.
 
 | Role | Light | Dark |
@@ -148,6 +152,8 @@ Token pairs (light, dark). Every text role is 4.5:1 or more on its surface in bo
 | `--color-text` | `#1d2939` | `#e8edf3` |
 | `--color-text-muted` | `#5c6370` | `#a9b4c3` |
 | `--color-link`, `--color-focus` | `#0077b6` | `#5cc0f2` |
+| `--color-accent` (tenant stripe, active tab, chosen card edge; 3:1) | `--brand` | `--brand` 45% mixed into white |
+| `--color-primary-hover` / `-active` (primary button) | `--color-primary` mixed toward black | `--color-primary` mixed toward white |
 | `--color-accent-tint`, `--color-info-tint` | `#eef9fe` | `#10283a` |
 | `--color-danger` / `-tint` | `#b42318` / `#fef3f2` | `#f97066` / `#3b1614` |
 | `--color-success` / `-tint` | `#067647` / `#ecfdf3` | `#47cd89` / `#0f2c1e` |
@@ -167,7 +173,7 @@ dark surface at 3:1; every chart still carries its values in a table and on hove
 **Tenant colour in the dark theme.** `--brand` and `--brand-contrast` are untouched: buttons and badges keep the tenant
 fill with its 4.5:1 text. What a tenant colour draws as text or a line on the page is derived again, because a darkened mix
 cannot be read on a dark page: `--color-link` and `--color-focus` become `color-mix(in srgb, var(--brand) 35%, #fff)`
-(4.5:1 on the dark surface for any colour, tested down to black) and the tints mix 18% of `--brand` into the dark surface.
+(4.5:1 on the dark surface for any colour, tested down to black), `--color-accent` becomes `color-mix(in srgb, var(--brand) 45%, #fff)` (3:1 on the dark surface, tested for dark brands such as `#7a0019` and `#004d40`) and the tints mix 18% of `--brand` into the dark surface.
 
 ## Rules for a new screen
 

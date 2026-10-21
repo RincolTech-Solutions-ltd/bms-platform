@@ -155,10 +155,12 @@ describe('the dark theme tokens', () => {
     expect(dark).toMatch(/--viz-3-value:\s*var\(--rt-viz-green-dark\)/);
   });
 
+  const brandBlock = () => css.match(/:root\[data-theme='dark'\]\[style\*='--brand'\]\s*\{([^}]*)\}/)?.[1] ?? '';
+
   it('a tenant colour in the dark theme only changes the accent family, and its link and focus read on the dark surface for any colour', () => {
-    const block = css.match(/:root\[data-theme='dark'\]\[style\*='--brand'\]\s*\{([^}]*)\}/)?.[1] ?? '';
+    const block = brandBlock();
     const props = [...block.matchAll(/(--[a-z-]+):\s*([^;]+);/g)];
-    const allowed = new Set(['--color-accent-tint', '--color-info-tint', '--color-link', '--color-focus']);
+    const allowed = new Set(['--color-accent', '--color-accent-tint', '--color-info-tint', '--color-link', '--color-focus']);
     expect(props.length).toBeGreaterThan(0);
     for (const [, name, value] of props) {
       expect(allowed.has(name as string), `${name} must not change with the tenant colour`).toBe(true);
@@ -169,6 +171,14 @@ describe('the dark theme tokens', () => {
       const link = mix(parseHex(brand) as Rgb, 0.35, WHITE);
       expect(contrast(link, D_SURFACE), `${brand} as a link ${toHex(link)}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(link, mix(parseHex(brand) as Rgb, 0.18, D_SURFACE)), `${brand} link on its tint`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('a tenant accent (stripe, active tab, chosen card edge) is 3:1 on the dark surface for any colour', () => {
+    expect(brandBlock()).toMatch(/--color-accent:\s*color-mix\(in srgb, var\(--brand\) 45%, #fff\)/);
+    for (const brand of ['#000000', '#0d5c75', '#7a0019', '#004d40', '#ffffff', '#00adef']) {
+      const accent = mix(parseHex(brand) as Rgb, 0.45, WHITE);
+      expect(contrast(accent, D_SURFACE), `${brand} as an accent ${toHex(accent)}`).toBeGreaterThanOrEqual(3);
     }
   });
 
