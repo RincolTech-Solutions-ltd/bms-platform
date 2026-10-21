@@ -259,8 +259,11 @@ spring:
   config:
     activate:
       on-profile: server
-# Staging and production: JSON logs with request_id in every line (NFR-OBS-01).
+# Staging and production: JSON logs with request_id in every line (NFR-OBS-01). Every string of every line (message,
+# exception, stack trace, MDC) passes through the redaction filter first (NFR-SEC-08, ADR-058, issue #426).
 logging:
   structured:
     format:
       console: ecs
+    json:
+      customizer: com.rincoltech.bms.kernel.LogRedaction

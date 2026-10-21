@@ -13,8 +13,20 @@ name: bms
 
 x-app-image: &api-image ${API_IMAGE:?API_IMAGE is set by deploy.sh}
 
+# Container logs are capped and rotated (launch readiness M8, issue #426): Docker's local driver keeps
+# at most five files of 20 MB per container, compressed, so the 40 GB disk cannot fill with logs
+# (about 100 MB a container at worst). `docker compose logs` still reads them. The API's lines are
+# already redacted of personal data before they reach Docker (ADR-058).
+x-logging: &logging
+  logging:
+    driver: local
+    options:
+      max-size: 20m
+      max-file: "5"
+
 services:
   postgres:
+    <<: *logging
     image: ${POSTGRES_IMAGE:?pin it in .env}
     restart: unless-stopped
     environment:
@@ -48,6 +60,7 @@ services:
 
   # One-shot: `docker compose run --rm migrate`, run by deploy.sh before the app switches.
   migrate:
+    <<: *logging
     image: *api-image
     profiles: ["migrate"]
     command: ["migrate"]
@@ -61,6 +74,7 @@ services:
         condition: service_healthy
 
   api:
+    <<: *logging
     image: *api-image
     restart: unless-stopped
     environment:
@@ -167,6 +181,7 @@ services:
       start_period: 90s
 
   web:
+    <<: *logging
     image: ${WEB_IMAGE:?WEB_IMAGE is set by deploy.sh}
     restart: unless-stopped
     environment:
@@ -175,6 +190,7 @@ services:
     mem_limit: 64m
 
   proxy:
+    <<: *logging
     image: ${PROXY_IMAGE:?PROXY_IMAGE is set by deploy.sh}
     restart: unless-stopped
     environment:
