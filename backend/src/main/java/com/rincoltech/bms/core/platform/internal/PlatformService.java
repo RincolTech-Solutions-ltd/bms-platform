@@ -123,14 +123,14 @@ class PlatformService implements TenantProvisioning {
             params.add(module);
         }
         sql.append(" ORDER BY o.name, o.slug");
-        return jdbc.sql(sql.toString()).params(params).query(this::tenant).list();
+        return jdbc.sql(sql.toString()).params(params).query(this::tenantRow).list();
     }
 
     @Transactional(readOnly = true)
     TenantResponse tenant(UUID tenantId) {
         return jdbc.sql("SELECT * FROM platform_tenant_overview() WHERE id = ?")
                 .param(tenantId)
-                .query(this::tenant)
+                .query(this::tenantRow)
                 .optional()
                 .orElseThrow(ApiException::notFound);
     }
@@ -400,7 +400,7 @@ class PlatformService implements TenantProvisioning {
         return unique;
     }
 
-    private TenantResponse tenant(ResultSet rs, int n) throws SQLException {
+    private TenantResponse tenantRow(ResultSet rs, int n) throws SQLException {
         String slug = rs.getString("slug");
         return new TenantResponse(
                 rs.getObject("id", UUID.class),
