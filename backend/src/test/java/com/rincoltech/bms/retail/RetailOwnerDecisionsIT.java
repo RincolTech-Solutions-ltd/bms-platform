@@ -186,6 +186,15 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
         assertThat(dashboard.getStatusCode()).as("%s", dashboard.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(dashboard.getBody().get("today").get("sales_minor").asLong()).isEqualTo(21_000);
         noCost(dashboard.getBody(), "the supervisor's dashboard");
+        // Issue #428: a range follows the same scope, with no cost and no ranking of colleagues.
+        ResponseEntity<JsonNode> week = get("/reports/dashboard?period=7d", supervisor);
+        assertThat(week.getStatusCode()).as("%s", week.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(week.getBody().get("range").get("current").get("sales_minor").asLong())
+                .isEqualTo(21_000);
+        assertThat(week.getBody().get("range").get("best_shop").get("id").asString())
+                .isEqualTo(t.headOffice().toString());
+        assertThat(week.getBody().get("range").has("top_salesperson")).isFalse();
+        noCost(week.getBody(), "the supervisor's dashboard over 7 days");
         ResponseEntity<JsonNode> analysis = get("/reports/sales-analysis", supervisor);
         assertThat(analysis.getStatusCode()).as("%s", analysis.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(analysis.getBody().get("totals").get("sales_minor").asLong()).isEqualTo(21_000);
