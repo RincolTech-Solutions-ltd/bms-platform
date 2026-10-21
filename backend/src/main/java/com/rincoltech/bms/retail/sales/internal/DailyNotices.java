@@ -25,8 +25,9 @@ import org.springframework.stereotype.Component;
  * <ul>
  *   <li><b>credit payments</b>, from {@value #CREDIT_HOUR}:00 on the business's clock, when a credit sale falls due today or
  *       fell overdue yesterday: one notice to the administrators over every shop, and one per shop to the supervisors of
- *       that shop (the holders of {@code retail.sale.all_sellers} given for that branch; administrators hold it everywhere and
- *       hear the whole business once). Counts only;
+ *       that shop (the holders of {@code retail.sale.all_sellers} given for that branch, the Supervisor of #404; administrators
+ *       hold it everywhere through a branchless role and hear the whole business once; sellers and storekeepers do not
+ *       hold it). Counts only;
  *   <li>the <b>daily closing summary</b>, at the time the business set (20:00 by default), to the owner and the
  *       administrators: the number of sales of the day at each shop. A notification lies on a lock screen, so it carries no
  *       amount (ADR-050 decision 11); a tap opens the day's sales, where the totals are shown to those who may see them.

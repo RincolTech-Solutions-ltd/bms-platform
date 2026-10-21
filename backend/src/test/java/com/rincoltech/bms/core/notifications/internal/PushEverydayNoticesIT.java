@@ -36,7 +36,7 @@ import tools.jackson.databind.JsonNode;
  * rule: a new remote order to the staff of its shop only (not other shops, not the administrators, not the taker, never for a
  * walk-in order); out for delivery and delivered to the person who took the order, unless they did it; low stock by the
  * minimum (the branch's own level first) or by the pace, to that branch's stock readers and the administrators, once per item
- * and day; credit payments due to the administrators each morning, once; the daily summary at the business's time, once, with
+ * and day; credit payments due to the administrators each morning, once, and to the supervisors of that shop only; the daily summary at the business's time, once, with
  * counts and no amount; and the business's switches. Nothing is sent (the scheduler is off): the test reads the outbox rows.
  * Fabricated tenants, people, items and devices.
  */
@@ -395,12 +395,29 @@ class PushEverydayNoticesIT extends IntegrationTest {
 
     @Test
     void creditDueTodayTellsTheAdministratorsOnceFromEightInTheMorning() {
+        // The Supervisor of #404 (retail.sale.all_sellers at its branch) at the head office and at the second branch,
+        // and a
+        // storekeeper at the head office, all with devices.
+        UUID hqSupervisor = Api.staff(t, Api.email("ev-sup-hq"), new Role("retail_supervisor", t.headOffice()));
+        UUID otherShopSupervisor =
+                Api.staff(t, Api.email("ev-sup-b2"), new Role("retail_supervisor", t.secondBranch()));
+        UUID hqStorekeeper = Api.staff(t, Api.email("ev-store-hq"), new Role("retail_storekeeper", t.headOffice()));
+        device(hqSupervisor);
+        device(otherShopSupervisor);
+        device(hqStorekeeper);
         creditSaleDue(today());
         dailyAt(today(), LocalTime.of(7, 30));
         assertThat(told("retail.credit_due")).isEmpty();
         dailyAt(today(), LocalTime.of(8, 15));
         assertThat(told("retail.credit_due")).containsExactly(user(admin));
         assertThat(param("retail.credit_due", "due_count")).isEqualTo("1");
+        // The shop's notice: only the supervisor of the head office, where the sale is. Not the second branch's
+        // supervisor,
+        // not the sellers or the storekeeper, and not the administrator, whose branchless role hears the business-wide
+        // one.
+        assertThat(told("retail.credit_due_branch")).containsExactly(user(hqSupervisor));
+        assertThat(param("retail.credit_due_branch", "branch_id"))
+                .isEqualTo(t.headOffice().toString());
         assertThat(param("retail.credit_due", "credit_words")).isEqualTo("1 credit sale falls due today");
         dailyAt(today(), LocalTime.of(8, 30));
         assertThat(told("retail.credit_due")).hasSize(1);
@@ -418,10 +435,9 @@ class PushEverydayNoticesIT extends IntegrationTest {
                         .query(String.class)
                         .single())
                 .isEqualTo("1 credit sale is overdue in all");
-        // Sellers are not told: the supervisors of a shop (retail.sale.all_sellers at that branch, #404) are the only
-        // branch
-        // staff who hear it, and no role holds that permission on this database yet.
-        assertThat(told("retail.credit_due_branch")).isEmpty();
+        // The shop's notice that day goes to the head office's supervisor again, and to nobody else.
+        assertThat(told("retail.credit_due_branch")).containsExactly(user(hqSupervisor), user(hqSupervisor));
+        assertThat(told("retail.credit_due")).doesNotContain(user(hqSupervisor), user(otherShopSupervisor));
     }
 
     @Test

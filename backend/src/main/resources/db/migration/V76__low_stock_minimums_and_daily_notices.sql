@@ -1,9 +1,9 @@
 -- V76: the low-stock minimum of an item, per shop or store if wanted, and the record of the daily push notices
 -- (issue #412, ADR-057).
 --
--- Main is at V72; V73 and V74 are claimed by the retail roles (#403, #404) and V75 possibly by the operator screens (#407),
--- so this takes V76. Flyway runs with outOfOrder off (AGENTS.md): at merge this file is renamed to the highest number on main
--- plus one if the claims land in another order or not at all.
+-- Main is at V74 (the retail roles, #403 and #404); V75 is claimed by the operator screens (#413, issue #407), so this takes
+-- V76. Flyway runs with outOfOrder off (AGENTS.md): at merge this file keeps the highest number, renamed to the highest
+-- number on main plus one if #413 has not landed first (check `ls db/migration | tail`).
 --
 -- Expand only: two new, empty tables. Nothing that exists is changed, so the previous release runs unchanged on this schema.
 --

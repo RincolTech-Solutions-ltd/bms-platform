@@ -47,7 +47,7 @@ sales has no pace at all; and neither rule alone catches both.
    - `retail.credit_due` and `retail.credit_due_branch`: each morning between 08:00 and 12:00 on the business's clock (the
      notice says "today", so a server down all morning does not send it late; the next morning's counts carry what is overdue),
      when a credit sale falls due today or fell overdue yesterday: one notice to the administrators over the whole business, and one per shop to the
-     holders of `retail.sale.all_sellers` given for that shop (the Supervisor of #404; no role holds it before that lands). Counts
+     holders of `retail.sale.all_sellers` given for that shop (the Supervisor of #404, migration `V74`; sellers and storekeepers do not hold it, and the administrators, who hold it through a branchless role, hear only the business-wide notice). Counts
      only, in words that leave out a zero ("3 credit sales are overdue in all" when nothing falls due today).
    - `retail.daily_summary`: at the time the business sets (a quarter hour up to 23:30, 20:00 by default), to the
      administrators: the number of sales of the day at each shop. A summary whose time passed while the server was down goes after
@@ -100,7 +100,7 @@ sales has no pace at all; and neither rule alone catches both.
 
 **Watch for:**
 
-- Supervisors hear credit due only once `retail.sale.all_sellers` exists (#404); until then the branch notice reaches nobody and
-  the administrators' notice carries the whole business.
+- A shop's credit notice reaches only the supervisors given for that shop; a shop without one hears nothing of its own, and the
+  administrators' notice still carries the whole business.
 - A business that sells around midnight: the summary and the morning notice use the business's own clock and day.
 - The Stock list's Low stock tab still uses ADR-029's fixed 5; moving it to this rule is a separate change.
