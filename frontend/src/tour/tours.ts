@@ -971,6 +971,36 @@ export const twoStepPage: Tour = {
   ],
 };
 
+// Business set-up > Notifications for the business (issue #412): what the business sends by push, and when the daily summary goes.
+export const businessNotificationsPage: Tour = {
+  id: 'page-business-notifications',
+  version: 1,
+  title: 'This page: notifications for the business',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/setup/notifications',
+  steps: [
+    {
+      id: 'intro',
+      target: 'business-notify-intro',
+      title: 'What your staff are told',
+      body: 'BMS can tell your staff on their phones when something needs them. Each person still turns it on for their own phone.',
+    },
+    {
+      id: 'switches',
+      target: 'business-notify-switches',
+      title: 'Each notice on or off',
+      body: 'New orders, orders delivered, stock running low, credit to collect and the daily summary are all on until you switch one off.',
+    },
+    {
+      id: 'time',
+      target: 'business-notify-time',
+      title: 'The daily summary',
+      body: 'Choose when the owner and the administrators get the number of sales at each shop. It goes at 20:00 unless you change it.',
+    },
+  ],
+};
+
 export const branchRolesCapability: Tour = {
   id: 'capability-branch-roles',
   version: 1,
@@ -1520,7 +1550,7 @@ export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, notificationsPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, notificationsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;
