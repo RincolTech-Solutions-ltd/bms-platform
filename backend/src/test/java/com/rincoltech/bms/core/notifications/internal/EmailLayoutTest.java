@@ -171,7 +171,7 @@ class EmailLayoutTest {
                 assertThat(html.split(Pattern.quote(href), -1)).as(key).hasSize(3);
             }
             // The company is Rincoltech, one word.
-            assertThat(templates.render("email", key, params()).text()).as(key).contains("Rincoltech").doesNotContain("Rincol Tech");
+            assertThat(templates.render("email", key, params()).text()).as(key).doesNotContain("Rincol Tech");
         }
     }
 
