@@ -25,6 +25,7 @@ import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeePaymentRequ
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderEvent;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderPage;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ReportRow;
@@ -290,7 +291,8 @@ class CustomerOrdersService {
                         Cursor.encode(items.getLast().createdAt() + "|"
                                 + items.getLast().id()))
                 : null;
-        return new OrderPage(items.stream().map(h -> view(h, false)).toList(), next);
+        Set<UUID> mine = salesMadeByCaller(items);
+        return new OrderPage(items.stream().map(h -> view(h, false, mine)).toList(), next);
     }
 
     @Transactional(readOnly = true)
@@ -845,25 +847,40 @@ class CustomerOrdersService {
 
     /**
      * ADR-055 (the owner's decision of 21 October 2026): every seller of the branch sees the orders and their values, the shop's
-     * shared work, but the sale a colleague made on delivery is not linked: its id and number are left out unless the caller made
-     * it or may see every seller's sales there.
+     * shared work, but not a colleague's figures: the sale a colleague made on delivery is not linked (no id or number, and the
+     * history's note does not name it), and who took, moved or delivered the order is shown only for the caller's own steps,
+     * unless the caller may see every seller's sales there. The sales the caller made are found for a whole page at once.
      */
-    private boolean saleShown(Header h) {
-        if (h.saleId() == null) {
-            return false;
-        }
-        Principal principal = CurrentPrincipal.require();
-        if (principal.may(SalesSummaryService.ALL_SELLERS, h.branchId())) {
-            return true;
-        }
-        return salesRepo
-                .find(h.saleId(), false)
-                .map(x -> principal.userId().equals(x.sale().createdBy()))
-                .orElse(false);
+    private Set<UUID> salesMadeByCaller(List<Header> headers) {
+        List<UUID> ids =
+                headers.stream().map(Header::saleId).filter(Objects::nonNull).toList();
+        return repo.salesMadeBy(ids, CurrentPrincipal.require().userId());
     }
 
+    private static final java.util.regex.Pattern SALE_NOTE = java.util.regex.Pattern.compile("^Sale \\S+\\. ?");
+
     private Order view(Header h, boolean withHistory) {
-        boolean sale = saleShown(h);
+        return view(h, withHistory, salesMadeByCaller(List.of(h)));
+    }
+
+    private Order view(Header h, boolean withHistory, Set<UUID> mine) {
+        Principal principal = CurrentPrincipal.require();
+        boolean everyone = principal.may(SalesSummaryService.ALL_SELLERS, h.branchId());
+        boolean sale = h.saleId() != null && (everyone || mine.contains(h.saleId()));
+        UUID me = principal.userId();
+        List<OrderEvent> events = withHistory ? repo.events(h.id()) : null;
+        if (events != null && !everyone) {
+            events = events.stream()
+                    .map(e -> new OrderEvent(
+                            e.step(),
+                            sale || e.note() == null
+                                    ? e.note()
+                                    : SALE_NOTE.matcher(e.note()).replaceFirst(""),
+                            me.equals(e.byUser()) ? e.byUser() : null,
+                            me.equals(e.byUser()) ? e.byName() : null,
+                            e.at()))
+                    .toList();
+        }
         return new Order(
                 h.id(),
                 h.orderNo(),
@@ -881,7 +898,7 @@ class CustomerOrdersService {
                 h.itemsTotalMinor() + h.deliveryFeeMinor(),
                 h.notes(),
                 h.status(),
-                h.deliveredBy(),
+                everyone || sale || h.saleId() == null ? h.deliveredBy() : null,
                 h.packedAt(),
                 h.sentAt(),
                 h.deliveredAt(),
@@ -895,10 +912,10 @@ class CustomerOrdersService {
                 h.feePaidMethod(),
                 "voided".equals(h.saleStatus()) ? Boolean.TRUE : null,
                 h.createdAt(),
-                h.createdBy(),
+                everyone || me.equals(h.createdBy()) ? h.createdBy() : null,
                 h.version(),
                 repo.lines(h.id()).stream().map(StoredLine::view).toList(),
-                withHistory ? repo.events(h.id()) : null);
+                events);
     }
 
     private static void requireOpen(Header h, String step) {

@@ -194,6 +194,17 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
             assertThat(get(path, supervisor).getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
         }
         assertThat(api.get("/api/v1/users", supervisor).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        // A Supervisor at head office who also sells at branch two: the dashboard covers the supervised shop, not a
+        // refusal.
+        String both = signIn(
+                "supervisor2",
+                new Role("retail_supervisor", t.headOffice()),
+                new Role("retail_sales", t.secondBranch()));
+        ResponseEntity<JsonNode> mixed = get("/reports/dashboard", both);
+        assertThat(mixed.getStatusCode()).as("%s", mixed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(mixed.getBody().get("today").get("sales_minor").asLong()).isEqualTo(21_000);
+        assertThat(get("/reports/dashboard?branch_id=" + t.secondBranch(), both).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
         // A seller at the same branch still sees only their own.
         assertThat(ids(get("/sales?limit=100", tokenA).getBody().get("items"))).containsExactly(saleA.toString());
     }
@@ -232,6 +243,7 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
                 Map.of("Idempotency-Key", UUID.randomUUID().toString()));
         assertThat(delivered.getStatusCode()).as("%s", delivered.getBody()).isEqualTo(HttpStatus.OK);
         String sale = delivered.getBody().get("sale_id").asString();
+        String saleNo = delivered.getBody().get("sale_no").asString();
 
         JsonNode listed = null;
         for (JsonNode o : get("/orders", tokenA).getBody().get("items")) {
@@ -247,15 +259,55 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
             assertThat(o.get("total_minor").asLong()).isEqualTo(8_000);
             assertThat(o.has("sale_id")).as("no link to the colleague's sale").isFalse();
             assertThat(o.has("sale_no")).isFalse();
-            assertThat(o.toString()).doesNotContain(sale);
+            assertThat(o.toString()).doesNotContain(sale).doesNotContain(saleNo).doesNotContain(sellerB.toString());
+            assertThat(o.has("created_by"))
+                    .as("who took the order is not named")
+                    .isFalse();
         }
         assertThat(get("/sales/" + sale, tokenA).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // The history says what happened, not who did it nor which sale it became.
+        JsonNode events = one.get("events");
+        assertThat(events).isNotEmpty();
+        for (JsonNode e : events) {
+            assertThat(e.has("by_user")).as("%s", e).isFalse();
+            assertThat(e.has("by_name")).as("%s", e).isFalse();
+            if (e.has("note")) {
+                assertThat(e.get("note").asString()).doesNotContain(saleNo);
+            }
+        }
+        JsonNode own = get("/orders/" + order, tokenB).getBody();
+        assertThat(own.get("events").toString()).contains(saleNo).contains(sellerB.toString());
         // The seller who delivered it, and the owner, see the sale.
         assertThat(get("/orders/" + order, tokenB).getBody().get("sale_id").asString())
                 .isEqualTo(sale);
         String owner = signIn("owner3", new Role("tenant_admin", null));
         assertThat(get("/orders/" + order, owner).getBody().get("sale_id").asString())
                 .isEqualTo(sale);
+    }
+
+    /**
+     * Decision 3: the payments on a colleague's credit sale are open to the seller at the till, without saying who took them.
+     * JUSTIFICATION-A3: a new test case for the payments list; the anchor is only the insertion point.
+     */
+    @Test
+    void aColleaguesPartPaymentIsListedWithoutWhoTookIt() {
+        UUID credit =
+                sell(tokenB, t.headOffice(), "1", Map.of("payment_method", "credit", "buyer_name", "Test Buyer 08"));
+        ResponseEntity<JsonNode> paid = api.call(
+                HttpMethod.POST,
+                R + "/sales/" + credit + "/payments",
+                Map.of("amount_minor", 3_000, "method", "cash"),
+                tokenB,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode seen = get("/sales/" + credit + "/payments", tokenA).getBody().get("items");
+        assertThat(seen).hasSize(1);
+        assertThat(seen.get(0).get("amount_minor").asLong()).isEqualTo(3_000);
+        assertThat(seen.get(0).has("created_by")).isFalse();
+        assertThat(seen.toString()).doesNotContain(sellerB.toString());
+        JsonNode theirs =
+                get("/sales/" + credit + "/payments", tokenB).getBody().get("items");
+        assertThat(theirs.get(0).get("created_by").asString()).isEqualTo(sellerB.toString());
     }
 
     // ---- A buyer's account ---------------------------------------------------------------------------------

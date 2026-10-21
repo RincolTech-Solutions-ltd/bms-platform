@@ -68,14 +68,16 @@ own figures.
    (`owing` and `overdue`, and opening a credit sale that still owes) are shown whoever made the sale, so whoever is at the till can
    take a buyer's payment. A debt is the buyer's figure, not a colleague's takings; the grouped summary is never widened by it and stays the caller's own sales. The owner decided the rest on 21 October 2026. **The cash book** is hidden from ordinary
    sellers: the Sales role lost its four cash book permissions in `V74`, and a new one, `retail.till.close` ("Can close the till and do
-   the banking"), is given per person through the role `retail_till` at the branches the person works in, with those four; the daily
-   cash summary, the expected banking, the savings suggestion and recording savings or banking also need it; administrators have it
+   the banking"), is given per person through the role `retail_till` at the branches the person works in, with those four; every cash
+   book route (its lists, reports, savings, banking, expenses and advances) also needs it, checked in code; administrators have it
    everywhere and no one else gets it by default. **A buyer's account** (the account, the statement and its PDF, the payments on
    account, credit control, customer ageing, and opening a credit sale that still owes) stays open to the sellers of its branches so
    they can take payments: its totals include colleagues' sales, which are the buyer's debt, but it never names who made a sale or took
    or reversed a payment (only the owner, holding `retail.profit.read` there, or the person themselves), and cost and profit stay out.
    **The order list** stays the shop's shared work: every seller of the branch sees the orders and their values, but the sale a
-   colleague made on delivery is not linked (its id and number are left out). **A Supervisor** (`retail_supervisor`: sale read,
+   colleague made on delivery is not linked (its id and number are left out, and the history does not name it), and the
+   order and its history name only the caller's own steps (who took, moved or delivered it); the payments list of a sale
+   names only the caller's own payments. **A Supervisor** (`retail_supervisor`: sale read,
    `retail.sale.all_sellers` and stock read, scoped to its branches) sees every seller's sales and totals, the dashboard and the sales
    analysis at its branches, with no profit, cost, margin, stock value, Users or Controls, and can be combined with the till.
    The order reports (delivery fees, cancellations) are the owner's (403).

@@ -423,12 +423,13 @@ Notes:
   colleague's takings. Cost, margins, profit and the value of the stock are absent for the Sales role already (`retail.profit.read`,
   slice 1). The owner's decisions of 21 October 2026 (ADR-055): the Sales role holds no cash book permission since `V74`;
   `retail.till.close` ("Can close the till and do the banking", the role `retail_till`, given per person at that person's branches, with
-  `retail.cashbook.read`, `retail.savings.record`, `retail.banking.record` and `retail.expense.record`) is also required by the daily cash
-  summary, the expected banking, the savings suggestion and recording savings or banking (403 otherwise), and the tenant admin holds it;
+  `retail.cashbook.read`, `retail.savings.record`, `retail.banking.record` and `retail.expense.record`) is also required by every cash book
+  route, checked in code for each request (403 otherwise), and the tenant admin holds it;
   a buyer's account, statement, payments on account, credit control and customer ageing stay open to the sellers of the branch, with
   `created_by` and `reversed_by` of a payment shown only to a holder of `retail.profit.read` there or to the person; an order of the
-  branch is listed with its values for every seller, its `sale_id` and `sale_no` only for the seller who made that sale or a holder of
-  `retail.sale.all_sellers`; and the Supervisor (`retail_supervisor`: `retail.sale.read`, `retail.sale.all_sellers`,
+  branch is listed with its values for every seller, its `sale_id` and `sale_no` (and the sale number in its history) only for the seller who made that sale or a holder of
+  `retail.sale.all_sellers`, and its `created_by` and the history's `by_user` and `by_name` only for the caller's own steps; the
+  payments of a sale name `created_by` only for the owner or the person; and the Supervisor (`retail_supervisor`: `retail.sale.read`, `retail.sale.all_sellers`,
   `retail.stock.read`) sees every seller's sales, totals, the dashboard and the sales analysis at its branches only. Tests:
   `RetailOwnerDecisionsIT`. Left as they are, and named for the owner to decide: the cash book's daily summary (the till's cash, which the person
   who banks it needs; profit-derived figures were already hidden, ADR-022 decision 13), the buyer's account (credit control, customer ageing, the statement and its PDF, payments on

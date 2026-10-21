@@ -1001,7 +1001,25 @@ class SalesService {
     @Transactional(readOnly = true)
     PaymentList payments(UUID saleId) {
         Sale s = get(saleId);
-        return new PaymentList(repo.payments(s.id()));
+        // ADR-055 (the owner's decision of 21 October 2026): a debt is open to every seller of the branch, but who took
+        // each
+        // payment is shown only to the owner (profit read there) or to the person who took it.
+        Principal principal = CurrentPrincipal.require();
+        boolean everyone = principal.may("retail.profit.read", s.branchId());
+        return new PaymentList(repo.payments(s.id()).stream()
+                .map(p -> everyone || principal.userId().equals(p.createdBy())
+                        ? p
+                        : new Payment(
+                                p.id(),
+                                p.saleId(),
+                                p.amountMinor(),
+                                p.currency(),
+                                p.method(),
+                                p.paidOn(),
+                                p.journalEntryId(),
+                                p.createdAt(),
+                                null))
+                .toList());
     }
 
     // ---- Customers -------------------------------------------------------------------------

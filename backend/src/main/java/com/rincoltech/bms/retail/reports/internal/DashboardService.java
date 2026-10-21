@@ -64,8 +64,7 @@ class DashboardService {
     @Transactional(readOnly = true)
     Report dashboard(List<UUID> branchIds) {
         Principal principal = CurrentPrincipal.require();
-        List<UUID> filter = principal.branchFilter(SALE_READ, branchIds);
-        AnalyticsSupport.requireAllSellers(principal, filter);
+        List<UUID> filter = AnalyticsSupport.everySellerFilter(principal, branchIds);
         LocalDate today = clock.today(tenant.profile().timezone());
         boolean profit = AnalyticsSupport.profitVisible(principal, filter);
 

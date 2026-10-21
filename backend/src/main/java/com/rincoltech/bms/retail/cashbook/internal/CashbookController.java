@@ -76,6 +76,16 @@ class CashbookController {
         this.reports = reports;
     }
 
+    /**
+     * ADR-055 (the owner's decision of 21 October 2026): every cash book route is the till's. This runs after the route's own
+     * permission and branch checks and before the handler, so a caller without {@code retail.till.close} is refused (403)
+     * whatever role gave them a cash book permission.
+     */
+    @org.springframework.web.bind.annotation.ModelAttribute
+    void requireTill() {
+        CashbookSupport.requireTill();
+    }
+
     private static <T> ResponseEntity<T> created(Outcome<T> outcome, String location) {
         ResponseEntity.BodyBuilder response = ResponseEntity.created(URI.create(location));
         if (outcome.replayed()) {
@@ -98,7 +108,9 @@ class CashbookController {
     @RequiresPermission("retail.savings.record")
     @Operation(
             summary = "The day's savings suggestion token, and the suggestion with profit read (FR-RET-18)",
-            operationId = "getRetailSavingsSuggestion")
+            operationId = "getRetailSavingsSuggestion",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     SavingsSuggestion suggestion(
             @RequestParam(name = "branch_id", required = false) UUID branchId,
             @RequestParam(name = "date", required = false) LocalDate date) {
@@ -108,7 +120,11 @@ class CashbookController {
 
     @PostMapping("/savings")
     @RequiresPermission("retail.savings.record")
-    @Operation(summary = "Record the day's savings (FR-RET-18 to FR-RET-20); M", operationId = "createRetailSavings")
+    @Operation(
+            summary = "Record the day's savings (FR-RET-18 to FR-RET-20); M",
+            operationId = "createRetailSavings",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Savings> createSavings(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody SavingsRequest request) {
         CashbookSupport.requireTill();
@@ -118,7 +134,11 @@ class CashbookController {
 
     @GetMapping("/savings")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Savings records, newest first", operationId = "listRetailSavings")
+    @Operation(
+            summary = "Savings records, newest first",
+            operationId = "listRetailSavings",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     SavingsPage listSavings(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -131,7 +151,11 @@ class CashbookController {
 
     @PostMapping("/savings/{savings_id}/void")
     @RequiresPermission("retail.cashbook.void")
-    @Operation(summary = "Void a savings record and free its day (FR-RET-28); M", operationId = "voidRetailSavings")
+    @Operation(
+            summary = "Void a savings record and free its day (FR-RET-28); M",
+            operationId = "voidRetailSavings",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Savings> voidSavings(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("savings_id") UUID id,
@@ -145,7 +169,9 @@ class CashbookController {
     @RequiresPermission("retail.banking.record")
     @Operation(
             summary = "The amount expected to be banked for a shop and day (FR-RET-21)",
-            operationId = "getRetailBankingExpected")
+            operationId = "getRetailBankingExpected",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     BankingExpected expected(
             @RequestParam(name = "branch_id", required = false) UUID branchId,
             @RequestParam(name = "date", required = false) LocalDate date) {
@@ -155,7 +181,11 @@ class CashbookController {
 
     @PostMapping("/bankings")
     @RequiresPermission("retail.banking.record")
-    @Operation(summary = "Record cash banked (FR-RET-22); M", operationId = "createRetailBanking")
+    @Operation(
+            summary = "Record cash banked (FR-RET-22); M",
+            operationId = "createRetailBanking",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Banking> createBanking(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody BankingRequest request) {
         CashbookSupport.requireTill();
@@ -165,7 +195,11 @@ class CashbookController {
 
     @GetMapping("/bankings")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Banking records, newest first", operationId = "listRetailBankings")
+    @Operation(
+            summary = "Banking records, newest first",
+            operationId = "listRetailBankings",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     BankingPage listBankings(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -178,7 +212,11 @@ class CashbookController {
 
     @PostMapping("/bankings/{banking_id}/void")
     @RequiresPermission("retail.cashbook.void")
-    @Operation(summary = "Void a banking record (FR-RET-28); M", operationId = "voidRetailBanking")
+    @Operation(
+            summary = "Void a banking record (FR-RET-28); M",
+            operationId = "voidRetailBanking",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Banking> voidBanking(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("banking_id") UUID id,
@@ -190,7 +228,11 @@ class CashbookController {
 
     @PostMapping("/withdrawals")
     @RequiresPermission("retail.withdrawal.record")
-    @Operation(summary = "Record cash withdrawn from the bank (FR-RET-25); M", operationId = "createRetailWithdrawal")
+    @Operation(
+            summary = "Record cash withdrawn from the bank (FR-RET-25); M",
+            operationId = "createRetailWithdrawal",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Withdrawal> createWithdrawal(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody WithdrawalRequest request) {
         Outcome<Withdrawal> outcome = banking.createWithdrawal(key, request);
@@ -199,7 +241,11 @@ class CashbookController {
 
     @GetMapping("/withdrawals")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Withdrawals from the bank, newest first", operationId = "listRetailWithdrawals")
+    @Operation(
+            summary = "Withdrawals from the bank, newest first",
+            operationId = "listRetailWithdrawals",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     WithdrawalPage listWithdrawals(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -212,7 +258,11 @@ class CashbookController {
 
     @PostMapping("/withdrawals/{withdrawal_id}/void")
     @RequiresPermission("retail.cashbook.void")
-    @Operation(summary = "Void a withdrawal (FR-RET-28); M", operationId = "voidRetailWithdrawal")
+    @Operation(
+            summary = "Void a withdrawal (FR-RET-28); M",
+            operationId = "voidRetailWithdrawal",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Withdrawal> voidWithdrawal(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("withdrawal_id") UUID id,
@@ -226,7 +276,9 @@ class CashbookController {
     @RequiresPermission("retail.expense.record")
     @Operation(
             summary = "Record a company expense paid from the till (FR-RET-24); M",
-            operationId = "createRetailExpense")
+            operationId = "createRetailExpense",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Expense> createExpense(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody ExpenseRequest request) {
         Outcome<Expense> outcome = expenses.create(key, request);
@@ -235,7 +287,11 @@ class CashbookController {
 
     @GetMapping("/expenses")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Expenses, newest first", operationId = "listRetailExpenses")
+    @Operation(
+            summary = "Expenses, newest first",
+            operationId = "listRetailExpenses",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ExpensePage listExpenses(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -250,7 +306,11 @@ class CashbookController {
 
     @PostMapping("/expenses/{expense_id}/void")
     @RequiresPermission("retail.cashbook.void")
-    @Operation(summary = "Void an expense (FR-RET-28); M", operationId = "voidRetailExpense")
+    @Operation(
+            summary = "Void an expense (FR-RET-28); M",
+            operationId = "voidRetailExpense",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Expense> voidExpense(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("expense_id") UUID id,
@@ -264,7 +324,9 @@ class CashbookController {
     @RequiresPermission("retail.advance.create")
     @Operation(
             summary = "Record an advance to the owner or a related party (FR-RET-26); M",
-            operationId = "createRetailAdvance")
+            operationId = "createRetailAdvance",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Advance> createAdvance(
             @RequestHeader(name = KEY, required = false) String key, @Valid @RequestBody AdvanceRequest request) {
         Outcome<Advance> outcome = advances.create(key, request);
@@ -273,7 +335,11 @@ class CashbookController {
 
     @GetMapping("/advances")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Advances with their balances, newest first", operationId = "listRetailAdvances")
+    @Operation(
+            summary = "Advances with their balances, newest first",
+            operationId = "listRetailAdvances",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     AdvancePage listAdvances(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "party_id", required = false) UUID partyId,
@@ -287,7 +353,11 @@ class CashbookController {
 
     @GetMapping("/advances/{advance_id}")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "An advance with its repayments", operationId = "getRetailAdvance")
+    @Operation(
+            summary = "An advance with its repayments",
+            operationId = "getRetailAdvance",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     Advance getAdvance(@PathVariable("advance_id") UUID id) {
         return advances.get(id);
     }
@@ -296,7 +366,9 @@ class CashbookController {
     @RequiresPermission("retail.advance.repay")
     @Operation(
             summary = "Record a repayment of an advance (FR-RET-26); M",
-            operationId = "createRetailAdvanceRepayment")
+            operationId = "createRetailAdvanceRepayment",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Repayment> repay(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("advance_id") UUID id,
@@ -310,7 +382,11 @@ class CashbookController {
 
     @PostMapping("/advances/{advance_id}/void")
     @RequiresPermission("retail.cashbook.void")
-    @Operation(summary = "Void an advance that has no repayments (FR-RET-28); M", operationId = "voidRetailAdvance")
+    @Operation(
+            summary = "Void an advance that has no repayments (FR-RET-28); M",
+            operationId = "voidRetailAdvance",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Advance> voidAdvance(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("advance_id") UUID id,
@@ -322,7 +398,9 @@ class CashbookController {
     @RequiresPermission("retail.cashbook.void")
     @Operation(
             summary = "Void a repayment and restore the balance (FR-RET-28); M",
-            operationId = "voidRetailAdvanceRepayment")
+            operationId = "voidRetailAdvanceRepayment",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ResponseEntity<Repayment> voidRepayment(
             @RequestHeader(name = KEY, required = false) String key,
             @PathVariable("advance_id") UUID advanceId,
@@ -337,7 +415,9 @@ class CashbookController {
     @RequiresPermission("retail.cashbook.read")
     @Operation(
             summary = "The daily cash summary per shop and day (FR-RET-27)",
-            operationId = "getRetailCashDailyReport")
+            operationId = "getRetailCashDailyReport",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     CashDailyReport daily(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -350,7 +430,9 @@ class CashbookController {
     @RequiresPermission("retail.cashbook.read")
     @Operation(
             summary = "Expected against banked per shop and day, with the running unbanked total (FR-RET-23)",
-            operationId = "getRetailCashBankingReport")
+            operationId = "getRetailCashBankingReport",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     BankingReport bankingReport(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -363,7 +445,9 @@ class CashbookController {
     @RequiresPermission("retail.cashbook.read")
     @Operation(
             summary = "Expenses by category, item, shop or month (FR-RET-29)",
-            operationId = "getRetailCashExpensesReport")
+            operationId = "getRetailCashExpensesReport",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     ExpenseReport expensesReport(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -375,7 +459,11 @@ class CashbookController {
 
     @GetMapping("/reports/cash/savings")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Savings per shop and day (FR-RET-29)", operationId = "getRetailCashSavingsReport")
+    @Operation(
+            summary = "Savings per shop and day (FR-RET-29)",
+            operationId = "getRetailCashSavingsReport",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     SavingsReport savingsReport(
             @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
             @RequestParam(name = "from", required = false) LocalDate from,
@@ -385,7 +473,11 @@ class CashbookController {
 
     @GetMapping("/reports/cash/advances")
     @RequiresPermission("retail.cashbook.read")
-    @Operation(summary = "Outstanding advances by party (FR-RET-29)", operationId = "getRetailCashAdvancesReport")
+    @Operation(
+            summary = "Outstanding advances by party (FR-RET-29)",
+            operationId = "getRetailCashAdvancesReport",
+            description =
+                    "ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied")
     AdvanceReport advancesReport(@RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
         return reports.advances(branchIds);
     }

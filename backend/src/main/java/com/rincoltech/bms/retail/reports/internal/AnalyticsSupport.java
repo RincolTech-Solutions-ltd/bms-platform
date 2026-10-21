@@ -63,6 +63,32 @@ final class AnalyticsSupport {
      * sales list and its summary instead. An empty filter (only branches outside the caller's scope were asked for) covers
      * nothing, so it is answered with an empty report, as before, and not refused; the same rule as the sales list.
      */
+    /**
+     * The branches a report that adds up every seller's sales covers (ADR-055): the ones asked for, within the sales read scope.
+     * When none were asked for and the caller sees every seller only at some of them (a Supervisor at one shop who is a seller
+     * at another), the report covers the supervised shops instead of being refused; asking for a shop outside them is refused.
+     */
+    static List<UUID> everySellerFilter(Principal principal, List<UUID> requested) {
+        List<UUID> filter = principal.branchFilter("retail.sale.read", requested);
+        boolean asked = requested != null && !requested.isEmpty();
+        if (!asked && !covers(principal, filter)) {
+            List<UUID> supervised = principal.branchFilter(ALL_SELLERS, null);
+            if (supervised != null && !supervised.isEmpty()) {
+                filter = filter == null
+                        ? supervised
+                        : filter.stream().filter(supervised::contains).toList();
+            }
+        }
+        requireAllSellers(principal, filter);
+        return filter;
+    }
+
+    private static boolean covers(Principal principal, List<UUID> filter) {
+        return filter == null
+                ? principal.scopeOf(ALL_SELLERS).map(Principal.BranchScope::all).orElse(false)
+                : filter.stream().allMatch(b -> principal.may(ALL_SELLERS, b));
+    }
+
     static void requireAllSellers(Principal principal, List<UUID> filter) {
         boolean everyone = filter == null
                 ? principal.scopeOf(ALL_SELLERS).map(Principal.BranchScope::all).orElse(false)
