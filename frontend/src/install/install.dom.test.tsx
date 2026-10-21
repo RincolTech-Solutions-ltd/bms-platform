@@ -113,7 +113,7 @@ describe('the install offer', () => {
     expect(screen.queryByRole('heading', { name: 'Install the app' })).toBeNull();
   });
 
-  it('gives an iPhone an Install button that shows the three taps, and can be waved away', async () => {
+  it('gives an iPhone an Install button that shows the Safari steps, and can be waved away', async () => {
     const { ui } = await load({ ios: true });
     render(<ui.InstallPrompt />);
     expect(screen.queryByTestId('ios-install-steps')).toBeNull();

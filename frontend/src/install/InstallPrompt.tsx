@@ -12,9 +12,11 @@ function useInstall() {
 }
 
 /**
- * The taps on an iPhone or iPad, in plain words. Only Safari can add to the Home Screen, and the Share button is often out of
- * sight: Safari folds its toolbar into the address when the page scrolls, and newer iPhones keep Share behind the ⋯ button. A
- * first pilot owner stopped at "tap Share" because she could not see it, so the steps say how to find it.
+ * The taps on an iPhone or iPad, in plain words. The steps name Safari because it is where these taps are the same for everyone
+ * (other iOS browsers can add to the Home Screen too, from menus that differ). The Share button is often out of sight: Safari
+ * folds its toolbar away when the page scrolls, and in some layouts Share sits behind the ⋯ button. A first pilot owner stopped
+ * at "tap Share" because she could not see it, so the steps say what to do when it is not there, rather than which phone or
+ * which iOS layout she has, which she cannot be expected to know.
  */
 export function IosSteps() {
   return (
@@ -23,8 +25,8 @@ export function IosSteps() {
         Use <strong>Safari</strong>, in a normal tab, not a Private one (a Private tab forgets your sign-in).
       </li>
       <li>
-        Tap the address at the bottom of the screen so the buttons show, then tap <strong>Share</strong>: the square with an
-        arrow. On newer iPhones tap <strong>⋯</strong> first, then Share. On an iPad it is at the top.
+        Tap <strong>Share</strong>: the square with an arrow. If the buttons are hidden, tap the address bar once so they
+        show. If you still do not see Share, tap <strong>⋯</strong> and Share is there.
       </li>
       <li>
         Scroll down and tap <strong>Add to Home Screen</strong>.
