@@ -442,6 +442,11 @@ Notes:
   Supervisor's branches; every range figure follows the same branch filter; profit needs `retail.profit.read` in every branch
   covered, and so does the top salesperson (a ranking of colleagues, the rule of the summary's salesperson level); a seller's own
   card reads the summary, which is their own sales. Tests: `RetailDashboardRangeIT`, `RetailSellerFiguresIT`, `RetailOwnerDecisionsIT`.
+  The receipt to share (issue #439, ADR-061) adds no permission: `GET /retail/sales/{sale_id}/receipt/pdf` needs `retail.sale.read`
+  and, without `retail.sale.all_sellers` at the sale's branch, a sale the caller made, with no exception for a debt still owed (404
+  otherwise), so a storekeeper (no `retail.sale.read`, 403) and a colleague get none. It writes nothing and is not audited; the
+  receipt leaves from the seller's own phone and no server sends it. The number typed for WhatsApp is never logged and is stored only
+  when the person ticks the save and holds `retail.customer.manage`. Tests: `SaleReceiptPdfIT`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
   `retail.advance.*` permissions are rows of the matrix above, seeded by the cash book migration.
