@@ -93,7 +93,6 @@ export function OwnSales() {
   const now = useQuery({
     queryKey: ['retail', 'own-sales', level, days.from ?? '', days.to],
     queryFn: () => ownGroups(level, days.from, days.to),
-    placeholderData: (previous) => previous,
   });
   const before = useQuery({
     queryKey: ['retail', 'own-sales', level, days.previous?.from ?? '', days.previous?.to ?? ''],

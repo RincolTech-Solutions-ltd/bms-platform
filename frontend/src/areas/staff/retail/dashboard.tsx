@@ -71,7 +71,7 @@ export function CashBookCards({ from, to, branchIds }: { from: string; to: strin
   );
 }
 
-export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, stockLink, links, cash }: {
+export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, stockLink, links, cash, updating = false }: {
   data: Dashboard;
   nameOf: (id: string | undefined) => string;
   choice?: RangeChoice;
@@ -81,6 +81,8 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
   links?: ReactNode;
   /** The cash book cards of the range, for a session that closes the till. */
   cash?: (range: Range) => ReactNode;
+  /** True while the figures of a newly picked range load; the ones shown are still those of `data.range`. */
+  updating?: boolean;
 }) {
   const phone = useIsPhone();
   const range = data.range;
@@ -94,11 +96,13 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
   if (!range) {
     return <section aria-labelledby="dash-title" className="an-dashboard"><h2 id="dash-title">Sales</h2>{picker}<p className="empty-state">No figures for these days.</p></section>;
   }
+  // The words follow the figures on screen, which are those of the range the server answered.
+  const shown: RangeChoice = { period: range.period ?? choice.period, from: range.from, to: range.to };
   const days = { from: range.from, to: range.to ?? data.date ?? '' };
-  const before = previousWords(choice, days);
+  const before = previousWords(shown, days);
   const cur = range.current ?? { sales_minor: 0, sale_count: 0 };
   const prev = range.previous;
-  const title = rangeTitle(choice, days);
+  const title = rangeTitle(shown, days);
   const shopProfit = shops.some((s) => s.range_gross_profit_minor !== undefined);
   const shopStock = shops.some((s) => s.out_of_stock !== undefined);
   const withBefore = prev !== undefined;
@@ -107,6 +111,7 @@ export function DashboardView({ data, nameOf, choice = DEFAULT_RANGE, onChoice, 
     <section aria-labelledby="dash-title" className="an-dashboard">
       <h2 id="dash-title">{onPayment ? 'Sold' : 'Sales'}, {title}</h2>
       {picker}
+      {updating && <p className="loading">Loading the days you picked</p>}
       <div className="rc-headline">
         <strong className="rc-total num">{money(cur.sales_minor ?? 0)}</strong>
         <ChangeLine now={cur.sales_minor ?? 0} before={prev?.sales_minor} words={before} />
@@ -257,6 +262,7 @@ export function RetailDashboard() {
       nameOf={nameOf}
       choice={choice}
       onChoice={pick}
+      updating={dashboard.isPlaceholderData}
       stockLink={<p className="hint"><Link to="/staff/retail/stock">See the stock lists</Link></p>}
       links={(
         <p className="rc-links">

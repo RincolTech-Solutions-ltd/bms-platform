@@ -90,6 +90,17 @@ describe('the owner dashboard range', () => {
     expect(readRange('00000000-0000-4000-8000-0000000000f2')).toEqual({ period: '7d' });
   });
 
+  it('keeps the figures on screen named for their own days while the next range loads', async () => {
+    dashboard.mockImplementation((q: { period: 'today' | '7d' }) => (q.period === '7d' ? Promise.resolve(body('7d')) : new Promise(() => undefined)));
+    cashDaily.mockResolvedValue({ items: [] });
+    show(<RetailDashboard />, mockMe('admin'));
+    await screen.findByText('Sales, Last 7 days');
+    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
+    await screen.findByText('Loading the days you picked');
+    expect(screen.getByText('Sales, Last 7 days')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Today' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('checks custom days before asking for them', async () => {
     const me = mockMe('admin');
     dashboard.mockImplementation(async (q: { period: 'today' | '7d' }) => body(q.period));
