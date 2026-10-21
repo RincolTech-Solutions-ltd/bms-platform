@@ -109,14 +109,14 @@ class PriceBookController {
     record SavePlanRequest(
             @NotBlank @Size(max = 80) String name,
             @Size(max = 500) String description,
-            @Min(1) @Max(100000) Integer maxBranches,
-            @Min(1) @Max(100000) Integer maxStaffUsers,
-            @Min(1) @Max(10000000) Integer maxActiveMembers,
+            @Min(0) @Max(100000) Integer maxBranches,
+            @Min(0) @Max(100000) Integer maxStaffUsers,
+            @Min(0) @Max(10000000) Integer maxActiveMembers,
             @NotEmpty @Size(max = 5) List<@Pattern(regexp = "^[a-z]{2,30}$") String> allowedModules,
             @NotNull Boolean active,
             @Min(0) @Max(1000) Integer sortOrder,
 
-            @Size(max = 300) @Schema(description = "Why, kept in the platform audit log")
+            @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why, kept in the platform audit log")
             String reason) {}
 
     @Schema(name = "AddPlanPriceRequest")
@@ -124,13 +124,16 @@ class PriceBookController {
             @Pattern(regexp = "^[A-Z]{3}$") @Schema(description = "Default UGX")
             String currency,
 
-            @NotNull @Min(0) @Max(1_000_000_000_000L) Long monthlyMinor,
+            @NotNull @Min(0) @Max(PriceBookService.MAX_MINOR)
+            Long monthlyMinor,
+
             @NotNull @Min(1) @Max(12) Integer annualMonths,
 
             @Schema(description = "Default today; never before today, so a price never changes the past")
             LocalDate effectiveFrom,
 
-            @Size(max = 300) String reason) {}
+            @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why, kept with the price and in the audit log")
+            String reason) {}
 
     @GetMapping
     @RequiresPermission("platform.tenants.read")

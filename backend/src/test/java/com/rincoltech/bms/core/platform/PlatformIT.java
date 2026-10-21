@@ -203,7 +203,7 @@ class PlatformIT extends IntegrationTest {
         ResponseEntity<JsonNode> off = platform.call(
                 HttpMethod.PUT,
                 "/api/v1/platform/tenants/" + tenantId + "/modules",
-                Map.of("modules", List.of()),
+                Map.of("modules", List.of(), "reason", "Test: modules for a test"),
                 operator.accessToken());
         assertThat(off.getBody().get("modules")).isEmpty();
         ResponseEntity<JsonNode> refused = devTenant.call(HttpMethod.GET, "/api/v1/lending/members", null, null, dev);
@@ -220,7 +220,7 @@ class PlatformIT extends IntegrationTest {
         platform.call(
                 HttpMethod.PUT,
                 "/api/v1/platform/tenants/" + tenantId + "/modules",
-                Map.of("modules", List.of("lending")),
+                Map.of("modules", List.of("lending"), "reason", "Test: modules for a test"),
                 operator.accessToken());
         assertThat(devTenant
                         .call(HttpMethod.GET, "/api/v1/lending/members", null, null, dev)
@@ -253,7 +253,8 @@ class PlatformIT extends IntegrationTest {
                 .params(mapping, tenantId, till)
                 .update();
         String path = "/api/v1/platform/tenants/" + tenantId + "/modules";
-        Map<String, Object> both = Map.of("modules", List.of("lending", "retail"));
+        Map<String, Object> both =
+                Map.of("modules", List.of("lending", "retail"), "reason", "Test: modules for a test");
 
         ResponseEntity<JsonNode> refused = platform.call(HttpMethod.PUT, path, both, operator.accessToken());
         assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(422);
@@ -310,7 +311,7 @@ class PlatformIT extends IntegrationTest {
                     return platform.call(
                             HttpMethod.PUT,
                             "/api/v1/platform/tenants/" + tenantId + "/modules",
-                            Map.of("modules", List.of("lending", "retail")),
+                            Map.of("modules", List.of("lending", "retail"), "reason", "Test: modules for a test"),
                             operator.accessToken());
                 });
                 start.countDown();

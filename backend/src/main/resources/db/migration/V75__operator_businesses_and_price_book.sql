@@ -36,14 +36,15 @@ ALTER TABLE plans VALIDATE CONSTRAINT plans_limits_not_negative;
 -- ---------------------------------------------------------------------------------------------
 -- 2. The price book: one row per price a plan has had. Append-only: a new price is a new row from its date, so a price
 --    never changes the past; the price in force on a day is the newest row whose effective_from is on or before it.
---    annual_months is the months charged for a year (10 means two months free).
+--    annual_months is the months charged for a year (fewer than 12 gives months free).
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE plan_prices (
     id                          uuid        NOT NULL PRIMARY KEY,
     plan_id                     uuid        NOT NULL REFERENCES plans (id),
     currency                    char(3)     NOT NULL REFERENCES currencies (code),
-    monthly_minor               bigint      NOT NULL CHECK (monthly_minor >= 0),
+    -- At most 50,000,000 minor units (UGX 50 million a month), far above any plan: a typing slip is refused, not stored.
+    monthly_minor               bigint      NOT NULL CHECK (monthly_minor BETWEEN 0 AND 50000000),
     annual_months               integer     NOT NULL CHECK (annual_months BETWEEN 1 AND 12),
     effective_from              date        NOT NULL,
     reason                      varchar(300),
@@ -109,6 +110,72 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
+-- 2b. Two marks on the subscription. suspended_from keeps the status a subscription had when it was suspended or cancelled,
+--     so a resume brings it back as it was (a business suspended in its free month returns to its free month, with the same
+--     last day). is_pilot marks a pilot or complimentary business (ADR-024 decision 6): no free month end, no clock, and the
+--     scheduled transitions to come skip it. Nobody is marked here.
+-- ---------------------------------------------------------------------------------------------
+
+ALTER TABLE subscriptions
+    ADD COLUMN suspended_from text CHECK (suspended_from IN ('trial', 'active', 'past_due')),
+    ADD COLUMN is_pilot       boolean NOT NULL DEFAULT false;
+
+-- V2's function, now keeping suspended_from: set when the subscription moves into suspended or cancelled from a working
+-- status, kept while it moves between those two, cleared when it leaves them. Returns the previous status, as before.
+CREATE OR REPLACE FUNCTION platform_set_subscription_status(
+    p_tenant_id uuid, p_status text, p_next_status_change_on date, p_platform_user_id uuid)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_previous text;
+BEGIN
+    SELECT status INTO v_previous FROM subscriptions WHERE tenant_id = p_tenant_id FOR UPDATE;
+    IF NOT FOUND THEN
+        INSERT INTO subscriptions (id, tenant_id, plan_id, status, updated_by_platform_user_id)
+        SELECT gen_random_uuid(), t.id, t.plan_id, 'active', p_platform_user_id FROM tenants t WHERE t.id = p_tenant_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'unknown tenant' USING ERRCODE = 'no_data_found';
+        END IF;
+        v_previous := 'active';
+    END IF;
+    UPDATE subscriptions s
+       SET status = p_status, next_status_change_on = p_next_status_change_on,
+           suspended_from = CASE
+               WHEN p_status NOT IN ('suspended', 'cancelled') THEN NULL
+               WHEN v_previous IN ('suspended', 'cancelled') THEN s.suspended_from
+               ELSE v_previous END,
+           updated_by_platform_user_id = p_platform_user_id, updated_at = now()
+     WHERE s.tenant_id = p_tenant_id;
+    UPDATE tenants
+       SET status = CASE WHEN p_status IN ('suspended', 'cancelled') THEN 'suspended' ELSE 'active' END,
+           updated_at = now()
+     WHERE id = p_tenant_id;
+    RETURN v_previous;
+END
+$$;
+
+-- Marks or unmarks a pilot (complimentary) business. Marking clears the last day of the free month: a pilot has none.
+-- Returns the previous mark.
+CREATE FUNCTION platform_set_pilot(p_tenant_id uuid, p_pilot boolean, p_platform_user_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_previous boolean;
+BEGIN
+    SELECT is_pilot INTO v_previous FROM subscriptions WHERE tenant_id = p_tenant_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'unknown tenant' USING ERRCODE = 'no_data_found';
+    END IF;
+    UPDATE subscriptions s
+       SET is_pilot = p_pilot,
+           trial_ends_on = CASE WHEN p_pilot THEN NULL ELSE s.trial_ends_on END,
+           updated_by_platform_user_id = p_platform_user_id, updated_at = now()
+     WHERE s.tenant_id = p_tenant_id;
+    RETURN v_previous;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
 -- 3. Manual subscription payments (ADR-024 decision 4, spec section 6): a record whatever the channel. In this release the
 --    operator enters a payment received and it is confirmed at once; the tenant's own claim ("I have paid") arrives with the
 --    billing screen. Never edited: a mistake is corrected by the operator moving the paid-until date, with a reason.
@@ -121,7 +188,7 @@ CREATE TABLE subscription_payments (
     subscription_id              uuid         NOT NULL,
     plan_id                      uuid         NOT NULL REFERENCES plans (id),
     status                       text         NOT NULL DEFAULT 'confirmed' CHECK (status IN ('claimed', 'confirmed', 'rejected')),
-    amount_minor                 bigint       NOT NULL CHECK (amount_minor > 0),
+    amount_minor                 bigint       NOT NULL CHECK (amount_minor BETWEEN 1 AND 50000000),
     currency                     char(3)      NOT NULL REFERENCES currencies (code),
     method                       text         NOT NULL CHECK (method IN ('mtn_momo', 'airtel_money', 'bank_transfer', 'other')),
     reference                    varchar(100),
@@ -130,7 +197,7 @@ CREATE TABLE subscription_payments (
     period_start                 date         NOT NULL,
     period_end                   date         NOT NULL,
     note                         varchar(500),
-    recorded_by_platform_user_id uuid         NOT NULL,
+    recorded_by_platform_user_id uuid         NOT NULL REFERENCES platform_users (id),
     created_at                   timestamptz  NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, subscription_id) REFERENCES subscriptions (tenant_id, id),
@@ -143,8 +210,10 @@ SELECT bms_make_append_only('subscription_payments');
 
 -- Records a payment for the bound tenant (the tenant comes from app.tenant_id, never a parameter) and extends what is paid.
 -- The paid period starts the day after whatever is already covered: a trial still running, an earlier payment, or today,
--- whichever is latest, so no free or paid day is lost. A trial or a past due subscription becomes active; a suspended or
--- cancelled one keeps its status (the operator resumes it, with a reason). Returns the period covered.
+-- whichever is latest, so no free or paid day is lost. A free month that has not started (nobody has signed in yet, and the
+-- business is not a pilot) starts at the payment, so paying first never burns it: the paid months follow it. A trial or a
+-- past due subscription becomes active; a suspended or cancelled one keeps its status (the operator resumes it, with a
+-- reason). Returns the period covered.
 CREATE FUNCTION platform_record_subscription_payment(
     p_id uuid, p_amount_minor bigint, p_method text, p_reference text, p_paid_on date, p_months integer,
     p_note text, p_today date, p_platform_user_id uuid)
@@ -162,6 +231,13 @@ BEGIN
         RAISE EXCEPTION 'unknown subscription' USING ERRCODE = 'no_data_found';
     END IF;
     SELECT t.currency INTO v_cur FROM tenants t WHERE t.id = v_tenant;
+    IF v_sub.status = 'trial' AND v_sub.trial_ends_on IS NULL AND NOT v_sub.is_pilot THEN
+        v_sub.trial_ends_on := (p_today + interval '1 month' - interval '1 day')::date;
+        UPDATE subscriptions s SET trial_ends_on = v_sub.trial_ends_on WHERE s.tenant_id = v_tenant;
+        INSERT INTO platform_audit_log (id, platform_user_id, action, tenant_id, data)
+        VALUES (gen_random_uuid(), p_platform_user_id, 'platform.tenant.trial_started', v_tenant,
+                jsonb_build_object('trial_ends_on', v_sub.trial_ends_on, 'started_by', 'payment', 'payment_id', p_id));
+    END IF;
     v_start := greatest(p_today,
                         v_sub.current_period_end + 1,
                         CASE WHEN v_sub.status = 'trial' THEN v_sub.trial_ends_on + 1 END);
@@ -226,9 +302,11 @@ BEGIN
 END
 $$;
 
--- Sets the last day of the trial (to give more time, or to correct it), or the last paid day. Returns the previous value.
+-- Sets the last day of the trial (to give more time, or to correct it), or the last paid day, or clears either (a clear
+-- flag wins over a date). Returns the previous values. The service checks the bounds.
 CREATE FUNCTION platform_set_subscription_dates(
-    p_tenant_id uuid, p_trial_ends_on date, p_paid_until date, p_platform_user_id uuid)
+    p_tenant_id uuid, p_trial_ends_on date, p_clear_trial boolean, p_paid_until date, p_clear_paid boolean,
+    p_platform_user_id uuid)
 RETURNS TABLE (previous_trial_ends_on date, previous_paid_until date)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -239,8 +317,9 @@ BEGIN
         RAISE EXCEPTION 'unknown tenant' USING ERRCODE = 'no_data_found';
     END IF;
     UPDATE subscriptions s
-       SET trial_ends_on = coalesce(p_trial_ends_on, s.trial_ends_on),
-           current_period_end = coalesce(p_paid_until, s.current_period_end),
+       SET trial_ends_on = CASE WHEN p_clear_trial THEN NULL ELSE coalesce(p_trial_ends_on, s.trial_ends_on) END,
+           current_period_end = CASE WHEN p_clear_paid THEN NULL ELSE coalesce(p_paid_until, s.current_period_end) END,
+           current_period_start = CASE WHEN p_clear_paid THEN NULL ELSE s.current_period_start END,
            updated_by_platform_user_id = p_platform_user_id, updated_at = now()
      WHERE s.tenant_id = p_tenant_id;
     previous_trial_ends_on := v_sub.trial_ends_on;
@@ -268,6 +347,7 @@ BEGIN
            updated_at = now()
       FROM tenants t
      WHERE s.tenant_id = NEW.tenant_id AND t.id = NEW.tenant_id AND s.status = 'trial' AND s.trial_ends_on IS NULL
+       AND NOT s.is_pilot
     RETURNING s.trial_ends_on INTO v_ends;
     IF v_ends IS NOT NULL THEN
         INSERT INTO platform_audit_log (id, action, tenant_id, data)
@@ -281,27 +361,38 @@ REVOKE ALL ON FUNCTION bms_start_trial_clock() FROM PUBLIC;
 
 CREATE TRIGGER start_trial_clock AFTER INSERT ON auth_sessions FOR EACH ROW EXECUTE FUNCTION bms_start_trial_clock();
 
--- A tenant already in its trial whose staff have signed in: its clock starts from that first session.
-UPDATE subscriptions s
-   SET trial_ends_on = ((f.first_at AT TIME ZONE t.timezone)::date + interval '1 month' - interval '1 day')::date
-  FROM tenants t,
-       (SELECT a.tenant_id, min(a.created_at) AS first_at
+-- A tenant already in its trial whose staff have signed in: its clock starts from that first session, with one
+-- platform.tenant.trial_started audit row per tenant dated here, as the trigger writes one.
+WITH firsts AS (
+        SELECT a.tenant_id, min(a.created_at) AS first_at
           FROM auth_sessions a JOIN users u ON u.tenant_id = a.tenant_id AND u.id = a.user_id AND u.kind = 'staff'
-         GROUP BY a.tenant_id) f
- WHERE s.tenant_id = t.id AND f.tenant_id = t.id AND s.status = 'trial' AND s.trial_ends_on IS NULL;
+         GROUP BY a.tenant_id),
+     dated AS (
+        UPDATE subscriptions s
+           SET trial_ends_on = ((f.first_at AT TIME ZONE t.timezone)::date + interval '1 month' - interval '1 day')::date
+          FROM tenants t, firsts f
+         WHERE s.tenant_id = t.id AND f.tenant_id = t.id AND s.status = 'trial' AND s.trial_ends_on IS NULL
+        RETURNING s.tenant_id, s.trial_ends_on, f.first_at)
+INSERT INTO platform_audit_log (id, action, tenant_id, data)
+SELECT gen_random_uuid(), 'platform.tenant.trial_started', d.tenant_id,
+       jsonb_build_object('trial_ends_on', d.trial_ends_on, 'first_sign_in_at', d.first_at, 'started_by', 'V75 backfill')
+  FROM dated d;
 
 -- ---------------------------------------------------------------------------------------------
 -- 6. Reads for the operator: every tenant with its plan, subscription dates, owner and last sign-in; a tenant's admins;
 --    the messages the outbox holds for a tenant. Contact details are for the operator only and never reach a tenant.
 -- ---------------------------------------------------------------------------------------------
 
-CREATE FUNCTION platform_tenant_overview() RETURNS TABLE (
+-- One tenant when p_tenant_id is given, else every tenant.
+CREATE FUNCTION platform_tenant_overview(p_tenant_id uuid DEFAULT NULL) RETURNS TABLE (
     id uuid, slug text, name text, status text, plan_code text, plan_name text, currency text, timezone text,
     subscription_status text, next_status_change_on date, trial_ends_on date, paid_from date, paid_until date,
+    suspended_from text, is_pilot boolean,
     modules text[], created_at timestamptz, owner_name text, owner_email text, last_sign_in_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     SELECT t.id, t.slug::text, t.name, t.status, p.code, p.name, t.currency::text, t.timezone,
            s.status, s.next_status_change_on, s.trial_ends_on, s.current_period_start, s.current_period_end,
+           s.suspended_from, coalesce(s.is_pilot, false),
            coalesce((SELECT array_agg(m.module_key ORDER BY m.module_key) FROM tenant_modules m WHERE m.tenant_id = t.id), '{}'),
            t.created_at,
            o.full_name, o.email::text,
@@ -317,6 +408,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
                             WHERE a.tenant_id = t.id AND a.user_id = u.id AND a.role_key = 'tenant_admin' AND a.revoked_at IS NULL)
              ORDER BY u.created_at, u.id
              LIMIT 1) o ON true
+     WHERE p_tenant_id IS NULL OR t.id = p_tenant_id
      ORDER BY t.name, t.slug
 $$;
 
@@ -350,15 +442,17 @@ REVOKE ALL ON FUNCTION platform_save_plan(text, text, text, integer, integer, in
 REVOKE ALL ON FUNCTION platform_add_plan_price(uuid, text, text, bigint, integer, date, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_record_subscription_payment(uuid, bigint, text, text, date, integer, text, date, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_set_tenant_plan(uuid, text, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform_set_subscription_dates(uuid, date, date, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform_tenant_overview() FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_set_subscription_dates(uuid, date, boolean, date, boolean, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_tenant_overview(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_set_pilot(uuid, boolean, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenant_admins(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenant_outbox(uuid, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform_save_plan(text, text, text, integer, integer, integer, text[], boolean, integer, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_add_plan_price(uuid, text, text, bigint, integer, date, text, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_record_subscription_payment(uuid, bigint, text, text, date, integer, text, date, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_set_tenant_plan(uuid, text, uuid) TO bms_app;
-GRANT EXECUTE ON FUNCTION platform_set_subscription_dates(uuid, date, date, uuid) TO bms_app;
-GRANT EXECUTE ON FUNCTION platform_tenant_overview() TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_set_subscription_dates(uuid, date, boolean, date, boolean, uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_tenant_overview(uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_set_pilot(uuid, boolean, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_tenant_admins(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_tenant_outbox(uuid, integer) TO bms_app;

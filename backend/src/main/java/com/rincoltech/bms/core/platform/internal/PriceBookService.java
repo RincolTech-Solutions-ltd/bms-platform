@@ -39,6 +39,9 @@ class PriceBookService {
 
     static final String PLAN_CODE = "^[a-z0-9_-]{1,40}$";
 
+    /** The cap on a monthly price and on a payment, in minor units: UGX 50 million, far above any plan (a typing slip). */
+    static final long MAX_MINOR = 50_000_000L;
+
     private final JdbcClient jdbc;
     private final PlatformAuditLog audit;
     private final BusinessClock clock;

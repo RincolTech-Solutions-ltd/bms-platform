@@ -93,7 +93,15 @@ class PlatformController {
             Instant lastSignInAt,
 
             @Schema(description = "The business's own address, where its staff sign in")
-            String address) {}
+            String address,
+
+            @Schema(
+                    description =
+                            "While suspended or cancelled: the status a resume brings back (trial, active or past_due)")
+            String suspendedFrom,
+
+            @Schema(description = "A pilot or complimentary business: free, no free month end (ADR-024 decision 6)")
+            boolean pilot) {}
 
     @Schema(name = "PlatformTenantList")
     record TenantList(List<TenantResponse> items) {}
@@ -146,7 +154,21 @@ class PlatformController {
             TenantResponse tenant, UUID headOfficeBranchId, FirstAdminInvitation adminInvitation) {}
 
     @Schema(name = "TenantModulesRequest")
-    record ModulesRequest(@NotNull List<@Pattern(regexp = "^[a-z]{2,30}$") String> modules) {}
+    record ModulesRequest(
+            @NotNull List<@Pattern(regexp = "^[a-z]{2,30}$") String> modules,
+
+            @NotBlank
+            @Size(min = 5, max = 300)
+            @Schema(description = "Why; kept in the platform audit log (issue #407)")
+            String reason) {}
+
+    @Schema(name = "TenantPilotRequest")
+    record PilotRequest(
+            @NotNull
+            @Schema(description = "True: a pilot or complimentary business, free with no end (ADR-024 decision 6)")
+            Boolean pilot,
+
+            @NotBlank @Size(min = 5, max = 300) String reason) {}
 
     @Schema(name = "SubscriptionStatusRequest")
     record SubscriptionRequest(
@@ -178,11 +200,22 @@ class PlatformController {
             @Schema(description = "The new last day paid for")
             LocalDate paidUntil,
 
+            @Schema(
+                    description =
+                            "True clears the last day of the free month (the clock starts again at the next sign-in)")
+            Boolean clearTrialEndsOn,
+
+            @Schema(description = "True clears what is paid (the last day paid for and the start of the paid period)")
+            Boolean clearPaidUntil,
+
             @NotBlank @Size(min = 5, max = 300) String reason) {}
 
     @Schema(name = "SubscriptionPaymentRequest", description = "A payment received by mobile money or bank transfer")
     record PaymentRequest(
-            @NotNull @Min(1) @Max(1_000_000_000_000L) @Schema(description = "Minor units; whole shillings for UGX")
+            @NotNull
+            @Min(1)
+            @Max(PriceBookService.MAX_MINOR)
+            @Schema(description = "Minor units; whole shillings for UGX; at most 50,000,000")
             Long amountMinor,
 
             @NotBlank @Pattern(regexp = "mtn_momo|airtel_money|bank_transfer|other")
@@ -196,7 +229,12 @@ class PlatformController {
             @NotNull @Min(1) @Max(24) @Schema(description = "Months the payment covers: 1 for a month, 12 for a year")
             Integer months,
 
-            @Size(max = 500) String note) {}
+            @Size(max = 500) String note,
+
+            @Schema(
+                    description =
+                            "True when the operator checked an amount more than 25% away from the plan's price for these months, or a plan with no price (422 payment_amount_unusual otherwise)")
+            Boolean confirmUnusualAmount) {}
 
     @Schema(name = "SubscriptionPayment")
     record PaymentResponse(
@@ -336,7 +374,7 @@ class PlatformController {
             summary = "Set the last day of the free month or the last day paid for, with a reason (FR-TEN-05)",
             operationId = "platformSetSubscriptionDates")
     TenantResponse dates(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody DatesRequest request) {
-        return business.setDates(tenantId, request.trialEndsOn(), request.paidUntil(), request.reason());
+        return business.setDates(tenantId, request);
     }
 
     @PostMapping("/tenants/{tenant_id}/payments")
@@ -358,7 +396,17 @@ class PlatformController {
     @RequiresPermission("platform.tenants.manage")
     @Operation(summary = "Switch modules on or off; data is kept (FR-TEN-03)", operationId = "platformSetModules")
     TenantResponse modules(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody ModulesRequest request) {
-        return service.setModules(tenantId, request.modules());
+        return service.setModules(tenantId, request.modules(), request.reason());
+    }
+
+    @PutMapping("/tenants/{tenant_id}/pilot")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary =
+                    "Mark or unmark a pilot (complimentary) business, with a reason: free, no free month end; the same mark again changes nothing (ADR-024 decision 6)",
+            operationId = "platformSetTenantPilot")
+    TenantResponse pilot(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody PilotRequest request) {
+        return business.setPilot(tenantId, request.pilot(), request.reason());
     }
 
     @PostMapping("/tenants/{tenant_id}/subscription")
@@ -384,10 +432,11 @@ class PlatformController {
     @PostMapping("/tenants/{tenant_id}/resume")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
-            summary = "Resume a suspended tenant with a reason; already active changes nothing (FR-TEN-06)",
+            summary =
+                    "Resume a suspended tenant with a reason, back to the status it had before (a free month stays a free month); a tenant that is not suspended changes nothing (FR-TEN-06)",
             operationId = "platformResumeTenant")
     TenantResponse resume(@PathVariable("tenant_id") UUID tenantId, @Valid @RequestBody ReasonRequest request) {
-        return service.setSubscription(tenantId, "active", null, request.reason());
+        return service.resume(tenantId, request.reason());
     }
 
     /**

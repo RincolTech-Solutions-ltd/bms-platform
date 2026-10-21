@@ -173,7 +173,12 @@ class OperatorScreensIT extends IntegrationTest {
         refusedToEveryoneButOperators(
                 HttpMethod.POST,
                 "/api/v1/platform/plans/starter/prices",
-                Map.of("monthly_minor", 1000, "annual_months", 11));
+                Map.of("monthly_minor", 1000, "annual_months", 11, "reason", "Test reason"));
+        refusedToEveryoneButOperators(
+                HttpMethod.PUT,
+                t + "/modules",
+                Map.of("modules", List.of("retail", "lending"), "reason", "Test reason"));
+        refusedToEveryoneButOperators(HttpMethod.PUT, t + "/pilot", Map.of("pilot", true, "reason", "Test reason"));
         // Nothing was changed by any refused call.
         assertThat(TestDatabase.owner()
                         .sql(
@@ -187,6 +192,54 @@ class OperatorScreensIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isZero();
+    }
+
+    // JUSTIFICATION-A3: the review of #413 asked for this test of the tenant host.
+    /**
+     * A tenant admin on the business's own host, with its own valid token, reaches none of the operator routes: the platform
+     * API is not served on a tenant host (404), and nothing changes.
+     */
+    @Test
+    void aTenantAdminOnItsOwnHostReachesNoOperatorRoute() {
+        Created c = create("ops-own", List.of("retail"), "growth");
+        String own = ownerSignsIn(c).accessToken();
+        Api onOwnHost = Api.platform(http).onHost(c.slug() + "-bms-staging.rincoltech.test");
+        String t = "/api/v1/platform/tenants/" + c.id();
+        Map<String, String> key = Map.of("Idempotency-Key", "k-own-host-1");
+        List<ResponseEntity<JsonNode>> calls = List.of(
+                onOwnHost.call(HttpMethod.GET, "/api/v1/platform/tenants", null, own, key),
+                onOwnHost.call(HttpMethod.GET, t + "/overview", null, own, key),
+                onOwnHost.call(HttpMethod.POST, t + "/resume", Map.of("reason", "Test reason"), own, key),
+                onOwnHost.call(HttpMethod.PUT, t + "/pilot", Map.of("pilot", true, "reason", "Test reason"), own, key),
+                onOwnHost.call(
+                        HttpMethod.PUT,
+                        t + "/subscription-dates",
+                        Map.of("trial_ends_on", "2026-12-31", "reason", "Test reason"),
+                        own,
+                        key),
+                onOwnHost.call(
+                        HttpMethod.POST,
+                        t + "/payments",
+                        Map.of("amount_minor", 1000, "method", "other", "paid_on", "2026-10-01", "months", 1),
+                        own,
+                        key),
+                onOwnHost.call(HttpMethod.GET, "/api/v1/platform/plans", null, own, key),
+                onOwnHost.call(
+                        HttpMethod.POST,
+                        "/api/v1/platform/plans/starter/prices",
+                        Map.of("monthly_minor", 1000, "annual_months", 11, "reason", "Test reason"),
+                        own,
+                        key));
+        for (ResponseEntity<JsonNode> call : calls) {
+            assertThat(call.getStatusCode()).as("%s", call.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
+        }
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM subscription_payments WHERE tenant_id = ?")
+                        .param(c.id())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(audits("platform.tenant.pilot_changed", c.id())).isZero();
     }
 
     /** FR-TEN-05: the list shows plan, status, owner, address and last sign-in; search and the two filters narrow it. */
@@ -247,6 +300,11 @@ class OperatorScreensIT extends IntegrationTest {
     void suspendAndResumeTakeAReasonAndRepeatHarmlessly() {
         Created c = create("ops-susp", List.of("retail"), "growth");
         String t = "/api/v1/platform/tenants/" + c.id();
+        LocalDate trialEnd = LocalDate.now(KAMPALA).plusDays(12);
+        TestDatabase.owner()
+                .sql("UPDATE subscriptions SET trial_ends_on = ? WHERE tenant_id = ?")
+                .params(trialEnd, c.id())
+                .update();
         ResponseEntity<JsonNode> noReason = platform.post(t + "/suspend", Map.of(), operator.accessToken());
         assertThat(noReason.getStatusCode().value()).isIn(400, 422);
         assertThat(audits("platform.tenant.subscription_changed", c.id())).isZero();
@@ -274,6 +332,11 @@ class OperatorScreensIT extends IntegrationTest {
         ResponseEntity<JsonNode> resumed =
                 platform.post(t + "/resume", Map.of("reason", "Test: paid by mobile money"), operator.accessToken());
         assertThat(resumed.getBody().get("status").asString()).isEqualTo("active");
+        assertThat(resumed.getBody().get("subscription_status").asString())
+                .as("suspended in its free month, it comes back to its free month")
+                .isEqualTo("trial");
+        assertThat(resumed.getBody().get("trial_ends_on").asString()).isEqualTo(trialEnd.toString());
+        assertThat(resumed.getBody().get("suspended_from").isNull()).isTrue();
         platform.post(t + "/resume", Map.of("reason", "Test: pressed twice"), operator.accessToken());
         assertThat(audits("platform.tenant.subscription_changed", c.id())).isEqualTo(2);
 
@@ -401,8 +464,9 @@ class OperatorScreensIT extends IntegrationTest {
      */
     @Test
     void aPaymentExtendsWhatIsPaidOnceAndStaysWithItsTenant() {
-        Created a = create("ops-pay-a", List.of("retail"), "growth");
-        Created b = create("ops-pay-b", List.of("retail"), "growth");
+        String plan = pricedPlan();
+        Created a = create("ops-pay-a", List.of("retail"), plan);
+        Created b = create("ops-pay-b", List.of("retail"), plan);
         LocalDate today = LocalDate.now(KAMPALA);
         TestDatabase.owner()
                 .sql("UPDATE subscriptions SET trial_ends_on = ? WHERE tenant_id = ?")
@@ -529,7 +593,196 @@ class OperatorScreensIT extends IntegrationTest {
         body.put("allowed_modules", modules);
         body.put("active", true);
         body.put("sort_order", 5);
+        body.put("reason", "Test: a plan for a test");
         return body;
+    }
+
+    /** A retail plan with limits and a price of 10,000 a month, a year at 11 months: invented figures. */
+    String pricedPlan() {
+        String code = "ops-priced-" + UUID.randomUUID().toString().substring(0, 6);
+        ResponseEntity<JsonNode> made = platform.call(
+                HttpMethod.PUT,
+                "/api/v1/platform/plans/" + code,
+                planWith("Test Priced", List.of("retail"), null, null),
+                operator.accessToken());
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> priced = platform.post(
+                "/api/v1/platform/plans/" + code + "/prices",
+                Map.of("monthly_minor", 10000, "annual_months", 11, "reason", "Test price"),
+                operator.accessToken());
+        assertThat(priced.getStatusCode()).as("%s", priced.getBody()).isEqualTo(HttpStatus.OK);
+        return code;
+    }
+
+    ResponseEntity<JsonNode> pay(Created c, Map<String, Object> body) {
+        return platform.call(
+                HttpMethod.POST,
+                "/api/v1/platform/tenants/" + c.id() + "/payments",
+                body,
+                operator.accessToken(),
+                Map.of("Idempotency-Key", "pay-" + UUID.randomUUID()));
+    }
+
+    /**
+     * ADR-056: a business that pays before anyone has signed in keeps its free month. The free month starts at the
+     * payment and the paid months follow it; the start is audited once and a later first sign-in changes nothing.
+     */
+    @Test
+    void aPaymentBeforeTheFirstSignInStartsTheFreeMonthAndPaysAfterIt() {
+        Created c = create("ops-early", List.of("retail"), pricedPlan());
+        LocalDate today = LocalDate.now(KAMPALA);
+        ResponseEntity<JsonNode> paid = pay(c, payment(10000, 1, "TEST-REF-11"));
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+        LocalDate freeEnds = today.plusMonths(1).minusDays(1);
+        assertThat(paid.getBody().get("period_start").asString())
+                .isEqualTo(freeEnds.plusDays(1).toString());
+        assertThat(paid.getBody().get("period_end").asString())
+                .isEqualTo(freeEnds.plusDays(1).plusMonths(1).minusDays(1).toString());
+        JsonNode tenant = platform.get("/api/v1/platform/tenants/" + c.id(), operator.accessToken())
+                .getBody();
+        assertThat(tenant.get("trial_ends_on").asString()).isEqualTo(freeEnds.toString());
+        assertThat(tenant.get("subscription_status").asString()).isEqualTo("active");
+        assertThat(audits("platform.tenant.trial_started", c.id())).isEqualTo(1);
+        ownerSignsIn(c);
+        assertThat(platform.get("/api/v1/platform/tenants/" + c.id(), operator.accessToken())
+                        .getBody()
+                        .get("trial_ends_on")
+                        .asString())
+                .isEqualTo(freeEnds.toString());
+        assertThat(audits("platform.tenant.trial_started", c.id())).isEqualTo(1);
+    }
+
+    /**
+     * ADR-056: an amount far from the plan's price for those months, or on a plan with no price, needs the operator's
+     * explicit confirmation; an amount above the cap is never taken.
+     */
+    @Test
+    void anUnusualPaymentNeedsAConfirmationAndTheCapHolds() {
+        Created priced = create("ops-odd", List.of("retail"), pricedPlan());
+        ResponseEntity<JsonNode> odd = pay(priced, payment(100000, 1, "TEST-REF-21"));
+        assertThat(odd.getStatusCode().value()).isEqualTo(422);
+        assertThat(odd.getBody().get("code").asString()).isEqualTo("payment_amount_unusual");
+        Map<String, Object> confirmed = payment(100000, 1, "TEST-REF-21");
+        confirmed.put("confirm_unusual_amount", true);
+        assertThat(pay(priced, confirmed).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(pay(priced, payment(12000, 1, "TEST-REF-22")).getStatusCode())
+                .as("within a quarter of the price")
+                .isEqualTo(HttpStatus.CREATED);
+
+        Map<String, Object> overCap = payment(50_000_001L, 1, "TEST-REF-23");
+        overCap.put("confirm_unusual_amount", true);
+        assertThat(pay(priced, overCap).getStatusCode().value()).isIn(400, 422);
+
+        Created unpriced = create("ops-noprice", List.of("retail"), "growth");
+        assertThat(pay(unpriced, payment(10000, 1, "TEST-REF-24"))
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .as("no price to check against")
+                .isEqualTo("payment_amount_unusual");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM subscription_payments WHERE tenant_id = ?")
+                        .param(unpriced.id())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    /** An active business suspended and resumed comes back active; a cancelled one keeps what it was before the suspend. */
+    @Test
+    void resumeBringsBackTheStatusFromBeforeTheSuspend() {
+        Created c = create("ops-back", List.of("retail"), "growth");
+        String t = "/api/v1/platform/tenants/" + c.id();
+        platform.post(
+                t + "/subscription",
+                Map.of("status", "past_due", "reason", "Test: late payment"),
+                operator.accessToken());
+        platform.post(t + "/suspend", Map.of("reason", "Test: still late"), operator.accessToken());
+        ResponseEntity<JsonNode> cancelled = platform.post(
+                t + "/subscription", Map.of("status", "cancelled", "reason", "Test: closing"), operator.accessToken());
+        assertThat(cancelled.getBody().get("suspended_from").asString()).isEqualTo("past_due");
+        ResponseEntity<JsonNode> back =
+                platform.post(t + "/resume", Map.of("reason", "Test: came back"), operator.accessToken());
+        assertThat(back.getBody().get("subscription_status").asString()).isEqualTo("past_due");
+        assertThat(back.getBody().get("status").asString()).isEqualTo("active");
+    }
+
+    /** ADR-024 decision 6: a pilot has no free month end and no clock; the mark is audited with its reason. */
+    @Test
+    void aPilotHasNoFreeMonthEnd() {
+        Created c = create("ops-pilot", List.of("retail"), "growth");
+        String t = "/api/v1/platform/tenants/" + c.id();
+        ResponseEntity<JsonNode> noReason =
+                platform.call(HttpMethod.PUT, t + "/pilot", Map.of("pilot", true), operator.accessToken());
+        assertThat(noReason.getStatusCode().value()).isIn(400, 422);
+        ResponseEntity<JsonNode> marked = platform.call(
+                HttpMethod.PUT,
+                t + "/pilot",
+                Map.of("pilot", true, "reason", "Test: pilot business"),
+                operator.accessToken());
+        assertThat(marked.getStatusCode()).as("%s", marked.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(marked.getBody().get("pilot").asBoolean()).isTrue();
+        platform.call(
+                HttpMethod.PUT, t + "/pilot", Map.of("pilot", true, "reason", "Test: again"), operator.accessToken());
+        assertThat(audits("platform.tenant.pilot_changed", c.id())).isEqualTo(1);
+        assertThat(lastReason("platform.tenant.pilot_changed", c.id())).isEqualTo("Test: pilot business");
+        ownerSignsIn(c);
+        assertThat(platform.get(t, operator.accessToken())
+                        .getBody()
+                        .get("trial_ends_on")
+                        .isNull())
+                .as("a pilot's first sign-in starts no clock")
+                .isTrue();
+        assertThat(audits("platform.tenant.trial_started", c.id())).isZero();
+    }
+
+    /** The dates are bounded (from 2026-01-01, at most five years ahead) and can be cleared, with a reason. */
+    @Test
+    void theDatesAreBoundedAndCanBeCleared() {
+        Created c = create("ops-dates", List.of("retail"), "growth");
+        String dates = "/api/v1/platform/tenants/" + c.id() + "/subscription-dates";
+        LocalDate today = LocalDate.now(KAMPALA);
+        for (String day : List.of("2025-12-31", today.plusYears(5).plusDays(1).toString())) {
+            ResponseEntity<JsonNode> refused = platform.call(
+                    HttpMethod.PUT,
+                    dates,
+                    Map.of("trial_ends_on", day, "reason", "Test bound"),
+                    operator.accessToken());
+            assertThat(refused.getStatusCode().value()).as(day).isEqualTo(422);
+        }
+        platform.call(
+                HttpMethod.PUT,
+                dates,
+                Map.of("trial_ends_on", today.plusDays(5).toString(), "reason", "Test set"),
+                operator.accessToken());
+        ResponseEntity<JsonNode> cleared = platform.call(
+                HttpMethod.PUT,
+                dates,
+                Map.of("clear_trial_ends_on", true, "reason", "Test: start again at sign-in"),
+                operator.accessToken());
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cleared.getBody().get("trial_ends_on").isNull()).isTrue();
+        assertThat(audits("platform.tenant.subscription_dates_changed", c.id())).isEqualTo(2);
+    }
+
+    /** A sender's error text is shown with any address in it masked. */
+    @Test
+    void anErrorTextOnTheBusinessPageHasItsAddressesMasked() {
+        Created c = create("ops-mask", List.of("retail"), "growth");
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO notification_outbox (id, channel, recipient, template_key, idempotency_key, tenant_id,
+                                                         category, status, last_error, failed_at)
+                        VALUES (?, 'email', 'owner-z@example.test', 'onboarding.activation', ?, ?, 'transactional', 'failed',
+                                '550 mailbox owner-z@example.test unknown', now())
+                        """)
+                .params(UUID.randomUUID(), "ops-mask:" + UUID.randomUUID(), c.id())
+                .update();
+        String messages = platform.get("/api/v1/platform/tenants/" + c.id() + "/overview", operator.accessToken())
+                .getBody()
+                .get("messages")
+                .toString();
+        assertThat(messages).contains("550 mailbox").doesNotContain("owner-z@example.test");
     }
 
     /** FR-SUB-01: a plan is created and changed by its code, a price is added from a date, and repeats change nothing. */
@@ -568,7 +821,20 @@ class OperatorScreensIT extends IntegrationTest {
         JsonNode current = priced.getBody().get("plan").get("current_price");
         assertThat(current.get("monthly_minor").asLong()).isEqualTo(10000);
         assertThat(current.get("annual_minor").asLong()).isEqualTo(110000);
-        platform.post(prices, Map.of("monthly_minor", 10000, "annual_months", 11), operator.accessToken());
+        platform.post(
+                prices,
+                Map.of("monthly_minor", 10000, "annual_months", 11, "reason", "Test same price"),
+                operator.accessToken());
+        ResponseEntity<JsonNode> noReason =
+                platform.post(prices, Map.of("monthly_minor", 12000, "annual_months", 11), operator.accessToken());
+        assertThat(noReason.getStatusCode().value())
+                .as("a price needs a reason")
+                .isIn(400, 422);
+        ResponseEntity<JsonNode> tooHigh = platform.post(
+                prices,
+                Map.of("monthly_minor", 50_000_001L, "annual_months", 11, "reason", "Test typing slip"),
+                operator.accessToken());
+        assertThat(tooHigh.getStatusCode().value()).as("over the cap").isIn(400, 422);
         LocalDate today = LocalDate.now(KAMPALA);
         ResponseEntity<JsonNode> past = platform.post(
                 prices,
@@ -578,7 +844,9 @@ class OperatorScreensIT extends IntegrationTest {
                         "annual_months",
                         10,
                         "effective_from",
-                        today.minusDays(2).toString()),
+                        today.minusDays(2).toString(),
+                        "reason",
+                        "Test past price"),
                 operator.accessToken());
         assertThat(past.getStatusCode().value()).isEqualTo(422);
         ResponseEntity<JsonNode> later = platform.post(
@@ -589,7 +857,9 @@ class OperatorScreensIT extends IntegrationTest {
                         "annual_months",
                         10,
                         "effective_from",
-                        today.plusDays(30).toString()),
+                        today.plusDays(30).toString(),
+                        "reason",
+                        "Test later price"),
                 operator.accessToken());
         assertThat(later.getBody()
                         .get("plan")

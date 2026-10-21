@@ -89,7 +89,7 @@ class PlatformService implements TenantProvisioning {
      */
     @Transactional(readOnly = true)
     List<TenantResponse> tenants(String q, List<String> statuses, String module) {
-        StringBuilder sql = new StringBuilder("SELECT * FROM platform_tenant_overview() o WHERE true");
+        StringBuilder sql = new StringBuilder("SELECT * FROM platform_tenant_overview(NULL) o WHERE true");
         List<Object> params = new ArrayList<>();
         String typed = q == null ? "" : q.trim();
         if (typed.length() > 100) {
@@ -128,7 +128,7 @@ class PlatformService implements TenantProvisioning {
 
     @Transactional(readOnly = true)
     TenantResponse tenant(UUID tenantId) {
-        return jdbc.sql("SELECT * FROM platform_tenant_overview() WHERE id = ?")
+        return jdbc.sql("SELECT * FROM platform_tenant_overview(?)")
                 .param(tenantId)
                 .query(this::tenantRow)
                 .optional()
@@ -283,9 +283,12 @@ class PlatformService implements TenantProvisioning {
     }
 
     @Transactional
-    TenantResponse setModules(UUID tenantId, List<String> requested) {
+    TenantResponse setModules(UUID tenantId, List<String> requested, String reason) {
         TenantResponse before = tenant(tenantId);
         List<String> modules = checkModules(requested);
+        if (modules.equals(before.modules().stream().sorted().toList())) {
+            return before;
+        }
         try {
             jdbc.sql("SELECT platform_set_tenant_modules(?, ?, ?)")
                     .params(
@@ -307,8 +310,24 @@ class PlatformService implements TenantProvisioning {
                 "platform.tenant.modules_changed",
                 CurrentPrincipal.require().userId(),
                 tenantId,
-                Map.of("before", before.modules(), "after", modules));
+                Map.of("before", before.modules(), "after", modules, "reason", reason.trim()));
         return tenant(tenantId);
+    }
+
+    /**
+     * FR-TEN-06: a suspended or cancelled tenant goes back to the status it had when it was suspended (kept in
+     * {@code subscriptions.suspended_from}; a free month stays a free month with the same last day), or to active when that
+     * is not known. A tenant that is not suspended or cancelled changes nothing.
+     */
+    @Transactional
+    TenantResponse resume(UUID tenantId, String reason) {
+        TenantResponse current = tenant(tenantId);
+        String status = current.subscriptionStatus();
+        if (!"suspended".equals(status) && !"cancelled".equals(status)) {
+            return current;
+        }
+        String back = current.suspendedFrom() == null ? "active" : current.suspendedFrom();
+        return setSubscription(tenantId, back, null, reason);
     }
 
     /**
@@ -421,7 +440,9 @@ class PlatformService implements TenantProvisioning {
                 rs.getString("owner_name"),
                 rs.getString("owner_email"),
                 instant(rs.getTimestamp("last_sign_in_at")),
-                hosts.tenantOrigin(slug));
+                hosts.tenantOrigin(slug),
+                rs.getString("suspended_from"),
+                rs.getBoolean("is_pilot"));
     }
 
     static Instant instant(Timestamp t) {

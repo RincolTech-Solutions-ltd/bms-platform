@@ -94,7 +94,7 @@ class BusinessService {
                                 rs.getString("template_key"),
                                 rs.getString("status"),
                                 rs.getInt("attempts"),
-                                rs.getString("last_error"),
+                                maskAddresses(rs.getString("last_error")),
                                 rs.getTimestamp("created_at").toInstant(),
                                 PlatformService.instant(rs.getTimestamp("sent_at")),
                                 PlatformService.instant(rs.getTimestamp("failed_at"))))
@@ -167,15 +167,33 @@ class BusinessService {
         return platform.tenant(tenantId);
     }
 
-    /** FR-TEN-05: the last day of the free month, or the last day paid for, set by hand with a reason. */
+    /** The earliest day a subscription date may be set to: nothing in this product is older. */
+    static final LocalDate EARLIEST_DATE = LocalDate.of(2026, 1, 1);
+
+    /**
+     * FR-TEN-05: the last day of the free month, or the last day paid for, set by hand with a reason, or cleared. A date is
+     * from 2026-01-01 to five years from today; the last day paid for is not before the paid period starts. Unchanged dates
+     * change nothing.
+     */
     @Transactional
-    TenantResponse setDates(UUID tenantId, LocalDate trialEndsOn, LocalDate paidUntil, String reason) {
+    TenantResponse setDates(UUID tenantId, PlatformController.DatesRequest request) {
         TenantResponse before = platform.tenant(tenantId);
-        if (trialEndsOn == null && paidUntil == null) {
+        boolean clearTrial = Boolean.TRUE.equals(request.clearTrialEndsOn());
+        boolean clearPaid = Boolean.TRUE.equals(request.clearPaidUntil());
+        LocalDate trialEndsOn = clearTrial ? null : request.trialEndsOn();
+        LocalDate paidUntil = clearPaid ? null : request.paidUntil();
+        if (trialEndsOn == null && paidUntil == null && !clearTrial && !clearPaid) {
             throw ApiException.validation(List.of(new FieldProblem(
                     "trial_ends_on",
                     "required",
-                    "Give the new last day of the free month, or the last day paid for.")));
+                    "Give the new last day of the free month, or the last day paid for, or clear one.")));
+        }
+        LocalDate latest = clock.today(ZoneId.of(before.timezone())).plusYears(5);
+        for (Map.Entry<String, LocalDate> date : dates(trialEndsOn, paidUntil).entrySet()) {
+            if (date.getValue().isBefore(EARLIEST_DATE) || date.getValue().isAfter(latest)) {
+                throw ApiException.validation(List.of(new FieldProblem(
+                        date.getKey(), "out_of_range", "Choose a day from 1 Jan 2026 to five years from today.")));
+            }
         }
         if (before.paidFrom() != null && paidUntil != null && paidUntil.isBefore(before.paidFrom())) {
             throw ApiException.validation(List.of(new FieldProblem(
@@ -183,16 +201,21 @@ class BusinessService {
                     "before_paid_from",
                     "The last day paid for cannot be before the paid period starts.")));
         }
-        boolean trialSame = trialEndsOn == null || trialEndsOn.equals(before.trialEndsOn());
-        boolean paidSame = paidUntil == null || paidUntil.equals(before.paidUntil());
+        boolean trialSame = clearTrial
+                ? before.trialEndsOn() == null
+                : trialEndsOn == null || trialEndsOn.equals(before.trialEndsOn());
+        boolean paidSame =
+                clearPaid ? before.paidUntil() == null : paidUntil == null || paidUntil.equals(before.paidUntil());
         if (trialSame && paidSame) {
             return before;
         }
-        jdbc.sql("SELECT * FROM platform_set_subscription_dates(?, ?, ?, ?)")
+        jdbc.sql("SELECT * FROM platform_set_subscription_dates(?, ?, ?, ?, ?, ?)")
                 .params(
                         tenantId,
                         trialEndsOn,
+                        clearTrial,
                         paidUntil,
+                        clearPaid,
                         CurrentPrincipal.require().userId())
                 .query()
                 .singleRow();
@@ -201,21 +224,68 @@ class BusinessService {
         Map<String, Object> now = new LinkedHashMap<>();
         if (!trialSame) {
             was.put("trial_ends_on", text(before.trialEndsOn()));
-            now.put("trial_ends_on", trialEndsOn.toString());
+            now.put("trial_ends_on", text(trialEndsOn));
         }
         if (!paidSame) {
             was.put("paid_until", text(before.paidUntil()));
-            now.put("paid_until", paidUntil.toString());
+            now.put("paid_until", text(paidUntil));
         }
         data.put("before", was);
         data.put("after", now);
-        data.put("reason", reason.trim());
+        data.put("reason", request.reason().trim());
         audit.record(
                 "platform.tenant.subscription_dates_changed",
                 CurrentPrincipal.require().userId(),
                 tenantId,
                 data);
         return platform.tenant(tenantId);
+    }
+
+    private static Map<String, LocalDate> dates(LocalDate trialEndsOn, LocalDate paidUntil) {
+        Map<String, LocalDate> out = new LinkedHashMap<>();
+        if (trialEndsOn != null) {
+            out.put("trial_ends_on", trialEndsOn);
+        }
+        if (paidUntil != null) {
+            out.put("paid_until", paidUntil);
+        }
+        return out;
+    }
+
+    /**
+     * ADR-024 decision 6: a pilot (complimentary) business is free with no free month end; marking clears the last day of
+     * the free month and the clock never starts. The same mark again changes nothing.
+     */
+    @Transactional
+    TenantResponse setPilot(UUID tenantId, boolean pilot, String reason) {
+        TenantResponse before = platform.tenant(tenantId);
+        if (before.pilot() == pilot) {
+            return before;
+        }
+        jdbc.sql("SELECT platform_set_pilot(?, ?, ?)")
+                .params(tenantId, pilot, CurrentPrincipal.require().userId())
+                .query(Boolean.class)
+                .single();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("before", before.pilot());
+        data.put("after", pilot);
+        data.put("trial_ends_on_before", text(before.trialEndsOn()));
+        data.put("reason", reason.trim());
+        audit.record("platform.tenant.pilot_changed", CurrentPrincipal.require().userId(), tenantId, data);
+        return platform.tenant(tenantId);
+    }
+
+    /** Masks what looks like an email address or a phone number in a sender's error text (the outbox keeps it raw). */
+    static String maskAddresses(String text) {
+        if (text == null) {
+            return null;
+        }
+        String masked = java.util.regex.Pattern.compile("[^\\s@<>\"'(),;:]+@[^\\s@<>\"'(),;:]+")
+                .matcher(text)
+                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement(Masking.lastFour(m.group())));
+        return java.util.regex.Pattern.compile("\\+?\\d[\\d -]{6,}\\d")
+                .matcher(masked)
+                .replaceAll(m -> java.util.regex.Matcher.quoteReplacement(Masking.lastFour(m.group())));
     }
 
     /**
@@ -233,6 +303,9 @@ class BusinessService {
         if (request.paidOn().isBefore(today.minusYears(1))) {
             throw ApiException.validation(List.of(
                     new FieldProblem("paid_on", "too_old", "The payment date is more than a year ago; check it.")));
+        }
+        if (!Boolean.TRUE.equals(request.confirmUnusualAmount())) {
+            checkUsualAmount(tenant, request, today);
         }
         UUID operator = CurrentPrincipal.require().userId();
         String path = "/api/v1/platform/tenants/" + tenantId + "/payments";
@@ -272,6 +345,39 @@ class BusinessService {
                             return payment;
                         })));
         return new Recorded(outcome.body(), outcome.replayed());
+    }
+
+    // JUSTIFICATION-A3: the review of #413 asked for this new check (point 3); no existing code compares a payment with
+    // the price.
+    /** The price of {@code months} on a plan: each whole year at the yearly price, the months left at the monthly one. */
+    static long expectedMinor(PriceBookController.PlanPriceResponse price, int months) {
+        return (months / 12) * price.annualMinor() + (months % 12) * price.monthlyMinor();
+    }
+
+    /**
+     * An amount more than 25% away from the plan's price for these months, or a plan with no price entered, is refused
+     * until the operator confirms it (a slip of a zero, or the wrong business): 422 {@code payment_amount_unusual}.
+     */
+    private void checkUsualAmount(TenantResponse tenant, PaymentRequest request, LocalDate today) {
+        String currency = tenant.currency();
+        PriceBookController.PlanPriceResponse price =
+                priceBook.priceOn(tenant.planCode(), currency, today).orElse(null);
+        if (price == null) {
+            throw ApiException.rule(
+                    "payment_amount_unusual",
+                    "No price is entered for the plan of this business, so the amount cannot be checked. Check it, then"
+                            + " confirm it.");
+        }
+        long expected = expectedMinor(price, request.months());
+        long amount = request.amountMinor();
+        if (Math.abs(amount - expected) * 4 > expected) {
+            throw ApiException.rule(
+                    "payment_amount_unusual",
+                    "The plan's price for " + request.months() + (request.months() == 1 ? " month" : " months") + " is "
+                            + String.format("%,d", expected) + " " + currency + " minor units, and this payment is "
+                            + String.format("%,d", amount)
+                            + ". That is more than a quarter away. Check it, then confirm it.");
+        }
     }
 
     private static final String PAYMENT_SELECT = """
