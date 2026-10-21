@@ -97,7 +97,8 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         mobileMoney    = softwareSystem "Mobile Money Operators" "MTN MoMo and Airtel Money wallets. Reached only through the payment gateway." "external"
         pushService    = softwareSystem "Browser Push Service" "The browser vendors' Web Push services (Chrome and Edge, Firefox, Safari and iOS, Windows): accept an encrypted message signed with the server's VAPID key and deliver it to a subscribed browser; a subscription is per user per device (ADR-050)." "external"
         emailService   = softwareSystem "Transactional Email Service" "SMTP over implicit TLS (port 465), every email multipart HTML and plain text (ADR-054): activation and applicant links, operator alerts, staff password reset links (ADR-042); later staff invitations, report-ready notices (ADR-024)." "external"
-        telegram       = softwareSystem "Telegram Bot API" "sendMessage to the operator chat: alerts for new applications (ADR-024)." "external"
+        telegram       = softwareSystem "Telegram Bot API" "sendMessage to the operator chat: alerts for new applications (ADR-024), and the host checks' site, job, disk, certificate, backup and restore drill alerts (ADR-058)." "external"
+        uptimeMonitor  = softwareSystem "Uptime Monitor" "A hosted uptime service outside our hosts (ADR-058): checks /healthz and one tenant sign-in page every minute, alerts after three failures, and expects a heartbeat from the host checks every five minutes. Sees public URLs only." "external"
         llmProvider    = softwareSystem "Language Model Provider" "OpenAI-compatible chat API (DeepSeek as a first test, ADR-037). Receives aggregated, aliased portfolio figures only; off by default." "external"
 
         # ==================================================================
@@ -128,6 +129,8 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
         paymentGateway -> mobileMoney "Collects from the payer's wallet"
         smsAggregator  -> bms.proxy "Delivery reports and USSD sessions on the callback host" "HTTPS"
         paymentGateway -> bms.proxy "Payment callbacks on the callback host" "HTTPS"
+        uptimeMonitor  -> bms.proxy "Checks /healthz and a tenant sign-in page every minute" "HTTPS"
+        uptimeMonitor  -> telegram "Posts down and recovery alerts to the operator chat" "HTTPS"
 
         # ==================================================================
         # COMPONENT LEVEL (inside the API)
@@ -354,6 +357,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             }
             host = deploymentNode "Staging host" "Shared ARM64 host at a Rincol home site; no inbound port; BMS capped at 900 MB by bms.slice" "Raspberry Pi 4, Debian 13, linux/arm64" {
                 puller = infrastructureNode "Puller" "bms-pull.timer every two minutes: resolves the staging pointer to its sha tag and runs deploy.sh (ADR-018)" "systemd timer, pull-staging.sh"
+                hostChecks = infrastructureNode "Host checks" "bms-monitor.timer every five minutes: site, jobs, disk, certificates, backups and the restore drill, posted to the Telegram operator chat, then a heartbeat to the uptime monitor; bms-restore-drill.timer weekly (ADR-058)" "systemd timers, monitor.sh, restore-drill.sh"
                 compose = deploymentNode "Docker Compose" "compose.pi-staging.yml: pinned multi-arch images, no published ports, per-container memory limits; migrate runs before the switch" "Docker" {
                     cloudflared = infrastructureNode "cloudflared" "Holds the outbound tunnel with a connector token; forwards to the internal origin" "cloudflare/cloudflared"
                     proxy = containerInstance bms.proxy
@@ -365,6 +369,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             }
             staging.cloudflare.edge -> staging.host.compose.cloudflared "Visitor requests, over the tunnel the host opened" "HTTPS, Cloudflare Tunnel"
             staging.host.compose.cloudflared -> staging.host.compose.proxy "Forwards with the original Host header" "HTTP"
+            staging.host.hostChecks -> staging.host.compose.proxy "Checks /healthz and the certificate through the public host" "HTTPS"
             staging.host.puller -> staging.github.registry "Reads the staging pointer; pulls sha-<short> images anonymously" "HTTPS"
             staging.laptop.deployRunner -> staging.github.registry "Pushes sha-<short> images with the job token; waits for the cosign signatures, then moves the staging pointer" "HTTPS"
             staging.maintainerMac.signer -> staging.github.registry "Signs image@digest with the Keychain key; reads the deploy run's job logs through the GitHub API" "HTTPS"
@@ -372,7 +377,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
 
         production = deploymentEnvironment "Production" {
             cloudflare = deploymentNode "Cloudflare" "DNS for the BMS hosts under rincoltech.com and object storage" {
-                deploymentNode "R2 production buckets" "Documents and nightly encrypted backups, private, 30-day retention" "Cloudflare R2" {
+                deploymentNode "R2 production buckets" "Documents and nightly encrypted backups, private; backups kept 30 days (monthly 365) by bucket lock and lifecycle rules the host token cannot change (ADR-058)" "Cloudflare R2" {
                     containerInstance bms.storage
                 }
                 dns = infrastructureNode "DNS" "A records for bms, bms-callbacks and each <slug>-bms under rincoltech.com; TXT records created by Caddy for the DNS-01 wildcard challenge" "Cloudflare DNS"
@@ -381,6 +386,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
                 registry = infrastructureNode "Container registry" "The images proven on staging, tagged vX.Y.Z" "GHCR"
             }
             vm = deploymentNode "Production VM" "Single cloud VM, 4 GB; deployed from a version tag after the dev lead approves" "Hetzner Cloud, Ubuntu LTS" {
+                hostChecks = infrastructureNode "Host checks" "bms-monitor.timer every five minutes: site, jobs, disk, certificates, backups and the restore drill, posted to the Telegram operator chat, then a heartbeat to the uptime monitor; bms-restore-drill.timer weekly (ADR-058)" "systemd timers, monitor.sh, restore-drill.sh"
                 compose = deploymentNode "Docker Compose" "Migrations run as a one-shot container before the app containers switch; failed health check rolls back" "Docker" {
                     proxy = containerInstance bms.proxy
                     containerInstance bms.web
@@ -390,6 +396,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
                 }
             }
             production.vm.compose.proxy -> production.cloudflare.dns "Creates DNS-01 challenge records for *.rincoltech.com" "Cloudflare API"
+            production.vm.hostChecks -> production.vm.compose.proxy "Checks /healthz and the certificate through the public host" "HTTPS"
             production.github.registry -> production.vm.compose.proxy "Images pulled by deploy.sh with a short-lived token" "HTTPS"
         }
     }

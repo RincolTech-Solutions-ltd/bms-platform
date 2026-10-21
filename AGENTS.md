@@ -362,6 +362,16 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (tenancy settings), stock dispatched to your branch (retail stock) and an approval waiting for you (approvals). Runbook `docs/runbooks/push-notifications.md`.
 - **Built (items with sizes and colours, issue #384, FR-RET-51, FR-RET-52, ADR-051):** migration `V69`: `retail_product_families` (the item: name, base code, category, unit; forced RLS) and four nullable columns on `retail_products` (`family_id`, `variant_size`, `variant_colour`, `variant_sort`) with an all-or-none check and a partial unique index of one variant per size and colour in an item. **A variant is a product**, so every sale, restock, transfer, stock-take, usage, return, price list, pack size and report path is per variant unchanged; every existing product keeps the four columns null and is its own single default variant (nothing copied, nothing reads differently, `MigrationOrderIT` proves it on data at V67). Routes `POST /retail/product-families` (every combination of the sizes and colours chosen once, codes `BASE-SIZE-COLOUR`, the item's prices unless a variant names its own), `GET` and `PATCH /retail/product-families/{id}` (the item's stock summed per branch over the caller's branches; a rename rewrites every variant's description, a new category moves every variant), `POST /retail/product-families/{id}/variants` (more sizes, a combination it has skipped) and `POST /retail/products/{id}/family` (an item without variants given sizes keeps its id, code, prices, stock, history and on-sale state as one of them), `POST /retail/product-families/join` and `/{id}/join` (items kept apart, one per size, become the sizes of one item, keeping ids, stock and history); an item's name is kept once per unit against items with and without sizes (ADR-044 one level up, `duplicate_reason` on the item); a product response carries `variant` only for a variant, and its name, category and unit follow its item (422 `variant_name_follows_item`, `variant_follows_item`). The sales and restock summaries group an `item` as all its variants and split it by a `variant` level offered only to a tenant with an item with sizes; an item's id as `product_id` or `item_id` finds every variant's lines. No permission added. Tests: `RetailVariantsIT`, `VariantGridTest`, `RlsIsolationIT`, `MigrationOrderIT`. Item photos are the second slice of the issue.
 - **Built (item photos, issue #384 slice 2, FR-RET-58, ADR-053):** migration `V71`: nullable `photo_document_id` on `retail_products` and `retail_product_families` (composite foreign keys to `documents`). A photo is a `core.documents` upload of subject type `retail.item_photo` through `prepareImage` (PNG, JPEG or WebP by content, never SVG, 5 MB, re-encoded, 1200 px), in the private bucket under the tenant's prefix; `retail.catalogue` now depends on `core.documents`. Routes `POST` and `DELETE /retail/products/{id}/photo` and `/retail/product-families/{id}/photo` (`retail.catalogue.manage`), and `GET /retail/photos/{photo_id}` (`retail.stock.read`) through the new `Documents.readImage`, from the same origin because the content security policy allows no image host, private and cached a day, not audited per read. A product's `photo_id` is its own photo and `item_photo_id` its item's; a 240 px small copy (`retail.item_photo_small`) is stored at upload and served with `?size=small`; `readImage` holds no connection while it fetches. The PWA shows it in the item list, the item's page and every item picker (sale, restock, stock), with Add a photo on an item's edit form and page (`item-photo.tsx`); `page-sizes` tour version 2. Tests: `RetailItemPhotosIT`, `item-photo.test.ts`.
+- **Built (launch hardening B, issue #425, ADR-058):** host side only, no migration and no application change. `deploy/monitor.sh`
+  (`bms-monitor.timer`, every five minutes) posts to the Telegram operator chat through the existing `BMS_TELEGRAM_*` values when the site
+  or a tenant sign-in page is down, a db-scheduler task failed, is stuck or overdue, disk passes 70 percent, a certificate expires within
+  14 days, a backup failed or is older than 26 hours (on the host and in R2), or the restore drill failed, is older than 9 days or ran over
+  the 2 hour RTO; once on start, every six hours while it lasts, once on recovery, and it pings an external heartbeat. The external uptime
+  monitor is a design for Hillary to set up. `restore-drill.sh` now runs on `bms-restore-drill.timer`, times itself and records its result
+  on the host, in a history file and in R2; `backup.sh` records a failed run and hands retention to the bucket with
+  `BACKUP_RETENTION_ON_HOST=false` once the R2 lock and lifecycle rules are on (provider steps left for Hillary). Tests:
+  `bash deploy/tests/monitor-test.sh` (CI, with shellcheck). Runbooks `docs/runbooks/monitoring-and-alerts.md`,
+  `restore-from-backup.md` sections 5 to 7, `security-incident.md` and `support-and-on-call.md` (owner placeholders to fill).
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -393,7 +403,7 @@ bms-platform/
 ├── .env.example         every environment variable, placeholders only
 ├── backend/             Spring Boot API, modules by package (ADR-010), Flyway migrations
 ├── frontend/            the React PWA: staff area, member area, platform console (ADR-009)
-├── deploy/              host-side files: compose.yml, deploy.sh, backup.sh, Caddy, SQL (SDD ch. 9)
+├── deploy/              host-side files: compose.yml, deploy.sh, backup.sh, restore-drill.sh, monitor.sh, systemd units, Caddy, SQL (SDD ch. 9)
 ├── scripts/db-bench/    throwaway PostgreSQL benchmark at 25 times the data (ADR-028); never production
 ├── fixtures/            fabricated test data only (pilot register sample)
 ├── docs/
@@ -402,7 +412,7 @@ bms-platform/
 │   ├── adr/             Architecture Decision Records
 │   ├── specs/           MVP scope, pilot data dictionary
 │   ├── api/             OpenAPI snapshot (generated) and contract drafts
-│   ├── runbooks/        deploy, rollback, restore, onboarding a tenant
+│   ├── runbooks/        deploy, rollback, restore, monitoring, incidents, support, onboarding a tenant
 │   ├── diagrams/        non-C4 diagram sources
 │   └── meetings/        technical meeting notes
 ├── .github/             CI workflows and guard scripts
@@ -662,6 +672,8 @@ Accepted (this list is the ADR index):
 - ADR-052 Customer orders keep stock aside on the balance row and become an ordinary sale on delivery through the sale path; the delivery
   fee is income of its own, paid at the door or, for a credit buyer, on the account (proposed, #385; FR-RET-53 to FR-RET-57; renumbered at merge if needed)
 - ADR-053 Item photos are stored through core.documents and served from the same origin (proposed, #384; FR-RET-58)
+- ADR-058 Host checks post to the Telegram operator chat on a systemd timer, an external uptime monitor and heartbeat watch the host, the
+  restore drill is timed and scheduled, and R2 lock and lifecycle rules make backups undeletable from the host (proposed, #425; renumbered at merge if needed)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 
