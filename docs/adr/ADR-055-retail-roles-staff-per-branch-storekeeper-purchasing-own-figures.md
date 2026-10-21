@@ -4,7 +4,7 @@
 
 Proposed (2026-10-21, issue #399; the product owner's go of 21 October 2026 on a retail owner's ask of 19 and 20 October). Built in two
 slices: slice 1 (branch assignment, the Storekeeper and Purchasing roles, the administrator never limited by branch; migration `V73`) and
-slice 2 (sellers see only their own figures; its own migration, the next free number at its merge). Builds on ADR-017 (per-permission branch
+slice 2 (sellers see only their own figures; migration `V74`; both renamed to the next free numbers at merge if needed). Builds on ADR-017 (per-permission branch
 scope), ADR-020 (the retail Sales role and `retail.profit.read`) and ADR-048 (a Store does not sell). Renumbered at merge if another ADR takes 055
 first.
 
@@ -66,9 +66,12 @@ own figures.
    instead of the dashboard. Profit, margins, buying prices, costs and the value of the stock are absent without `retail.profit.read`
    (slice 1 extends that rule to the value at the selling price). One exception keeps the till working: the debts still owed
    (`owing` and `overdue`, and opening a credit sale that still owes) are shown whoever made the sale, so whoever is at the till can
-   take a buyer's payment. A debt is the buyer's figure, not a colleague's takings. The cash book's daily summary, the credit control
-   and customer ageing reports and the order list are left as they are and named for the owner to decide (the till's cash, what
-   buyers owe, the shop's shared work).
+   take a buyer's payment. A debt is the buyer's figure, not a colleague's takings; its grouped summary under `owing` adds up what
+   buyers owe, the same figures credit control shows. Left as they are and named for the owner to decide: the cash book (the daily
+   summary, the expected banking and the savings suggestion are the till's cash, which whoever banks it needs), the buyer's account
+   (credit control, customer ageing, the statement and its PDF, the payments on account, which list a buyer's sales whoever made
+   them), and the order list (the shop's shared work; a delivered order names its sale, which opens only for its seller or the
+   owner). The order reports (delivery fees, cancellations) are the owner's (403).
 6. **Existing users keep what they have.** The administrator and every lending role keep exactly their permissions, the Sales role keeps its
    permissions, and every existing assignment keeps its branch; the only rows `V73` changes are administrator rows limited to a branch, which
    it widens. Slice 2 narrows what the Sales role sees of other people's sales, which is the change the owner asked for.
@@ -92,7 +95,12 @@ own figures.
 - Purchasing as a role means the owner gives it per branch; a person who buys for every branch gets one assignment for every branch.
 - Seeded roles are global: a business cannot rename them or make its own mix; a custom role remains future work.
 
+- Slice 2: a seller loses the owner dashboard, the sales analysis and the order reports (their own sales are on the Retail home
+  and in the sales lists); the cash book, the buyer's account and the order list still show branch figures until the owner decides.
+
 **Watch for:**
+- The own-sales filter is `created_by` on `retail_sales` with no index of its own: the list and summary scan the branch's sales in
+  the date range, as before, and drop the others; add an index on `(tenant_id, created_by, sale_date)` if a busy shop needs it.
 - A new retail route must keep declaring a permission and checking the branch of what it touches; a route that reads across branches without
   the scope would leak to a storekeeper or a seller. `RetailRolesIT` is the place to add the new route to the role matrix.
 - A future check that reads a role name (for example "is this a storekeeper") would break decision 4; check permissions, never role keys.

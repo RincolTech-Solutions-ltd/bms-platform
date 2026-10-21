@@ -759,16 +759,7 @@ class CustomerOrdersService {
         LocalDate[] range = range(from, to);
         Principal principal = CurrentPrincipal.require();
         List<UUID> filter = principal.branchFilter(MANAGE, branchIds);
-        // ADR-055: the fees and the value of everybody's orders are the owner's figures; a seller who sees only their
-        // own
-        // sales is refused (403), as for the dashboard.
-        if (SalesSummaryService.ownSellerOnly(principal, filter, null) != null) {
-            throw new ApiException(
-                    HttpStatus.FORBIDDEN,
-                    "permission_denied",
-                    "Permission denied",
-                    "This report adds up everybody's orders; it is for the owner.");
-        }
+        requireAllSellers(principal, filter);
         List<ReportRow> rows = repo.fees(filter, range[0], range[1], group).stream()
                 .map(row -> new ReportRow(
                         row.key(), label(group, row.key()), row.orders(), row.itemsMinor(), row.feesMinor()))
@@ -785,9 +776,25 @@ class CustomerOrdersService {
     }
 
     @Transactional(readOnly = true)
+    /**
+     * ADR-055: the fees, the value of everybody's orders and who cancelled them are the owner's figures; a seller who sees only
+     * their own sales is refused (403), as for the dashboard.
+     */
+    private static void requireAllSellers(Principal principal, List<UUID> filter) {
+        if (SalesSummaryService.ownSellerOnly(principal, filter, null) != null) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "This report adds up everybody's orders; it is for the owner.");
+        }
+    }
+
     CancellationsReport cancellations(List<UUID> branchIds, LocalDate from, LocalDate to) {
         LocalDate[] range = range(from, to);
-        List<UUID> filter = CurrentPrincipal.require().branchFilter(MANAGE, branchIds);
+        Principal principal = CurrentPrincipal.require();
+        List<UUID> filter = principal.branchFilter(MANAGE, branchIds);
+        requireAllSellers(principal, filter);
         List<ReportRow> bySource = repo.cancelledBySource(filter, range[0], range[1]).stream()
                 .map(row -> new ReportRow(row.key(), label("source", row.key()), row.orders(), row.itemsMinor(), 0))
                 .toList();

@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 
 /** Shared rules of the retail analytics reports (issue #149): date window, row limit, gating, percentages. */
 final class AnalyticsSupport {
@@ -59,18 +60,16 @@ final class AnalyticsSupport {
     /**
      * ADR-055: a report that adds up every seller's sales (the owner dashboard, the sales analysis) is refused (403) unless
      * the caller holds {@code retail.sale.all_sellers} in every branch it covers; a seller reads their own figures in the
-     * sales list and its summary instead.
+     * sales list and its summary instead. An empty filter (only branches outside the caller's scope were asked for) covers
+     * nothing, so it is answered with an empty report, as before, and not refused; the same rule as the sales list.
      */
     static void requireAllSellers(Principal principal, List<UUID> filter) {
-        var scope = principal.scopeOf(ALL_SELLERS);
-        boolean everyone = scope.isPresent()
-                && (scope.get().all()
-                        || (filter != null
-                                && !filter.isEmpty()
-                                && filter.stream().allMatch(scope.get()::covers)));
+        boolean everyone = filter == null
+                ? principal.scopeOf(ALL_SELLERS).map(Principal.BranchScope::all).orElse(false)
+                : filter.stream().allMatch(b -> principal.may(ALL_SELLERS, b));
         if (!everyone) {
             throw new ApiException(
-                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    HttpStatus.FORBIDDEN,
                     "permission_denied",
                     "Permission denied",
                     "This report adds up everybody's sales; it is for the owner. Your own sales are in the sales list.");

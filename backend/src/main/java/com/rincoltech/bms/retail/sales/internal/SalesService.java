@@ -723,7 +723,10 @@ class SalesService {
         UUID own = SalesSummaryService.debtsOnly(owing)
                 ? null
                 : SalesSummaryService.ownSellerOnly(principal, filter, sellerId);
-        if (own == null && sellerId != null && !SalesSummaryService.profitVisible(principal, filter)) {
+        if (own == null
+                && sellerId != null
+                && !sellerId.equals(principal.userId())
+                && !SalesSummaryService.profitVisible(principal, filter)) {
             // A person's takings are management information, as in the salesperson level of the summary.
             throw new ApiException(
                     HttpStatus.FORBIDDEN,

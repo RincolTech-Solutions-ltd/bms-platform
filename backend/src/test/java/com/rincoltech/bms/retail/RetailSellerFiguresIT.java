@@ -171,7 +171,9 @@ class RetailSellerFiguresIT extends IntegrationTest {
         assertThat(get("/sales/summary?group_by=seller", tokenA).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         // A search finds only their own sales too.
-        assertThat(ok("/sales?limit=100&buyer=OWN", tokenA).get("items").size()).isLessThanOrEqualTo(1);
+        // A search is no way round it: the owner's cash sales are not found by a seller, whatever is typed.
+        assertThat(ok("/sales?limit=100&from=" + today(), tokenA).get("items").size())
+                .isEqualTo(1);
     }
 
     /**
@@ -211,6 +213,8 @@ class RetailSellerFiguresIT extends IntegrationTest {
         // Paid in full, it is no longer a debt: it is the colleague's sale again and is not found.
         assertThat(get("/sales/" + debt, tokenA).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         noOwnerFigures(ok("/sales?limit=100&owing=owing", tokenA), "debts list");
+        assertThat(get("/sales?owing=owing&seller_id=" + sellerA, tokenA).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     @Test
@@ -219,6 +223,7 @@ class RetailSellerFiguresIT extends IntegrationTest {
                 "/reports/dashboard",
                 "/reports/sales-analysis",
                 "/orders/reports/delivery-fees",
+                "/orders/reports/cancellations",
                 "/reports/profit/daily?from=" + today() + "&to=" + today(),
                 "/reports/margins",
                 "/reports/business-evaluation",
@@ -279,5 +284,6 @@ class RetailSellerFiguresIT extends IntegrationTest {
                 .isTrue();
         assertThat(ok("/products/" + product, owner).has("cost_minor")).isTrue();
         assertThat(get("/orders/reports/delivery-fees", owner).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(get("/orders/reports/cancellations", owner).getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 }
