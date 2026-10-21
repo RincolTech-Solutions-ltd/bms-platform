@@ -205,7 +205,7 @@ another branch's rows (chapter 15).
 | `sort_order` | `integer NOT NULL DEFAULT 0` | The order in the operator's list. `V75`. |
 | `updated_at`, `updated_by_platform_user_id` | | `V75`. |
 
-Checks since `V75`: `plans_code_shape` (`^[a-z0-9_-]{1,40}$`) and `plans_limits_positive` (a limit is NULL or above 0). Written
+Checks since `V75`: `plans_code_shape` (`^[a-z0-9_-]{1,40}$`) and `plans_limits_not_negative` (a limit is NULL or 0 and above; the operator screens send 1 and above). Written
 only through `platform_save_plan` (an upsert by code that refuses to take out a module a tenant on the plan has on; ADR-016).
 Prices are commercial and are not stored in this repository's seed data: the operator types them (ADR-056).
 
@@ -427,7 +427,7 @@ Reads for the operator across tenants (`V75`, definer functions owned by `bms_ow
 `platform_tenant_overview()` (every tenant with its plan, subscription dates, modules, the
 first tenant admin as the owner and the latest staff sign-in), `platform_tenant_admins(tenant)`
 and `platform_tenant_outbox(tenant, limit)` (the outbox rows of one tenant, never their
-parameters; served by the partial index `notification_outbox_by_tenant`).
+parameters).
 
 ### `tenant_modules` (RLS; `bms_app` SELECT only)
 

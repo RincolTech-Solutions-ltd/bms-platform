@@ -26,12 +26,12 @@ ALTER TABLE plans
 
 ALTER TABLE plans
     ADD CONSTRAINT plans_code_shape CHECK (code ~ '^[a-z0-9_-]{1,40}$') NOT VALID,
-    ADD CONSTRAINT plans_limits_positive CHECK (
-        (max_branches IS NULL OR max_branches > 0)
-        AND (max_staff_users IS NULL OR max_staff_users > 0)
-        AND (max_active_members IS NULL OR max_active_members > 0)) NOT VALID;
+    ADD CONSTRAINT plans_limits_not_negative CHECK (
+        (max_branches IS NULL OR max_branches >= 0)
+        AND (max_staff_users IS NULL OR max_staff_users >= 0)
+        AND (max_active_members IS NULL OR max_active_members >= 0)) NOT VALID;
 ALTER TABLE plans VALIDATE CONSTRAINT plans_code_shape;
-ALTER TABLE plans VALIDATE CONSTRAINT plans_limits_positive;
+ALTER TABLE plans VALIDATE CONSTRAINT plans_limits_not_negative;
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. The price book: one row per price a plan has had. Append-only: a new price is a new row from its date, so a price
@@ -345,7 +345,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
      ORDER BY o.created_at DESC, o.id
      LIMIT least(greatest(p_limit, 1), 100)
 $$;
-CREATE INDEX notification_outbox_by_tenant ON notification_outbox (tenant_id, created_at DESC) WHERE tenant_id IS NOT NULL;
 
 REVOKE ALL ON FUNCTION platform_save_plan(text, text, text, integer, integer, integer, text[], boolean, integer, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_add_plan_price(uuid, text, text, bigint, integer, date, text, uuid) FROM PUBLIC;
