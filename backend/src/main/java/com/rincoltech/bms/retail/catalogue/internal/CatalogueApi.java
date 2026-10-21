@@ -786,7 +786,10 @@ final class CatalogueApi {
             description =
                     "Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps"
                             + " its id, code, prices, stock and history; its name becomes the item's name with its size and colour,"
-                            + " its category the item's. They must share one unit and have no sizes yet")
+                            + " its category the item's. They must share one unit and have no sizes yet. Joining an item that exists"
+                            + " (POST /product-families/{id}/join) takes only items: name, base_code, category_id and"
+                            + " duplicate_reason are refused with 422 there, and the item may not pass 100 sizes and colours."
+                            + " A product's reason for a name in use is cleared by a join and kept in the audit trail")
     record JoinRequest(
             @Size(min = 1, max = 200) @Schema(description = "The item's name; required for a new item")
             String name,

@@ -10961,7 +10961,7 @@ export interface components {
             product_id: string;
             size?: string;
         };
-        /** @description Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps its id, code, prices, stock and history; its name becomes the item's name with its size and colour, its category the item's. They must share one unit and have no sizes yet */
+        /** @description Issue #384: items kept apart until now (one per size) become the sizes and colours of one item. Each keeps its id, code, prices, stock and history; its name becomes the item's name with its size and colour, its category the item's. They must share one unit and have no sizes yet. Joining an item that exists (POST /product-families/{id}/join) takes only items: name, base_code, category_id and duplicate_reason are refused with 422 there, and the item may not pass 100 sizes and colours. A product's reason for a name in use is cleared by a join and kept in the audit trail */
         RetailJoinRequest: {
             /** @description What later variant codes start with; by default the first item's code */
             base_code?: string;
@@ -11302,7 +11302,7 @@ export interface components {
              */
             total?: number;
         };
-        /** @description One item or category; code and unit are set for an item only */
+        /** @description One item or category; code and unit are set for an item only. An item with sizes and colours is one row, all its sizes added up, with its base code (issue #395) */
         RetailMarginRow: {
             code?: string;
             /** Format: int64 */
@@ -11338,7 +11338,7 @@ export interface components {
         RetailMargins: {
             below_target?: components["schemas"]["RetailMarginBelowTarget"];
             by_category?: components["schemas"]["RetailMarginRow"][];
-            /** @description The top items by profit */
+            /** @description The top items by profit; an item with sizes counts once, all its sizes together */
             by_product?: components["schemas"]["RetailMarginRow"][];
             currency?: string;
             /** Format: date */
@@ -13014,7 +13014,7 @@ export interface components {
         RetailSalesAnalysis: {
             by_branch?: components["schemas"]["RetailSalesAnalysisRow"][];
             by_category?: components["schemas"]["RetailSalesAnalysisRow"][];
-            /** @description The top products by sales */
+            /** @description The top items by sales; an item with sizes counts once, all its sizes together */
             by_product?: components["schemas"]["RetailSalesAnalysisRow"][];
             by_seller?: components["schemas"]["RetailSalesAnalysisRow"][];
             currency?: string;
@@ -13045,7 +13045,7 @@ export interface components {
             to?: string;
             /** Format: int32 */
             top?: number;
-            /** @description The top products by quantity */
+            /** @description The top items by quantity; an item with sizes counts once, all its sizes together */
             top_by_quantity?: components["schemas"]["RetailSalesAnalysisRow"][];
             totals?: components["schemas"]["RetailSalesAnalysisTotals"];
         };
@@ -13070,7 +13070,7 @@ export interface components {
             /** Format: int64 */
             sales_minor?: number;
         };
-        /** @description One branch, category, product or seller. code and unit are set for a product only. */
+        /** @description One branch, category, item or seller. code and unit are set for an item only; an item with sizes and colours is one row, all its sizes added up, with its base code (issue #395). */
         RetailSalesAnalysisRow: {
             code?: string;
             /**

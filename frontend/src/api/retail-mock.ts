@@ -14,7 +14,7 @@ import { createAccountsMock } from './retail-accounts-mock';
 import { createDocumentsMock } from './retail-documents-mock';
 import { createReturnsMock } from './retail-returns-mock';
 import { createPurchasingMock } from './retail-purchasing-mock';
-import { cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
+import { MAX_VARIANTS, cleanOption, planVariants, variantDescription, variantKey, variantLabel } from './retail-variants';
 
 // Fabricated retail data for VITE_RETAIL_MOCK and for tests: invented products, branches and
 // balances, held in memory, with the REAL snake_case shapes of docs/sdd/07-api-design.md section
@@ -535,6 +535,12 @@ export function createMockRetail(): RetailApi {
     joinFamily: (familyId, body) =>
       run(() => {
         const items = body.items ?? [];
+        // An item that exists keeps its own name, base code and category: the server refuses a body that would name it anew.
+        if (familyId && (body.name?.trim() || body.base_code?.trim() || body.category_id || body.duplicate_reason?.trim())) {
+          refuse(422, 'validation_failed', 'The item exists already and keeps its own name, code and category; leave these out.');
+        }
+        const inItem = familyId ? [...products.values()].filter((p) => p.familyId === familyId).length : 0;
+        if (inItem + items.length > MAX_VARIANTS) refuse(422, 'too_many_variants', `An item has at most ${MAX_VARIANTS} sizes and colours.`);
         const picked = items.map((i) => find(i.product_id ?? ''));
         if (picked.some((p) => p.familyId)) refuse(422, 'already_has_variants', 'One of these is a size or colour of an item already.');
         const first = picked[0] ?? refuse(422, 'validation_failed', 'Pick at least one item.');

@@ -313,15 +313,21 @@ interface JoinRow {
 
 /**
  * Items you already have, one per size (FR-RET-51): "Cable 1.5mm" and "Cable 2.5mm" typed as two items become the sizes of one
- * item. Each keeps its code, prices, stock and history; its name becomes the item's with its size and colour.
+ * item. Each keeps its code, prices, stock and history; its name becomes the item's with its size and colour. They join a new
+ * item, or one that has sizes already (found by picking one of its sizes), which keeps its own name and category (issue #395).
  */
 export function JoinPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [rows, setRows] = useState<JoinRow[]>([]);
-  const unit = rows[0]?.product.unit_id;
+  // The item they join when it exists already: any one of its sizes names it.
+  const [target, setTarget] = useState<{ id: string; name: string } | null>(null);
+  const targetItem = useQuery({ queryKey: ['retail', 'family', target?.id], queryFn: () => retail.getFamily(target?.id ?? ''), enabled: target !== null });
+  const there = targetItem.data?.variants ?? [];
+  const unit = target ? targetItem.data?.unit_id : rows[0]?.product.unit_id;
   const keys = rows.map((r) => variantKey(r.size.trim() || undefined, r.colour.trim() || undefined));
+  const taken = new Set(there.map((v) => variantKey(v.variant?.size, v.variant?.colour)));
   const problem = rows.length === 0
     ? 'Pick the items that are sizes or colours of one thing.'
     : rows.some((r) => r.product.unit_id !== unit)
@@ -330,12 +336,17 @@ export function JoinPage() {
         ? 'Give each one its size, its colour or both.'
         : new Set(keys).size !== keys.length
           ? 'Two of them have the same size and colour.'
-          : name.trim() === '' ? 'Give the item a name.' : null;
+          : keys.some((k) => taken.has(k))
+            ? `${target?.name} has one of these sizes and colours already.`
+            : there.length + rows.length > MAX_VARIANTS
+              ? `An item has at most ${MAX_VARIANTS} sizes and colours, and ${target?.name} has ${there.length}.`
+              : !target && name.trim() === '' ? 'Give the item a name.' : null;
   const save = useMutation({
-    mutationFn: (duplicateReason?: string) => retail.joinFamily(null, {
-      name: name.trim(),
+    mutationFn: (duplicateReason?: string) => retail.joinFamily(target?.id ?? null, {
+      // An item that exists keeps its name and category: only the items go with it.
+      ...(target ? {} : { name: name.trim() }),
       items: rows.map((r) => ({ product_id: r.product.id ?? '', ...(r.size.trim() ? { size: r.size.trim() } : {}), ...(r.colour.trim() ? { colour: r.colour.trim() } : {}) })),
-      ...(duplicateReason ? { duplicate_reason: duplicateReason } : {}),
+      ...(duplicateReason && !target ? { duplicate_reason: duplicateReason } : {}),
     }),
     onSuccess: (family) => {
       void queryClient.invalidateQueries({ queryKey: ['retail'] });
@@ -347,10 +358,27 @@ export function JoinPage() {
     <Gate screen="products" title="Join items as sizes of one item">
       <p><Link to={'/staff/retail/catalogue/products' as never}>Back to Items</Link></p>
       <p>Use this when you already have one item per size or colour, such as Cable 1.5mm and Cable 2.5mm. Each keeps its code, price, stock and history, and they show together as one item.</p>
-      <div data-tour="join-name">
-        <label htmlFor="join-name">What is the item called?</label>
-        <input id="join-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="Twin cable" />
-      </div>
+      {target ? (
+        <section data-tour="join-target" aria-label="The item they join">
+          <p>They join <strong>{target.name}</strong>, which keeps its name and category.</p>
+          <button type="button" className="btn-ghost" onClick={() => setTarget(null)}>Make a new item instead</button>
+        </section>
+      ) : (
+        <>
+          <div data-tour="join-name">
+            <label htmlFor="join-name">What is the item called?</label>
+            <input id="join-name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder="Twin cable" />
+          </div>
+          <section data-tour="join-existing" aria-label="Or join an item that has sizes already">
+            <h2>Or join an item that has sizes already</h2>
+            <p className="hint">Search for any one of its sizes and add it here; the items you pick below then become more sizes of that item.</p>
+            <ProductPicker
+              id="join-target-search" showStock={false} addLabel="Join this item"
+              onAdd={(p) => { if (p.variant?.family_id) setTarget({ id: p.variant.family_id, name: p.variant.family_name ?? '' }); }}
+            />
+          </section>
+        </>
+      )}
       <section data-tour="join-pick" aria-label="Pick the items">
         <h2>Pick the items</h2>
         <ProductPicker

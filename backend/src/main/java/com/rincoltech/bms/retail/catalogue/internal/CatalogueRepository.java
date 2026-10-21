@@ -816,6 +816,45 @@ class CatalogueRepository {
                 .update();
     }
 
+    /** The reason a product kept a name that was in use, null when it has none; a join clears it. */
+    String duplicateReason(UUID productId) {
+        return jdbc.sql("SELECT duplicate_reason FROM retail_products WHERE id = ?")
+                .param(productId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
+    }
+
+    /** The active pack sizes of a product copied to another (a new size of the same item); rows copied. */
+    int copyPacks(UUID fromProductId, UUID toProductId, UUID by) {
+        return jdbc.sql("""
+                        INSERT INTO retail_product_units (id, tenant_id, product_id, unit_id, factor, created_by)
+                        SELECT gen_random_uuid(), tenant_id, :to, unit_id, factor, :by
+                          FROM retail_product_units WHERE product_id = :from AND active
+                        """)
+                .param("from", fromProductId)
+                .param("to", toProductId)
+                .param("by", by)
+                .update();
+    }
+
+    /** The price list prices of a product that are in force on {@code today} or start later, copied to another; rows copied. */
+    int copyPriceItems(UUID fromProductId, UUID toProductId, UUID by, java.time.LocalDate today) {
+        return jdbc.sql("""
+                        INSERT INTO retail_price_list_items (id, tenant_id, price_list_id, product_id, unit_id, min_qty,
+                                                             price_minor, valid_from, valid_to, created_by)
+                        SELECT gen_random_uuid(), tenant_id, price_list_id, :to, unit_id, min_qty, price_minor,
+                               valid_from, valid_to, :by
+                          FROM retail_price_list_items
+                         WHERE product_id = :from AND (valid_to IS NULL OR valid_to >= :today)
+                        """)
+                .param("from", fromProductId)
+                .param("to", toProductId)
+                .param("by", by)
+                .param("today", java.sql.Date.valueOf(today))
+                .update();
+    }
+
     /** Adding variants changes the item: its version moves, so an item read before is known to be stale. */
     void touchFamily(UUID id) {
         jdbc.sql("UPDATE retail_product_families SET updated_at = now(), version = version + 1 WHERE id = ?")

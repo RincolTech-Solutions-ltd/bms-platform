@@ -736,4 +736,220 @@ class RetailVariantsIT extends IntegrationTest {
                         .asString())
                 .isEqualTo("Small");
     }
+
+    // ---- follow-ups to #388 and #392 (issue #395) ------------------------------------------------
+
+    private String auditOf(String action, UUID entity) {
+        return TestDatabase.owner()
+                .sql("SELECT data::text FROM audit_log WHERE tenant_id = ? AND action = ? AND entity_id = ?")
+                .params(t.tenantId(), action, entity)
+                .query(String.class)
+                .single();
+    }
+
+    @Test
+    void joiningAnItemKeepsTheReasonItHadForItsNameInTheAuditBefore() {
+        UUID thin = plain("CAB-15", "Test Cable thin");
+        UUID thick = plain("CAB-25", "Test Cable thick");
+        TestDatabase.owner()
+                .sql("UPDATE retail_products SET duplicate_reason = 'Test two brands, one name' WHERE id = ?")
+                .params(thin)
+                .update();
+        ResponseEntity<JsonNode> r = api.post(
+                "/product-families/join",
+                Map.of(
+                        "name",
+                        "Test Twin Cable",
+                        "items",
+                        List.of(
+                                Map.of("product_id", thin, "size", "1.5mm"),
+                                Map.of("product_id", thick, "size", "2.5mm"))),
+                ADMIN);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT duplicate_reason FROM retail_products WHERE id = ?")
+                        .param(thin)
+                        .query(String.class)
+                        .optional())
+                .isEmpty();
+        assertThat(auditOf("retail.product.updated", thin)).contains("Test two brands, one name");
+        assertThat(auditOf("retail.product.updated", thick)).doesNotContain("duplicate_reason");
+
+        // The same when an item without sizes is given them in place.
+        UUID shirt = plain("SHIRT-1", "Test Shirt");
+        TestDatabase.owner()
+                .sql("UPDATE retail_products SET duplicate_reason = 'Test another shirt' WHERE id = ?")
+                .params(shirt)
+                .update();
+        assertThat(api.post("/products/" + shirt + "/family", Map.of("size", "S", "sizes", List.of("M")), ADMIN)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(auditOf("retail.product.updated", shirt)).contains("Test another shirt");
+    }
+
+    @Test
+    void joiningAnItemThatExistsRefusesWhatWouldNameItAnewInsteadOfIgnoringIt() {
+        JsonNode f = romper();
+        UUID extra = plain("ROMP-X", "Test Romper extra");
+        ResponseEntity<JsonNode> r = api.post(
+                "/product-families/" + f.get("id").asString() + "/join",
+                Map.of(
+                        "name",
+                        "Test Renamed",
+                        "base_code",
+                        "NEW",
+                        "category_id",
+                        category,
+                        "duplicate_reason",
+                        "Test reason here",
+                        "items",
+                        List.of(Map.of("product_id", extra, "size", "12-18m"))),
+                ADMIN);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("errors").toString())
+                .contains("name")
+                .contains("base_code")
+                .contains("category_id")
+                .contains("duplicate_reason");
+        // Nothing was joined.
+        assertThat(family(UUID.fromString(f.get("id").asString())).get("variants"))
+                .hasSize(6);
+        assertThat(api.get("/products/" + extra, ADMIN).getBody().has("variant"))
+                .isFalse();
+    }
+
+    @Test
+    void joiningAnItemThatExistsNeverTakesItPastTheMostSizesAnItemMayHave() {
+        // Ten sizes in ten colours is the 100 an item may have.
+        List<String> sizes = new ArrayList<>();
+        List<String> colours = new ArrayList<>();
+        for (int i = 1; i <= 10; i++) {
+            sizes.add("S" + i);
+            colours.add("C" + i);
+        }
+        ResponseEntity<JsonNode> full = createFamily("Test Full Item", "FULL", sizes, colours);
+        assertThat(full.getStatusCode()).as("%s", full.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID one = plain("ONE-1", "Test One");
+        ResponseEntity<JsonNode> r = api.post(
+                "/product-families/" + full.getBody().get("id").asString() + "/join",
+                Map.of("items", List.of(Map.of("product_id", one, "size", "S11"))),
+                ADMIN);
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(r.getBody().get("code").asString()).isEqualTo("too_many_variants");
+        assertThat(api.get("/products/" + one, ADMIN).getBody().has("variant")).isFalse();
+    }
+
+    @Test
+    void aNewSizeTakesThePackSizesAndPriceListPricesOfTheSizeItIsMadeFrom() {
+        capability("units", true);
+        capability("price_lists", true);
+        String perms = ADMIN + ",retail.pricelist.manage,retail.pricelist.use";
+        JsonNode f = romper();
+        UUID model = variant(f, "0-3m", "Blue");
+        UUID carton = api.unit("test-carton");
+        assertThat(api.post("/products/" + model + "/units", Map.of("unit_id", carton, "factor", "12"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        UUID list = RetailTestSupport.id(api.post("/price-lists", Map.of("name", "Test Wholesale"), perms));
+        assertThat(api.post(
+                                "/price-lists/" + list + "/items",
+                                Map.of("product_id", model, "unit_id", carton, "price_minor", 100_000),
+                                perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        assertThat(api.post(
+                                "/price-lists/" + list + "/items",
+                                Map.of("product_id", model, "unit_id", pieces, "price_minor", 8_000),
+                                perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        ResponseEntity<JsonNode> more = api.post(
+                "/product-families/" + f.get("id").asString() + "/variants",
+                Map.of("sizes", List.of("12-18m"), "colours", List.of("Blue")),
+                ADMIN);
+        assertThat(more.getStatusCode()).as("%s", more.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID added = variant(more.getBody(), "12-18m", "Blue");
+        JsonNode packs =
+                api.get("/products/" + added + "/units", perms).getBody().get("items");
+        assertThat(packs).hasSize(1);
+        assertThat(packs.get(0).get("unit_id").asString()).isEqualTo(carton.toString());
+        assertThat(packs.get(0).get("factor").asString()).isEqualTo("12.000");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT string_agg(price_minor::text, ',' ORDER BY price_minor) FROM retail_price_list_items"
+                                        + " WHERE tenant_id = ? AND product_id = ?")
+                        .params(t.tenantId(), added)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("8000,100000");
+        assertThat(auditOf(
+                        "retail.product_family.variants_added",
+                        UUID.fromString(f.get("id").asString())))
+                .contains("packs_copied")
+                .contains("price_list_items_copied");
+
+        // An item given sizes in place does the same: the sizes made from it sell as it does.
+        UUID sock = plain("SOCK-1", "Test Sock");
+        assertThat(api.post("/products/" + sock + "/units", Map.of("unit_id", carton, "factor", "6"), perms)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        ResponseEntity<JsonNode> made =
+                api.post("/products/" + sock + "/family", Map.of("size", "S", "sizes", List.of("M")), perms);
+        assertThat(made.getStatusCode()).as("%s", made.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID medium = null;
+        for (JsonNode v : made.getBody().get("variants")) {
+            if ("M".equals(text(v.get("variant"), "size"))) {
+                medium = UUID.fromString(v.get("id").asString());
+            }
+        }
+        assertThat(api.get("/products/" + medium + "/units", perms).getBody().get("items"))
+                .hasSize(1);
+    }
+
+    @Test
+    void marginsAndSalesAnalysisCountAnItemWithSizesOnceAllItsSizesTogether() {
+        UUID plain = api.product("PLAIN-1", 1_000, 5_000);
+        JsonNode f = romper();
+        String familyKey = f.get("id").asString();
+        UUID small = variant(f, "0-3m", "Blue");
+        UUID large = variant(f, "6-12m", "Pink");
+        restock(hq, small, "10", large, "10", plain, "10");
+        sell(hq, small, "3");
+        sell(hq, large, "2");
+        sell(hq, plain, "1");
+
+        for (String path : List.of("/reports/margins", "/reports/sales-analysis")) {
+            JsonNode rows = summary(path).get("by_product");
+            JsonNode romperRow = null;
+            for (JsonNode row : rows) {
+                if (familyKey.equals(row.get("id").asString())) {
+                    romperRow = row;
+                }
+                // Never a size of the item on a row of its own.
+                assertThat(row.get("id").asString()).isNotIn(small.toString(), large.toString());
+            }
+            assertThat(romperRow).as(path).isNotNull();
+            assertThat(romperRow.get("label").asString()).isEqualTo("Test Romper");
+            assertThat(romperRow.get("code").asString()).isEqualTo("ROMP");
+            assertThat(romperRow.get("sales_minor").asLong()).isEqualTo(5 * 9_000);
+            assertThat(romperRow.get("qty").asString()).isEqualTo("5.000");
+            JsonNode alone = null;
+            for (JsonNode row : rows) {
+                if (plain.toString().equals(row.get("id").asString())) {
+                    alone = row;
+                }
+            }
+            assertThat(alone).as(path).isNotNull();
+            assertThat(alone.get("sales_minor").asLong()).isEqualTo(5_000);
+        }
+        JsonNode margin = null;
+        for (JsonNode row : summary("/reports/margins").get("by_product")) {
+            if (familyKey.equals(row.get("id").asString())) {
+                margin = row;
+            }
+        }
+        assertThat(margin.get("cost_minor").asLong()).isEqualTo(5 * 4_000);
+        assertThat(margin.get("profit_minor").asLong()).isEqualTo(5 * 5_000);
+    }
 }

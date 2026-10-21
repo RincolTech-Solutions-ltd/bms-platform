@@ -4,6 +4,7 @@ import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
+import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.kernel.Versions;
@@ -23,6 +24,7 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueRepository.VariantB
 import com.rincoltech.bms.retail.catalogue.internal.VariantGrid.Planned;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -51,12 +53,19 @@ class FamilyService {
     private final CatalogueService catalogue;
     private final CurrentTenant currentTenant;
     private final AuditLog audit;
+    private final BusinessClock clock;
 
-    FamilyService(CatalogueRepository repo, CatalogueService catalogue, CurrentTenant currentTenant, AuditLog audit) {
+    FamilyService(
+            CatalogueRepository repo,
+            CatalogueService catalogue,
+            CurrentTenant currentTenant,
+            AuditLog audit,
+            BusinessClock clock) {
         this.repo = repo;
         this.catalogue = catalogue;
         this.currentTenant = currentTenant;
         this.audit = audit;
+        this.clock = clock;
     }
 
     /** FR-RET-51: the item and every variant of the sizes and colours chosen once, each with its first price history row. */
@@ -88,7 +97,7 @@ class FamilyService {
 
     /**
      * FR-RET-51: more sizes or colours for an item. A generated combination the item has already is skipped; prices default
-     * to those of the item's first variant.
+     * to those of the item's first variant, and so do its pack sizes and its price list prices that are in force.
      */
     @Transactional
     Family addVariants(UUID familyId, AddVariantsRequest r) {
@@ -113,7 +122,11 @@ class FamilyService {
         UUID by = CurrentPrincipal.require().userId();
         // An item whose every size is switched off is no longer sold: a size added to it starts switched off too.
         boolean onSale = existing.isEmpty() || existing.stream().anyMatch(Product::active);
-        insertVariants(familyId, family.name(), family.categoryId(), family.unitId(), plan, by, onSale);
+        List<UUID> added =
+                insertVariants(familyId, family.name(), family.categoryId(), family.unitId(), plan, by, onSale);
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("variants", existing.size() + plan.size());
+        copyCommercialTerms(first, added, by, after);
         repo.touchFamily(familyId);
         audit.record(new AuditLog.Entry(
                 "retail.product_family.variants_added",
@@ -121,7 +134,7 @@ class FamilyService {
                 familyId,
                 null,
                 Map.of("variants", existing.size()),
-                Map.of("variants", existing.size() + plan.size())));
+                after));
         return get(familyId);
     }
 
@@ -158,23 +171,27 @@ class FamilyService {
         repo.insertFamily(familyId, name, base, product.categoryId(), product.unitId(), by, duplicateReason);
         String description = VariantGrid.description(name, size, colour);
         catalogue.acceptName(description, product.unitId(), productId, null);
+        String oldReason = repo.duplicateReason(productId);
         repo.joinFamily(productId, familyId, size, colour, 0, description);
         Set<String> keys = Set.of(Planned.key(size, colour));
         List<Planned> plan = VariantGrid.plan(
                 base, r.sizes(), r.colours(), r.variants(), product.costMinor(), product.sellMinor(), keys, 1);
         // The new sizes are on sale exactly when the item is: an item that was switched off stays off in every size.
-        insertVariants(familyId, name, product.categoryId(), product.unitId(), plan, by, product.active());
+        List<UUID> added =
+                insertVariants(familyId, name, product.categoryId(), product.unitId(), plan, by, product.active());
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("name", name);
         after.put("base_code", base);
         after.put("from_product_id", productId);
         after.put("variants", plan.size() + 1);
+        copyCommercialTerms(product, added, by, after);
         audit.record(AuditLog.Entry.created("retail.product_family.created", FAMILY, familyId, null, after));
         Map<String, Object> was = new LinkedHashMap<>();
         Map<String, Object> now = new LinkedHashMap<>();
         was.put("description", product.description());
         now.put("description", description);
         now.put("family_id", familyId);
+        clearedReason(was, now, oldReason);
         if (size != null) {
             now.put("variant_size", size);
         }
@@ -202,6 +219,9 @@ class FamilyService {
         for (UUID pid : ids.stream().sorted().toList()) {
             locked.put(pid, repo.lock(pid).orElseThrow(ApiException::notFound));
         }
+        if (family != null) {
+            requireNoNewItemFields(r);
+        }
         Product first = locked.get(ids.getFirst());
         UUID unitId = family != null ? family.unitId() : first.unitId();
         UUID categoryId =
@@ -212,6 +232,12 @@ class FamilyService {
             for (Product v : repo.variants(family.id())) {
                 keys.add(Planned.key(v.variant().size(), v.variant().colour()));
                 next = Math.max(next, v.variant().position() + 1);
+            }
+            if (keys.size() + ids.size() > VariantGrid.MAX_VARIANTS) {
+                throw ApiException.rule(
+                        "too_many_variants",
+                        "The item has " + keys.size() + " sizes and colours and this adds " + ids.size()
+                                + ". An item has at most " + VariantGrid.MAX_VARIANTS + "; join fewer.");
             }
         }
         List<String[]> options = new ArrayList<>();
@@ -270,12 +296,14 @@ class FamilyService {
             String colour = options.get(i)[1];
             String description = VariantGrid.description(name, size, colour);
             catalogue.acceptName(description, unitId, p.id(), null);
+            String oldReason = repo.duplicateReason(p.id());
             repo.joinFamily(p.id(), id, size, colour, next + i, description);
             Map<String, Object> was = new LinkedHashMap<>();
             Map<String, Object> now = new LinkedHashMap<>();
             was.put("description", p.description());
             now.put("description", description);
             now.put("family_id", id);
+            clearedReason(was, now, oldReason);
             if (size != null) {
                 now.put("variant_size", size);
             }
@@ -429,14 +457,71 @@ class FamilyService {
         return get(id);
     }
 
+    /**
+     * Joining an item that exists takes its name, base code and category as they are: a field that would name them anew is
+     * refused, not ignored, so a caller never believes it renamed or moved the item.
+     */
+    private static void requireNoNewItemFields(JoinRequest r) {
+        List<FieldProblem> problems = new ArrayList<>();
+        String why = "The item exists already and keeps its own; leave this out, or change the item on its own page.";
+        if (r.name() != null && !r.name().isBlank()) {
+            problems.add(new FieldProblem("name", "not_allowed", why));
+        }
+        if (r.baseCode() != null && !r.baseCode().isBlank()) {
+            problems.add(new FieldProblem("base_code", "not_allowed", why));
+        }
+        if (r.categoryId() != null) {
+            problems.add(new FieldProblem("category_id", "not_allowed", why));
+        }
+        if (r.duplicateReason() != null && !r.duplicateReason().isBlank()) {
+            problems.add(new FieldProblem(
+                    "duplicate_reason", "not_allowed", "The item's name is not being chosen here; leave this out."));
+        }
+        if (!problems.isEmpty()) {
+            throw ApiException.validation(problems);
+        }
+    }
+
+    /** Joining an item clears the reason a product kept a name that was in use (the item's name replaces it): say what it was. */
+    private static void clearedReason(Map<String, Object> was, Map<String, Object> now, String oldReason) {
+        if (oldReason != null) {
+            was.put("duplicate_reason", oldReason);
+            now.put("duplicate_reason", null);
+        }
+    }
+
+    /**
+     * New sizes are sold the way the size they were made from is: its active pack sizes (while the units capability is on)
+     * and the price list prices in force or coming, each at the same price, are copied to every one of them.
+     */
+    private void copyCommercialTerms(Product from, List<UUID> to, UUID by, Map<String, Object> audited) {
+        if (to.isEmpty()) {
+            return;
+        }
+        LocalDate today = clock.today(currentTenant.profile().timezone());
+        int packs = 0;
+        int prices = 0;
+        for (UUID id : to) {
+            packs += catalogue.unitsOn() ? repo.copyPacks(from.id(), id, by) : 0;
+            prices += repo.copyPriceItems(from.id(), id, by, today);
+        }
+        if (packs > 0) {
+            audited.put("packs_copied", packs);
+        }
+        if (prices > 0) {
+            audited.put("price_list_items_copied", prices);
+        }
+    }
+
     // ---- helpers ---------------------------------------------------------------------------
 
     /**
      * Each planned variant becomes a product of the item: its name and code pass the catalogue's rules (one name per unit,
      * one code ignoring case), its prices get the {@code initial} history row, and its creation is audited.
      */
-    private void insertVariants(
+    private List<UUID> insertVariants(
             UUID familyId, String name, UUID categoryId, UUID unitId, List<Planned> plan, UUID by, boolean active) {
+        List<UUID> made = new ArrayList<>();
         Set<String> codes = repo.productCodes();
         String currency = currentTenant.profile().currency();
         for (Planned v : plan) {
@@ -480,6 +565,7 @@ class FamilyService {
                         : CatalogueService.duplicateCode();
             }
             codes.add(code.toLowerCase(Locale.ROOT));
+            made.add(p.id());
             repo.insertHistory(
                     new PriceChange(
                             UUID.randomUUID(),
@@ -513,6 +599,7 @@ class FamilyService {
             audit.record(
                     AuditLog.Entry.created("retail.product.created", CatalogueService.PRODUCT, p.id(), null, after));
         }
+        return made;
     }
 
     private static void requireSome(List<Planned> plan) {
