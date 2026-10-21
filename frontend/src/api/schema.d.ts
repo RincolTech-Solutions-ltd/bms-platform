@@ -11277,7 +11277,10 @@ export interface components {
             amount_minor?: number;
             /** Format: date-time */
             created_at?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Who took it: shown to the owner (retail.profit.read at the branch) and to the person (ADR-055)
+             */
             created_by?: string;
             currency?: string;
             /** Format: uuid */

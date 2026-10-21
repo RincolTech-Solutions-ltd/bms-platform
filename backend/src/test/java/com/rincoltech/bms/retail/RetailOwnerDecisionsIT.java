@@ -266,7 +266,7 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
         }
         assertThat(get("/sales/" + sale, tokenA).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         // The history says what happened, not who did it nor which sale it became.
-        JsonNode events = one.get("events");
+        JsonNode events = one.get("history");
         assertThat(events).isNotEmpty();
         for (JsonNode e : events) {
             assertThat(e.has("by_user")).as("%s", e).isFalse();
@@ -276,7 +276,7 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
             }
         }
         JsonNode own = get("/orders/" + order, tokenB).getBody();
-        assertThat(own.get("events").toString()).contains(saleNo).contains(sellerB.toString());
+        assertThat(own.get("history").toString()).contains(saleNo).contains(sellerB.toString());
         // The seller who delivered it, and the owner, see the sale.
         assertThat(get("/orders/" + order, tokenB).getBody().get("sale_id").asString())
                 .isEqualTo(sale);
