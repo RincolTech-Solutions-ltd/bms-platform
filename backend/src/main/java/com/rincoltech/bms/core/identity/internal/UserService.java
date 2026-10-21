@@ -205,7 +205,7 @@ class UserService implements TenantAdmins {
         audit.record(
                 AuditLog.Entry.created("core.user.invited", "core.user", id, null, after), platformUserId, "platform");
         InvitationLink link = issueInvitation(id, platformUserId, user.email(), user.phoneE164());
-        return new Invitation(id, link.url(), link.expiresAt());
+        return new Invitation(id, link.url(), link.expiresAt(), accounts.mfaRequired(id));
     }
 
     @Override
