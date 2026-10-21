@@ -415,7 +415,7 @@ Notes:
   without it in every branch the figures cover sees only the sales they made, enforced in the queries: the sales list and its
   grouped summary filter on `created_by` (a `seller_id` other than one's own is 403, the salesperson level is 403), one sale and its
   payments are 404 for someone else's, and the owner dashboard, the sales analysis and the two order reports (delivery fees, cancellations) are 403. One
-  exception keeps the till working: the debts still owed (`owing=owing` or `overdue`, and opening a credit sale that still owes)
+  exception keeps the till working: the debts still owed (`owing=owing` or `overdue` on the sales list, never the summary, and opening a credit sale that still owes)
   are shown whoever made the sale, so the person at the till can take a buyer's payment; a debt is the buyer's figure, not a
   colleague's takings. Cost, margins, profit and the value of the stock are absent for the Sales role already (`retail.profit.read`,
   slice 1). Left as they are, and named for the owner to decide: the cash book's daily summary (the till's cash, which the person

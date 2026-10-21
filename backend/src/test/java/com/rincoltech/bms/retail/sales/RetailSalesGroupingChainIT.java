@@ -401,6 +401,20 @@ class RetailSalesGroupingChainIT extends IntegrationTest {
         assertThat(own).hasSize(1);
         assertThat(own.get(0).get("created_by").asString())
                 .isEqualTo(two.userId().toString());
+        // On the debts list, which shows every debt still owed so the till can take a payment, a colleague's row does
+        // not
+        // say who made it, so it cannot be summed per person.
+        JsonNode debts =
+                cashier.get("/sales?limit=100&owing=owing", SALES).getBody().get("items");
+        assertThat(debts).isNotEmpty();
+        for (JsonNode row : debts) {
+            for (String who : List.of("created_by", "voided_by")) {
+                JsonNode v = row.get(who);
+                assertThat(v == null || v.isNull())
+                        .as("%s of a cashier's row for sale %s", who, row.get("sale_no"))
+                        .isTrue();
+            }
+        }
         // The detail of a sale somebody else made is not found.
         JsonNode theirs = null;
         for (JsonNode row : one.get("/sales?limit=100", ADMIN).getBody().get("items")) {

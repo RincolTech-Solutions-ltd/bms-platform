@@ -66,12 +66,14 @@ own figures.
    instead of the dashboard. Profit, margins, buying prices, costs and the value of the stock are absent without `retail.profit.read`
    (slice 1 extends that rule to the value at the selling price). One exception keeps the till working: the debts still owed
    (`owing` and `overdue`, and opening a credit sale that still owes) are shown whoever made the sale, so whoever is at the till can
-   take a buyer's payment. A debt is the buyer's figure, not a colleague's takings; its grouped summary under `owing` adds up what
-   buyers owe, the same figures credit control shows. Left as they are and named for the owner to decide: the cash book (the daily
+   take a buyer's payment. A debt is the buyer's figure, not a colleague's takings; the grouped summary is never widened by it and stays the caller's own sales. Left as they are and named for the owner to decide: the cash book (the daily
    summary, the expected banking and the savings suggestion are the till's cash, which whoever banks it needs), the buyer's account
    (credit control, customer ageing, the statement and its PDF, the payments on account, which list a buyer's sales whoever made
    them), and the order list (the shop's shared work; a delivered order names its sale, which opens only for its seller or the
    owner). The order reports (delivery fees, cancellations) are the owner's (403).
+   Two consequences to know: the stock list still shows each item's quantity and selling price, so a seller can multiply them for one
+   item (a shelf price times a count, never a total over the stock); and imported history, whose `created_by` is the import actor
+   (`RetailHistory.IMPORT_ACTOR`), belongs to no seller, so only the owner (or a holder of `retail.sale.all_sellers`) sees it.
 6. **Existing users keep what they have.** The administrator and every lending role keep exactly their permissions, the Sales role keeps its
    permissions, and every existing assignment keeps its branch; the only rows `V73` changes are administrator rows limited to a branch, which
    it widens. Slice 2 narrows what the Sales role sees of other people's sales, which is the change the owner asked for.

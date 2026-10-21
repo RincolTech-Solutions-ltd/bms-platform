@@ -76,8 +76,9 @@ class SalesSummaryService {
         // the
         // figures cover, the rule of profit_minor.
         boolean sellers = profitVisible(principal, filter);
-        // ADR-055: without retail.sale.all_sellers in every branch shown, every figure is the caller's own sales.
-        UUID own = debtsOnly(q.owing()) ? null : ownSellerOnly(principal, filter, q.sellerId());
+        // ADR-055: without retail.sale.all_sellers in every branch shown, every figure is the caller's own sales, debts
+        // included: a colleague's debt is found in the list to take its payment, never summed here.
+        UUID own = ownSellerOnly(principal, filter, q.sellerId());
         // Issue #384: the variant level is offered only to a tenant that has an item with sizes and colours.
         boolean variants = repo.anyItemWithVariants();
         List<String> available = SalesSummaryRepository.LEVELS.stream()
@@ -174,9 +175,9 @@ class SalesSummaryService {
     static final String ALL_SELLERS = "retail.sale.all_sellers";
 
     /**
-     * ADR-055: the debts still owed at the caller's branches (the {@code owing} and {@code overdue} filters) are shown whoever
+     * ADR-055: the debts still owed at the caller's branches (the {@code owing} and {@code overdue} filters) are listed whoever
      * made the sale, so whoever is at the till can take a buyer's payment; a debt is the buyer's figure, not a colleague's
-     * takings. Paid sales, cash sales and every other filter stay the caller's own.
+     * takings. Only the sales list uses it: the grouped summary stays the caller's own, so no colleague's debts are summed.
      */
     static boolean debtsOnly(String owing) {
         return "owing".equals(owing) || "overdue".equals(owing);

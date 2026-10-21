@@ -171,7 +171,7 @@ class RetailSellerFiguresIT extends IntegrationTest {
         assertThat(get("/sales/summary?group_by=seller", tokenA).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
         // A search finds only their own sales too.
-        // A search is no way round it: the owner's cash sales are not found by a seller, whatever is typed.
+        // The list's own date filter finds only their own sale of today.
         assertThat(ok("/sales?limit=100&from=" + today(), tokenA).get("items").size())
                 .isEqualTo(1);
     }
@@ -203,6 +203,28 @@ class RetailSellerFiguresIT extends IntegrationTest {
         assertThat(ids(ok("/sales?limit=100&owing=owing", tokenA).get("items"))).containsExactly(debt.toString());
         assertThat(ids(ok("/sales?limit=100", tokenA).get("items"))).doesNotContain(debt.toString());
         assertThat(get("/sales/" + debt, tokenA).getStatusCode()).isEqualTo(HttpStatus.OK);
+        // The colleague's debt is listed for the till, never summed: the grouped debts are the seller's own (none).
+        JsonNode owingSummary = ok("/sales/summary?group_by=day&owing=owing", tokenA);
+        assertThat(totalOf(owingSummary)).isZero();
+        assertThat(totalOf(ok("/sales/summary?group_by=day&owing=owing", tokenB)))
+                .isEqualTo(7_000);
+        // A search is no way round it: by buyer name or by any text, a seller finds no colleague's sale outside the
+        // debts.
+        String byName = "/sales?limit=100&buyer="
+                + java.net.URLEncoder.encode("Test Buyer 05", java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(ok(byName, tokenA).get("items")).isEmpty();
+        assertThat(ids(ok(byName, tokenB).get("items"))).containsExactly(debt.toString());
+        assertThat(ok("/sales?limit=100&query=Test&buyer=Test", tokenA).get("items"))
+                .isEmpty();
+        // On the debts list a colleague's row does not say who made it.
+        for (JsonNode row : ok("/sales?limit=100&owing=owing", tokenA).get("items")) {
+            for (String who : List.of("created_by", "voided_by")) {
+                JsonNode v = row.get(who);
+                assertThat(v == null || v.isNull())
+                        .as("%s of a colleague's debt", who)
+                        .isTrue();
+            }
+        }
         ResponseEntity<JsonNode> paid = api.call(
                 HttpMethod.POST,
                 R + "/sales/" + debt + "/payments",
