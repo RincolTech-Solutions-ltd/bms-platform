@@ -9317,7 +9317,7 @@ export interface components {
             available_minor?: number;
             /**
              * Format: int64
-             * @description Owed on credit sales in the caller's branch scope, historical imports included
+             * @description Owed on credit sales in the caller's branch scope, historical imports included: what a payment on account can settle
              */
             balance_minor?: number;
             /**
@@ -9328,6 +9328,12 @@ export interface components {
             currency?: string;
             /** Format: uuid */
             customer_id?: string;
+            delivery_fees?: components["schemas"]["RetailDeliveryFeeOwed"][];
+            /**
+             * Format: int64
+             * @description Issue #385: delivery fees of customer orders left on the account and not yet paid, owed besides balance_minor and paid on each order
+             */
+            delivery_fees_owed_minor?: number;
             /**
              * Format: int64
              * @description What the limit is measured against: owed on credit sales in every branch. Present only when the caller's scope covers every branch, so no other branch's sales leak
@@ -9399,11 +9405,20 @@ export interface components {
         };
         /** @description Credit sales in the caller's branch scope */
         RetailCustomerBalance: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Owed on the open credit sales: what a payment on account can settle
+             */
             balance_minor?: number;
             currency?: string;
             /** Format: uuid */
             customer_id?: string;
+            delivery_fees?: components["schemas"]["RetailDeliveryFeeOwed"][];
+            /**
+             * Format: int64
+             * @description Issue #385: delivery fees of customer orders left on the account and not yet paid, owed besides balance_minor and paid on each order (POST /retail/orders/{order_id}/fee-payment)
+             */
+            delivery_fees_owed_minor?: number;
             open_sales?: components["schemas"]["RetailOpenSale"][];
         };
         RetailCustomerGroup: {
@@ -9803,6 +9818,21 @@ export interface components {
             value_at_cost_minor?: number;
             /** Format: int64 */
             value_at_price_minor?: number;
+        };
+        /** @description A delivery fee left on the buyer's account, paid on its order */
+        RetailDeliveryFeeOwed: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: date */
+            delivered_on?: string;
+            /** Format: int64 */
+            fee_minor?: number;
+            /** Format: uuid */
+            order_id?: string;
+            order_no?: string;
+            /** Format: uuid */
+            sale_id?: string;
+            sale_no?: string;
         };
         RetailDocument: {
             /** Format: uuid */

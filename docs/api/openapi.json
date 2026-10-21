@@ -8021,7 +8021,7 @@
             "type" : "integer"
           },
           "balance_minor" : {
-            "description" : "Owed on credit sales in the caller's branch scope, historical imports included",
+            "description" : "Owed on credit sales in the caller's branch scope, historical imports included: what a payment on account can settle",
             "format" : "int64",
             "type" : "integer"
           },
@@ -8036,6 +8036,17 @@
           "customer_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "delivery_fees" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDeliveryFeeOwed"
+            },
+            "type" : "array"
+          },
+          "delivery_fees_owed_minor" : {
+            "description" : "Issue #385: delivery fees of customer orders left on the account and not yet paid, owed besides balance_minor and paid on each order",
+            "format" : "int64",
+            "type" : "integer"
           },
           "exposure_minor" : {
             "description" : "What the limit is measured against: owed on credit sales in every branch. Present only when the caller's scope covers every branch, so no other branch's sales leak",
@@ -8158,6 +8169,7 @@
         "description" : "Credit sales in the caller's branch scope",
         "properties" : {
           "balance_minor" : {
+            "description" : "Owed on the open credit sales: what a payment on account can settle",
             "format" : "int64",
             "type" : "integer"
           },
@@ -8167,6 +8179,17 @@
           "customer_id" : {
             "format" : "uuid",
             "type" : "string"
+          },
+          "delivery_fees" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailDeliveryFeeOwed"
+            },
+            "type" : "array"
+          },
+          "delivery_fees_owed_minor" : {
+            "description" : "Issue #385: delivery fees of customer orders left on the account and not yet paid, owed besides balance_minor and paid on each order (POST /retail/orders/{order_id}/fee-payment)",
+            "format" : "int64",
+            "type" : "integer"
           },
           "open_sales" : {
             "items" : {
@@ -8790,6 +8813,37 @@
           "value_at_price_minor" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        }
+      },
+      "RetailDeliveryFeeOwed" : {
+        "description" : "A delivery fee left on the buyer's account, paid on its order",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "delivered_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "fee_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "order_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "order_no" : {
+            "type" : "string"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_no" : {
+            "type" : "string"
           }
         }
       },
