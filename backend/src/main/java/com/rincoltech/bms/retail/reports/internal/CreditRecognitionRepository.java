@@ -58,9 +58,12 @@ class CreditRecognitionRepository {
                 java.sql.Timestamp.from(to.plusDays(1).atStartOfDay(zone).toInstant()));
         String inPeriod = periods.sql("s.sale_date", "s.created_at", params, "crpE");
         String paidDay = "CAST((p.created_at AT TIME ZONE :zone) AS date)";
-        // A branch scope picks the sales to read from the events of the window that the scope reports (the branch that took a
-        // payment, that was reversed, that paid a refund out); every event of a picked sale is still read, since the running
-        // figures of a sale need them all. A return with no cash out is spread over the branches that took the sale's money,
+        // A branch scope picks the sales to read from the events of the window that the scope reports (the branch that
+        // took a
+        // payment, that was reversed, that paid a refund out); every event of a picked sale is still read, since the
+        // running
+        // figures of a sale need them all. A return with no cash out is spread over the branches that took the sale's
+        // money,
         // so it is picked whatever its own branch.
         String payScope = "";
         String revScope = "";

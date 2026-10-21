@@ -344,7 +344,8 @@ class RetailDashboardRangeIT extends IntegrationTest {
             assertThat(range.has("best_seller")).as(q).isFalse();
             assertThat(range.has("top_salesperson")).as(q).isFalse();
         }
-        JsonNode all = none.get("/reports/dashboard?period=all", ADMIN).getBody().get("range");
+        JsonNode all =
+                none.get("/reports/dashboard?period=all", ADMIN).getBody().get("range");
         assertThat(all.get("from").asString()).isEqualTo(today().toString());
         assertThat(all.has("previous")).isFalse();
     }
@@ -372,8 +373,7 @@ class RetailDashboardRangeIT extends IntegrationTest {
     /** A range far in the past is read for its own days and the days before it; today's card and the fixed windows are unchanged. */
     @Test
     void anOldCustomRangeReadsItsOwnDaysAndKeepsTodayAsItWas() {
-        JsonNode body = range(
-                "period=custom&from=" + today().minusDays(410) + "&to=" + today().minusDays(390), ADMIN);
+        JsonNode body = range("period=custom&from=" + today().minusDays(410) + "&to=" + today().minusDays(390), ADMIN);
         figures(body.get("range").get("current"), 300, 1, 100);
         figures(body.get("range").get("previous"), 0, 0, 0);
         assertThat(body.get("today").get("sales_minor").asLong()).isEqualTo(3_600);
@@ -389,7 +389,7 @@ class RetailDashboardRangeIT extends IntegrationTest {
                 "period=custom&from=" + today().plusDays(30) + "&to=" + today().plusDays(60),
                 "period=custom&from=" + today().minusDays(2) + "&to=" + today().plusDays(1))) {
             ResponseEntity<JsonNode> r = api.get("/reports/dashboard?" + q, ADMIN);
-            assertThat(r.getStatusCode()).as("%s: %s", q, r.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+            assertThat(r.getStatusCode().value()).as("%s: %s", q, r.getBody()).isEqualTo(422);
         }
     }
 
@@ -398,7 +398,8 @@ class RetailDashboardRangeIT extends IntegrationTest {
     void aStorekeeperIsRefusedWithARangeToo() {
         String storekeeper = "retail.stock.read,retail.stock.transfer,retail.stocktake.commit,retail.usage.report";
         assertThat(api.get("/reports/dashboard", storekeeper).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        for (String q : List.of("period=7d", "period=all", "period=custom&from=" + today().minusDays(3) + "&to=" + today())) {
+        for (String q :
+                List.of("period=7d", "period=all", "period=custom&from=" + today().minusDays(3) + "&to=" + today())) {
             ResponseEntity<JsonNode> r = api.get("/reports/dashboard?" + q, storekeeper);
             assertThat(r.getStatusCode()).as("%s: %s", q, r.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
         }

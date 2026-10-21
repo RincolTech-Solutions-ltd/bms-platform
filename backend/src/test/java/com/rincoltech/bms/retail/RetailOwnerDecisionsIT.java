@@ -214,13 +214,30 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
         assertThat(mixed.getBody().get("today").get("sales_minor").asLong()).isEqualTo(21_000);
         assertThat(get("/reports/dashboard?branch_id=" + t.secondBranch(), both).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
-        // Issue #428: a range does not widen it. A Supervisor asking for a branch outside the supervision is refused with a
-        // period, whatever the period.
+        // Issue #428: a range does not widen it. A branch outside the caller's sales scope covers nothing, so a
+        // Supervisor
+        // asking for it gets an empty report, as without a range (AnalyticsSupport.everySellerFilter), and a Supervisor
+        // who
+        // sells there is refused.
         for (String period : List.of("period=7d", "period=all", "period=today")) {
             ResponseEntity<JsonNode> outside =
                     get("/reports/dashboard?" + period + "&branch_id=" + t.secondBranch(), supervisor);
-            assertThat(outside.getStatusCode()).as("%s: %s", period, outside.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
-            assertThat(get("/reports/dashboard?" + period + "&branch_id=" + t.secondBranch(), both).getStatusCode())
+            assertThat(outside.getStatusCode())
+                    .as("%s: %s", period, outside.getBody())
+                    .isEqualTo(HttpStatus.OK);
+            assertThat(outside.getBody()
+                            .get("range")
+                            .get("current")
+                            .get("sales_minor")
+                            .asLong())
+                    .as(period)
+                    .isZero();
+            assertThat(outside.getBody().get("shops")).as(period).isEmpty();
+            assertThat(outside.getBody().toString())
+                    .as(period)
+                    .doesNotContain(t.secondBranch().toString());
+            assertThat(get("/reports/dashboard?" + period + "&branch_id=" + t.secondBranch(), both)
+                            .getStatusCode())
                     .as("also for the supervisor who sells at branch two: %s", period)
                     .isEqualTo(HttpStatus.FORBIDDEN);
         }

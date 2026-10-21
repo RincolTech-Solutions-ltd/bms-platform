@@ -170,7 +170,8 @@ class DashboardService {
         // The when-paid fields appear once the rule has started, not while its start day is still ahead.
         boolean onPay = periods.contains(today);
         LocalDate windowStart = today.minusDays(29);
-        // The last 30 days (today, the 7 and 30 day figures, the shops) and, apart, the range with the period before it: a
+        // The last 30 days (today, the 7 and 30 day figures, the shops) and, apart, the range with the period before
+        // it: a
         // range far in the past is read for its own days and the 30 before them, never for everything up to today.
         Book book = book(filter, windowStart, today, periods, onPay);
         Book ranged = range == null
@@ -249,7 +250,9 @@ class DashboardService {
         // A branch that only took payments on credit sales has money collected today and needs its row.
         book.collBranch().keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         if (ranged != null && ranged != book) {
-            ranged.byBranch().keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
+            ranged.byBranch().keySet().stream()
+                    .filter(b -> !branches.contains(b))
+                    .forEach(branches::add);
         }
         positions.keySet().stream().filter(b -> !branches.contains(b)).forEach(branches::add);
         branches.sort(null);
@@ -271,7 +274,8 @@ class DashboardService {
                 }
             }
             if (range != null) {
-                for (Map.Entry<LocalDate, long[]> e : ranged.byBranch().getOrDefault(b, Map.of()).entrySet()) {
+                for (Map.Entry<LocalDate, long[]> e :
+                        ranged.byBranch().getOrDefault(b, Map.of()).entrySet()) {
                     if (range.contains(e.getKey())) {
                         rs += e.getValue()[0];
                     } else if (range.inPrevious(e.getKey())) {
@@ -418,7 +422,8 @@ class DashboardService {
                 series,
                 busiestDay,
                 bestShop(range, book, principal),
-                // Over more than a year the two rankings, which scan every sale line of the span, are left out (ADR-060).
+                // Over more than a year the two rankings, which scan every sale line of the span, are left out
+                // (ADR-060).
                 range.leaders() ? leader(Dimension.PRODUCT, filter, range) : null,
                 // A ranking of colleagues is management information, as the salesperson level of the sales summary.
                 profit && range.leaders() ? leader(Dimension.SELLER, filter, range) : null);

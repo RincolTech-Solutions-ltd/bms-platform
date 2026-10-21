@@ -5,7 +5,7 @@
 Proposed (owner request, issue #428, 21 Oct 2026). Extends the owner dashboard of issue #149 without changing its body when no
 range is asked for, and keeps every rule of ADR-043 (credit sales counted when the buyer pays), ADR-055 (retail roles: a seller sees
 only their own figures, no cost, profit, margin or stock value without `retail.profit.read`, branch scope, the Supervisor at its
-branches) and ADR-047 (no league tables). The number follows ADR-058 (host checks, pull request 427) and ADR-059 (pull request 433),
+branches) and ADR-047 (no league tables). The number follows pending ADR-058 (host checks, pull request 427) and pending ADR-059 (pull request 433),
 which merge first. No migration.
 
 ## Context
