@@ -14160,6 +14160,7 @@
           "credit_notes" : {
             "description" : "The credit notes of the completed returns, oldest first",
             "items" : {
+              "description" : "The credit notes of the completed returns, oldest first",
               "type" : "string"
             },
             "type" : "array"
