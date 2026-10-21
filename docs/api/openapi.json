@@ -14139,6 +14139,83 @@
           }
         }
       },
+      "RetailSaleReceipt" : {
+        "properties" : {
+          "balance_minor" : {
+            "description" : "What the buyer still owes, as on the sale: returns and payments taken into account",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "business_name" : {
+            "description" : "The business's own name from its letterhead",
+            "type" : "string"
+          },
+          "buyer_contact" : {
+            "description" : "The buyer's number: the record's when the sale names one, else the sale's",
+            "type" : "string"
+          },
+          "buyer_name" : {
+            "type" : "string"
+          },
+          "credit_notes" : {
+            "description" : "The credit notes of the completed returns, oldest first",
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "customer_has_contact" : {
+            "description" : "Whether the buyer's record already has a number",
+            "type" : "boolean"
+          },
+          "customer_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "customer_version" : {
+            "description" : "The buyer record's version, for a save of its number under If-Match",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "net_minor" : {
+            "description" : "The total less the goods taken back",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "paid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "payment_method" : {
+            "type" : "string"
+          },
+          "receipt_no" : {
+            "description" : "The sale's number, which the receipt carries",
+            "type" : "string"
+          },
+          "returned_minor" : {
+            "description" : "The value of the goods taken back by completed returns",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_version" : {
+            "description" : "The sale's version; it changes with a payment or a return",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RetailSaleRequest" : {
         "properties" : {
           "branch_id" : {
@@ -34889,6 +34966,34 @@
         "tags" : [ "retail-sales" ]
       }
     },
+    "/api/v1/retail/sales/{sale_id}/receipt" : {
+      "get" : {
+        "operationId" : "getRetailSaleReceipt",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sale_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSaleReceipt"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The facts of a sale's receipt to share, as its PDF prints them: number, business name, buyer and number, paid, balance, returns and net; own sales only without retail.sale.all_sellers (issue #439)",
+        "tags" : [ "retail-documents" ]
+      }
+    },
     "/api/v1/retail/sales/{sale_id}/receipt/pdf" : {
       "get" : {
         "operationId" : "renderRetailSaleReceipt",
@@ -34931,7 +35036,7 @@
                 }
               }
             },
-            "description" : "The sale was voided"
+            "description" : "The sale was voided or written off, or every item of it was taken back"
           },
           "503" : {
             "content" : {

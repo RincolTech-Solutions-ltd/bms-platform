@@ -331,6 +331,13 @@ class DocumentsRepository {
                 .optional();
     }
 
+    Optional<Integer> customerVersion(UUID customerId) {
+        return jdbc.sql("SELECT version FROM retail_customers WHERE id = ?")
+                .param(customerId)
+                .query(Integer.class)
+                .optional();
+    }
+
     String userName(UUID userId) {
         if (userId == null) {
             return "the system";

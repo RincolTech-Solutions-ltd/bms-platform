@@ -23,6 +23,7 @@ import com.rincoltech.bms.retail.sales.internal.DocumentSnapshot.TransferRef;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.DocumentPage;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.IssueRequest;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.IssuedDocument;
+import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SaleReceipt;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.Series;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SeriesBranch;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SeriesList;
@@ -82,6 +83,7 @@ class DocumentsService {
     private final SalesService sales;
     private final AccountsService accounts;
     private final SalesRepository salesRepo;
+    private final ReturnsRepository returns;
     private final DocumentModels models;
     private final Documents documents;
     private final RetailCapabilities capabilities;
@@ -100,6 +102,7 @@ class DocumentsService {
             SalesService sales,
             AccountsService accounts,
             SalesRepository salesRepo,
+            ReturnsRepository returns,
             DocumentModels models,
             Documents documents,
             RetailCapabilities capabilities,
@@ -115,6 +118,7 @@ class DocumentsService {
         this.sales = sales;
         this.accounts = accounts;
         this.salesRepo = salesRepo;
+        this.returns = returns;
         this.models = models;
         this.documents = documents;
         this.capabilities = capabilities;
@@ -682,32 +686,125 @@ class DocumentsService {
         return documents.renderPdf("customer_statement", model);
     }
 
-    // JUSTIFICATION-A3: one new read route's service method; it reuses saleSnapshot, the invoice model and template.
+    // JUSTIFICATION-A3: the receipt to share (issue #439): one check of who may share it, its facts and its PDF.
+    /** How long a receipt waits for a render place before 503 {@code documents_busy}, as a statement does. */
+    static final long RECEIPT_WAIT_MILLIS = 3000;
+
+    /** A sale whose receipt may be shared, with its completed returns. */
+    private record Receipt(Sale sale, List<ReturnsRepository.Row> returned, long returnedMinor) {}
+
+    /**
+     * The sale behind a receipt to share (issue #439, ADR-061), in the caller's read transaction. Stricter than reading
+     * the sale: without {@code retail.sale.all_sellers} at its branch only a sale the caller made, with no exception for
+     * a debt still owed (404, as a sale outside the scope). A voided sale, a written-off sale and a sale whose goods were
+     * all taken back have no receipt (422): a clean receipt is never printed for money that is not owed or not kept.
+     */
+    private Receipt receipt(UUID saleId) {
+        Principal principal = CurrentPrincipal.require();
+        Sale sale = sales.get(saleId);
+        boolean own = principal.userId() != null && principal.userId().equals(sale.createdBy());
+        if (!own && !principal.may(SalesSummaryService.ALL_SELLERS, sale.branchId())) {
+            throw ApiException.notFound();
+        }
+        if (!sale.status().equals("completed")) {
+            throw ApiException.rule("sale_voided", "A cancelled sale has no receipt to share.");
+        }
+        if (sale.writeOff() != null) {
+            throw ApiException.rule(
+                    "sale_written_off", "The unpaid part of this sale was written off, so it has no receipt to share.");
+        }
+        List<ReturnsRepository.Row> done = returns.forSale(sale.id()).stream()
+                .filter(r -> r.status().equals("completed"))
+                .toList();
+        long returnedMinor =
+                done.stream().mapToLong(ReturnsRepository.Row::totalMinor).sum();
+        if (!done.isEmpty() && returnedMinor >= sale.totalMinor()) {
+            throw ApiException.rule(
+                    "sale_fully_returned", "Every item of this sale was taken back, so it has no receipt to share.");
+        }
+        return new Receipt(sale, done, returnedMinor);
+    }
+
+    /** The facts of the receipt to share: what the screen's caption says, the same figures as the PDF. */
+    SaleReceipt receiptFacts(UUID saleId) {
+        return reading.execute(status -> {
+            Receipt r = receipt(saleId);
+            Sale sale = r.sale();
+            String name = sale.buyerName();
+            String contact = sale.buyerContact();
+            Integer customerVersion = null;
+            boolean customerHasContact = false;
+            if (sale.customerId() != null) {
+                DocumentsRepository.BuyerInfo c =
+                        repo.customer(sale.customerId()).orElse(null);
+                if (c != null) {
+                    name = c.name();
+                    customerHasContact = c.contact() != null && !c.contact().isBlank();
+                    contact = customerHasContact ? c.contact() : contact;
+                    customerVersion = repo.customerVersion(sale.customerId()).orElse(null);
+                }
+            }
+            return new SaleReceipt(
+                    sale.id(),
+                    sale.saleNo(),
+                    models.businessName(),
+                    name == null || name.isBlank() ? null : name,
+                    contact == null || contact.isBlank() ? null : contact,
+                    sale.customerId(),
+                    customerVersion,
+                    customerHasContact,
+                    sale.paymentMethod(),
+                    sale.currency(),
+                    sale.totalMinor(),
+                    sale.paidMinor(),
+                    sale.balanceMinor(),
+                    r.returnedMinor(),
+                    sale.totalMinor() - r.returnedMinor(),
+                    r.returned().stream()
+                            .map(ReturnsRepository.Row::creditNoteNo)
+                            .toList(),
+                    sale.version());
+        });
+    }
+
     /**
      * The receipt of a sale as a PDF, for the seller to share from their own phone (issue #439, ADR-061): the invoice
-     * layout titled RECEIPT under the sale's own number, rendered now from the sale and never stored, numbered in no
-     * series and written to no table, so it needs neither the documents capability nor {@code retail.document.issue}.
-     * It is stricter than reading the sale: a seller who sees only their own figures gets their own sales' receipts and
-     * not the receipt of another seller's credit sale they may take a payment on (404, as a sale outside the scope).
+     * layout titled RECEIPT under the sale's own number, with the balance the sale carries, the returns and the net, and
+     * the seller who made the sale. Rendered now and never stored, numbered in no series and written to no table, so it
+     * needs neither the documents capability nor {@code retail.document.issue}. The model is built only once a report
+     * render place is held, so a burst of receipts always leaves one place for the documents an administrator issues.
      */
-    @SuppressWarnings("unchecked")
     byte[] receiptPdf(UUID saleId) {
-        Map<String, Object> model = reading.execute(status -> {
-            Principal principal = CurrentPrincipal.require();
-            Sale sale = sales.get(saleId);
-            if (!principal.may(SalesSummaryService.ALL_SELLERS, sale.branchId())
-                    && !java.util.Objects.equals(principal.userId(), sale.createdBy())) {
-                throw ApiException.notFound();
+        java.nio.file.Path file = null;
+        try {
+            file = java.nio.file.Files.createTempFile("bms-receipt-", ".pdf");
+            documents.renderPdf(
+                    "invoice",
+                    () -> reading.execute(status -> {
+                        Receipt r = receipt(saleId);
+                        Sale sale = r.sale();
+                        DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
+                        return models.receipt(
+                                snapshot,
+                                repo.userName(sale.createdBy()),
+                                sale.balanceMinor(),
+                                r.returned(),
+                                sale.totalMinor() - r.returnedMinor());
+                    }),
+                    file,
+                    RECEIPT_WAIT_MILLIS);
+            return java.nio.file.Files.readAllBytes(file);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        } finally {
+            if (file != null) {
+                try {
+                    java.nio.file.Files.deleteIfExists(file);
+                } catch (java.io.IOException ignored) {
+                    // A temporary file the host cleans; nothing in it outlives the request.
+                }
             }
-            if (!sale.status().equals("completed")) {
-                throw ApiException.rule("sale_voided", "A cancelled sale has no receipt to share.");
-            }
-            DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
-            Map<String, Object> m = models.model(snapshot);
-            ((Map<String, Object>) m.get("doc")).put("title", "RECEIPT");
-            return m;
-        });
-        return documents.renderPdf("invoice", model);
+        }
     }
 
     LocalDate today() {

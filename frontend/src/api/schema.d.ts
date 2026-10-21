@@ -5213,6 +5213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sales/{sale_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The facts of a sale's receipt to share, as its PDF prints them: number, business name, buyer and number, paid, balance, returns and net; own sales only without retail.sale.all_sellers (issue #439) */
+        get: operations["getRetailSaleReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales/{sale_id}/receipt/pdf": {
         parameters: {
             query?: never;
@@ -12960,6 +12977,54 @@ export interface components {
         RetailSalePage: {
             items?: components["schemas"]["RetailSale"][];
             next_cursor?: string;
+        };
+        RetailSaleReceipt: {
+            /**
+             * Format: int64
+             * @description What the buyer still owes, as on the sale: returns and payments taken into account
+             */
+            balance_minor?: number;
+            /** @description The business's own name from its letterhead */
+            business_name?: string;
+            /** @description The buyer's number: the record's when the sale names one, else the sale's */
+            buyer_contact?: string;
+            buyer_name?: string;
+            /** @description The credit notes of the completed returns, oldest first */
+            credit_notes?: string[];
+            currency?: string;
+            /** @description Whether the buyer's record already has a number */
+            customer_has_contact?: boolean;
+            /** Format: uuid */
+            customer_id?: string;
+            /**
+             * Format: int32
+             * @description The buyer record's version, for a save of its number under If-Match
+             */
+            customer_version?: number;
+            /**
+             * Format: int64
+             * @description The total less the goods taken back
+             */
+            net_minor?: number;
+            /** Format: int64 */
+            paid_minor?: number;
+            payment_method?: string;
+            /** @description The sale's number, which the receipt carries */
+            receipt_no?: string;
+            /**
+             * Format: int64
+             * @description The value of the goods taken back by completed returns
+             */
+            returned_minor?: number;
+            /** Format: uuid */
+            sale_id?: string;
+            /**
+             * Format: int32
+             * @description The sale's version; it changes with a payment or a return
+             */
+            sale_version?: number;
+            /** Format: int64 */
+            total_minor?: number;
         };
         RetailSaleRequest: {
             /**
@@ -25210,6 +25275,28 @@ export interface operations {
             };
         };
     };
+    getRetailSaleReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailSaleReceipt"];
+                };
+            };
+        };
+    };
     renderRetailSaleReceipt: {
         parameters: {
             query?: never;
@@ -25239,7 +25326,7 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
-            /** @description The sale was voided */
+            /** @description The sale was voided or written off, or every item of it was taken back */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.sales.internal.DocumentsApi.DocumentList;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.DocumentPage;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.IssueRequest;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.IssuedDocument;
+import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SaleReceipt;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SeriesList;
 import com.rincoltech.bms.retail.sales.internal.DocumentsApi.SeriesRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -193,6 +194,19 @@ class DocumentsController {
                 .body(pdf);
     }
 
+    // JUSTIFICATION-A3: the facts of the receipt to share; the same check as its PDF below.
+    @GetMapping("/sales/{sale_id}/receipt")
+    @RequiresPermission("retail.sale.read")
+    @Operation(
+            summary =
+                    "The facts of a sale's receipt to share, as its PDF prints them: number, business name, buyer and"
+                            + " number, paid, balance, returns and net; own sales only without retail.sale.all_sellers (issue #439)",
+            operationId = "getRetailSaleReceipt")
+    SaleReceipt receipt(@PathVariable("sale_id") UUID saleId, HttpServletResponse response) {
+        NoStore.apply(response);
+        return service.receiptFacts(saleId);
+    }
+
     // JUSTIFICATION-A3: one new read route; the same PDF response shape as the statement route above.
     @GetMapping(
             path = "/sales/{sale_id}/receipt/pdf",
@@ -214,7 +228,7 @@ class DocumentsController {
                 content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
         @ApiResponse(
                 responseCode = "422",
-                description = "The sale was voided",
+                description = "The sale was voided or written off, or every item of it was taken back",
                 content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
         @ApiResponse(
                 responseCode = "503",

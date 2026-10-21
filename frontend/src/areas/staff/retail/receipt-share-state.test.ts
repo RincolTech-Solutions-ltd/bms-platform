@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalisePhone, receiptCaption, whatsAppLink } from './receipt-share-state';
+import { normalisePhone, plainName, receiptCaption, wellFormed, whatsAppLink } from './receipt-share-state';
 
 // Issue #439: the phone rules ported from the company's other product, and the caption. Every number is fabricated.
 
@@ -38,6 +38,11 @@ describe('normalisePhone', () => {
     expect(ok('700000015')).toBe('256700000015');
   });
 
+  it('refuses 256 typed with digits missing, and 9 digits that are not a Uganda mobile', () => {
+    expect(refused('256700000')).toMatch(/256 with digits missing/);
+    expect(refused('123456789')).toMatch(/starts with 07/);
+  });
+
   it('keeps a full Uganda number as it is', () => {
     expect(ok('256700000016')).toBe('256700000016');
     expect(ok('+256700000016')).toBe('256700000016');
@@ -74,31 +79,58 @@ describe('whatsAppLink', () => {
       'https://wa.me/256700000022?text=*Test%20Shop*%3A%20Receipt%20RS00000001%0AThank%20you',
     );
   });
+
+  it('drops half an emoji instead of throwing', () => {
+    const cut = 'Test Buyer \uD83D';
+    expect(() => encodeURIComponent(cut)).toThrow(URIError);
+    expect(wellFormed(cut)).toBe('Test Buyer ');
+    expect(whatsAppLink('256700000023', cut)).toBe('https://wa.me/256700000023?text=Test%20Buyer%20');
+    expect(wellFormed('Test \uD83D\uDE00 Shop')).toBe('Test \uD83D\uDE00 Shop');
+  });
+});
+
+describe('plainName', () => {
+  it('takes out the characters that would break WhatsApp bold and italics', () => {
+    expect(plainName('*Test* _Shop_ ~Ltd~ `01`')).toBe('Test Shop Ltd 01');
+  });
 });
 
 describe('receiptCaption', () => {
-  const paid = { sale_no: 'RS00000001', payment_method: 'cash', paid_minor: 25000, balance_minor: 0 };
+  const paid = {
+    receipt_no: 'RS00000001', business_name: 'Test Trading Ltd', buyer_name: 'Test Buyer 01', payment_method: 'cash',
+    paid_minor: 25000, balance_minor: 0, returned_minor: 0, net_minor: 25000, credit_notes: [],
+  };
 
   it('names the business, the buyer, what was paid and that it is settled', () => {
-    expect(receiptCaption(paid, 'Test Trading Ltd', 'Test Buyer 01')).toBe(
+    expect(receiptCaption(paid)).toBe(
       ['*Test Trading Ltd*: Receipt RS00000001', 'Customer: Test Buyer 01', 'Amount paid: UGX 25,000 (Cash)', 'Fully settled, thank you!', 'Thank you for your business.'].join('\n'),
     );
   });
 
   it('leaves the customer line out when there is no buyer', () => {
-    const text = receiptCaption(paid, 'Test Trading Ltd', undefined);
+    const text = receiptCaption({ ...paid, buyer_name: undefined });
     expect(text).not.toContain('Customer:');
     expect(text.split('\n')).toHaveLength(4);
   });
 
   it('shows the balance still owed on a credit sale', () => {
-    const text = receiptCaption({ sale_no: 'RS00000002', payment_method: 'credit', paid_minor: 10000, balance_minor: 15000 }, 'Test Trading Ltd', 'Test Buyer 02');
+    const text = receiptCaption({ ...paid, receipt_no: 'RS00000002', payment_method: 'credit', paid_minor: 10000, balance_minor: 15000 });
     expect(text).toContain('Amount paid: UGX 10,000 (Credit)');
     expect(text).toContain('Balance outstanding: UGX 15,000');
     expect(text).not.toContain('Fully settled');
   });
 
-  it('never makes up a business name', () => {
-    expect(receiptCaption(paid, undefined, undefined).split('\n')[0]).toBe('Receipt RS00000001');
+  it('names the goods taken back, the credit notes and the net', () => {
+    const text = receiptCaption({ ...paid, payment_method: 'credit', paid_minor: 0, returned_minor: 5000, net_minor: 20000, balance_minor: 20000, credit_notes: ['CN-HQ-000001'] });
+    expect(text).toContain('Goods returned: UGX 5,000 (credit note CN-HQ-000001)');
+    expect(text).toContain('Net after returns: UGX 20,000');
+    expect(text).toContain('Balance outstanding: UGX 20,000');
+  });
+
+  it('never makes up a business name, and keeps markup out of the names', () => {
+    expect(receiptCaption({ ...paid, business_name: undefined }).split('\n')[0]).toBe('Receipt RS00000001');
+    const text = receiptCaption({ ...paid, business_name: 'Test *Bold* Shop', buyer_name: 'Test_Buyer' });
+    expect(text.split('\n')[0]).toBe('*Test Bold Shop*: Receipt RS00000001');
+    expect(text).toContain('Customer: TestBuyer');
   });
 });
