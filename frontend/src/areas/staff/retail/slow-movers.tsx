@@ -12,7 +12,8 @@ import { Problem, changeFailureText, money, useIsPhone } from './ui';
 // Slow movers on Stock health (issue #414): items that do sell, but so slowly that the stock lasts more than the
 // business's number of months (or sold fewer than its minimum in 90 days). Separate from dead stock, which did not sell
 // at all. Money tied up arrives only with retail.profit.read in the branch; the server leaves the field out otherwise.
-// "Sells better at" names another branch of the person's own where the item sells faster, with a Move stock link
+// An item newer in the branch than 90 days is judged on the days it has been there (days_counted), so it is not slow just
+// for being new. "Sells better at" names another branch of the person's own where the item sells faster, with a Move stock link
 // filled in for someone who may move stock from this branch.
 
 type NameOf = (id: string | undefined) => string;
@@ -21,7 +22,7 @@ type NameOf = (id: string | undefined) => string;
 function MoveLink({ row }: { row: SlowMover }) {
   const staff = useContext(StaffContext);
   const router = useRouter({ warn: false });
-  const to = row.sells_better_at;
+  const to = row.better_at;
   if (!to || !router || !staff || !canUse(staff.me, 'transfer') || !holdsAt(staff.me, TRANSFER, row.branch_id)) return null;
   const search = { from: row.branch_id ?? '', to: to.branch_id ?? '', product: row.product_id ?? '', code: row.code ?? '', qty: showQty(to.suggested_qty ?? '0') };
   return (
@@ -32,7 +33,7 @@ function MoveLink({ row }: { row: SlowMover }) {
 }
 
 function Better({ row, nameOf }: { row: SlowMover; nameOf: NameOf }) {
-  const to = row.sells_better_at;
+  const to = row.better_at;
   if (!to) return null;
   return (
     <span className="hint">
@@ -73,11 +74,14 @@ export function SlowMoversSection({ data, nameOf }: { data: SlowMovers | undefin
                     <span className="hint">{r.code}, {nameOf(r.branch_id)}</span>
                     {phone && <><br /><span className="hint">{showQty(r.qty_on_hand ?? '0')} {r.unit} in stock, last sold {r.last_sold_on}</span></>}
                     {phone && r.value_at_cost_minor !== undefined && <><br /><span className="hint">Money tied up {money(r.value_at_cost_minor)}</span></>}
-                    {r.sells_better_at && <><br /><Better row={r} nameOf={nameOf} /></>}
+                    {r.better_at && <><br /><Better row={r} nameOf={nameOf} /></>}
                   </td>
                   {!phone && <td className="num">{showQty(r.qty_on_hand ?? '0')} {r.unit}</td>}
                   {!phone && <td>{r.last_sold_on}</td>}
-                  <td className="num">{r.capped ? 'over ' : ''}{r.months_to_sell}</td>
+                  <td className="num">
+                    {r.capped ? 'over ' : ''}{r.months_of_stock}
+                    {(r.days_counted ?? 90) < 90 && <><br /><span className="hint">new, pace of {r.days_counted} {r.days_counted === 1 ? 'day' : 'days'}</span></>}
+                  </td>
                   {withCost && !phone && <td className="num">{moneyOrNone(r.value_at_cost_minor)}</td>}
                 </tr>
               ))}

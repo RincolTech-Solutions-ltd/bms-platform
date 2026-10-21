@@ -184,7 +184,7 @@ describe('stock health', () => {
     },
     slow_movers: {
       days: 90, slow_months: 4, min_sold: 0, total: 1, value_at_cost_minor: 4400,
-      items: [{ branch_id: 'b1', product_id: 'p7', code: 'ANA-7', description: 'Test Product ANA-7', unit: 'piece', qty_on_hand: '44.000', sold_last90: '3.000', last_sold_on: '2026-09-30', months_to_sell: '44.0', capped: false, value_at_cost_minor: 4400 }],
+      items: [{ branch_id: 'b1', product_id: 'p7', code: 'ANA-7', description: 'Test Product ANA-7', unit: 'piece', qty_on_hand: '44.000', sold_last90: '3.000', last_sold_on: '2026-09-30', months_of_stock: '44.0', capped: false, value_at_cost_minor: 4400 }],
     },
     shrinkage: [{ branch_id: 'b1', used_reports: 1, damaged_reports: 1, short_lines: 1, over_lines: 0, used_cost_minor: 1000, damaged_cost_minor: 400, stocktake_loss_minor: 400, stocktake_gain_minor: 0, net_cost_minor: 1800 }],
   };

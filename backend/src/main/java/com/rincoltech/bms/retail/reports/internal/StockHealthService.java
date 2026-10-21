@@ -167,15 +167,15 @@ class StockHealthService {
         List<UUID> products = rows.stream().map(SlowRow::productId).distinct().toList();
         List<UUID> scope = principal.branchFilter("retail.stock.read", null);
         Map<UUID, List<BranchPace>> elsewhere = new LinkedHashMap<>();
-        for (BranchPace p : repo.paceOf(scope, products, since, today)) {
+        for (BranchPace p : repo.paceOf(scope, products, since, today, SLOW_DAYS)) {
             elsewhere.computeIfAbsent(p.productId(), k -> new ArrayList<>()).add(p);
         }
         List<SlowItem> items = rows.stream()
                 .map(r -> {
-                    BigDecimal monthsToSell = r.qty()
-                            .multiply(BigDecimal.valueOf(SLOW_DAYS))
+                    BigDecimal monthsOfStock = r.qty()
+                            .multiply(BigDecimal.valueOf(r.days()))
                             .divide(r.sold().multiply(BigDecimal.valueOf(30)), 1, RoundingMode.HALF_UP);
-                    boolean capped = monthsToSell.compareTo(MONTHS_CAP) > 0;
+                    boolean capped = monthsOfStock.compareTo(MONTHS_CAP) > 0;
                     return new SlowItem(
                             r.branchId(),
                             r.productId(),
@@ -185,7 +185,8 @@ class StockHealthService {
                             Quantities.format(r.qty()),
                             Quantities.format(r.sold()),
                             r.lastSold(),
-                            AnalyticsSupport.oneDecimal(capped ? MONTHS_CAP : monthsToSell),
+                            r.days(),
+                            AnalyticsSupport.oneDecimal(capped ? MONTHS_CAP : monthsOfStock),
                             capped,
                             principal.may(PROFIT_READ, r.branchId()) ? r.atCost() : null,
                             sellsBetterAt(r, elsewhere.getOrDefault(r.productId(), List.of()), months, coverDays));
@@ -202,24 +203,30 @@ class StockHealthService {
     }
 
     /**
-     * The branch that sells the item fastest of those that sell it faster than {@code r}'s branch and can take some:
-     * it takes what it sells in {@code coverDays} less what it holds, and this branch gives at most what it holds
-     * above {@code months} months of its own sales. Whole units only; null when no branch can take one.
+     * The branch that sells the item fastest of those that sell it faster than {@code r}'s branch and can take some,
+     * the pace being units sold over each one's own days ({@link SlowRow#days}, {@link BranchPace#days}): it takes
+     * what it sells in {@code coverDays} less what it holds, and this branch gives at most what it holds above
+     * {@code months} months of its own sales. Whole units only; null when no branch can take one.
      */
     static SellsBetterAt sellsBetterAt(SlowRow r, List<BranchPace> candidates, int months, int coverDays) {
-        BigDecimal window = BigDecimal.valueOf(SLOW_DAYS);
-        BigDecimal keep = r.sold().multiply(BigDecimal.valueOf(months * 30L)).divide(window, 3, RoundingMode.CEILING);
+        BigDecimal ownDays = BigDecimal.valueOf(r.days());
+        BigDecimal keep = r.sold().multiply(BigDecimal.valueOf(months * 30L)).divide(ownDays, 3, RoundingMode.CEILING);
         BigDecimal spare = r.qty().subtract(keep);
         if (spare.compareTo(BigDecimal.ONE) < 0) {
             return null;
         }
+        // Faster when its units over its days beat ours: c.sold * r.days > r.sold * c.days, compared exactly.
+        Comparator<BranchPace> fastestFirst = (a, b) -> b.sold()
+                .multiply(BigDecimal.valueOf(a.days()))
+                .compareTo(a.sold().multiply(BigDecimal.valueOf(b.days())));
         return candidates.stream()
-                .filter(c -> !c.branchId().equals(r.branchId()) && c.sold().compareTo(r.sold()) > 0)
-                .sorted(Comparator.comparing(BranchPace::sold).reversed().thenComparing(BranchPace::branchId))
+                .filter(c -> !c.branchId().equals(r.branchId())
+                        && c.sold().multiply(ownDays).compareTo(r.sold().multiply(BigDecimal.valueOf(c.days()))) > 0)
+                .sorted(fastestFirst.thenComparing(BranchPace::branchId))
                 .map(c -> {
                     BigDecimal need = c.sold()
                             .multiply(BigDecimal.valueOf(coverDays))
-                            .divide(window, 3, RoundingMode.CEILING)
+                            .divide(BigDecimal.valueOf(c.days()), 3, RoundingMode.CEILING)
                             .subtract(c.qty().max(BigDecimal.ZERO));
                     BigDecimal move = need.min(spare).setScale(0, RoundingMode.FLOOR);
                     return move.signum() > 0

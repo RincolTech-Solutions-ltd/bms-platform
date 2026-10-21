@@ -13092,7 +13092,7 @@ export interface components {
         RetailSellsBetterAt: {
             /** Format: uuid */
             branch_id?: string;
-            /** @description Units sold there in the last 90 days */
+            /** @description Units sold there in the last 90 days, or since the item first came there */
             sold_last90?: string;
             /** @description Whole units to move: what that branch sells in cover_days, less its stock, at most what this branch holds above slow_months of its own sales */
             suggested_qty?: string;
@@ -13162,24 +13162,29 @@ export interface components {
         };
         /** @description An item that sold in the branch in the last 90 days, but slowly */
         RetailSlowMover: {
+            better_at?: components["schemas"]["RetailSellsBetterAt"];
             /** Format: uuid */
             branch_id?: string;
-            /** @description True when the months are above 120 and months_to_sell shows 120.0 */
+            /** @description True when the months are above 120 and months_of_stock shows 120.0 */
             capped?: boolean;
             code?: string;
+            /**
+             * Format: int32
+             * @description The days the pace is taken over: 90, or fewer for an item that came to this branch (its first stock movement or sale there) less than 90 days ago, today included
+             */
+            days_counted?: number;
             description?: string;
             /**
              * Format: date
              * @description The last day the item sold in this branch
              */
             last_sold_on?: string;
-            /** @description Stock over the monthly pace of the last 90 days (30 days a month), one place */
-            months_to_sell?: string;
+            /** @description Months of stock: the stock over the monthly pace of days_counted (30 days a month), one place */
+            months_of_stock?: string;
             /** Format: uuid */
             product_id?: string;
             qty_on_hand?: string;
-            sells_better_at?: components["schemas"]["RetailSellsBetterAt"];
-            /** @description Units sold in the last 90 days in this branch */
+            /** @description Units sold in this branch in the last 90 days, or in days_counted for a newer item */
             sold_last90?: string;
             unit?: string;
             /**

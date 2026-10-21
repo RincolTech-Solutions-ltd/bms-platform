@@ -1198,12 +1198,13 @@ own: the order is copied from the chat, so the form asks for the phone first and
 - Stock health has a Slow movers section between Days of cover and Dead stock: items that sold in the branch in the last 90
   days, but whose stock lasts more than the business's months at that pace (or that sold fewer than its minimum). The title
   says the months; the hint says the minimum when one is set, and that items with no sale are under Dead stock.
-- Each row: the item (opens Stock), its code and branch, the stock, the last day it sold, the months to sell ("over 120.0"
-  when capped) and, only when the body carries it, the money tied up at cost. On a phone the stock, the last sale and the money
+- Each row: the item (opens Stock), its code and branch, the stock, the last day it sold, the months of stock ("over 120.0"
+  when capped; "new, pace of N days" under it for an item in the branch less than 90 days) and, only when the body carries it, the money tied up at cost. On a phone the stock, the last sale and the money
   tied up move under the item. Below the table, for a caller with `retail.profit.read` in every branch, "Money tied up in slow
-  stock" with the total at cost.
+  stock" with the total at cost (only for such a caller, unlike the dead stock totals, which follow the branches shown). Units sold
+  are counted before customer returns, as in Days of cover.
 - "Sells better at Test Branch B (30 sold in 90 days). Move 8 piece there." under the item when another branch of the caller's
-  sells it faster. A Move button follows for a person who may move stock from the row's branch; it opens Move stock at
+  sells it faster; only an open branch that stocks goods is named. A Move button follows for a person who may move stock from the row's branch; it opens Move stock at
   `/staff/retail/transfer?from=...&to=...&product=...&code=...&qty=...`, which uses that source branch when the person may move
   stock there and fills an empty form once (the destination and the item with the quantity, the item read with the source's
   stock so the usual "Only N in stock" hint shows). The person still reviews and saves; the server checks everything as for

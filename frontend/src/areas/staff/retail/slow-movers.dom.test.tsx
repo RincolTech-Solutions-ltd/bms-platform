@@ -56,14 +56,14 @@ const nameOf = (id?: string) => (id === BRANCH_A ? 'Test Branch A' : 'Test Branc
 
 const row = {
   branch_id: BRANCH_A, product_id: PRODUCT, code: 'TI-01', description: 'Test Item 01', unit: 'piece',
-  qty_on_hand: '40.000', sold_last90: '3.000', last_sold_on: '2026-10-11', months_to_sell: '40.0', capped: false,
+  qty_on_hand: '40.000', sold_last90: '3.000', last_sold_on: '2026-10-11', months_of_stock: '40.0', capped: false,
 };
 
 const withCost: SlowMovers = {
   days: 90, slow_months: 4, min_sold: 0, total: 2, value_at_cost_minor: 6000,
   items: [
-    { ...row, value_at_cost_minor: 4000, sells_better_at: { branch_id: BRANCH_B, sold_last90: '30.000', suggested_qty: '8.000' } },
-    { ...row, branch_id: BRANCH_B, product_id: 'p2', code: 'TI-02', description: 'Test Item 02', months_to_sell: '120.0', capped: true, value_at_cost_minor: 2000 },
+    { ...row, value_at_cost_minor: 4000, better_at: { branch_id: BRANCH_B, sold_last90: '30.000', suggested_qty: '8.000' } },
+    { ...row, branch_id: BRANCH_B, product_id: 'p2', code: 'TI-02', description: 'Test Item 02', months_of_stock: '120.0', capped: true, value_at_cost_minor: 2000 },
   ],
 };
 
@@ -80,6 +80,13 @@ describe('slow movers section', () => {
     expect(screen.getByText('Money tied up')).toBeTruthy();
     expect(screen.getByText('UGX 4,000')).toBeTruthy();
     expect(screen.getByText(/Money tied up in slow stock: UGX 6,000/)).toBeTruthy();
+  });
+
+  it('says a new item is paced over the days it has been in the branch', () => {
+    const fresh: SlowMovers = { ...withCost, items: [{ ...row, days_counted: 30, months_of_stock: '49.0' }, { ...row, product_id: 'p3', days_counted: 90 }] };
+    show(<SlowMoversSection data={fresh} nameOf={nameOf} />);
+    expect(screen.getByText('49.0')).toBeTruthy();
+    expect(screen.getAllByText('new, pace of 30 days')).toHaveLength(1);
   });
 
   it('never shows money tied up to a caller whose body has no cost', () => {

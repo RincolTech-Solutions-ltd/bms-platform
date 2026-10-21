@@ -14571,7 +14571,7 @@
             "type" : "string"
           },
           "sold_last90" : {
-            "description" : "Units sold there in the last 90 days",
+            "description" : "Units sold there in the last 90 days, or since the item first came there",
             "type" : "string"
           },
           "suggested_qty" : {
@@ -14680,16 +14680,24 @@
       "RetailSlowMover" : {
         "description" : "An item that sold in the branch in the last 90 days, but slowly",
         "properties" : {
+          "better_at" : {
+            "$ref" : "#/components/schemas/RetailSellsBetterAt"
+          },
           "branch_id" : {
             "format" : "uuid",
             "type" : "string"
           },
           "capped" : {
-            "description" : "True when the months are above 120 and months_to_sell shows 120.0",
+            "description" : "True when the months are above 120 and months_of_stock shows 120.0",
             "type" : "boolean"
           },
           "code" : {
             "type" : "string"
+          },
+          "days_counted" : {
+            "description" : "The days the pace is taken over: 90, or fewer for an item that came to this branch (its first stock movement or sale there) less than 90 days ago, today included",
+            "format" : "int32",
+            "type" : "integer"
           },
           "description" : {
             "type" : "string"
@@ -14699,8 +14707,8 @@
             "format" : "date",
             "type" : "string"
           },
-          "months_to_sell" : {
-            "description" : "Stock over the monthly pace of the last 90 days (30 days a month), one place",
+          "months_of_stock" : {
+            "description" : "Months of stock: the stock over the monthly pace of days_counted (30 days a month), one place",
             "type" : "string"
           },
           "product_id" : {
@@ -14710,11 +14718,8 @@
           "qty_on_hand" : {
             "type" : "string"
           },
-          "sells_better_at" : {
-            "$ref" : "#/components/schemas/RetailSellsBetterAt"
-          },
           "sold_last90" : {
-            "description" : "Units sold in the last 90 days in this branch",
+            "description" : "Units sold in this branch in the last 90 days, or in days_counted for a newer item",
             "type" : "string"
           },
           "unit" : {

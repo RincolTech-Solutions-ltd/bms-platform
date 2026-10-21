@@ -96,7 +96,7 @@ final class StockHealthApi {
     record SellsBetterAt(
             UUID branchId,
 
-            @Schema(description = "Units sold there in the last 90 days")
+            @Schema(description = "Units sold there in the last 90 days, or since the item first came there")
             String soldLast90,
 
             @Schema(
@@ -114,23 +114,30 @@ final class StockHealthApi {
             String unit,
             String qtyOnHand,
 
-            @Schema(description = "Units sold in the last 90 days in this branch")
+            @Schema(description = "Units sold in this branch in the last 90 days, or in days_counted for a newer item")
             String soldLast90,
 
             @Schema(description = "The last day the item sold in this branch")
             LocalDate lastSoldOn,
 
-            @Schema(description = "Stock over the monthly pace of the last 90 days (30 days a month), one place")
-            String monthsToSell,
+            @Schema(
+                    description = "The days the pace is taken over: 90, or fewer for an item that came to this branch"
+                            + " (its first stock movement or sale there) less than 90 days ago, today included")
+            int daysCounted,
 
-            @Schema(description = "True when the months are above 120 and months_to_sell shows 120.0")
+            @Schema(
+                    description = "Months of stock: the stock over the monthly pace of days_counted (30 days a month),"
+                            + " one place")
+            String monthsOfStock,
+
+            @Schema(description = "True when the months are above 120 and months_of_stock shows 120.0")
             boolean capped,
 
             @Schema(description = COST_ONLY + "; the money tied up: quantity times the current cost")
             Long valueAtCostMinor,
 
             @Schema(description = "Absent when no other branch in the caller's scope sells it faster")
-            SellsBetterAt sellsBetterAt) {}
+            SellsBetterAt betterAt) {}
 
     @Schema(
             name = "RetailSlowMovers",

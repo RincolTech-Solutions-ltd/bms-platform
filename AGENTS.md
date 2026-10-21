@@ -185,8 +185,10 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
 - **Built (slow movers on Stock health, issue #414, FR-RET-64):** reports only, no migration, no permission: `slow_movers` in
   `GET /retail/reports/stock-health` (items that sold in the branch in the last 90 days but would take more than the business's
   `slow_mover_months`, default 4, to sell at that pace, or sold under `slow_mover_min_sold`, default 0 meaning off; apart from dead
-  stock), with the last sold day, the months to sell, the money tied up at cost only with `retail.profit.read` in the branch, the
-  total only with it everywhere, and "Sells better at" another branch in the caller's scope with a whole quantity to move. The two
+  stock; an item newer in the branch is paced over its own days, `days_counted`), with the last sold day, `months_of_stock`, the
+  money tied up at cost only with `retail.profit.read` in the branch, the total only with it everywhere, and `better_at`: another
+  active, goods-stocking branch in the caller's scope that sells it faster, with a whole quantity to move. No field name holds
+  `sell`, `cost` or `price`, so the Storekeeper guard of `RetailRolesIT` holds. The two
   rules live in the `retail` settings group (`/retail/settings/capabilities`). The PWA: the Slow movers section, a Move link that
   opens Move stock filled in (`from`, `to`, `product`, `code`, `qty` in the address), the Slow movers card on Retail settings;
   tours `page-stock-health` v2 and `page-retail-settings` v4 (`docs/specs/retail-ui-notes.md`).
