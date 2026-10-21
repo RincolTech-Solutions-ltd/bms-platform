@@ -13006,7 +13006,10 @@ export interface components {
              * @description The total less the goods taken back
              */
             net_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The money the buyer actually paid: a return taken off the balance is not counted
+             */
             paid_minor?: number;
             payment_method?: string;
             /** @description The sale's number, which the receipt carries */

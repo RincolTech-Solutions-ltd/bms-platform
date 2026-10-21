@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed (owner decision, issue #439, 22 Oct 2026). Keeps every rule of ADR-055 (retail roles: a seller sees only their own
-figures, a storekeeper no prices) and ADR-033 (optional documents: the invoice, delivery note and quotation stay behind the
+Proposed (owner decision, issue #439, 22 Oct 2026). Follows ADR-055 (retail roles: a seller sees only their own figures, a
+storekeeper no prices) with one deliberate, narrow exception in decision 3, and ADR-033 (optional documents: the invoice, delivery note and quotation stay behind the
 `documents` capability and `retail.document.issue`). The number follows pending ADR-058 (pull request 427) and pending ADR-059
 (pull request 433), and ADR-060 on main. No migration.
 
@@ -34,19 +34,27 @@ the `documents` capability on, so a seller could not reach any PDF of their own 
    stored, numbered in a series or written to a table, so they work with the `documents` capability on or off and need no
    `retail.document.issue`. The numbered invoice of ADR-033 is unchanged. Who may have the receipt and whether the sale has one
    are checked first, holding no render place, so a wrong or foreign sale id is a quick 404 or 422. The PDF is then laid out in a
-   render place of its own (`Documents.renderSharedPdf`), one place for the whole platform, apart from the document places
+   render place of its own (`Documents.renderSharedPdf`), `bms.documents.max-concurrent-shared-renders` places (two by default)
+   for the whole platform, apart from the document places
    (`bms.documents.max-concurrent-renders`, two by default) and the report places (all but one of those): a report never makes a
    seller wait, and a burst of receipts never takes a place an administrator's documents need. Its model is built only once
-   that place is held. At most three PDFs are laid out at once on the smallest host instead of two; a receipt is one or two
-   pages.
+   that place is held. At most four PDFs are laid out at once on the smallest host instead of two (two documents or reports and
+   two receipts); a receipt is one or two pages.
 3. **Who may share.** Only someone who can already view the sale may fetch its receipt, enforced on the server and mirrored in the
    screen: `retail.sale.read` at the sale's branch, and without `retail.sale.all_sellers` there only a sale the caller made (a
    caller with no user, such as a service token, never counts as its maker). This is stricter than reading the sale itself:
    ADR-055 lets a seller open another seller's credit sale that still owes, to take a payment, but not fetch its receipt. A
    storekeeper has no `retail.sale.read` and gets 403; a supervisor gets every seller's at the branches it supervises and an
-   administrator everywhere.
+   administrator everywhere. **A deliberate exception to ADR-055:** ADR-055 hides who made a sale from a caller without
+   `retail.profit.read`, but the printed receipt is signed "Issued by" the seller who made the sale, because a customer's receipt
+   says who served them, the customer sees it anyway, and the caller may already see the sale. The maker's name appears ONLY in
+   that printed signature of a receipt the caller is already allowed to fetch, never in any API field (the facts route carries no
+   maker, and `created_by` stays hidden as ADR-055 says). Decided on the owner's delegation on 22 Oct 2026; the owner may reverse
+   it, which is a change to the signature line only.
 4. **A receipt says what the money is now, or is refused.** The balance is the one the sale carries (payments, and returns taken
-   off the balance, already counted), never the total less the payments. A sale with a completed return is titled RECEIPT AFTER
+   off the balance, already counted), never the total less the payments. What the buyer paid is the money actually paid: a return
+   taken off the balance is booked on the sale as paid in the ledger (unchanged), and the receipt and its facts show it as a
+   return, never as a payment, so a credit sale with nothing paid says so. A sale with a completed return is titled RECEIPT AFTER
    RETURNS and lists each credit note with the goods taken back, what was paid back and what was taken off the balance, and the
    net; the caption names the goods returned, the credit notes and the net too. No receipt is given (422) for a voided sale
    (`sale_voided`), a written-off sale (`sale_written_off`), or a sale whose goods were all taken back (`sale_fully_returned`):

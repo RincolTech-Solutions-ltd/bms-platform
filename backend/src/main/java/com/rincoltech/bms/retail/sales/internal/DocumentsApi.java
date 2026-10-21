@@ -280,6 +280,8 @@ final class DocumentsApi {
             String paymentMethod,
             String currency,
             long totalMinor,
+
+            @Schema(description = "The money the buyer actually paid: a return taken off the balance is not counted")
             long paidMinor,
 
             @Schema(description = "What the buyer still owes, as on the sale: returns and payments taken into account")

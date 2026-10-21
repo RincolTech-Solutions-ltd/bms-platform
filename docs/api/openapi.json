@@ -14186,6 +14186,7 @@
             "type" : "integer"
           },
           "paid_minor" : {
+            "description" : "The money the buyer actually paid: a return taken off the balance is not counted",
             "format" : "int64",
             "type" : "integer"
           },

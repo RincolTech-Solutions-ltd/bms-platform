@@ -52,10 +52,18 @@ class PdfRenderer {
      *     smallest host has a heap of about 224 MB, so the default is two
      * @param waitMillis how long a request waits for a slot before it is answered 503 with Retry-After
      */
+    PdfRenderer(int maxConcurrent, long waitMillis) {
+        this(maxConcurrent, waitMillis, DEFAULT_SHARING_PLACES);
+    }
+
+    /**
+     * @param sharingPlaces the render places of shared receipts (ADR-061), apart from the document and report places
+     */
     @Autowired
     PdfRenderer(
             @Value("${bms.documents.max-concurrent-renders:2}") int maxConcurrent,
-            @Value("${bms.documents.render-wait-ms:3000}") long waitMillis) {
+            @Value("${bms.documents.render-wait-ms:3000}") long waitMillis,
+            @Value("${bms.documents.max-concurrent-shared-renders:2}") int sharingPlaces) {
         this.slots = new Semaphore(Math.max(1, maxConcurrent), true);
         // Reports take at most all but one place, so a receipt asked for while reports are made is not turned away.
         this.reportSlots = new Semaphore(Math.max(1, maxConcurrent - 1), true);
@@ -63,7 +71,7 @@ class PdfRenderer {
         // reports: a
         // report never makes a seller wait, and a burst of receipts never takes a place an administrator's documents
         // need.
-        this.sharingSlots = new Semaphore(SHARING_PLACES, true);
+        this.sharingSlots = new Semaphore(Math.max(1, sharingPlaces), true);
         this.waitMillis = waitMillis;
         this.glyphs = loadGlyphs();
         ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
@@ -115,8 +123,8 @@ class PdfRenderer {
         return withSlot(() -> renderNow(template, model));
     }
 
-    /** The render places of shared receipts (ADR-061), apart from {@link #slots}: one receipt is laid out at a time. */
-    static final int SHARING_PLACES = 1;
+    /** The default render places of shared receipts (ADR-061), apart from {@link #slots}. */
+    static final int DEFAULT_SHARING_PLACES = 2;
 
     // JUSTIFICATION-A3: the receipt pool of ADR-061; the same wait, 503 and layout as the document places.
     /**

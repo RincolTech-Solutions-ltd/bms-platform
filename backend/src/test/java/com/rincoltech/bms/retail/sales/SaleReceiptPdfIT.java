@@ -301,6 +301,8 @@ class SaleReceiptPdfIT extends IntegrationTest {
                         .asLong())
                 .isEqualTo(5_000);
         JsonNode f = facts(sellerA, sale, SALES).getBody();
+        // The ledger books the credit as paid on the sale; the receipt shows it as a return: the buyer paid nothing.
+        assertThat(f.get("paid_minor").asLong()).isZero();
         assertThat(f.get("returned_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("net_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("balance_minor").asLong()).isEqualTo(5_000);
@@ -314,7 +316,10 @@ class SaleReceiptPdfIT extends IntegrationTest {
                 .contains("Sold on credit.")
                 .contains("5,000 UGX")
                 .doesNotContain("10,000 UGX")
-                .doesNotContain("paid back");
+                .doesNotContain("paid back")
+                .doesNotContain("Part paid")
+                .doesNotContain("Paid so far")
+                .doesNotContain("Paid in full");
     }
 
     void aPartReturnPaidBackShowsWhatWasPaidBackAndTheNet(String method) throws Exception {

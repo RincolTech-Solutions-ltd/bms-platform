@@ -688,7 +688,13 @@ class DocumentsService {
 
     // JUSTIFICATION-A3: the receipt to share (issue #439): one check of who may share it, its facts and its PDF.
     /** A sale whose receipt may be shared, with its completed returns. */
-    private record Receipt(Sale sale, UUID madeBy, List<ReturnsRepository.Row> returned, long returnedMinor) {}
+    /**
+     * A sale whose receipt may be shared, with its completed returns. {@code paidMinor} is the money the buyer actually paid:
+     * a return taken off the balance is booked on the sale as paid ({@code addPaid}), and a receipt shows it as a return,
+     * never as a payment.
+     */
+    private record Receipt(
+            Sale sale, UUID madeBy, List<ReturnsRepository.Row> returned, long returnedMinor, long paidMinor) {}
 
     /**
      * The sale behind a receipt to share (issue #439, ADR-061), in the caller's read transaction. Stricter than reading
@@ -721,7 +727,10 @@ class DocumentsService {
             throw ApiException.rule(
                     "sale_fully_returned", "Every item of this sale was taken back, so it has no receipt to share.");
         }
-        return new Receipt(sale, madeBy, done, returnedMinor);
+        long offBalance = done.stream()
+                .mapToLong(ReturnsRepository.Row::accountCreditMinor)
+                .sum();
+        return new Receipt(sale, madeBy, done, returnedMinor, Math.max(0, sale.paidMinor() - offBalance));
     }
 
     /** The facts of the receipt to share: what the screen's caption says, the same figures as the PDF. */
@@ -755,7 +764,7 @@ class DocumentsService {
                     sale.paymentMethod(),
                     sale.currency(),
                     sale.totalMinor(),
-                    sale.paidMinor(),
+                    r.paidMinor(),
                     sale.balanceMinor(),
                     r.returnedMinor(),
                     sale.totalMinor() - r.returnedMinor(),
@@ -785,6 +794,7 @@ class DocumentsService {
                     return models.receipt(
                             snapshot,
                             repo.userName(r.madeBy()),
+                            r.paidMinor(),
                             sale.balanceMinor(),
                             r.returned(),
                             sale.totalMinor() - r.returnedMinor());

@@ -90,7 +90,9 @@ export function receiptCaption(f: CaptionFacts): string {
   return [
     `${name ? `*${name}*: ` : ''}Receipt ${f.receipt_no ?? ''}`.trim(),
     ...(who ? [`Customer: ${who}`] : []),
-    `Amount paid: ${money(f.paid_minor ?? 0)}${method ? ` (${method})` : ''}`,
+    // A credit sale with nothing paid says so; a return taken off the balance is never shown as paid (the facts' paid_minor
+    // is the money actually paid).
+    f.payment_method === 'credit' && (f.paid_minor ?? 0) === 0 ? 'Sold on credit, nothing paid yet' : `Amount paid: ${money(f.paid_minor ?? 0)}${method ? ` (${method})` : ''}`,
     ...(returned > 0 ? [`Goods returned: ${money(returned)}${notes ? ` (credit note ${notes})` : ''}`, `Net after returns: ${money(f.net_minor ?? 0)}`] : []),
     owed > 0 ? `Balance outstanding: ${money(owed)}` : 'Fully settled, thank you!',
     'Thank you for your business.',

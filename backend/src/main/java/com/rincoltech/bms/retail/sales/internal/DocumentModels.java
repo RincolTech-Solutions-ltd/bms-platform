@@ -120,12 +120,18 @@ class DocumentModels {
 
     /**
      * The model of the receipt a seller shares (issue #439, ADR-061): the invoice of the snapshot, titled RECEIPT, signed by
-     * the seller who made the sale, with what the sale still owes as the sale carries it (payments and returns taken off),
+     * the seller who made the sale, with the money the buyer actually paid ({@code paidMinor}: a return taken off the balance
+     * is a return, not a payment) and what the sale still owes as the sale carries it (payments and returns taken off),
      * and, when goods were taken back, each credit note, the net and a title that says so.
      */
     @SuppressWarnings("unchecked")
     Map<String, Object> receipt(
-            DocumentSnapshot s, String soldBy, long balanceMinor, List<ReturnsRepository.Row> returned, long netMinor) {
+            DocumentSnapshot s,
+            String soldBy,
+            long paidMinor,
+            long balanceMinor,
+            List<ReturnsRepository.Row> returned,
+            long netMinor) {
         Map<String, Object> m = model(s);
         ((Map<String, Object>) m.get("doc")).put("title", returned.isEmpty() ? "RECEIPT" : "RECEIPT AFTER RETURNS");
         ((Map<String, Object>) m.get("signs")).put("issuedBy", soldBy);
@@ -139,11 +145,12 @@ class DocumentModels {
             totals.put("status", "Paid in full.");
             totals.put("due", null);
         } else {
-            totals.put("status", sale.paidMinor() > 0 ? "Part paid." : "Sold on credit.");
+            totals.put("status", paidMinor > 0 ? "Part paid." : "Sold on credit.");
             totals.put(
                     "due",
-                    "Paid so far: " + money(sale.paidMinor(), s.currency()) + ". Balance outstanding on "
-                            + date(s.issueDate()) + ": " + money(balanceMinor, s.currency()) + " " + s.currency());
+                    (paidMinor > 0 ? "Paid so far: " + money(paidMinor, s.currency()) + ". " : "")
+                            + "Balance outstanding on " + date(s.issueDate()) + ": "
+                            + money(balanceMinor, s.currency()) + " " + s.currency());
         }
         if (!returned.isEmpty()) {
             List<String> lines = new ArrayList<>();

@@ -123,6 +123,8 @@ describe('receiptCaption', () => {
 
   it('names the goods taken back, the credit notes and the net', () => {
     const text = receiptCaption({ ...paid, payment_method: 'credit', paid_minor: 0, returned_minor: 5000, net_minor: 20000, balance_minor: 20000, credit_notes: ['CN-HQ-000001'] });
+    expect(text).toContain('Sold on credit, nothing paid yet');
+    expect(text).not.toMatch(/Amount paid/);
     expect(text).toContain('Goods returned: UGX 5,000 (credit note CN-HQ-000001)');
     expect(text).toContain('Net after returns: UGX 20,000');
     expect(text).toContain('Balance outstanding: UGX 20,000');
