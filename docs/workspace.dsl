@@ -358,6 +358,12 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             laptop = deploymentNode "Jerome's laptop" "Windows 11 with WSL2 Ubuntu; shared with the AGA and other CI runner users; Kyma-owned (ADR-040 amendment)" "HP EliteBook, x86-64" {
                 deployRunner = infrastructureNode "Deploy runner" "bms-deploy-laptop: user bmsdeploy (uid 1006), rootless Docker wiped before and after every job, nftables wall, 5 GB cap, no signing key or deploy secret; builds and pushes the images and waits for their signatures before moving the staging pointer (ADR-040)" "GitHub Actions runner, deploy/runner/provision-laptop.sh"
             }
+            alertsNode = deploymentNode "Telegram" "Hosted by Telegram; the operator chat the team reads on their phones" "Telegram Bot API" {
+                alertsChat = infrastructureNode "Operator chat" "Receives PROBLEM, STILL FAILING and RESOLVED messages carrying check names, hosts and numbers only, never personal data (ADR-058)" "sendMessage"
+            }
+            uptimeNode = deploymentNode "Uptime monitor" "Hosted uptime service outside our hosts; alerts when the heartbeat pings stop (ADR-058)" "External service" {
+                heartbeat = infrastructureNode "Heartbeat check" "Expects a ping every five minutes with a 15 minute grace" "HTTPS heartbeat"
+            }
             host = deploymentNode "Staging host" "Shared ARM64 host at a Rincol home site; no inbound port; BMS capped at 900 MB by bms.slice" "Raspberry Pi 4, Debian 13, linux/arm64" {
                 puller = infrastructureNode "Puller" "bms-pull.timer every two minutes: resolves the staging pointer to its sha tag and runs deploy.sh (ADR-018)" "systemd timer, pull-staging.sh"
                 hostChecks = infrastructureNode "Host checks" "bms-monitor.timer every five minutes: site, jobs, disk, certificates, backups and the restore drill, posted to the Telegram operator chat, then a heartbeat to the uptime monitor; bms-restore-drill.timer weekly (ADR-058)" "systemd timers, monitor.sh, restore-drill.sh"
@@ -373,6 +379,8 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             staging.cloudflare.edge -> staging.host.compose.cloudflared "Visitor requests, over the tunnel the host opened" "HTTPS, Cloudflare Tunnel"
             staging.host.compose.cloudflared -> staging.host.compose.proxy "Forwards with the original Host header" "HTTP"
             staging.host.hostChecks -> staging.host.compose.proxy "Checks /healthz and the certificate through the public host" "HTTPS"
+            staging.host.hostChecks -> staging.alertsNode.alertsChat "Posts PROBLEM, STILL FAILING and RESOLVED alerts; the bot token goes on stdin, never the command line" "HTTPS"
+            staging.host.hostChecks -> staging.uptimeNode.heartbeat "Pings the heartbeat after every run that sent all its alerts" "HTTPS"
             staging.host.puller -> staging.github.registry "Reads the staging pointer; pulls sha-<short> images anonymously" "HTTPS"
             staging.laptop.deployRunner -> staging.github.registry "Pushes sha-<short> images with the job token; waits for the cosign signatures, then moves the staging pointer" "HTTPS"
             staging.maintainerMac.signer -> staging.github.registry "Signs image@digest with the Keychain key; reads the deploy run's job logs through the GitHub API" "HTTPS"
@@ -388,6 +396,12 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             github = deploymentNode "GitHub" "Tag vX.Y.Z retags the sha-<short> images; no rebuild (ADR-006)" "GitHub Actions" {
                 registry = infrastructureNode "Container registry" "The images proven on staging, tagged vX.Y.Z" "GHCR"
             }
+            alertsNode = deploymentNode "Telegram" "Hosted by Telegram; the operator chat the team reads on their phones" "Telegram Bot API" {
+                alertsChat = infrastructureNode "Operator chat" "Receives PROBLEM, STILL FAILING and RESOLVED messages carrying check names, hosts and numbers only, never personal data (ADR-058)" "sendMessage"
+            }
+            uptimeNode = deploymentNode "Uptime monitor" "Hosted uptime service outside our hosts; alerts when the heartbeat pings stop (ADR-058)" "External service" {
+                heartbeat = infrastructureNode "Heartbeat check" "Expects a ping every five minutes with a 15 minute grace" "HTTPS heartbeat"
+            }
             vm = deploymentNode "Production VM" "Single cloud VM, 4 GB; deployed from a version tag after the dev lead approves" "Hetzner Cloud, Ubuntu LTS" {
                 hostChecks = infrastructureNode "Host checks" "bms-monitor.timer every five minutes: site, jobs, disk, certificates, backups and the restore drill, posted to the Telegram operator chat, then a heartbeat to the uptime monitor; bms-restore-drill.timer weekly (ADR-058)" "systemd timers, monitor.sh, restore-drill.sh"
                 compose = deploymentNode "Docker Compose" "Migrations run as a one-shot container before the app containers switch; failed health check rolls back" "Docker" {
@@ -400,6 +414,8 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             }
             production.vm.compose.proxy -> production.cloudflare.dns "Creates DNS-01 challenge records for *.rincoltech.com" "Cloudflare API"
             production.vm.hostChecks -> production.vm.compose.proxy "Checks /healthz and the certificate through the public host" "HTTPS"
+            production.vm.hostChecks -> production.alertsNode.alertsChat "Posts PROBLEM, STILL FAILING and RESOLVED alerts; the bot token goes on stdin, never the command line" "HTTPS"
+            production.vm.hostChecks -> production.uptimeNode.heartbeat "Pings the heartbeat after every run that sent all its alerts" "HTTPS"
             production.github.registry -> production.vm.compose.proxy "Images pulled by deploy.sh with a short-lived token" "HTTPS"
         }
     }

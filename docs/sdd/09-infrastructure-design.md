@@ -310,7 +310,8 @@ logs JSON (ECS format) with the request id on every line in the `server` profile
   cosign.pub             the signing public key (ADR-018 finding H2): committed at deploy/cosign.pub,
                           provisioned once by hand, never replaced by a release
   systemd/               the unit files, for reference; installed by hand
-  postgres/initdb/       copied from deploy/ on every deploy
+  postgres/initdb/       copied from deploy/ on every deploy. Production: the restore drill reads its init scripts here.
+                          Staging: the drill reads releases/<tag>/postgres/initdb (the staged release it matches)
   sql/                   onboarding scripts (docs/runbooks/onboard-tenant.md)
   .env                   written once by hand (docs/runbooks/provision-host.md); mode 600
   state/current_tag, current_created   the live release and when it was built (for the downgrade guard)

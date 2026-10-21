@@ -94,7 +94,7 @@ the source; the trial balance of one tenant balances (sum of debits equals sum o
 
 `deploy/restore-drill.sh` (`bms-restore-drill.timer`, Sunday 03:30 host time, as the deploy user; installed with
 `docs/runbooks/monitoring-and-alerts.md` section 2) does steps 1 to 4 for you without touching the live database: it fetches the
-newest `daily/` dump, decrypts it, restores it into a throwaway PostgreSQL (no network, 384 MB, inside `bms.slice` on staging) and
+newest `daily/` dump, decrypts it, restores it into a throwaway PostgreSQL (no network, 384 MB, inside `bms.slice` on staging; on production the 384 MB and 64 MB container caps apply, and the drill reads the init scripts from `/opt/bms/postgres/initdb`, on staging from `releases/<tag>/postgres/initdb`) and
 checks the Flyway history, the row counts and the application role's row-level-security access. It removes the throwaway
 database and the decrypted dump whatever the outcome, and records one line, timed from its start:
 
@@ -104,7 +104,7 @@ database and the decrypted dump whatever the outcome, and records one line, time
 ```
 
 in `state/last_restore_drill` or `state/last_restore_drill_error`, appended to `state/restore-drill-history.log`, and uploaded to
-`r2:<bucket>/<environment>/drill/last_restore_drill.txt` so the record survives the host. Its output is in
+`r2:<bucket>/<environment>/drill/last_restore_drill.txt` so the record survives the host. A failed pg_restore is recorded as the fixed text "pg_restore failed, see state/restore-drill.log": the error itself can quote row values, so it stays on the host. Its output is in
 `state/restore-drill.log`. Run it by hand with `sudo systemctl start bms-restore-drill.service` after changing the backup key or the
 R2 credentials.
 
@@ -167,16 +167,21 @@ the R2 documentation pages "Bucket locks" and "Object lifecycles" and note the d
    `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` in `/opt/bms/.env`.
 4. **Turn host retention off.** In `/opt/bms/.env` set `BACKUP_RETENTION_ON_HOST=false`. The next `backup.sh` logs
    "retention is the bucket's lifecycle rules; this host deletes nothing".
-5. **Prove it.** From the host, try to delete the newest backup with the host's own credentials; it must be refused:
+5. **Prove it.** From the host, upload a throwaway object under `daily/` and try to delete THAT object with the host's own
+   credentials; the delete must be refused. Never test against a real backup: if the lock is not on, the delete succeeds.
    ```bash
    cd /opt/bms && set -a && . ./.env && set +a
-   docker run --rm -e RCLONE_CONFIG_R2_TYPE=s3 -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+   rc() { docker run --rm -v /tmp:/tmp -e RCLONE_CONFIG_R2_TYPE=s3 -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
      -e RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT" -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
-     -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true "$RCLONE_IMAGE" \
-     deletefile "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/<newest file>"
+     -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true "$RCLONE_IMAGE" "$@"; }
+   echo lock-test > /tmp/lock-test.txt
+   rc copyto /tmp/lock-test.txt "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/0-lock-test-$(date -u +%Y%m%dT%H%M%SZ).txt"
+   rc lsf "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/" | grep 0-lock-test      # note the exact name
+   rc deletefile "r2:${R2_BACKUP_BUCKET}/${BMS_ENVIRONMENT}/daily/<the lock-test name>"
    ```
-   Expect an access denied or object locked error and the file still listed. If the delete succeeds, the lock is not on: stop, the
-   next backup recreates what was lost, and fix step 1 before anything else.
+   Expect an access denied or object locked error and the throwaway still listed. If the delete succeeds, the lock is not on: only
+   the throwaway was lost, fix step 1 before anything else. The throwaway stays for its 30 days (the lock, once on, holds it); it is
+   its name starts with `0-` so it sorts before every `bms-` backup and neither `monitor.sh` nor the drill picks it as the newest.
 6. **Protect the account.** Two-step sign-in on every Cloudflare account member, and as few administrators as possible: an
    administrator can still remove a lock rule. Record the date, the rule names and who applied them in this section's table.
 

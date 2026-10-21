@@ -5,7 +5,8 @@
 # Every run checks, on this host:
 #   site    https://<platform host>/healthz and, with MONITOR_TENANT_SLUG, that tenant's sign-in page;
 #   jobs    db-scheduler executions that failed (consecutive_failures), are stuck (picked, no
-#           heartbeat for 15 minutes) or are overdue (not picked 30 minutes after they were due);
+#           heartbeat for 30 minutes: db-scheduler's default heartbeat is 5 minutes and it declares an
+#           execution dead at about 20, so the API's own restart never alerts) or are overdue (not picked 30 minutes after they were due);
 #   disk    every path in MONITOR_DISK_PATHS above MONITOR_DISK_LIMIT percent (70);
 #   tls     the certificate of the platform, callback and tenant hosts expiring within 14 days;
 #   backup  state/last_backup_error newer than the last good backup, the last good backup older
@@ -16,7 +17,8 @@
 # once when it clears; state/alerts/<check> remembers what was sent. A message that could not be sent
 # is not remembered, so the next run tries again. Messages carry check names, hosts and numbers only,
 # never personal data. With MONITOR_HEARTBEAT_URL set, every completed run pings it, so the external
-# monitor notices when this host or its timer goes quiet.
+# monitor notices when this host or its timer goes quiet; a run that could not send an alert does not ping.
+# site and jobs alert only after two bad runs in a row, so a deploy recreating the containers is not a page.
 #
 # Schedule: bms-monitor.timer, every five minutes, as the deploy user.
 # Reads /opt/bms/.env: BMS_ENVIRONMENT, BMS_PLATFORM_HOST, BMS_TELEGRAM_BOT_TOKEN,
@@ -31,7 +33,7 @@ MONITOR_BACKUP_HOURS="${MONITOR_BACKUP_HOURS:-26}"
 MONITOR_DRILL_DAYS="${MONITOR_DRILL_DAYS:-9}"
 MONITOR_RTO_SECONDS="${MONITOR_RTO_SECONDS:-7200}"
 MONITOR_REPEAT_HOURS="${MONITOR_REPEAT_HOURS:-6}"
-MONITOR_STUCK_MINUTES="${MONITOR_STUCK_MINUTES:-15}"
+MONITOR_STUCK_MINUTES="${MONITOR_STUCK_MINUTES:-30}"
 MONITOR_OVERDUE_MINUTES="${MONITOR_OVERDUE_MINUTES:-30}"
 MONITOR_POSTGRES_CONTAINER="${MONITOR_POSTGRES_CONTAINER:-bms-postgres-1}"
 STATE="${MONITOR_STATE_DIR:-state}"
@@ -46,15 +48,15 @@ http_status() {
     curl --silent --output /dev/null --max-time 15 --retry 1 --retry-delay 5 --write-out '%{http_code}' "$1" 2> /dev/null || true
 }
 cert_end() {
-    openssl s_client -connect "$1:443" -servername "$1" < /dev/null 2> /dev/null \
-        | openssl x509 -noout -enddate 2> /dev/null | sed 's/^notAfter=//'
+    timeout 20 openssl s_client -connect "$1:443" -servername "$1" < /dev/null 2> /dev/null \
+        | timeout 20 openssl x509 -noout -enddate 2> /dev/null | sed 's/^notAfter=//'
 }
 disk_percent() { df -P "$1" 2> /dev/null | awk 'NR == 2 { sub("%", "", $5); print $5 }'; }
-sql() { docker exec "$MONITOR_POSTGRES_CONTAINER" psql -U bms_owner -d bms -tAF ' ' -c "$1"; }
+sql() { timeout 30 docker exec "$MONITOR_POSTGRES_CONTAINER" psql -U bms_owner -d bms -tAF ' ' -c "$1"; }
 newest_r2_backup() {
     local cgroup=()
     [[ "$BMS_ENVIRONMENT" == "staging" ]] && cgroup=(--cgroup-parent bms.slice)
-    docker run --rm "${cgroup[@]}" --memory 64m \
+    timeout 60 docker run --rm "${cgroup[@]}" --memory 64m \
         --env RCLONE_CONFIG_R2_TYPE=s3 \
         --env RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
         --env RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT" \
@@ -75,13 +77,18 @@ telegram_send() {
             --data-urlencode "text=$1" > /dev/null
 }
 
-# report <check> <problem text, empty when healthy>
+# Write-then-rename, so a reader or a killed run never sees half a state file (ADR-018).
+put_state() { printf '%s\n' "$2" > "$1.tmp.$$" && mv -f "$1.tmp.$$" "$1"; }
+
+# report <check> <problem text, empty when healthy> [bad runs in a row needed before the first PROBLEM, default 1]
+# The count lives in state/alerts/<check>.bad. A deploy recreating the containers must not page anyone.
 SEND_FAILED=0
 report() {
-    local check="$1" problem="$2" file="$STATE/alerts/$1" t prefix since sent
+    local check="$1" problem="$2" need="${3:-1}" file="$STATE/alerts/$1" bad="$STATE/alerts/$1.bad" t prefix since sent n
     t="$(now)"
     prefix="[BMS ${BMS_ENVIRONMENT:-unknown}]"
     if [[ -z "$problem" ]]; then
+        rm -f "$bad"
         [[ -f "$file" ]] || return 0
         read -r since _ < "$file"
         if telegram_send "${prefix} RESOLVED ${check}: healthy again (problem since $(iso "$since"))"; then
@@ -96,10 +103,15 @@ report() {
         (( t - sent >= MONITOR_REPEAT_HOURS * 3600 )) || return 0
         telegram_send "${prefix} STILL FAILING ${check}: ${problem} (since $(iso "$since"))" || { SEND_FAILED=1; return 0; }
     else
+        n="$(cat "$bad" 2> /dev/null || echo 0)"
+        [[ "$n" =~ ^[0-9]+$ ]] || n=0
+        n=$(( n + 1 ))
+        put_state "$bad" "$n"
+        (( n >= need )) || return 0
         since="$t"
         telegram_send "${prefix} PROBLEM ${check}: ${problem}" || { SEND_FAILED=1; return 0; }
     fi
-    printf '%s %s\n' "$since" "$t" > "$file"
+    put_state "$file" "$since $t"
 }
 
 join() {
@@ -122,7 +134,7 @@ check_site() {
         code="$(http_status "https://${tenant}/")"
         [[ "$code" == "200" ]] || problems+=("the sign-in page https://${tenant}/ answered ${code:-nothing}")
     fi
-    report site "$(join "${problems[@]}")"
+    report site "$(join "${problems[@]}")" 2
 }
 
 check_jobs() {
@@ -136,10 +148,10 @@ check_jobs() {
                      SELECT task_name, 'overdue' FROM scheduled_tasks
                      WHERE NOT picked AND execution_time < now() - interval '${MONITOR_OVERDUE_MINUTES} minutes'
                      ORDER BY 1")"; then
-        report jobs "cannot read scheduled_tasks from ${MONITOR_POSTGRES_CONTAINER}"
+        report jobs "cannot read scheduled_tasks from ${MONITOR_POSTGRES_CONTAINER}" 2
         return
     fi
-    report jobs "$(printf '%s' "$out" | awk 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')"
+    report jobs "$(printf '%s' "$out" | awk 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')" 2
 }
 
 check_disk() {
@@ -187,7 +199,7 @@ check_backup() {
         problems+=("the last good backup is $(( (t - ok) / 3600 )) hours old (limit ${MONITOR_BACKUP_HOURS})")
     fi
     # R2 is asked at most once an hour: a container start every five minutes is not worth it.
-    if [[ -n "${R2_BACKUP_BUCKET:-}" ]]; then
+    if [[ -n "${R2_BACKUP_BUCKET:-}" && -n "${R2_ENDPOINT:-}" && -n "${R2_ACCESS_KEY_ID:-}" && -n "${R2_SECRET_ACCESS_KEY:-}" && -n "${RCLONE_IMAGE:-}" ]]; then
         local checked
         checked="$(cat "$STATE/monitor_r2_checked" 2> /dev/null || echo 0)"
         if (( t - checked >= 3600 )); then
@@ -195,13 +207,13 @@ check_backup() {
             stamp="$(printf '%s' "$name" | sed -nE 's/.*-([0-9]{8})T([0-9]{2})([0-9]{2})([0-9]{2})Z\.dump\.enc$/\1 \2:\3:\4/p')"
             stamp="$(to_epoch "${stamp:-none}")" || stamp=0
             if (( stamp == 0 )); then
-                printf 'no readable backup under %s/daily/ in R2\n' "$BMS_ENVIRONMENT" > "$STATE/monitor_r2_problem"
+                put_state "$STATE/monitor_r2_problem" "no readable backup under ${BMS_ENVIRONMENT}/daily/ in R2"
             elif (( t - stamp > MONITOR_BACKUP_HOURS * 3600 )); then
-                printf 'the newest backup in R2 is %s hours old\n' "$(( (t - stamp) / 3600 ))" > "$STATE/monitor_r2_problem"
+                put_state "$STATE/monitor_r2_problem" "the newest backup in R2 is $(( (t - stamp) / 3600 )) hours old"
             else
                 rm -f "$STATE/monitor_r2_problem"
             fi
-            echo "$t" > "$STATE/monitor_r2_checked"
+            put_state "$STATE/monitor_r2_checked" "$t"
         fi
         [[ -s "$STATE/monitor_r2_problem" ]] && problems+=("$(cat "$STATE/monitor_r2_problem")")
     fi
@@ -245,7 +257,8 @@ main() {
     check_backup
     check_drill
 
-    if [[ -n "${MONITOR_HEARTBEAT_URL:-}" ]]; then
+    # An unreachable Telegram must not tell the external monitor all is well.
+    if [[ -n "${MONITOR_HEARTBEAT_URL:-}" ]] && (( SEND_FAILED == 0 )); then
         curl --silent --output /dev/null --max-time 10 --retry 2 "$MONITOR_HEARTBEAT_URL" || log "heartbeat ping failed"
     fi
     (( SEND_FAILED == 0 )) || { log "at least one alert could not be sent"; exit 1; }

@@ -28,8 +28,8 @@ service, and a single production VM. The operator chat on Telegram already exist
    or stale backup (26 hours, on the host and in R2 once an hour), and a failed, stale (9 days) or slow (over the 2 hour RTO) restore
    drill. No Prometheus, Grafana or agent: one more service on a 4 GB VM costs more than it buys at one tenant.
 2. **One channel: the existing Telegram operator chat**, through the same bot as the API's operator alerts, from the host env file
-   only. A problem is sent once when it starts, again every six hours while it lasts, and once when it clears. A message that could
-   not be sent is not remembered, so the next run tries again, and the unit fails so the journal shows it. Messages carry check
+   only. `site` and `jobs` need two bad runs in a row before the first PROBLEM (staging deploys recreate the containers; the external monitor already waits for three failures). A problem is sent once when it starts, again every six hours while it lasts, and once when it clears. A message that could
+   not be sent is not remembered, so the next run tries again, the unit fails so the journal shows it, and that run does not ping the heartbeat. Every probe has a timeout so a wedged Docker daemon still ends in an alert. A job counts as stuck after 30 minutes without a heartbeat: db-scheduler's default heartbeat is 5 minutes and it declares an execution dead at about 20, so 30 stays quiet through an API restart. Messages carry check
    names, hosts and numbers, never personal data.
 3. **The outside is watched from outside.** A host that is down cannot report itself, so an external uptime service checks
    `https://<platform host>/healthz` and one tenant sign-in page every minute and alerts after three consecutive failures
@@ -38,7 +38,7 @@ service, and a single production VM. The operator chat on Telegram already exist
    URLs.
 4. **The restore drill is timed, recorded and scheduled.** `restore-drill.sh` runs weekly from `bms-restore-drill.timer`, records
    its time in seconds against the RTO on the host, in a history file and in R2 under `<environment>/drill/`, and `monitor.sh`
-   reports it. The weekly drill restores into a throwaway database; the quarterly timed restore onto a fresh VM (NFR-BAK-04) stays a
+   reports it. The weekly drill restores into a throwaway database, capped at 384 MB (PostgreSQL) and 64 MB (rclone) per container on production as well as staging, reading its init scripts from `postgres/initdb` on production and `releases/<tag>/postgres/initdb` on staging. A failed restore is recorded as a fixed text; the pg_restore error, which can quote row values, stays in the host's log and is never sent to Telegram or uploaded; the quarterly timed restore onto a fresh VM (NFR-BAK-04) stays a
    human drill recorded in `docs/meetings/<date>/`.
 5. **The host cannot delete its backups.** R2 bucket lock rules keep every object under `daily/` for 30 days and under `monthly/`
    for 365 days, bucket lifecycle rules delete them afterwards, and `backup.sh` deletes nothing once `BACKUP_RETENTION_ON_HOST=false`.
@@ -57,6 +57,7 @@ service, and a single production VM. The operator chat on Telegram already exist
 - The checks share the host's fate for everything but the site and the heartbeat; the external monitor covers that gap.
 - Locked objects cannot be removed early even on purpose. Removing a backup before 30 days (for example after an erasure request
   that must reach backups) needs a rule change by a Cloudflare account admin, which is recorded in the incident or request log.
+- Peak disk during the drill is the encrypted dump plus the decrypted dump plus the throwaway database, roughly three times the dump size in `/opt/bms/backups` and the Docker volume; both are removed at the end. With the 70 percent disk alert, a dump above about a fifth of the free space needs a larger disk first. The drill and history logs are cut to their last 200 lines.
 - The workstation watchdog of the old chapter 9 is retired; `monitor.sh` and the external heartbeat replace it.
 
 ## Alternatives considered

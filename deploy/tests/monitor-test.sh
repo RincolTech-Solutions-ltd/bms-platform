@@ -73,26 +73,28 @@ check_silent() {
 
 # --- site ---
 fresh; check_site; check_silent "site healthy sends nothing"
-fresh; HEALTHZ=502; check_site
-check "site down sends one problem" '^\[BMS test\] PROBLEM site: https://bms.example.test/healthz answered 502$'
+fresh; HEALTHZ=502; check_site; check_silent "one bad site run sends nothing (a deploy is not an outage)"
+check_site
+check "site down two runs in a row sends one problem" '^\[BMS test\] PROBLEM site: https://bms.example.test/healthz answered 502$'
 : > "$SENT"; check_site; check_silent "site still down within the repeat window sends nothing"
 NOW=$(( NOW + 6 * 3600 )); check_site; check "site still down after six hours reminds" 'STILL FAILING site'
 : > "$SENT"; HEALTHZ=200; check_site; check "site back sends one resolved" '^\[BMS test\] RESOLVED site: healthy again'
+fresh; HEALTHZ=502; check_site; HEALTHZ=200; check_site; HEALTHZ=502; check_site; check_silent "a good run resets the bad count"
 assert "resolved clears the alert state" test ! -e "$MONITOR_STATE_DIR/alerts/site"
 NOW=1800000000
-fresh; SIGNIN=000; check_site; check "tenant sign-in page down" 'the sign-in page https://demo-bms.example.test/ answered 000'
+fresh; SIGNIN=000; check_site; check_site; check "tenant sign-in page down" 'the sign-in page https://demo-bms.example.test/ answered 000'
 
 # --- an alert that could not be sent is tried again ---
-fresh; TELEGRAM_UP=no; HEALTHZ=503; check_site
+fresh; TELEGRAM_UP=no; HEALTHZ=503; check_site; check_site
 assert "unsent alert is flagged" test "$SEND_FAILED" = 1
 assert "unsent alert is not remembered" test ! -e "$MONITOR_STATE_DIR/alerts/site"
 TELEGRAM_UP=yes; check_site; check "unsent alert goes on the next run" 'PROBLEM site'
 
 # --- jobs ---
 fresh; check_jobs; check_silent "no failed jobs sends nothing"
-fresh; SQL_OUT=$'core.payments.poll failed_3_times\nlending.arrears stuck\n'; check_jobs
+fresh; SQL_OUT=$'core.payments.poll failed_3_times\nlending.arrears stuck\n'; check_jobs; check_silent "one bad jobs run sends nothing"; check_jobs
 check "failed and stuck jobs listed" 'PROBLEM jobs: core.payments.poll \(failed_3_times\), lending.arrears \(stuck\)$'
-fresh; SQL_OK=no; check_jobs; check "unreadable scheduler table" 'PROBLEM jobs: cannot read scheduled_tasks'
+fresh; SQL_OK=no; check_jobs; check_jobs; check "unreadable scheduler table" 'PROBLEM jobs: cannot read scheduled_tasks'
 
 # --- disk ---
 fresh; DISK=70; check_disk; check_silent "disk at the limit sends nothing"
@@ -113,13 +115,15 @@ fresh; stamp $(( NOW - 7200 )) > "$MONITOR_STATE_DIR/last_backup_ok"
 printf '%s FAILED exit 1\n' "$(stamp $(( NOW - 60 )))" > "$MONITOR_STATE_DIR/last_backup_error"; check_backup
 check "failed backup" 'PROBLEM backup: the last backup failed: .* FAILED exit 1'
 fresh; check_backup; check "no backup ever" 'no good backup recorded on this host'
-fresh; stamp $(( NOW - 3600 )) > "$MONITOR_STATE_DIR/last_backup_ok"; R2_BACKUP_BUCKET=bucket
+fresh; stamp $(( NOW - 3600 )) > "$MONITOR_STATE_DIR/last_backup_ok"; R2_BACKUP_BUCKET=bucket R2_ENDPOINT=https://r2.test R2_ACCESS_KEY_ID=k R2_SECRET_ACCESS_KEY=s RCLONE_IMAGE=rclone:test
 R2_NEWEST="bms-test-$(date -u -d "@$(( NOW - 30 * 3600 ))" +%Y%m%dT%H%M%SZ).dump.enc"; check_backup
 check "stale newest object in R2" 'the newest backup in R2 is 30 hours old'
 : > "$SENT"; R2_NEWEST="bms-test-$(date -u -d "@$NOW" +%Y%m%dT%H%M%SZ).dump.enc"; check_backup
 check_silent "R2 is not asked again within the hour (problem kept)"
 NOW=$(( NOW + 3600 )); check_backup; check "R2 fresh again resolves" 'RESOLVED backup'
-NOW=1800000000; R2_BACKUP_BUCKET=""
+NOW=1800000000
+fresh; stamp $(( NOW - 3600 )) > "$MONITOR_STATE_DIR/last_backup_ok"; R2_BACKUP_BUCKET=bucket RCLONE_IMAGE=""; R2_NEWEST=""; check_backup; check_silent "R2 not asked when one of its five settings is missing"
+R2_BACKUP_BUCKET="" R2_ENDPOINT="" R2_ACCESS_KEY_ID="" R2_SECRET_ACCESS_KEY="" RCLONE_IMAGE=""
 
 # --- drill ---
 fresh; printf '%s OK f seconds=900 rto_ok=yes flyway=76\n' "$(stamp $(( NOW - 86400 )))" > "$MONITOR_STATE_DIR/last_restore_drill"

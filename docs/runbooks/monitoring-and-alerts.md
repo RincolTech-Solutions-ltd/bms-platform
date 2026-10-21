@@ -84,12 +84,14 @@ problem again.
 
 | Check | Meaning | First steps |
 |---|---|---|
-| `site` | `/healthz` or the tenant sign-in page did not answer 200 from the host itself | `docker compose --project-name bms -f /opt/bms/compose.yml ps`; `logs --tail 200 api proxy`; the checks in `docs/runbooks/deploy.md`. A bad release: `docs/runbooks/rollback.md` |
-| `jobs` | A db-scheduler task has `consecutive_failures > 0` (`failed_<n>_times`), is picked with no heartbeat for 15 minutes (`stuck`), or was due 30 minutes ago and not picked (`overdue`, usually the API is down or its scheduler stopped) | `docker compose ... logs api \| grep -i '<task name>'`; a tenant job names the failing tenant in its log line. `overdue` on every task: check `site` first |
+| `site` | `/healthz` or the tenant sign-in page did not answer 200 from the host itself, on two runs in a row (a staging deploy recreates the containers every two minutes at most) | `docker compose --project-name bms -f /opt/bms/compose.yml ps`; `logs --tail 200 api proxy`; the checks in `docs/runbooks/deploy.md`. A bad release: `docs/runbooks/rollback.md` |
+| `jobs` | On two runs in a row, a db-scheduler task has `consecutive_failures > 0` (`failed_<n>_times`), is picked with no heartbeat for 30 minutes (`stuck`; db-scheduler beats every 5 minutes and declares an execution dead at about 20, so an API restart does not alert), or was due 30 minutes ago and not picked (`overdue`, usually the API is down or its scheduler stopped) | `docker compose ... logs api \| grep -i '<task name>'`; a tenant job names the failing tenant in its log line. `overdue` on every task: check `site` first |
 | `disk` | A path is over 70 percent | `df -h`; `docker system df`; old images (`docker image prune` keeps the running ones); `state/*.log` sizes; the database volume. Do not delete anything under the postgres volume |
 | `tls` | A certificate expires within 14 days, or none could be read | Production: `logs proxy \| grep -i acme`; the usual cause is the Cloudflare DNS token (`CLOUDFLARE_API_TOKEN`, Zone.DNS:Edit) revoked or expired. Staging: the Cloudflare edge certificate, check the zone's SSL page |
 | `backup` | The last `backup.sh` failed (`state/last_backup_error`), no good backup in 26 hours, or the newest object in R2 is older than 26 hours | `tail -50 /opt/bms/state/backup.log`; run `backup.sh` by hand; R2 credentials and the bucket lock (`restore-from-backup.md` section 7) |
-| `drill` | The last drill failed, none succeeded in 9 days, or it took longer than the 2 hour RTO | `tail -80 /opt/bms/state/restore-drill.log`; `state/restore-drill-history.log`; `restore-from-backup.md` section 5 |
+| `drill` | The last drill failed, none succeeded in 9 days, or it took longer than the 2 hour RTO | `tail -80 /opt/bms/state/restore-drill.log` (the pg_restore error text is only there, never in Telegram or R2); `state/restore-drill-history.log`; both are cut to their last 200 lines on each run; `restore-from-backup.md` section 5 |
+
+A run that could not send an alert does not ping the heartbeat, so the external monitor also notices a host that cannot reach Telegram. Every probe has a timeout (20 s for TLS, 30 s for the database, 60 s for R2), so a wedged Docker daemon still ends in an alert.
 
 If the external monitor alerts and `monitor.sh` is silent, the host itself is down or cannot reach Telegram: reach the VM
 through the provider's console.
