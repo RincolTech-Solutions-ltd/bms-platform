@@ -198,6 +198,66 @@ class RetailOwnerDecisionsIT extends IntegrationTest {
         assertThat(ids(get("/sales?limit=100", tokenA).getBody().get("items"))).containsExactly(saleA.toString());
     }
 
+    // ---- Orders --------------------------------------------------------------------------------------------
+
+    /**
+     * Decision 4a: the orders are the shop's shared work, so every seller of the branch sees them and their values, but the
+     * sale a colleague made on delivery is not linked: no sale id or number, in the list or on the order.
+     * JUSTIFICATION-A3: a new test case for decision 4a; the anchor is only the insertion point.
+     */
+    @Test
+    void everySellerSeesTheOrdersAndValuesButNotAColleaguesDeliveredSale() {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("branch_id", t.headOffice());
+        body.put("source", "whatsapp");
+        body.put("customer_name", "Test Customer 09");
+        body.put("customer_phone", "+256700000019");
+        body.put("delivery_place", "Test Place, Plot 9");
+        body.put("delivery_date", today().toString());
+        body.put("delivery_fee_minor", 1_000);
+        body.put("lines", List.of(Map.of("product_id", product, "qty", "1")));
+        ResponseEntity<JsonNode> placed = api.call(
+                HttpMethod.POST,
+                R + "/orders",
+                body,
+                tokenB,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(placed.getStatusCode()).as("%s", placed.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID order = RetailTestSupport.id(placed);
+        ResponseEntity<JsonNode> delivered = api.call(
+                HttpMethod.POST,
+                R + "/orders/" + order + "/deliver",
+                Map.of("payment_method", "cash"),
+                tokenB,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(delivered.getStatusCode()).as("%s", delivered.getBody()).isEqualTo(HttpStatus.OK);
+        String sale = delivered.getBody().get("sale_id").asString();
+
+        JsonNode listed = null;
+        for (JsonNode o : get("/orders", tokenA).getBody().get("items")) {
+            if (o.get("id").asString().equals(order.toString())) {
+                listed = o;
+            }
+        }
+        assertThat(listed).as("a colleague's order is on the list").isNotNull();
+        JsonNode one = get("/orders/" + order, tokenA).getBody();
+        for (JsonNode o : List.of(listed, one)) {
+            assertThat(o.get("status").asString()).isEqualTo("delivered");
+            assertThat(o.get("items_total_minor").asLong()).isEqualTo(7_000);
+            assertThat(o.get("total_minor").asLong()).isEqualTo(8_000);
+            assertThat(o.has("sale_id")).as("no link to the colleague's sale").isFalse();
+            assertThat(o.has("sale_no")).isFalse();
+            assertThat(o.toString()).doesNotContain(sale);
+        }
+        assertThat(get("/sales/" + sale, tokenA).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // The seller who delivered it, and the owner, see the sale.
+        assertThat(get("/orders/" + order, tokenB).getBody().get("sale_id").asString())
+                .isEqualTo(sale);
+        String owner = signIn("owner3", new Role("tenant_admin", null));
+        assertThat(get("/orders/" + order, owner).getBody().get("sale_id").asString())
+                .isEqualTo(sale);
+    }
+
     // ---- A buyer's account ---------------------------------------------------------------------------------
 
     @Test
