@@ -200,9 +200,31 @@ another branch's rows (chapter 15).
 | `max_staff_users` | `integer` | NULL = unlimited. |
 | `max_active_members` | `integer` | NULL = unlimited. |
 | `allowed_modules` | `text[] NOT NULL` | For example `{lending}`. |
-| `is_active` | `boolean NOT NULL DEFAULT true` | |
+| `is_active` | `boolean NOT NULL DEFAULT true` | False: offered to no new business and no move onto it. |
+| `description` | `varchar(500)` | What the plan includes, typed by the operator. `V75`. |
+| `sort_order` | `integer NOT NULL DEFAULT 0` | The order in the operator's list. `V75`. |
+| `updated_at`, `updated_by_platform_user_id` | | `V75`. |
 
-Prices are commercial and are not stored in this repository's seed data.
+Checks since `V75`: `plans_code_shape` (`^[a-z0-9_-]{1,40}$`) and `plans_limits_not_negative` (a limit is NULL or 0 and above; the operator screens send 1 and above). Written
+only through `platform_save_plan` (an upsert by code that refuses to take out a module a tenant on the plan has on; ADR-016).
+Prices are commercial and are not stored in this repository's seed data: the operator types them (ADR-056).
+
+### `plan_prices` (reference, no RLS, `bms_app` SELECT only, append-only; `V75`, ADR-056)
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `plan_id` | `uuid NOT NULL` | FK `plans`. |
+| `currency` | `char(3) NOT NULL` | FK `currencies`. |
+| `monthly_minor` | `bigint NOT NULL` | 0 to 50,000,000. |
+| `annual_months` | `integer NOT NULL` | 1 to 12: the months charged for a year. |
+| `effective_from` | `date NOT NULL` | The price in force on a day is the newest row starting on or before it. |
+| `reason` | `varchar(300)` | |
+| `created_by_platform_user_id` | `uuid NOT NULL` | FK `platform_users`. |
+| `created_at` | `timestamptz NOT NULL` | |
+
+Index `(plan_id, currency, effective_from DESC, created_at DESC)`. Written only through `platform_add_plan_price`; the service
+refuses a start before today, so a price never changes the past.
 
 ### `permissions`, `roles`, `role_permissions` (reference, no RLS, `bms_app` SELECT only)
 
@@ -379,7 +401,33 @@ last minute), then by due time, and locks the best twenty candidates in that ord
 `past_due`, `suspended`, `cancelled`], `current_period_start date`,
 `current_period_end date`, `trial_ends_on date`, `next_status_change_on date`,
 `updated_by_platform_user_id uuid`. One current row per tenant
-(`UNIQUE (tenant_id)`); history is in `platform_audit_log`.
+(`UNIQUE (tenant_id)`); history is in `platform_audit_log`. `trial_ends_on` is the last day of
+the free month: since `V75` the trigger `start_trial_clock` on `auth_sessions` sets it once, one
+month from the first session of a staff user, in the tenant's time zone (FR-SUB-02).
+`suspended_from` (`V75`) is the status a resume brings back, kept while the subscription is suspended or cancelled, and set to `active` by a payment recorded meanwhile; `is_pilot` (`V75`, ADR-024 decision 6) marks a pilot or complimentary business with no free month end and no scheduled status change (marking clears both), which the clock and the scheduled transitions skip. `current_period_start` and `current_period_end` are the first and the last day paid for, moved by
+`platform_record_subscription_payment`; the operator can also set the two dates by hand with
+`platform_set_subscription_dates` and the plan with `platform_set_tenant_plan`, which refuses a plan the business is over on open shops and stores, staff or active lending members (ADR-056). `platform_plan_tenants_over` counts the businesses on a plan that a lowered limit would leave over it, for the warning before a plan is saved.
+
+### `subscription_payments` (RLS; `bms_app` SELECT only; append-only; `V75`, ADR-024 decision 4, ADR-056)
+
+(std, no `version`, no `updated_at`) `subscription_id uuid NOT NULL` (composite FK
+`subscriptions`), `plan_id uuid NOT NULL`, `status text NOT NULL DEFAULT 'confirmed'`
+[`claimed`, `confirmed`, `rejected`; only `confirmed` is written in this release],
+`amount_minor bigint NOT NULL` (1 to 50,000,000), `currency char(3) NOT NULL` (the tenant's),
+`method text NOT NULL` [`mtn_momo`, `airtel_money`, `bank_transfer`, `other`],
+`reference varchar(100)`, `paid_on date NOT NULL`, `months integer NOT NULL` (1 to 24),
+`period_start date NOT NULL`, `period_end date NOT NULL` (the first and last day covered),
+`note varchar(500)`, `recorded_by_platform_user_id uuid NOT NULL` (FK `platform_users`). Index
+`(tenant_id, created_at DESC)`. Written only through
+`platform_record_subscription_payment`, which reads the tenant from `app.tenant_id` inside the
+transaction the platform console binds to it (`TenantContext.callAs`), in one transaction with
+the subscription move and the `Idempotency-Key` row. FR-SPM-01.
+
+Reads for the operator across tenants (`V75`, definer functions owned by `bms_owner`):
+`platform_tenant_overview()` (every tenant with its plan, subscription dates, modules, the
+first tenant admin as the owner and the latest staff sign-in), `platform_tenant_admins(tenant)`
+and `platform_tenant_outbox(tenant, limit)` (the outbox rows of one tenant, never their
+parameters).
 
 ### `tenant_modules` (RLS; `bms_app` SELECT only)
 
@@ -526,6 +574,7 @@ Index `(tenant_id, user_id) WHERE revoked_at IS NULL`. FR-IAM-07, FR-IAM-08.
 `branch_id uuid` (NULL = all branches of the tenant), `granted_by uuid NOT NULL`,
 `revoked_at timestamptz`, `revoked_by uuid`.
 Partial unique `(tenant_id, user_id, role_key, coalesce(branch_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE revoked_at IS NULL`.
+Check `user_role_assignments_admin_every_branch` (V73, ADR-055): an active `tenant_admin` row has no branch, so an administrator always covers every branch; V73 widened any limited administrator row before validating it. The roles `retail_storekeeper` and `retail_purchasing` are seeded by V73; V74 adds the permission `retail.sale.all_sellers` (administrators), the only change of slice 2: the own-sales filter reads `retail_sales.created_by`.
 
 ### `audit_log` (RLS, append-only)
 
@@ -1999,6 +2048,25 @@ and the stock movement checks, on the largest table, validate in a later migrati
 Built: customer orders (migration `V70`, renamed at merge in merge order). Three tables, forced row-level security and composite foreign keys on the tenant on each. `retail_customer_orders`: `order_no` (`OR` and six digits, `UNIQUE (tenant_id, order_no)`, from the tenant sequence `retail_order_no`), `branch_id` (a shop), `ordered_on`, `source` (`whatsapp`, `instagram`, `facebook`, `phone`, `walk_in`, `other`), `customer_id` (a credit buyer, optional), `customer_name` (required), `customer_phone`, `delivery_place` (empty means the customer collects at the shop), `delivery_date`, `delivery_fee_minor`, `currency`, `items_total_minor` (the sum of the lines at the prices agreed), `notes`, `status` (`ordered`, `packed`, `out_for_delivery`, `delivered`, `cancelled`), `packed_at`/`packed_by`, `sent_at`/`sent_by` and `delivered_by` (who takes it out, free text), `delivered_at`/`delivered_on`/`delivered_by_user` and `sale_id` (the sale it became, unique), `fee_method` and `fee_entry_id` (how the fee was paid, `cash`, `mobile_money`, `bank` or `account`, and its journal entry), `fee_paid_at`/`fee_paid_on`/`fee_paid_method`/`fee_paid_by`/`fee_payment_entry_id` (a fee on account paid later, once, or settled by the write-off of its sale with `fee_paid_method` written_off; the trigger allows only that change on a delivered order), `cancelled_at`/`cancelled_on`/`cancelled_by`/`cancel_reason`, and `version`. Checks tie each step to its columns (a delivered order has its sale, a cancelled one its reason, a sent one who took it); the application role may update only the step and delivery columns (column grants), and the trigger `retail_customer_orders_guard_update` moves the step forward only (ordered to packed, out for delivery, delivered or cancelled; packed to out for delivery, delivered or cancelled; out for delivery to delivered or cancelled), one version per change, nothing after delivered or cancelled. Indexes: the list (`tenant_id, branch_id, status, created_at DESC, id DESC`), the open orders by delivery day, the delivered by `delivered_on`, the cancelled by `cancelled_on`, and the phone lookup on `right(bms_digits(customer_phone), 9)` (and on `retail_customers (tenant_id, right(bms_digits(contact), 9))` for the credit buyers). `retail_customer_order_lines` (append-only): `line_no`, `product_id`, `unit_id` (a pack, or null for the base unit), `qty` (in that unit), `base_qty` (what the order keeps aside, in base units), `unit_price_minor` (agreed, per that unit), `line_total_minor`, and while price lists are on how the price was chosen (`price_source` retail, list or override, `price_list_id`, `price_break_min_qty`, `resolved_unit_price_minor`, and for an override `price_override_reason` and `overridden_by`). `retail_sale_lines` gains `price_overridden_by` (who changed a price when the customer order was taken) and the price source `order_agreed` in its price check (dropped and added again NOT VALID, then validated). `retail_customer_order_events` (append-only): the history, `step` (`ordered`, `changed`, `packed`, `out_for_delivery`, `delivered`, `cancelled`, `fee_paid`, `sale_voided`), `note`, `by_user`, `created_at`.
 
 `retail_stock_balances` gains `reserved_qty numeric(14,3) NOT NULL DEFAULT 0` with the check `retail_stock_balances_reserved_positive` (added `NOT VALID`, then validated): what open orders keep aside of the balance, changed only by `StockLedger.reserve` and `release` under the balance row's lock in the transaction of the order step. A sale, usage, damage, transfer out or goods sent back to a supplier may not take `qty` below `reserved_qty` (422 `insufficient_stock`); a stock-take may. Reservations post nothing and add no movement, so the reconciliation of balances against movements is unchanged. The chart gains 4120 `delivery_income` (income, credit normal) through the seed function of V64 with one row added; tenants that switched retail on earlier get it in the same migration. On delivery the fee is one entry of its own, source type `retail.customer_order`: debit the account of the method it was paid by (cash on hand, mobile money or bank), credit `delivery_income`; the items are an ordinary sale (`retail_sales`) with its two entries. The file sets `lock_timeout` to five seconds as its first statement. ADD COLUMN with a constant default rewrites nothing but holds an access exclusive lock on the balances until the commit; the new tables are empty.
+
+### 6.11.3d Low-stock levels and the daily notices (FR-RET-63, FR-NTF-24, issue #412, ADR-057, V76)
+
+Built: migration `V76` (renamed at merge in merge order). Two tables, forced row-level security with the standard policy.
+
+`retail_stock_minimums` (`bms_app` SELECT, INSERT, UPDATE, DELETE): `id`, `tenant_id`, `product_id` (FK `(tenant_id, product_id)`),
+`branch_id` (FK `(tenant_id, branch_id)`; null means the level for every shop and store), `min_qty numeric(14,3) NOT NULL CHECK (min_qty > 0)`
+in the item's base unit, `updated_at`, `updated_by`. `UNIQUE NULLS NOT DISTINCT (tenant_id, product_id, branch_id)`: one level for every
+branch and one per branch, written with `INSERT ... ON CONFLICT DO UPDATE` and removed with a DELETE (no level is no row). A branch's own
+level wins over the level for every branch. A variant is a product, so each size and colour has its own rows. Read by the low-stock push
+after each movement out (by the item and branch) and by the Stock health reorder list; every change is audited
+(`retail.stock_minimum.changed`).
+
+`retail_notice_runs` (`bms_app` SELECT, INSERT; append-only): `tenant_id`, `kind` (`credit_due`, `daily_summary`), `run_on date` (the
+business day), `created_at`, primary key `(tenant_id, kind, run_on)`. The job `retail.daily-notices` inserts the row before it prepares
+a daily notice (`ON CONFLICT DO NOTHING`), so a notice is prepared once a day whatever the number of ticks.
+
+The tenant settings group `notifications` (in `tenant_settings.settings.module_groups`, no column): `new_orders`, `order_updates`,
+`low_stock`, `credit_due`, `daily_summary` (booleans, absent means on) and `daily_summary_time` (`HH:mm`, 20:00 by default).
 
 ### 6.11.4 The pilot import (FR-RET-12; ADR-020 decision 9; #55)
 

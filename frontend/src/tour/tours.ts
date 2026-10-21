@@ -2,6 +2,7 @@ import type { Me } from '../api/client';
 import type { Tour, TourStep } from './model';
 import { CUSTOMER_TOURS } from './tours-customers';
 import { LENDING_MORE_TOURS } from './tours-lending-more';
+import { OPERATOR_TOURS } from './tours-operator';
 import { PUBLIC_TOURS } from './tours-public';
 import { RETAIL_CASH_TOURS } from './tours-retail-cash';
 import { RETAIL_ORDER_TOURS } from './tours-retail-orders';
@@ -792,7 +793,8 @@ export const retailSettingsPage: Tour = {
   id: 'page-retail-settings',
   // Version 2 adds the credit sale step (issue #340, ADR-043).
   // Version 3 says in that step that the credit rule is one way: once it has started it is not switched off here.
-  version: 3,
+  // Version 4 adds the slow movers step (issue #414).
+  version: 4,
   title: 'This page: retail settings',
   audience: isTenantAdmin,
   autoStart: false,
@@ -821,6 +823,12 @@ export const retailSettingsPage: Tour = {
       target: 'retail-credit-recognition',
       title: 'When a credit sale counts',
       body: 'Choose whether a credit sale counts as income and profit when it is made, or only when the buyer pays. Your daily savings follow this choice. You read the change before you confirm it. Once "when the buyer pays" has started, it is not switched off here.',
+    },
+    {
+      id: 'slow-movers',
+      target: 'retail-slow-movers',
+      title: 'Slow movers',
+      body: 'Choose when an item counts as slow on Stock health: how many months of stock is too much. You can also count an item as slow when few sold in 90 days. Tap Save.',
     },
   ],
 };
@@ -854,7 +862,7 @@ export const assistantPage: Tour = {
 // The Users page (issue #319): a page tour for whoever may read the staff list; the steps about changing people need the manage permission.
 export const usersPage: Tour = {
   id: 'page-users',
-  version: 2,
+  version: 4,
   title: 'This page: staff users',
   audience: (me) => held(me, 'core.users.read'),
   autoStart: false,
@@ -868,6 +876,12 @@ export const usersPage: Tour = {
       body: 'Tap here to add a person. You type their name and phone, choose what they do, and get a link to send them. The link is shown once.',
     },
     {
+      id: 'roles-card',
+      target: 'who-can-do-what',
+      title: 'Who can do what',
+      body: 'Open this to see what each role may do. There is one short line for every role.',
+    },
+    {
       id: 'search',
       target: 'staff-search',
       title: 'Find a person',
@@ -878,7 +892,7 @@ export const usersPage: Tour = {
       target: 'staff-list',
       optional: true,
       title: 'Who has joined',
-      body: 'Invited means the person has not opened their link yet. On their card you can send a new link, change their roles, or deactivate them when they leave. Reset sign-in makes a link for someone who forgot their password.',
+      body: 'Invited means the person has not opened their link yet. Each card says what the person does and in which shops and stores. On their card you can send a new link, change their roles and where they work, or deactivate them when they leave. Reset sign-in makes a link for someone who forgot their password.',
     },
   ],
 };
@@ -888,7 +902,7 @@ export const usersPage: Tour = {
 // tour in this file is; the new screen needs exactly this one.
 export const notificationsPage: Tour = {
   id: 'page-notifications',
-  version: 1,
+  version: 2,
   title: 'This page: notifications and the app',
   audience: () => true,
   autoStart: false,
@@ -912,6 +926,12 @@ export const notificationsPage: Tour = {
       optional: true,
       title: 'Your devices',
       body: 'Each device that tells you things is listed here. Remove one you no longer use.',
+    },
+    {
+      // Issue #412: the turn-on card shows in the staff area of the installed app, not on this page, so this step points at nothing.
+      id: 'turn-on-card',
+      title: 'Asked once, with one tap',
+      body: 'When you open the installed app, a card asks "Get told when something needs you?". Tap Turn on and your phone asks once. Not now asks again in a few days, at most three times.',
     },
   ],
 };
@@ -967,6 +987,36 @@ export const twoStepPage: Tour = {
       target: 'twostep-choice',
       title: 'Who must use it',
       body: 'Optional means nobody has to. Pick some roles, or everyone, to require it. Before you save, you see who will be asked and from which day.',
+    },
+  ],
+};
+
+// Business set-up > Notifications for the business (issue #412): what the business sends by push, and when the daily summary goes.
+export const businessNotificationsPage: Tour = {
+  id: 'page-business-notifications',
+  version: 1,
+  title: 'This page: notifications for the business',
+  audience: isTenantAdmin,
+  autoStart: false,
+  page: '/staff/setup/notifications',
+  steps: [
+    {
+      id: 'intro',
+      target: 'business-notify-intro',
+      title: 'What your staff are told',
+      body: 'BMS can tell your staff on their phones when something needs them. Each person still turns it on for their own phone.',
+    },
+    {
+      id: 'switches',
+      target: 'business-notify-switches',
+      title: 'Each notice on or off',
+      body: 'New orders, orders delivered, stock running low, credit to collect and the daily summary are all on until you switch one off.',
+    },
+    {
+      id: 'time',
+      target: 'business-notify-time',
+      title: 'The daily summary',
+      body: 'Choose when the owner and the administrators get the number of sales at each shop. It goes at 20:00 unless you change it.',
     },
   ],
 };
@@ -1520,7 +1570,7 @@ export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, notificationsPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, notificationsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;
@@ -1530,7 +1580,7 @@ const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((par
  * segment (`goods-received/new`) must come before its `$` sibling (`goods-received/$receiptId`): the tours with fewer `$` segments go
  * first (the sort is stable, so the order inside each group is the order written). route-coverage.test.ts proves it for every route.
  */
-export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...RETAIL_ORDER_TOURS, ...LENDING_MORE_TOURS, ...PUBLIC_TOURS]
+export const TOURS: readonly Tour[] = [...CORE_TOURS, ...RETAIL_REPORT_TOURS, ...RETAIL_CASH_TOURS, ...RETAIL_PURCHASING_TOURS, ...RETAIL_ORDER_TOURS, ...LENDING_MORE_TOURS, ...PUBLIC_TOURS, ...OPERATOR_TOURS]
   .map((tour, order) => ({ tour, order }))
   .sort((a, b) => dynamicSegments(a.tour) - dynamicSegments(b.tour) || a.order - b.order)
   .map(({ tour }) => tour);

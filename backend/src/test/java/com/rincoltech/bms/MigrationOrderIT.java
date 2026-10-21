@@ -1480,7 +1480,7 @@ class MigrationOrderIT {
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
-                                        + " 'retail.order.manage')")
+                                        + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -1669,6 +1669,215 @@ class MigrationOrderIT {
                             .param(product)
                             .update())
                     .hasStackTraceContaining("retail_products_variant_chk");
+        }
+    }
+
+    /**
+     * Issue #399, ADR-055: the retail roles migration (V73) keeps every assignment of a database at V72 as it was, except an
+     * administrator limited to one branch, who is widened to every branch (revoked where the person already covers every
+     * branch, so the unique index holds); a revoked row stays revoked; the two new roles exist with their permissions; and
+     * the new check ends validated and refuses an administrator limited to a branch.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates role assignments across the retail roles migration.
+     */
+    @Test
+    void retailRolesMigrationWidensALimitedAdministratorAndKeepsEveryOtherAssignment() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            assertThat(flyway(postgres, "72").migrate().targetSchemaVersion).isEqualTo("72");
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID tenant = UUID.randomUUID();
+            UUID branch = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'test-v72r', 'Test Tenant V72R', '00000000-0000-4000-8000-000000000001')")
+                    .param(tenant)
+                    .update();
+            owner.sql(
+                            "INSERT INTO branches (id, tenant_id, code, name, is_head_office) VALUES (?, ?, 'HQ', 'Head Office', true)")
+                    .params(branch, tenant)
+                    .update();
+            UUID limited = UUID.randomUUID();
+            UUID both = UUID.randomUUID();
+            UUID seller = UUID.randomUUID();
+            int i = 0;
+            for (UUID user : List.of(limited, both, seller)) {
+                i++;
+                owner.sql(
+                                "INSERT INTO users (id, tenant_id, kind, full_name, email, status) VALUES (?, ?, 'staff', ?, ?, 'active')")
+                        .params(user, tenant, "Test Staff 0" + i, "test.staff" + i + "@example.invalid")
+                        .update();
+            }
+            String assign = """
+                    INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by, revoked_at)
+                    VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?)
+                    """;
+            owner.sql(assign)
+                    .params(tenant, limited, "tenant_admin", branch, limited, null)
+                    .update();
+            owner.sql(assign)
+                    .params(
+                            tenant,
+                            limited,
+                            "tenant_admin",
+                            branch,
+                            limited,
+                            java.sql.Timestamp.valueOf("2026-01-01 00:00:00"))
+                    .update();
+            owner.sql(assign)
+                    .params(tenant, both, "tenant_admin", null, both, null)
+                    .update();
+            owner.sql(assign)
+                    .params(tenant, both, "tenant_admin", branch, both, null)
+                    .update();
+            owner.sql(assign)
+                    .params(tenant, seller, "retail_sales", branch, both, null)
+                    .update();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(result.success).isTrue();
+            String active = """
+                    SELECT role_key || '@' || coalesce(branch_id::text, 'all') FROM user_role_assignments
+                     WHERE user_id = ? AND revoked_at IS NULL ORDER BY 1
+                    """;
+            assertThat(owner.sql(active).param(limited).query(String.class).list())
+                    .as("a limited administrator now covers every branch")
+                    .containsExactly("tenant_admin@all");
+            assertThat(owner.sql(active).param(both).query(String.class).list())
+                    .as("the limited duplicate is revoked, the every-branch row kept")
+                    .containsExactly("tenant_admin@all");
+            assertThat(owner.sql(active).param(seller).query(String.class).list())
+                    .as("every other assignment is kept as it was")
+                    .containsExactly("retail_sales@" + branch);
+            assertThat(owner.sql("""
+                                    SELECT count(*) FROM user_role_assignments
+                                     WHERE user_id = ? AND branch_id = ? AND revoked_at = TIMESTAMP '2026-01-01 00:00:00'
+                                    """).params(limited, branch).query(Long.class).single())
+                    .as("a row revoked before stays as it was")
+                    .isEqualTo(1);
+            assertThat(owner.sql("""
+                                    SELECT string_agg(entity_id::text, ',' ORDER BY entity_id) FROM audit_log
+                                     WHERE action = 'core.user.roles_changed' AND actor_kind = 'system'
+                                       AND data -> 'after' -> 'roles' = '["tenant_admin@all"]'::jsonb
+                                    """).query(String.class).single())
+                    .as("each widened or revoked administrator row has a system audit row")
+                    .isEqualTo(java.util.stream.Stream.of(limited, both)
+                            .map(UUID::toString)
+                            .sorted()
+                            .collect(java.util.stream.Collectors.joining(",")));
+            assertThat(owner.sql("""
+                                    SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
+                                      FROM role_permissions WHERE role_key IN ('retail_storekeeper', 'retail_purchasing')
+                                    """).query(String.class).single())
+                    .isEqualTo("retail_purchasing:retail.purchase.create,retail_purchasing:retail.stock.read,"
+                            + "retail_storekeeper:retail.stock.read,retail_storekeeper:retail.stock.transfer,"
+                            + "retail_storekeeper:retail.stocktake.commit,retail_storekeeper:retail.usage.report");
+            // V74 (slice 2): seeing every seller's sales is the administrator's alone; the Sales role sees its own.
+            assertThat(owner.sql("SELECT string_agg(role_key, ',' ORDER BY role_key) FROM role_permissions"
+                                    + " WHERE permission_key = 'retail.sale.all_sellers'")
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("retail_supervisor,tenant_admin");
+            // V74: the cash book left the Sales role for the till, given per person; the administrator keeps it all.
+            // JUSTIFICATION-A3: new assertions for the V74 grants; the anchor is only the insertion point.
+            assertThat(owner.sql("""
+                                    SELECT string_agg(role_key || ':' || permission_key, ',' ORDER BY role_key, permission_key)
+                                      FROM role_permissions
+                                     WHERE permission_key IN ('retail.cashbook.read', 'retail.savings.record',
+                                                              'retail.banking.record', 'retail.expense.record',
+                                                              'retail.till.close')
+                                       AND role_key <> 'tenant_admin'
+                                    """).query(String.class).single())
+                    .isEqualTo("retail_till:retail.banking.record,retail_till:retail.cashbook.read,"
+                            + "retail_till:retail.expense.record,retail_till:retail.savings.record,"
+                            + "retail_till:retail.till.close");
+            assertThat(owner.sql("""
+                                    SELECT count(*) FROM role_permissions
+                                     WHERE role_key = 'tenant_admin' AND permission_key IN ('retail.cashbook.read',
+                                           'retail.savings.record', 'retail.banking.record', 'retail.expense.record',
+                                           'retail.till.close')
+                                    """).query(Long.class).single()).isEqualTo(5);
+            assertThat(owner.sql("""
+                                    SELECT count(*) FROM pg_constraint
+                                     WHERE conrelid = 'user_role_assignments'::regclass AND NOT convalidated
+                                    """).query(Long.class).single())
+                    .as("every constraint ends validated")
+                    .isZero();
+            assertThatThrownBy(() -> owner.sql(assign)
+                            .params(tenant, seller, "tenant_admin", branch, both, null)
+                            .update())
+                    .hasStackTraceContaining("user_role_assignments_admin_every_branch");
+        }
+    }
+
+    /**
+     * V75 (issue #407, ADR-056) on a database at V74, the migration before it: the three businesses the owner agreed as pilots are marked pilot with no
+     * free month end and an audit row each, only where the slug exists; every other trial whose staff signed in gets its
+     * free month dated from the first staff session, with a platform.tenant.trial_started row.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates subscriptions across the trial clock migration.
+     */
+    @Test
+    void operatorScreensMigrationMarksTheAgreedPilotsAndDatesTheOtherTrials() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            assertThat(flyway(postgres, "74").migrate().targetSchemaVersion).isEqualTo("74");
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID operator = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO platform_users (id, email, full_name) VALUES (?, 'op-v75@example.test', 'Test Operator')")
+                    .param(operator)
+                    .update();
+            UUID pilot = UUID.randomUUID();
+            UUID demo = UUID.randomUUID();
+            for (Object[] t : new Object[][] {{pilot, "hats"}, {demo, "test-v75-demo"}}) {
+                owner.sql(
+                                "SELECT platform_create_tenant(?, ?, 'Test Business', 'growth', 'UGX', 'Africa/Kampala', '{retail}',"
+                                        + " gen_random_uuid(), 'HQ', 'Head Office', ?)")
+                        .params(t[0], t[1], operator)
+                        .query((rs, n) -> 1)
+                        .single();
+                UUID user = UUID.randomUUID();
+                owner.sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                                + " VALUES (?, ?, 'staff', 'Test Owner', ?, 'active')")
+                        .params(user, t[0], "owner-" + t[1] + "@example.test")
+                        .update();
+                owner.sql("""
+                                INSERT INTO auth_sessions (id, tenant_id, user_id, family_id, refresh_token_hash, expires_at,
+                                                           idle_expires_at, created_at)
+                                VALUES (gen_random_uuid(), ?, ?, gen_random_uuid(), ?, now(), now(),
+                                        TIMESTAMPTZ '2026-10-01 10:00:00+03')
+                                """)
+                        .params(t[0], user, String.valueOf(t[1]).repeat(64).substring(0, 64))
+                        .update();
+            }
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+            assertThat(result.success).isTrue();
+
+            assertThat(owner.sql("SELECT is_pilot AND trial_ends_on IS NULL FROM subscriptions WHERE tenant_id = ?")
+                            .param(pilot)
+                            .query(Boolean.class)
+                            .single())
+                    .as("the agreed pilot has no free month end")
+                    .isTrue();
+            assertThat(owner.sql("SELECT action FROM platform_audit_log WHERE tenant_id = ?")
+                            .param(pilot)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("platform.tenant.pilot_changed");
+            assertThat(owner.sql("SELECT trial_ends_on::text FROM subscriptions WHERE tenant_id = ? AND NOT is_pilot")
+                            .param(demo)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("2026-10-31");
+            assertThat(owner.sql("SELECT action FROM platform_audit_log WHERE tenant_id = ?")
+                            .param(demo)
+                            .query(String.class)
+                            .list())
+                    .containsExactly("platform.tenant.trial_started");
         }
     }
 

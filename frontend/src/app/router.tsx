@@ -63,6 +63,10 @@ const staffBranchesRoute = createRoute({ getParentRoute: () => staffRoute, path:
 const staffTwoStepPolicyRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/two-step', staticData: { crumb: 'Two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/page').then((m) => m.Route),
 );
+// What the business sends by push and when the daily summary goes (issue #412). Under Business set-up in the trail.
+const staffBusinessNotificationsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/notifications', staticData: { crumb: 'Notifications for the business' } }).lazy(() =>
+  import('../areas/staff/notifications/business').then((m) => m.Route),
+);
 const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, path: '/two-step', staticData: { crumb: 'Your two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/own').then((m) => m.Route),
 );
@@ -270,6 +274,16 @@ const platformApplicationRoute = createRoute({
 const platformOutboxRoute = createRoute({ getParentRoute: () => platformRoute, path: '/outbox' }).lazy(() =>
   import('../areas/platform/outbox').then((m) => m.Route),
 );
+// The operator screens of issue #407: every business, one business's page, and the price book.
+const platformBusinessesRoute = createRoute({ getParentRoute: () => platformRoute, path: '/businesses' }).lazy(() =>
+  import('../areas/platform/businesses').then((m) => m.Route),
+);
+const platformBusinessRoute = createRoute({ getParentRoute: () => platformRoute, path: '/businesses/$tenantId' }).lazy(() =>
+  import('../areas/platform/business').then((m) => m.Route),
+);
+const platformPlansRoute = createRoute({ getParentRoute: () => platformRoute, path: '/plans' }).lazy(() =>
+  import('../areas/platform/plans').then((m) => m.Route),
+);
 
 const memberRoute = createRoute({ getParentRoute: () => rootRoute, path: '/member' }).lazy(() =>
   import('../areas/member/route').then((m) => m.Route),
@@ -282,7 +296,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffBusinessNotificationsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
@@ -392,7 +406,14 @@ export const router = createRouter({
     applicationStatusRoute,
     operatorSignInRoute,
     operatorSetupRoute,
-    platformRoute.addChildren([platformApplicationsRoute, platformApplicationRoute, platformOutboxRoute]),
+    platformRoute.addChildren([
+      platformApplicationsRoute,
+      platformApplicationRoute,
+      platformOutboxRoute,
+      platformBusinessesRoute,
+      platformBusinessRoute,
+      platformPlansRoute,
+    ]),
   ]),
 });
 

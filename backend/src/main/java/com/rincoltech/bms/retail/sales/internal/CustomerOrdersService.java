@@ -12,6 +12,7 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Cursor;
 import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.PushNotice;
 import com.rincoltech.bms.kernel.Search;
 import com.rincoltech.bms.kernel.Versions;
 import com.rincoltech.bms.retail.catalogue.RetailCatalogue;
@@ -25,6 +26,7 @@ import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeePaymentRequ
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.FeesReport;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Lookup;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.Order;
+import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderEvent;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderPage;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.OrderRequest;
 import com.rincoltech.bms.retail.sales.internal.CustomerOrdersApi.ReportRow;
@@ -57,6 +59,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -99,6 +102,7 @@ class CustomerOrdersService {
     private final CurrentTenant tenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final ApplicationEventPublisher events;
 
     CustomerOrdersService(
             CustomerOrdersRepository repo,
@@ -114,7 +118,8 @@ class CustomerOrdersService {
             TenantSequences sequences,
             CurrentTenant tenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            ApplicationEventPublisher events) {
         this.repo = repo;
         this.salesRepo = salesRepo;
         this.sales = sales;
@@ -129,6 +134,7 @@ class CustomerOrdersService {
         this.tenant = tenant;
         this.clock = clock;
         this.audit = audit;
+        this.events = events;
     }
 
     private LocalDate today() {
@@ -226,6 +232,19 @@ class CustomerOrdersService {
         after.put("delivery_fee_minor", fee);
         after.put("lines", priced.lines().size());
         audit.record(AuditLog.Entry.created("retail.order.created", ORDER, id, branch, after));
+        // Issue #412: an order that came in from outside the shop (a call, WhatsApp, social media) is news for the
+        // people who
+        // work at that shop, who pack it; a walk-in order is taken at the counter by someone already there.
+        if (!"walk_in".equals(r.source())) {
+            events.publishEvent(new PushNotice(
+                    "retail.order_new",
+                    id.toString(),
+                    new PushNotice.BranchStaff(MANAGE, branch, principal.userId()),
+                    Map.of(
+                            "branch_id", branch.toString(),
+                            "source_label", sourceWords(r.source()),
+                            "path", "/staff/retail/orders/" + id)));
+        }
         return view(repo.find(id, false).orElseThrow(), true);
     }
 
@@ -290,7 +309,8 @@ class CustomerOrdersService {
                         Cursor.encode(items.getLast().createdAt() + "|"
                                 + items.getLast().id()))
                 : null;
-        return new OrderPage(items.stream().map(h -> view(h, false)).toList(), next);
+        Set<UUID> mine = salesMadeByCaller(items);
+        return new OrderPage(items.stream().map(h -> view(h, false, mine)).toList(), next);
     }
 
     @Transactional(readOnly = true)
@@ -450,6 +470,7 @@ class CustomerOrdersService {
         after.put("delivered_by", rider);
         audit.record(
                 new AuditLog.Entry("retail.order.sent", ORDER, id, h.branchId(), Map.of("status", h.status()), after));
+        toldTaker(h, "retail.order_out_for_delivery", by);
         return view(repo.find(id, false).orElseThrow(), true);
     }
 
@@ -652,6 +673,7 @@ class CustomerOrdersService {
         }
         audit.record(new AuditLog.Entry(
                 "retail.order.delivered", ORDER, id, h.branchId(), Map.of("status", h.status()), after));
+        toldTaker(h, "retail.order_delivered", principal.userId());
         return new Delivered(
                 view(repo.find(id, false).orElseThrow(), true), sale.id(), sale.saleNo(), paidAtDoor, owed);
     }
@@ -757,13 +779,13 @@ class CustomerOrdersService {
                     List.of(new FieldProblem("group_by", "invalid", "group_by is day, source or rider.")));
         }
         LocalDate[] range = range(from, to);
-        List<ReportRow> rows =
-                repo
-                        .fees(CurrentPrincipal.require().branchFilter(MANAGE, branchIds), range[0], range[1], group)
-                        .stream()
-                        .map(row -> new ReportRow(
-                                row.key(), label(group, row.key()), row.orders(), row.itemsMinor(), row.feesMinor()))
-                        .toList();
+        Principal principal = CurrentPrincipal.require();
+        List<UUID> filter = principal.branchFilter(MANAGE, branchIds);
+        requireAllSellers(principal, filter);
+        List<ReportRow> rows = repo.fees(filter, range[0], range[1], group).stream()
+                .map(row -> new ReportRow(
+                        row.key(), label(group, row.key()), row.orders(), row.itemsMinor(), row.feesMinor()))
+                .toList();
         return new FeesReport(
                 range[0],
                 range[1],
@@ -775,10 +797,26 @@ class CustomerOrdersService {
                 rows);
     }
 
+    /**
+     * ADR-055: the fees, the value of everybody's orders and who cancelled them are the owner's figures; a seller who sees only
+     * their own sales is refused (403), as for the dashboard.
+     */
+    private static void requireAllSellers(Principal principal, List<UUID> filter) {
+        if (SalesSummaryService.ownSellerOnly(principal, filter, null) != null) {
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "permission_denied",
+                    "Permission denied",
+                    "This report adds up everybody's orders; it is for the owner.");
+        }
+    }
+
     @Transactional(readOnly = true)
     CancellationsReport cancellations(List<UUID> branchIds, LocalDate from, LocalDate to) {
         LocalDate[] range = range(from, to);
-        List<UUID> filter = CurrentPrincipal.require().branchFilter(MANAGE, branchIds);
+        Principal principal = CurrentPrincipal.require();
+        List<UUID> filter = principal.branchFilter(MANAGE, branchIds);
+        requireAllSellers(principal, filter);
         List<ReportRow> bySource = repo.cancelledBySource(filter, range[0], range[1]).stream()
                 .map(row -> new ReportRow(row.key(), label("source", row.key()), row.orders(), row.itemsMinor(), 0))
                 .toList();
@@ -827,7 +865,68 @@ class CustomerOrdersService {
 
     // ---- Helpers -------------------------------------------------------------------------------------
 
+    /**
+     * Issue #412: the person who took the order hears that it went out and that it arrived, unless they did the step
+     * themselves. The notice names the shop and never the customer.
+     */
+    private void toldTaker(Header h, String template, UUID by) {
+        if (h.createdBy() == null || h.createdBy().equals(by)) {
+            return;
+        }
+        events.publishEvent(new PushNotice(
+                template,
+                h.id().toString(),
+                new PushNotice.Users(Set.of(h.createdBy())),
+                Map.of("branch_id", h.branchId().toString(), "path", "/staff/retail/orders/" + h.id())));
+    }
+
+    /** How a remote order came in, in the words a notification uses. */
+    static String sourceWords(String source) {
+        return switch (source == null ? "" : source) {
+            case "whatsapp" -> "WhatsApp";
+            case "instagram" -> "Instagram";
+            case "facebook" -> "Facebook";
+            case "phone" -> "phone";
+            default -> "another channel";
+        };
+    }
+
+    /**
+     * ADR-055 (the owner's decision of 21 October 2026): every seller of the branch sees the orders and their values, the shop's
+     * shared work, but not a colleague's figures: the sale a colleague made on delivery is not linked (no id or number, and the
+     * history's note does not name it), and who took, moved or delivered the order is shown only for the caller's own steps,
+     * unless the caller may see every seller's sales there. The sales the caller made are found for a whole page at once.
+     */
+    private Set<UUID> salesMadeByCaller(List<Header> headers) {
+        List<UUID> ids =
+                headers.stream().map(Header::saleId).filter(Objects::nonNull).toList();
+        return repo.salesMadeBy(ids, CurrentPrincipal.require().userId());
+    }
+
+    private static final java.util.regex.Pattern SALE_NOTE = java.util.regex.Pattern.compile("^Sale \\S+\\. ?");
+
     private Order view(Header h, boolean withHistory) {
+        return view(h, withHistory, salesMadeByCaller(List.of(h)));
+    }
+
+    private Order view(Header h, boolean withHistory, Set<UUID> mine) {
+        Principal principal = CurrentPrincipal.require();
+        boolean everyone = principal.may(SalesSummaryService.ALL_SELLERS, h.branchId());
+        boolean sale = h.saleId() != null && (everyone || mine.contains(h.saleId()));
+        UUID me = principal.userId();
+        List<OrderEvent> events = withHistory ? repo.events(h.id()) : null;
+        if (events != null && !everyone) {
+            events = events.stream()
+                    .map(e -> new OrderEvent(
+                            e.step(),
+                            sale || e.note() == null
+                                    ? e.note()
+                                    : SALE_NOTE.matcher(e.note()).replaceFirst(""),
+                            me.equals(e.byUser()) ? e.byUser() : null,
+                            me.equals(e.byUser()) ? e.byName() : null,
+                            e.at()))
+                    .toList();
+        }
         return new Order(
                 h.id(),
                 h.orderNo(),
@@ -845,13 +944,13 @@ class CustomerOrdersService {
                 h.itemsTotalMinor() + h.deliveryFeeMinor(),
                 h.notes(),
                 h.status(),
-                h.deliveredBy(),
+                everyone || sale || h.saleId() == null ? h.deliveredBy() : null,
                 h.packedAt(),
                 h.sentAt(),
                 h.deliveredAt(),
                 h.deliveredOn(),
-                h.saleId(),
-                h.saleNo(),
+                sale ? h.saleId() : null,
+                sale ? h.saleNo() : null,
                 h.feeMethod(),
                 h.cancelledAt(),
                 h.cancelReason(),
@@ -859,10 +958,10 @@ class CustomerOrdersService {
                 h.feePaidMethod(),
                 "voided".equals(h.saleStatus()) ? Boolean.TRUE : null,
                 h.createdAt(),
-                h.createdBy(),
+                everyone || me.equals(h.createdBy()) ? h.createdBy() : null,
                 h.version(),
                 repo.lines(h.id()).stream().map(StoredLine::view).toList(),
-                withHistory ? repo.events(h.id()) : null);
+                events);
     }
 
     private static void requireOpen(Header h, String step) {

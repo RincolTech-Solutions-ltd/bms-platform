@@ -32,19 +32,21 @@ const MOCK_BRANCHES = [
   { id: BRANCH_B, code: 'BR2', name: 'Test Branch B', is_head_office: false },
 ];
 
-// The seeded sales role: its sale permissions and, in the cash book, what a shop user may do without seeing
-// profit: record savings (the standard amount only), banking and expenses, and read the lists and reports
-// (ADR-022 decision 13, chapter 8 matrix).
+// The seeded sales role: its sale permissions. Since V74 (ADR-055, the owner's decision of 21 October 2026) the cash book is
+// the till's, given per person: the cashier below is a seller who was also given "Can close the till and do the banking", which
+// records savings (the standard amount only), banking and expenses and reads the lists and reports (ADR-022 decision 13).
 const SALES_PERMISSIONS = [
   'retail.sale.create', 'retail.sale.read', 'retail.stock.read', 'retail.usage.report', 'retail.customer.manage', 'retail.price.override',
-  'retail.order.manage', 'retail.savings.record', 'retail.banking.record', 'retail.expense.record', 'retail.cashbook.read',
+  'retail.order.manage',
 ];
-const CASHIER_PERMISSIONS = SALES_PERMISSIONS;
+const TILL_PERMISSIONS = ['retail.savings.record', 'retail.banking.record', 'retail.expense.record', 'retail.cashbook.read', 'retail.till.close'];
+const CASHIER_PERMISSIONS = [...SALES_PERMISSIONS, ...TILL_PERMISSIONS];
 const ADMIN_PERMISSIONS = [
   ...SALES_PERMISSIONS, 'retail.catalogue.manage', 'retail.price.edit', 'retail.sale.void',
-  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage', 'retail.pricelist.manage', 'retail.pricelist.use', 'retail.credit.manage', 'retail.credit.write_off', 'retail.credit.override', 'retail.document.issue', 'retail.sale.return', 'retail.controls.read',
+  'retail.stocktake.commit', 'retail.purchase.create', 'retail.stock.transfer', 'retail.profit.read', 'core.settings.manage', 'retail.branch_role.manage', 'retail.pricelist.manage', 'retail.pricelist.use', 'retail.credit.manage', 'retail.credit.write_off', 'retail.credit.override', 'retail.document.issue', 'retail.sale.return', 'retail.controls.read', 'retail.sale.all_sellers',
   'retail.savings.record', 'retail.savings.overwrite', 'retail.banking.record', 'retail.expense.record', 'retail.expense.manage',
   'retail.withdrawal.record', 'retail.advance.create', 'retail.advance.repay', 'retail.cashbook.read', 'retail.cashbook.void', 'retail.payable.manage',
+  'retail.till.close',
 ];
 
 /** A fake signed-in user for the mock session, so the app runs without a backend. */
@@ -161,7 +163,7 @@ export function createMockRetail(): RetailApi {
   // Branch roles and capabilities of this mock instance (ADR-033): every branch both, every capability off.
   const roles = new Map<string, 'store' | 'shop' | 'both'>();
   const roleOf = (branch: string): 'store' | 'shop' | 'both' => roles.get(branch) ?? 'both';
-  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shop' }, version: 1 };
+  let caps: { value: Record<string, unknown>; version: number } = { value: { profile: 'shop', slow_mover_months: 4, slow_mover_min_sold: 0 }, version: 1 };
   const twoStep = () => transferReceipt || caps.value['transfer_receipt'] === true;
   const read = (): CapabilitiesRead => ({ capabilities: { ...caps.value, ...Object.fromEntries(MOCK_FLAGS.map((k) => [k, caps.value[k] === true])) }, version: caps.version });
   const balances = new Map<string, number>();
@@ -1055,7 +1057,7 @@ export function createMockRetail(): RetailApi {
       return delay({ ...st });
     },
 
-    // Stock value is read with retail.stock.read; its cost and profit columns need retail.profit.read.
+    // The valuation is read with retail.stock.read; the value at price, cost and profit columns need retail.profit.read (ADR-055).
     // Without a branch it covers every branch, with a total per branch, as the server does (#144).
     valuation: ({ branchId, asOf }) => {
       const bp = (profit: number, atCost: number): { expected_profit_bp?: number } => (atCost > 0 ? { expected_profit_bp: Math.round((profit * 10000) / atCost) } : {});
@@ -1064,14 +1066,14 @@ export function createMockRetail(): RetailApi {
         const milli = bal(id, p.id);
         const sells = lineTotal(p.sellMinor, milli);
         const atCost = lineTotal(p.costMinor, milli);
-        return cost({ branch_id: id, product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor, expected_sales_minor: sells },
-          { cost_minor: p.costMinor, value_at_cost_minor: atCost, expected_profit_minor: sells - atCost, ...bp(sells - atCost, atCost) });
+        return cost({ branch_id: id, product_id: p.id, code: p.code, description: p.description, category_id: categoryId(p.category), category: p.category, unit: p.unit, qty: fromMilli(milli), negative: milli < 0, sell_minor: p.sellMinor },
+          { expected_sales_minor: sells, cost_minor: p.costMinor, value_at_cost_minor: atCost, expected_profit_minor: sells - atCost, ...bp(sells - atCost, atCost) });
       }));
       const sum = (pick: (r: ValuationRow) => number | undefined, from: ValuationRow[] = rows) => from.reduce((s, r) => s + (pick(r) ?? 0), 0);
       const totals = (own: ValuationRow[]) => {
         const sells = sum((r) => r.expected_sales_minor, own);
         const atCost = sum((r) => r.value_at_cost_minor, own);
-        return cost({ expected_sales_minor: sells }, { value_at_cost_minor: atCost, expected_profit_minor: sells - atCost, ...bp(sells - atCost, atCost) });
+        return cost({}, { expected_sales_minor: sells, value_at_cost_minor: atCost, expected_profit_minor: sells - atCost, ...bp(sells - atCost, atCost) });
       };
       const branches = ids.map((id) => ({ branch_id: id, ...totals(rows.filter((r) => r.branch_id === id)) }));
       const categories = CATEGORIES.map((c) => ({ category_id: c.id, category: c.name, ...totals(rows.filter((r) => r.category_id === c.id)) }));
@@ -1100,6 +1102,9 @@ export function createMockRetail(): RetailApi {
         for (const key of MOCK_FLAGS) next[key] = body.profile === 'shop' ? false : MOCK_TRADE_PRESET.includes(key) ? true : next[key];
       }
       for (const key of MOCK_FLAGS) if (typeof body[key] === 'boolean') next[key] = body[key];
+      // The slow mover rules of Stock health (issue #414), whole numbers in the server's ranges.
+      if (typeof body.slow_mover_months === 'number') next.slow_mover_months = body.slow_mover_months;
+      if (typeof body.slow_mover_min_sold === 'number') next.slow_mover_min_sold = body.slow_mover_min_sold;
       caps = { value: next, version: caps.version + 1 };
       return delay(read());
     },

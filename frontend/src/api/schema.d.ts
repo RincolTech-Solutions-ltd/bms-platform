@@ -2523,10 +2523,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Plans with their limits (FR-TEN-04) */
+        /** Plans with their limits and the price in force today (FR-TEN-04, FR-SUB-01) */
         get: operations["platformListPlans"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/plans/{plan_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One plan with its price history (FR-SUB-01) */
+        get: operations["platformGetPlan"];
+        /** Create the plan with this code, or change it; the same request again changes nothing (FR-SUB-01) */
+        put: operations["platformSavePlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/plans/{plan_code}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set the plan's price from a date; the price already in force on that date again changes nothing (FR-SUB-01) */
+        post: operations["platformAddPlanPrice"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2608,7 +2643,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every tenant */
+        /** Every tenant with plan, subscription, owner and last sign-in; search and filter (FR-TEN-05) */
         get: operations["platformListTenants"];
         put?: never;
         /** Create a tenant with head office, modules and an invited first admin (FR-TEN-01) */
@@ -2653,6 +2688,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business page: details, owner and admins, price, payments, recent messages and operator history */
+        get: operations["platformTenantOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/payment-account": {
         parameters: {
             query?: never;
@@ -2687,6 +2739,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a payment received; it extends what is paid (ADR-024 decision 4). Needs an Idempotency-Key; a repeat records nothing */
+        post: operations["platformRecordPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/pilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark or unmark a pilot (complimentary) business, with a reason: free, no free month end; the same mark again changes nothing (ADR-024 decision 6) */
+        put: operations["platformSetTenantPilot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Move the business to another active plan, with a reason; the same plan again changes nothing (FR-TEN-04) */
+        put: operations["platformSetTenantPlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/resume": {
         parameters: {
             query?: never;
@@ -2696,7 +2799,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Resume a suspended tenant (FR-TEN-06) */
+        /** Resume a suspended tenant with a reason, back to the status it had before (a free month stays a free month); a tenant that is not suspended changes nothing (FR-TEN-06) */
         post: operations["platformResumeTenant"];
         delete?: never;
         options?: never;
@@ -2766,8 +2869,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Move the subscription status (FR-TEN-05) */
+        /** Move the subscription status, with a reason; the same status again changes nothing (FR-TEN-05) */
         post: operations["platformSetSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/subscription-dates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the last day of the free month or the last day paid for, with a reason (FR-TEN-05) */
+        put: operations["platformSetSubscriptionDates"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2783,7 +2903,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Suspend: the tenant becomes read only (FR-TEN-06) */
+        /** Suspend with a reason: the tenant becomes read only, nothing is deleted; already suspended changes nothing (FR-TEN-06) */
         post: operations["platformSuspendTenant"];
         delete?: never;
         options?: never;
@@ -2800,7 +2920,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reset the lost second factor of a tenant admin; needs a current code from the operator's own authenticator (FR-IAM-12) */
+        /** Reset the lost second factor of a tenant admin, with a reason; needs a current code from the operator's own authenticator (FR-IAM-12) */
         post: operations["platformResetAdminMfa"];
         delete?: never;
         options?: never;
@@ -2817,7 +2937,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Issue a one-time password reset link for a tenant admin; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15) */
+        /** Issue a one-time password reset link for a tenant admin, with a reason; shown once, valid one hour; needs a current code from the operator's own authenticator (FR-IAM-15) */
         post: operations["platformResetAdminSignIn"];
         delete?: never;
         options?: never;
@@ -2901,10 +3021,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Advances with their balances, newest first */
+        /**
+         * Advances with their balances, newest first
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailAdvances"];
         put?: never;
-        /** Record an advance to the owner or a related party (FR-RET-26); M */
+        /**
+         * Record an advance to the owner or a related party (FR-RET-26); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailAdvance"];
         delete?: never;
         options?: never;
@@ -2919,7 +3045,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** An advance with its repayments */
+        /**
+         * An advance with its repayments
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailAdvance"];
         put?: never;
         post?: never;
@@ -2938,7 +3067,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record a repayment of an advance (FR-RET-26); M */
+        /**
+         * Record a repayment of an advance (FR-RET-26); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailAdvanceRepayment"];
         delete?: never;
         options?: never;
@@ -2955,7 +3087,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a repayment and restore the balance (FR-RET-28); M */
+        /**
+         * Void a repayment and restore the balance (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailAdvanceRepayment"];
         delete?: never;
         options?: never;
@@ -2972,7 +3107,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void an advance that has no repayments (FR-RET-28); M */
+        /**
+         * Void an advance that has no repayments (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailAdvance"];
         delete?: never;
         options?: never;
@@ -2987,10 +3125,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Banking records, newest first */
+        /**
+         * Banking records, newest first
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailBankings"];
         put?: never;
-        /** Record cash banked (FR-RET-22); M */
+        /**
+         * Record cash banked (FR-RET-22); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailBanking"];
         delete?: never;
         options?: never;
@@ -3005,7 +3149,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The amount expected to be banked for a shop and day (FR-RET-21) */
+        /**
+         * The amount expected to be banked for a shop and day (FR-RET-21)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailBankingExpected"];
         put?: never;
         post?: never;
@@ -3024,7 +3171,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a banking record (FR-RET-28); M */
+        /**
+         * Void a banking record (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailBanking"];
         delete?: never;
         options?: never;
@@ -3073,10 +3223,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Beneficiaries and advance parties */
+        /**
+         * Beneficiaries and advance parties
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailCashParties"];
         put?: never;
-        /** Add a beneficiary or advance party on the fly */
+        /**
+         * Add a beneficiary or advance party on the fly
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailCashParty"];
         delete?: never;
         options?: never;
@@ -3470,10 +3626,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Expense categories with their items */
+        /**
+         * Expense categories with their items
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailExpenseCategories"];
         put?: never;
-        /** Add an expense category (FR-RET-17) */
+        /**
+         * Add an expense category (FR-RET-17)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailExpenseCategory"];
         delete?: never;
         options?: never;
@@ -3494,7 +3656,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Rename, remap, switch off or reorder a category; needs If-Match */
+        /**
+         * Rename, remap, switch off or reorder a category; needs If-Match
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         patch: operations["updateRetailExpenseCategory"];
         trace?: never;
     };
@@ -3507,7 +3672,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add an item to a category */
+        /**
+         * Add an item to a category
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailExpenseItem"];
         delete?: never;
         options?: never;
@@ -3528,7 +3696,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Rename, switch off or flag an item as needing an explanation; needs If-Match */
+        /**
+         * Rename, switch off or flag an item as needing an explanation; needs If-Match
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         patch: operations["updateRetailExpenseItem"];
         trace?: never;
     };
@@ -3539,10 +3710,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Expenses, newest first */
+        /**
+         * Expenses, newest first
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailExpenses"];
         put?: never;
-        /** Record a company expense paid from the till (FR-RET-24); M */
+        /**
+         * Record a company expense paid from the till (FR-RET-24); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailExpense"];
         delete?: never;
         options?: never;
@@ -3559,7 +3736,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void an expense (FR-RET-28); M */
+        /**
+         * Void an expense (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailExpense"];
         delete?: never;
         options?: never;
@@ -3764,7 +3944,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Orders cancelled and why, by source (issue #385) */
+        /**
+         * Orders cancelled and why, by source (issue #385)
+         * @description ADR-055: it adds up everybody's orders, so the caller also needs retail.sale.all_sellers in every branch it covers, else 403 permission_denied
+         */
         get: operations["getRetailOrderCancellationsReport"];
         put?: never;
         post?: never;
@@ -3781,7 +3964,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Delivered orders and the delivery fees taken, by day, source or rider (issue #385) */
+        /**
+         * Delivered orders and the delivery fees taken, by day, source or rider (issue #385)
+         * @description ADR-055: it adds up everybody's orders, so the caller also needs retail.sale.all_sellers in every branch it covers, else 403 permission_denied
+         */
         get: operations["getRetailOrderFeesReport"];
         put?: never;
         post?: never;
@@ -4242,6 +4428,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/products/{product_id}/stock-minimum": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Warn me when stock is below: the item's level for every branch and each branch's own (issue #412) */
+        get: operations["getRetailStockMinimum"];
+        /** Set or remove the item's low-stock level for every shop and store (issue #412) */
+        put: operations["setRetailStockMinimum"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retail/products/{product_id}/stock-minimum/branches/{branch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set or remove one branch's own low-stock level; retail.catalogue.manage or retail.stocktake.commit at that branch (issue #412) */
+        put: operations["setRetailBranchStockMinimum"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/products/{product_id}/units": {
         parameters: {
             query?: never;
@@ -4527,7 +4748,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Outstanding advances by party (FR-RET-29) */
+        /**
+         * Outstanding advances by party (FR-RET-29)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailCashAdvancesReport"];
         put?: never;
         post?: never;
@@ -4544,7 +4768,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Expected against banked per shop and day, with the running unbanked total (FR-RET-23) */
+        /**
+         * Expected against banked per shop and day, with the running unbanked total (FR-RET-23)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailCashBankingReport"];
         put?: never;
         post?: never;
@@ -4561,7 +4788,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The daily cash summary per shop and day (FR-RET-27) */
+        /**
+         * The daily cash summary per shop and day (FR-RET-27)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailCashDailyReport"];
         put?: never;
         post?: never;
@@ -4578,7 +4808,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Expenses by category, item, shop or month (FR-RET-29) */
+        /**
+         * Expenses by category, item, shop or month (FR-RET-29)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailCashExpensesReport"];
         put?: never;
         post?: never;
@@ -4595,7 +4828,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Savings per shop and day (FR-RET-29) */
+        /**
+         * Savings per shop and day (FR-RET-29)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailCashSavingsReport"];
         put?: never;
         post?: never;
@@ -4646,7 +4882,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149) */
+        /**
+         * Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149)
+         * @description ADR-055: it adds up every seller's sales, so the caller also needs retail.sale.all_sellers in every branch it covers, else 403 permission_denied; without branch_id a Supervisor gets the shops it supervises
+         */
         get: operations["getRetailDashboard"];
         put?: never;
         post?: never;
@@ -4697,7 +4936,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Sales by period, branch, category, product and seller, with slow movers (issue #149) */
+        /**
+         * Sales by period, branch, category, product and seller, with slow movers (issue #149)
+         * @description ADR-055: it adds up every seller's sales, so the caller also needs retail.sale.all_sellers in every branch it covers, else 403 permission_denied; without branch_id a Supervisor gets the shops it supervises
+         */
         get: operations["getRetailSalesAnalysis"];
         put?: never;
         post?: never;
@@ -4867,7 +5109,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Sales in the caller's branch scope */
+        /**
+         * Sales in the caller's branch scope
+         * @description ADR-055: without retail.sale.all_sellers in every branch covered, only the caller's own sales; a seller_id other than one's own is 403
+         */
         get: operations["listRetailSales"];
         put?: never;
         /** Record a sale: snapshots, stock and journals in one transaction (FR-RET-04); M */
@@ -4885,7 +5130,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Sales grouped by a chain of levels with a summary per group (issues #328, #341) */
+        /**
+         * Sales grouped by a chain of levels with a summary per group (issues #328, #341)
+         * @description ADR-055: without retail.sale.all_sellers in every branch covered, only the caller's own sales; a seller_id other than one's own is 403
+         */
         get: operations["summariseRetailSales"];
         put?: never;
         post?: never;
@@ -5007,10 +5255,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Savings records, newest first */
+        /**
+         * Savings records, newest first
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailSavings"];
         put?: never;
-        /** Record the day's savings (FR-RET-18 to FR-RET-20); M */
+        /**
+         * Record the day's savings (FR-RET-18 to FR-RET-20); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailSavings"];
         delete?: never;
         options?: never;
@@ -5025,7 +5279,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The day's savings suggestion token, and the suggestion with profit read (FR-RET-18) */
+        /**
+         * The day's savings suggestion token, and the suggestion with profit read (FR-RET-18)
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["getRetailSavingsSuggestion"];
         put?: never;
         post?: never;
@@ -5044,7 +5301,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a savings record and free its day (FR-RET-28); M */
+        /**
+         * Void a savings record and free its day (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailSavings"];
         delete?: never;
         options?: never;
@@ -5610,10 +5870,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Withdrawals from the bank, newest first */
+        /**
+         * Withdrawals from the bank, newest first
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         get: operations["listRetailWithdrawals"];
         put?: never;
-        /** Record cash withdrawn from the bank (FR-RET-25); M */
+        /**
+         * Record cash withdrawn from the bank (FR-RET-25); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["createRetailWithdrawal"];
         delete?: never;
         options?: never;
@@ -5630,7 +5896,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a withdrawal (FR-RET-28); M */
+        /**
+         * Void a withdrawal (FR-RET-28); M
+         * @description ADR-055: the cash book is the till's. Besides the permission of the route the caller needs retail.till.close (Can close the till and do the banking), else 403 permission_denied
+         */
         post: operations["voidRetailWithdrawal"];
         delete?: never;
         options?: never;
@@ -5686,6 +5955,24 @@ export interface paths {
         post?: never;
         /** Remove the business logo; the file is kept (FR-TEN-08) */
         delete: operations["removeLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which everyday push notices the business sends, and when the daily summary goes (issue #412) */
+        get: operations["getNotificationSettings"];
+        /** Change which everyday push notices the business sends, audited with before and after (issue #412) */
+        put: operations["updateNotificationSettings"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5949,6 +6236,23 @@ export interface components {
             /** Format: uuid */
             tenant_id?: string;
             tenant_slug?: string;
+        };
+        AddPlanPriceRequest: {
+            /** Format: int32 */
+            annual_months: number;
+            /** @description True when the operator checked a monthly price more than 25% away from the one in force (422 price_change_unusual otherwise) */
+            confirm_large_change?: boolean;
+            /** @description Default UGX */
+            currency?: string;
+            /**
+             * Format: date
+             * @description Default today; never before today, so a price never changes the past
+             */
+            effective_from?: string;
+            /** Format: int64 */
+            monthly_minor: number;
+            /** @description Why, kept with the price and in the audit log */
+            reason: string;
         };
         /** @description Issue #384: more sizes or colours for an item; a combination it has already is skipped. Without variants every combination of sizes and colours is made, sizes in the order given; with variants exactly those are made */
         AddRetailVariantsRequest: {
@@ -6253,6 +6557,17 @@ export interface components {
             theme_primary?: string;
             /** @description #FFFFFF or #111111, the readable text colour on themePrimary; null with it */
             theme_text?: string;
+        };
+        BusinessDetail: {
+            admins?: components["schemas"]["TenantAdmin"][];
+            /** @description Newest first, at most 50 */
+            history?: components["schemas"]["TenantHistoryEntry"][];
+            /** @description Newest first, at most 50; sent messages are purged after a while */
+            messages?: components["schemas"]["TenantMessage"][];
+            /** @description Newest first */
+            payments?: components["schemas"]["SubscriptionPayment"][];
+            plan_price?: components["schemas"]["PlanPrice"];
+            tenant?: components["schemas"]["PlatformTenant"];
         };
         /** @description The reason is required only when the branch still holds stock or has transfers on their way (422 branch_close_needs_reason says which). */
         CloseBranchRequest: {
@@ -8081,6 +8396,32 @@ export interface components {
         NextOfKinList: {
             items?: components["schemas"]["NextOfKin"][];
         };
+        NotificationSettings: {
+            /** @description Credit payments due today or overdue, each morning */
+            credit_due?: boolean;
+            /** @description The daily closing summary to the owner and the administrators */
+            daily_summary?: boolean;
+            /**
+             * @description HH:mm on the business's clock (timezone) when the daily summary goes
+             * @example 20:00
+             */
+            daily_summary_time?: string;
+            /** @description An item below its low-stock level at a shop or store, once a day per item */
+            low_stock?: boolean;
+            /** @description New orders from a phone call, WhatsApp, Instagram, Facebook or elsewhere, to the order's shop */
+            new_orders?: boolean;
+            /** @description An order out for delivery and delivered, to the person who took it */
+            order_updates?: boolean;
+            /** @description False when this server has no push keys: nothing is sent whatever is chosen here */
+            push_available?: boolean;
+            /**
+             * @description The business's time zone, for the summary time
+             * @example Africa/Kampala
+             */
+            timezone?: string;
+            /** Format: int32 */
+            version?: number;
+        };
         OpenInvestmentRequest: {
             /** Format: int64 */
             amount_minor: number;
@@ -8226,20 +8567,73 @@ export interface components {
             /** Format: date */
             value_date?: string;
         };
-        /** @description Limits only; prices are not stored in this repository */
+        /** @description Limits, what the plan includes, and its price in force today */
         Plan: {
+            /** @description False: no new business and no move onto it */
+            active?: boolean;
             allowed_modules?: string[];
             code?: string;
-            /** Format: int32 */
+            current_price?: components["schemas"]["PlanPrice"];
+            description?: string;
+            /**
+             * Format: int32
+             * @description Active lending members; null is unlimited
+             */
             max_active_members?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Shops and stores; null is unlimited
+             */
             max_branches?: number;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Staff users, invited or active; null is unlimited
+             */
             max_staff_users?: number;
             name?: string;
+            next_price?: components["schemas"]["PlanPrice"];
+            /** Format: int32 */
+            sort_order?: number;
+            /**
+             * Format: int64
+             * @description Businesses on this plan
+             */
+            tenant_count?: number;
+        };
+        PlanDetail: {
+            plan?: components["schemas"]["Plan"];
+            /** @description Every price the plan has had, newest first */
+            prices?: components["schemas"]["PlanPrice"][];
         };
         PlanList: {
             items?: components["schemas"]["Plan"][];
+        };
+        /** @description A price of a plan from a date; a later row replaces it from its own date */
+        PlanPrice: {
+            /**
+             * Format: int64
+             * @description monthly_minor times annual_months
+             */
+            annual_minor?: number;
+            /**
+             * Format: int32
+             * @description Months charged for a year, for example 10
+             */
+            annual_months?: number;
+            /** Format: date-time */
+            created_at?: string;
+            created_by_name?: string;
+            currency?: string;
+            /** Format: date */
+            effective_from?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int64
+             * @description The monthly price in minor units (whole shillings for UGX)
+             */
+            monthly_minor?: number;
+            reason?: string;
         };
         PlatformMe: {
             email?: string;
@@ -8249,6 +8643,10 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
         };
+        PlatformReasonRequest: {
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+        };
         /** @description Shown once to the operator, who hands it to the tenant admin */
         PlatformSignInResetLink: {
             /** Format: date-time */
@@ -8256,25 +8654,58 @@ export interface components {
             url?: string;
         };
         PlatformStepUpRequest: {
+            /** @description Why; kept in the platform audit log (issue #407) */
+            reason: string;
             /** @description A current 6 digit code from the operator's own authenticator app */
             totp_code: string;
         };
         PlatformTenant: {
+            /** @description The business's own address, where its staff sign in */
+            address?: string;
             /** Format: date-time */
             created_at?: string;
             currency?: string;
             /** Format: uuid */
             id?: string;
+            /**
+             * Format: date-time
+             * @description The latest sign-in of any staff user, or null
+             */
+            last_sign_in_at?: string;
             modules?: string[];
             name?: string;
             /** Format: date */
             next_status_change_on?: string;
+            owner_email?: string;
+            /** @description The first tenant admin (the owner), or null */
+            owner_name?: string;
+            /**
+             * Format: date
+             * @description The first day of the paid period, or null
+             */
+            paid_from?: string;
+            /**
+             * Format: date
+             * @description The last day paid for, or null when nothing was paid
+             */
+            paid_until?: string;
+            /** @description A pilot or complimentary business: free, no free month end (ADR-024 decision 6) */
+            pilot?: boolean;
             plan_code?: string;
+            plan_name?: string;
             slug?: string;
             /** @description active or suspended (read only, FR-TEN-06) */
             status?: string;
+            /** @description trial, active, past_due, suspended or cancelled */
             subscription_status?: string;
+            /** @description While suspended or cancelled: the status a resume brings back (trial, active or past_due) */
+            suspended_from?: string;
             timezone?: string;
+            /**
+             * Format: date
+             * @description The last day of the free month; set at the first staff sign-in, null before it
+             */
+            trial_ends_on?: string;
         };
         PlatformTenantList: {
             items?: components["schemas"]["PlatformTenant"][];
@@ -8622,7 +9053,10 @@ export interface components {
             negative?: boolean;
             /** Format: uuid */
             product_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /** @description The sum over the branches of the page */
             total_qty?: string;
@@ -8884,6 +9318,16 @@ export interface components {
              * @description Read only: the tenant's approval threshold for customer returns (action retail_sale_return), present only when one is set; while it is absent a return needs no second administrator
              */
             returns_approval_threshold_minor?: number;
+            /**
+             * Format: int32
+             * @description Stock health (issue #414): an item is also a slow mover when fewer than this many units sold in the branch in the last 90 days; 0 (the default) switches this rule off
+             */
+            slow_mover_min_sold?: number;
+            /**
+             * Format: int32
+             * @description Stock health (issue #414): an item that sold in the last 90 days is a slow mover when its stock lasts more than this many months at that pace; 1 to 24, default 4
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
@@ -9254,7 +9698,7 @@ export interface components {
             /** Format: int32 */
             next_offset?: number;
         };
-        /** @description Items with cover below lead_days, the lowest first, with a suggested quantity */
+        /** @description Items below their low-stock minimum or with cover below lead_days, whichever trips first, the most urgent first, with a suggested quantity (issue #412) */
         RetailCoverList: {
             items?: components["schemas"]["RetailCoverRow"][];
             /**
@@ -9275,12 +9719,21 @@ export interface components {
             /** @description Stock divided by the daily average, one place; 0.0 when none is left */
             days_of_cover?: string;
             description?: string;
+            /**
+             * @description Reorder rows only: which rule says it is low, minimum (below the level set) or pace (fewer than lead_days of cover)
+             * @enum {string}
+             */
+            low_by?: "minimum" | "pace";
+            /** @description Reorder rows only: the rule in words, for example below your minimum of 10 */
+            low_words?: string;
+            /** @description Reorder rows only: the low-stock minimum that applies at this branch, when one is set (issue #412) */
+            min_qty?: string;
             /** Format: uuid */
             product_id?: string;
             qty_on_hand?: string;
             /** @description Units sold in the last 30 days in this branch */
             sold_last30?: string;
-            /** @description Reorder rows only: units to buy to reach cover_days of cover at this pace */
+            /** @description Reorder rows only: units to buy to reach cover_days of cover at this pace, and at least the minimum */
             suggested_qty?: string;
             unit?: string;
         };
@@ -9773,7 +10226,7 @@ export interface components {
             stock_at_cost_minor?: number;
             /**
              * Format: int64
-             * @description Present only with retail.stock.read
+             * @description Present only with retail.profit.read in this branch (ADR-055)
              */
             stock_at_price_minor?: number;
             /**
@@ -9810,7 +10263,10 @@ export interface components {
              * @description Present only with retail.profit.read in every branch the report covers; stock above zero at the current cost
              */
             value_at_cost_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in every branch the report covers (ADR-055); stock above zero at the current sell price
+             */
             value_at_price_minor?: number;
         };
         RetailDashboardToday: {
@@ -9863,7 +10319,10 @@ export interface components {
              * @description All reported branches; Present only with retail.profit.read in this branch in every branch reported
              */
             value_at_cost_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description All reported branches; Present only with retail.profit.read in this branch in every branch reported (ADR-055)
+             */
             value_at_price_minor?: number;
         };
         RetailDeadStockBranch: {
@@ -9876,7 +10335,10 @@ export interface components {
              * @description Present only with retail.profit.read in this branch; quantity times the current cost
              */
             value_at_cost_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch (ADR-055); quantity times the current sell price
+             */
             value_at_price_minor?: number;
         };
         /** @description The largest by value at price */
@@ -9894,7 +10356,10 @@ export interface components {
              * @description Present only with retail.profit.read in this branch
              */
             value_at_cost_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch (ADR-055); quantity times the current sell price
+             */
             value_at_price_minor?: number;
         };
         /** @description A delivery fee left on the buyer's account, paid on its order */
@@ -10653,7 +11118,10 @@ export interface components {
             negative?: boolean;
             /** Format: uuid */
             product_id?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /** @description The sum of the balances of each role present in the report */
             subtotals?: components["schemas"]["RetailRoleQuantity"][];
@@ -11145,7 +11613,10 @@ export interface components {
             amount_minor?: number;
             /** Format: date-time */
             created_at?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Who took it: shown to the owner (retail.profit.read at the branch) and to the person (ADR-055)
+             */
             created_by?: string;
             currency?: string;
             /** Format: uuid */
@@ -11467,7 +11938,10 @@ export interface components {
             qty?: string;
             /** @description Issue #385: of the branch balance, what open customer orders keep aside (so not free to sell); sent only with branch_id, and only when something is kept */
             reserved_qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             /**
              * Format: int32
@@ -12702,6 +13176,15 @@ export interface components {
             /** Format: int64 */
             total_sold_minor?: number;
         };
+        /** @description Another branch in the caller's scope where the same item sells faster, and what to move there */
+        RetailSellsBetterAt: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description Units sold there in the last 90 days, or since the item first came there */
+            sold_last90?: string;
+            /** @description Whole units to move: what that branch sells in cover_days, less its stock, at most what this branch holds above slow_months of its own sales */
+            suggested_qty?: string;
+        };
         RetailShrinkageBranch: {
             /** Format: uuid */
             branch_id?: string;
@@ -12764,6 +13247,66 @@ export interface components {
         RetailSimilarProducts: {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
+        };
+        /** @description An item that sold in the branch in the last 90 days, but slowly */
+        RetailSlowMover: {
+            better_at?: components["schemas"]["RetailSellsBetterAt"];
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when the months are above 120 and months_of_stock shows 120.0 */
+            capped?: boolean;
+            code?: string;
+            /**
+             * Format: int32
+             * @description The days the pace is taken over: 90, or fewer for an item that came to this branch (its first stock movement or sale there) less than 90 days ago, today included
+             */
+            days_counted?: number;
+            description?: string;
+            /**
+             * Format: date
+             * @description The last day the item sold in this branch
+             */
+            last_sold_on?: string;
+            /** @description Months of stock: the stock over the monthly pace of days_counted (30 days a month), one place */
+            months_of_stock?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            /** @description Units sold in this branch in the last 90 days, or in days_counted for a newer item */
+            sold_last90?: string;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; the money tied up: quantity times the current cost
+             */
+            value_at_cost_minor?: number;
+        };
+        /** @description Items that sell, but slowly: more than slow_months of stock at the pace of the last 90 days, or fewer than min_sold units sold in 90 days. Never dead stock (no sale in 90 days) */
+        RetailSlowMovers: {
+            /** Format: int32 */
+            days?: number;
+            /** @description The longest to sell first */
+            items?: components["schemas"]["RetailSlowMover"][];
+            /**
+             * Format: int32
+             * @description The business's setting slow_mover_min_sold; 0 means the rule is off
+             */
+            min_sold?: number;
+            /**
+             * Format: int32
+             * @description The business's setting slow_mover_months
+             */
+            slow_months?: number;
+            /**
+             * Format: int32
+             * @description Rows before the row limit
+             */
+            total?: number;
+            /**
+             * Format: int64
+             * @description Money tied up in all slow stock reported, at cost; present only for a caller with retail.profit.read in every branch of the business (an administrator)
+             */
+            value_at_cost_minor?: number;
         };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
@@ -12870,12 +13413,41 @@ export interface components {
             profit_visible?: boolean;
             reorder?: components["schemas"]["RetailCoverList"];
             shrinkage?: components["schemas"]["RetailShrinkageBranch"][];
+            slow_movers?: components["schemas"]["RetailSlowMovers"];
             /** Format: date */
             to?: string;
             /** Format: int32 */
             top?: number;
             /** Format: int32 */
             velocity_days?: number;
+        };
+        /** @description Warn me when stock is below (issue #412) */
+        RetailStockMinimum: {
+            branches?: components["schemas"]["RetailStockMinimumBranch"][];
+            /** @description True when the caller may set the level for every branch (retail.catalogue.manage) */
+            can_set_every_branch?: boolean;
+            /**
+             * Format: int32
+             * @description With no level, or as well as it, an item is low when it runs out within this many days at the pace of the last 30 days
+             */
+            lead_days?: number;
+            /** @description The level for every shop and store, in the item's unit; absent when none is set */
+            min_qty?: string;
+            /** Format: uuid */
+            product_id?: string;
+        };
+        RetailStockMinimumBranch: {
+            /** @description The level that applies here: the branch's own, else the one for every branch; absent when none */
+            applies_qty?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            branch_name?: string;
+            /** @description True when the caller may set this branch's own level */
+            can_set?: boolean;
+            /** @description This branch's own level, absent when it follows the level for every branch */
+            min_qty?: string;
+            /** @description True for a store (keeps goods, does not sell) */
+            store?: boolean;
         };
         RetailStockMovement: {
             /** Format: date-time */
@@ -12940,7 +13512,10 @@ export interface components {
             qty?: string;
             /** @description Issue #385: of qty, what open customer orders keep aside (not free to sell); absent when nothing is kept */
             reserved_qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             unit?: string;
         };
@@ -12983,7 +13558,7 @@ export interface components {
             negative_count?: number;
             /**
              * Format: int64
-             * @description What the stock holds at the selling price
+             * @description Present only with retail.profit.read in every branch the figures cover (ADR-055): what the stock holds at the selling price
              */
             value_minor?: number;
         };
@@ -12996,7 +13571,7 @@ export interface components {
             qty_on_hand?: string;
             /**
              * Format: int64
-             * @description Quantity on hand times the current sell price
+             * @description Present only with retail.profit.read in every branch the report covers (ADR-055): quantity on hand times the current sell price
              */
             stock_at_price_minor?: number;
             unit?: string;
@@ -13849,7 +14424,10 @@ export interface components {
              * @description Present only with retail.profit.read; expected sales less value at cost
              */
             expected_profit_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)
+             */
             expected_sales_minor?: number;
             rows?: components["schemas"]["RetailValuationRow"][];
             /**
@@ -13871,7 +14449,10 @@ export interface components {
              * @description Present only with retail.profit.read; expected sales less value at cost
              */
             expected_profit_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)
+             */
             expected_sales_minor?: number;
             /**
              * Format: int64
@@ -13904,7 +14485,10 @@ export interface components {
              * @description Present only with retail.profit.read
              */
             expected_profit_minor?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Expected sales, the stock at the current sell price; present only with retail.profit.read in every branch it covers (ADR-055)
+             */
             expected_sales_minor?: number;
             /**
              * Format: int64
@@ -13939,14 +14523,17 @@ export interface components {
             expected_profit_minor?: number;
             /**
              * Format: int64
-             * @description qty times the current sell price; absent when amount_out_of_range
+             * @description qty times the current sell price; present only with retail.profit.read in this branch (ADR-055); absent when amount_out_of_range
              */
             expected_sales_minor?: number;
             negative?: boolean;
             /** Format: uuid */
             product_id?: string;
             qty?: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             */
             sell_minor?: number;
             unit?: string;
             /**
@@ -14089,6 +14676,25 @@ export interface components {
             consumer_secret?: string;
             /** @description A current code of the signed-in administrator's own authenticator (step-up), used once */
             totp_code?: string;
+        };
+        /** @description Creates the plan with this code, or changes it */
+        SavePlanRequest: {
+            active: boolean;
+            allowed_modules: string[];
+            /** @description True when the operator was warned that businesses on the plan already use more than a lowered limit, and keeps it (422 plan_limit_below_use otherwise) */
+            confirm_below_use?: boolean;
+            description?: string;
+            /** Format: int32 */
+            max_active_members?: number;
+            /** Format: int32 */
+            max_branches?: number;
+            /** Format: int32 */
+            max_staff_users?: number;
+            name: string;
+            /** @description Why, kept in the platform audit log */
+            reason: string;
+            /** Format: int32 */
+            sort_order?: number;
         };
         SaveSmsTemplateRequest: {
             /** @description The wording with {placeholders} from the event's list; 422 with the code of the first problem */
@@ -14507,6 +15113,13 @@ export interface components {
             /** @enum {string} */
             role: "store" | "shop" | "both";
         };
+        SetRetailStockMinimumRequest: {
+            /**
+             * @description Warn when stock is below this; null removes the level
+             * @example 10
+             */
+            min_qty?: string;
+        };
         SignInRequest: {
             /** @description Email, or phone for staff */
             login: string;
@@ -14741,13 +15354,131 @@ export interface components {
             subject_id?: string;
             subject_type?: string;
         };
+        /** @description Send one or both dates */
+        SubscriptionDatesRequest: {
+            /** @description True clears what is paid (the last day paid for and the start of the paid period) */
+            clear_paid_until?: boolean;
+            /** @description True clears the last day of the free month (the clock starts again at the next sign-in) */
+            clear_trial_ends_on?: boolean;
+            /**
+             * Format: date
+             * @description The new last day paid for
+             */
+            paid_until?: string;
+            reason: string;
+            /**
+             * Format: date
+             * @description The new last day of the free month
+             */
+            trial_ends_on?: string;
+        };
+        SubscriptionPayment: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            method?: string;
+            /** Format: int32 */
+            months?: number;
+            note?: string;
+            /** Format: date */
+            paid_on?: string;
+            /**
+             * Format: date
+             * @description The last day the payment covers
+             */
+            period_end?: string;
+            /**
+             * Format: date
+             * @description The first day the payment covers
+             */
+            period_start?: string;
+            recorded_by_name?: string;
+            reference?: string;
+            /** @description confirmed (entered by the operator); claimed and rejected arrive with the tenant's billing */
+            status?: string;
+        };
+        /** @description A payment received by mobile money or bank transfer */
+        SubscriptionPaymentRequest: {
+            /**
+             * Format: int64
+             * @description Minor units; whole shillings for UGX; at most 50,000,000
+             */
+            amount_minor: number;
+            /** @description True when the operator checked an amount more than 25% away from the plan's price for these months, or a plan with no price (422 payment_amount_unusual otherwise) */
+            confirm_unusual_amount?: boolean;
+            method: string;
+            /**
+             * Format: int32
+             * @description Months the payment covers: 1 for a month, 12 for a year
+             */
+            months: number;
+            note?: string;
+            /** Format: date */
+            paid_on: string;
+            /** @description Why it is recorded (who confirmed it, how it was checked); kept in the platform audit log */
+            reason: string;
+            /** @description The sender's transaction reference */
+            reference?: string;
+        };
         SubscriptionStatusRequest: {
             /** Format: date */
             next_status_change_on?: string;
+            /** @description Why; kept in the platform audit log */
+            reason: string;
             status: string;
+        };
+        TenantAdmin: {
+            /** Format: date-time */
+            created_at?: string;
+            email?: string;
+            full_name?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: date-time */
+            last_login_at?: string;
+            mfa_enabled?: boolean;
+            phone?: string;
+            /** @description invited, active or deactivated */
+            status?: string;
+        };
+        /** @description An operator action on the business, from the platform audit log */
+        TenantHistoryEntry: {
+            action?: string;
+            after?: string;
+            before?: string;
+            /** Format: date-time */
+            occurred_at?: string;
+            operator_name?: string;
+            reason?: string;
+        };
+        /** @description A message the outbox holds for the business; never its text or link */
+        TenantMessage: {
+            /** Format: int32 */
+            attempts?: number;
+            channel?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            failed_at?: string;
+            /** Format: uuid */
+            id?: string;
+            last_error?: string;
+            /** @description Masked to its last 4 characters */
+            recipient?: string;
+            /** Format: date-time */
+            sent_at?: string;
+            /** @description pending, sent or failed */
+            status?: string;
+            template_key?: string;
         };
         TenantModulesRequest: {
             modules: string[];
+            /** @description Why; kept in the platform audit log (issue #407) */
+            reason: string;
         };
         TenantPaymentAccountStatus: {
             /** @description A closed word: invalid_credentials or registration_refused */
@@ -14756,6 +15487,15 @@ export interface components {
             last_checked_at?: string;
             /** @description not_connected, verified or failed */
             status?: string;
+        };
+        TenantPilotRequest: {
+            /** @description True: a pilot or complimentary business, free with no end (ADR-024 decision 6) */
+            pilot: boolean;
+            reason: string;
+        };
+        TenantPlanRequest: {
+            plan_code: string;
+            reason: string;
         };
         TenantSettings: {
             allow_loans_before_kyc_verified?: boolean;
@@ -14943,6 +15683,18 @@ export interface components {
             relationship?: string;
             relationship_text?: string;
         };
+        UpdateNotificationSettingsRequest: {
+            credit_due?: boolean;
+            daily_summary?: boolean;
+            /**
+             * @description HH:mm on the business's clock, a quarter hour up to 23:30
+             * @example 20:00
+             */
+            daily_summary_time?: string;
+            low_stock?: boolean;
+            new_orders?: boolean;
+            order_updates?: boolean;
+        };
         UpdatePaymentsSettingsRequest: {
             /** @description Remove the daily ceiling */
             clear_daily_ceiling?: boolean;
@@ -14965,6 +15717,16 @@ export interface components {
             profile?: "shop" | "trade";
             purchasing?: boolean;
             returns?: boolean;
+            /**
+             * Format: int32
+             * @description 0 to 1,000,000; 0 is off
+             */
+            slow_mover_min_sold?: number;
+            /**
+             * Format: int32
+             * @description 1 to 24
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
@@ -19481,7 +20243,9 @@ export interface operations {
     };
     platformListPlans: {
         parameters: {
-            query?: never;
+            query?: {
+                include_inactive?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19495,6 +20259,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanList"];
+                };
+            };
+        };
+    };
+    platformGetPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanDetail"];
+                };
+            };
+        };
+    };
+    platformSavePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanDetail"];
+                };
+            };
+        };
+    };
+    platformAddPlanPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPlanPriceRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanDetail"];
                 };
             };
         };
@@ -19597,7 +20435,11 @@ export interface operations {
     };
     platformListTenants: {
         parameters: {
-            query?: never;
+            query?: {
+                q?: string;
+                status?: string[];
+                module?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19687,6 +20529,28 @@ export interface operations {
             };
         };
     };
+    platformTenantOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessDetail"];
+                };
+            };
+        };
+    };
     platformGetTenantPaymentAccount: {
         parameters: {
             query?: never;
@@ -19735,6 +20599,86 @@ export interface operations {
             };
         };
     };
+    platformRecordPayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionPaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionPayment"];
+                };
+            };
+        };
+    };
+    platformSetTenantPilot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPilotRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
+    platformSetTenantPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
     platformResumeTenant: {
         parameters: {
             query?: never;
@@ -19744,7 +20688,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformReasonRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -19899,6 +20847,32 @@ export interface operations {
             };
         };
     };
+    platformSetSubscriptionDates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionDatesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
     platformSuspendTenant: {
         parameters: {
             query?: never;
@@ -19908,7 +20882,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformReasonRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -22653,6 +23631,81 @@ export interface operations {
             };
         };
     };
+    getRetailStockMinimum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockMinimum"];
+                };
+            };
+        };
+    };
+    setRetailStockMinimum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRetailStockMinimumRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockMinimum"];
+                };
+            };
+        };
+    };
+    setRetailBranchStockMinimum: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRetailStockMinimumRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailStockMinimum"];
+                };
+            };
+        };
+    };
     listRetailProductUnits: {
         parameters: {
             query?: never;
@@ -25346,6 +26399,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantSettings"];
+                };
+            };
+        };
+    };
+    getNotificationSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    updateNotificationSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNotificationSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettings"];
                 };
             };
         };
