@@ -8884,6 +8884,16 @@ export interface components {
              * @description Read only: the tenant's approval threshold for customer returns (action retail_sale_return), present only when one is set; while it is absent a return needs no second administrator
              */
             returns_approval_threshold_minor?: number;
+            /**
+             * Format: int32
+             * @description Stock health (issue #414): an item is also a slow mover when fewer than this many units sold in the branch in the last 90 days; 0 (the default) switches this rule off
+             */
+            slow_mover_min_sold?: number;
+            /**
+             * Format: int32
+             * @description Stock health (issue #414): an item that sold in the last 90 days is a slow mover when its stock lasts more than this many months at that pace; 1 to 24, default 4
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
@@ -12702,6 +12712,15 @@ export interface components {
             /** Format: int64 */
             total_sold_minor?: number;
         };
+        /** @description Another branch in the caller's scope where the same item sells faster, and what to move there */
+        RetailSellsBetterAt: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description Units sold there in the last 90 days */
+            sold_last90?: string;
+            /** @description Whole units to move: what that branch sells in cover_days, less its stock, at most what this branch holds above slow_months of its own sales */
+            suggested_qty?: string;
+        };
         RetailShrinkageBranch: {
             /** Format: uuid */
             branch_id?: string;
@@ -12764,6 +12783,61 @@ export interface components {
         RetailSimilarProducts: {
             exact?: components["schemas"]["RetailSimilarProduct"][];
             similar?: components["schemas"]["RetailSimilarProduct"][];
+        };
+        /** @description An item that sold in the branch in the last 90 days, but slowly */
+        RetailSlowMover: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description True when the months are above 120 and months_to_sell shows 120.0 */
+            capped?: boolean;
+            code?: string;
+            description?: string;
+            /**
+             * Format: date
+             * @description The last day the item sold in this branch
+             */
+            last_sold_on?: string;
+            /** @description Stock over the monthly pace of the last 90 days (30 days a month), one place */
+            months_to_sell?: string;
+            /** Format: uuid */
+            product_id?: string;
+            qty_on_hand?: string;
+            sells_better_at?: components["schemas"]["RetailSellsBetterAt"];
+            /** @description Units sold in the last 90 days in this branch */
+            sold_last90?: string;
+            unit?: string;
+            /**
+             * Format: int64
+             * @description Present only with retail.profit.read in this branch; the money tied up: quantity times the current cost
+             */
+            value_at_cost_minor?: number;
+        };
+        /** @description Items that sell, but slowly: more than slow_months of stock at the pace of the last 90 days, or fewer than min_sold units sold in 90 days. Never dead stock (no sale in 90 days) */
+        RetailSlowMovers: {
+            /** Format: int32 */
+            days?: number;
+            /** @description The longest to sell first */
+            items?: components["schemas"]["RetailSlowMover"][];
+            /**
+             * Format: int32
+             * @description The business's setting slow_mover_min_sold; 0 means the rule is off
+             */
+            min_sold?: number;
+            /**
+             * Format: int32
+             * @description The business's setting slow_mover_months
+             */
+            slow_months?: number;
+            /**
+             * Format: int32
+             * @description Rows before the row limit
+             */
+            total?: number;
+            /**
+             * Format: int64
+             * @description Money tied up in all slow stock reported, at cost; present only for a caller with retail.profit.read in every branch of the business (an administrator)
+             */
+            value_at_cost_minor?: number;
         };
         /** @description Imported credit sales. They were never posted to the ledger (issue #96), so the statement lists them apart and the ledger-supported closing balance leaves them out */
         RetailStatementBeforeSystemStart: {
@@ -12870,6 +12944,7 @@ export interface components {
             profit_visible?: boolean;
             reorder?: components["schemas"]["RetailCoverList"];
             shrinkage?: components["schemas"]["RetailShrinkageBranch"][];
+            slow_movers?: components["schemas"]["RetailSlowMovers"];
             /** Format: date */
             to?: string;
             /** Format: int32 */
@@ -14965,6 +15040,16 @@ export interface components {
             profile?: "shop" | "trade";
             purchasing?: boolean;
             returns?: boolean;
+            /**
+             * Format: int32
+             * @description 0 to 1,000,000; 0 is off
+             */
+            slow_mover_min_sold?: number;
+            /**
+             * Format: int32
+             * @description 1 to 24
+             */
+            slow_mover_months?: number;
             transfer_receipt?: boolean;
             units?: boolean;
         };
