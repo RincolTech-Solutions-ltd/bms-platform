@@ -682,6 +682,34 @@ class DocumentsService {
         return documents.renderPdf("customer_statement", model);
     }
 
+    // JUSTIFICATION-A3: one new read route's service method; it reuses saleSnapshot, the invoice model and template.
+    /**
+     * The receipt of a sale as a PDF, for the seller to share from their own phone (issue #439, ADR-061): the invoice
+     * layout titled RECEIPT under the sale's own number, rendered now from the sale and never stored, numbered in no
+     * series and written to no table, so it needs neither the documents capability nor {@code retail.document.issue}.
+     * It is stricter than reading the sale: a seller who sees only their own figures gets their own sales' receipts and
+     * not the receipt of another seller's credit sale they may take a payment on (404, as a sale outside the scope).
+     */
+    @SuppressWarnings("unchecked")
+    byte[] receiptPdf(UUID saleId) {
+        Map<String, Object> model = reading.execute(status -> {
+            Principal principal = CurrentPrincipal.require();
+            Sale sale = sales.get(saleId);
+            if (!principal.may(SalesSummaryService.ALL_SELLERS, sale.branchId())
+                    && !java.util.Objects.equals(principal.userId(), sale.createdBy())) {
+                throw ApiException.notFound();
+            }
+            if (!sale.status().equals("completed")) {
+                throw ApiException.rule("sale_voided", "A cancelled sale has no receipt to share.");
+            }
+            DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
+            Map<String, Object> m = models.model(snapshot);
+            ((Map<String, Object>) m.get("doc")).put("title", "RECEIPT");
+            return m;
+        });
+        return documents.renderPdf("invoice", model);
+    }
+
     LocalDate today() {
         return clock.today(tenant.profile().timezone());
     }

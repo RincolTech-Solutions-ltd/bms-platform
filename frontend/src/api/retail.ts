@@ -459,6 +459,8 @@ export interface RetailApi {
   reverseAccountPayment(id: string, paymentId: string, reason: string, idempotencyKey: string): Promise<AccountPayment>;
   /** The customer statement as a PDF (documents and customer_accounts), as at today and never stored. */
   customerStatementPdf(id: string, q: { from?: string; to?: string }): Promise<Blob>;
+  /** The receipt of a sale as a PDF to share from the seller's phone (retail.sale.read; own sales only without retail.sale.all_sellers), never stored (issue #439). */
+  saleReceiptPdf(saleId: string): Promise<Blob>;
   /** Optional documents (the documents capability, issue #197); 404 capability_not_enabled while it is off. */
   listSaleDocuments(saleId: string): Promise<RetailDocument[]>;
   /** The invoice or delivery note of a sale, issued once; takes the Idempotency-Key of its button. */
@@ -996,6 +998,11 @@ const realRetail: RetailApi = {
       params: { path: { customer_id: id }, query: { from: from || undefined, to: to || undefined } },
       parseAs: 'blob',
     });
+    return unwrap(result as { data?: Blob; error?: unknown; response: Response });
+  },
+
+  async saleReceiptPdf(saleId) {
+    const result = await api.GET('/api/v1/retail/sales/{sale_id}/receipt/pdf', { params: { path: { sale_id: saleId } }, parseAs: 'blob' });
     return unwrap(result as { data?: Blob; error?: unknown; response: Response });
   },
 

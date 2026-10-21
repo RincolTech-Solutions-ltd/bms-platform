@@ -27,6 +27,7 @@ export type DocumentsMock = Pick<
   RetailApi,
   | 'listSaleDocuments' | 'issueSaleDocument' | 'issueTransferDocument' | 'listDocuments' | 'renderDocument' | 'documentUrl' | 'documentSeries'
   | 'setDocumentPrefix' | 'renderCreditNote' | 'listQuotations' | 'getQuotation' | 'createQuotation' | 'cancelQuotation' | 'convertQuotation' | 'customerStatementPdf'
+  | 'saleReceiptPdf'
 >;
 
 const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
@@ -239,5 +240,14 @@ export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
     renderCreditNote: (returnId) => gate(() => ({ return_id: returnId, credit_note_no: 'CN-MOCK', status: 'issued', pdf_document_id: env.nextId('f'), created: true })),
 
     customerStatementPdf: () => gate(() => new Blob(['%PDF-1.4 mock statement'], { type: 'application/pdf' })),
+
+    // The receipt to share (issue #439): not gated by the documents capability, never stored.
+    saleReceiptPdf: (saleId) =>
+      env.run(() => {
+        const sale = env.sales().find((x) => x.id === saleId);
+        if (!sale) return env.refuse(404, 'not_found', 'Not found.');
+        if (sale.status !== 'completed') return env.refuse(422, 'sale_voided', 'A cancelled sale has no receipt to share.');
+        return new Blob([`%PDF-1.4 mock receipt ${sale.sale_no ?? ''}`], { type: 'application/pdf' });
+      }),
   };
 }

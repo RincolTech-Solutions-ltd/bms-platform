@@ -5213,6 +5213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/sales/{sale_id}/receipt/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The receipt of a sale as a PDF to share from the seller's phone, rendered now and never stored; a seller who sees only their own figures gets their own sales only (issue #439) */
+        get: operations["renderRetailSaleReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/sales/{sale_id}/returns": {
         parameters: {
             query?: never;
@@ -25189,6 +25206,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailPaymentResult"];
+                };
+            };
+        };
+    };
+    renderRetailSaleReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description No such sale in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description The sale was voided */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Too many documents are being produced; see Retry-After */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };

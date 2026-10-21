@@ -38,7 +38,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code /api/v1/retail} document routes (documents capability; ADR-033, issue #197; chapter 7 section 7.11.20). Every
- * route answers 404 {@code capability_not_enabled} while the capability is off. A document is downloaded through
+ * route answers 404 {@code capability_not_enabled} while the capability is off, except the receipt of a sale (issue
+ * #439, ADR-061), which is never stored and is a seller's to share. A document is downloaded through
  * {@code POST /api/v1/documents/{id}/download-url} with the {@code pdf_document_id} these routes return (FR-DOC-03).
  */
 @RestController
@@ -187,6 +188,49 @@ class DocumentsController {
                         HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment()
                                 .filename("statement.pdf")
+                                .build()
+                                .toString())
+                .body(pdf);
+    }
+
+    // JUSTIFICATION-A3: one new read route; the same PDF response shape as the statement route above.
+    @GetMapping(
+            path = "/sales/{sale_id}/receipt/pdf",
+            produces = {MediaType.APPLICATION_PDF_VALUE, MediaType.APPLICATION_JSON_VALUE})
+    @RequiresPermission("retail.sale.read")
+    @Operation(
+            summary = "The receipt of a sale as a PDF to share from the seller's phone, rendered now and never stored;"
+                    + " a seller who sees only their own figures gets their own sales only (issue #439)",
+            operationId = "renderRetailSaleReceipt")
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                description = "The PDF",
+                content =
+                        @Content(mediaType = "application/pdf", schema = @Schema(type = "string", format = "binary"))),
+        @ApiResponse(
+                responseCode = "404",
+                description = "No such sale in the caller's scope",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
+        @ApiResponse(
+                responseCode = "422",
+                description = "The sale was voided",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object"))),
+        @ApiResponse(
+                responseCode = "503",
+                description = "Too many documents are being produced; see Retry-After",
+                content = @Content(mediaType = "application/json", schema = @Schema(type = "object")))
+    })
+    ResponseEntity<byte[]> receiptPdf(@PathVariable("sale_id") UUID saleId) {
+        byte[] pdf = service.receiptPdf(saleId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment()
+                                .filename("receipt.pdf")
                                 .build()
                                 .toString())
                 .body(pdf);

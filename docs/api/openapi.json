@@ -34889,6 +34889,65 @@
         "tags" : [ "retail-sales" ]
       }
     },
+    "/api/v1/retail/sales/{sale_id}/receipt/pdf" : {
+      "get" : {
+        "operationId" : "renderRetailSaleReceipt",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sale_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/pdf" : {
+                "schema" : {
+                  "format" : "binary",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "The PDF"
+          },
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "No such sale in the caller's scope"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "The sale was voided"
+          },
+          "503" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Too many documents are being produced; see Retry-After"
+          }
+        },
+        "summary" : "The receipt of a sale as a PDF to share from the seller's phone, rendered now and never stored; a seller who sees only their own figures gets their own sales only (issue #439)",
+        "tags" : [ "retail-documents" ]
+      }
+    },
     "/api/v1/retail/sales/{sale_id}/returns" : {
       "get" : {
         "operationId" : "listRetailSaleReturns",
