@@ -393,13 +393,13 @@ Notes:
   stock at the selling price (`expected_sales_minor` of the valuation, `value_minor` of the stock summary, the dead stock
   `value_at_price_minor` of stock health), which is the owner's figure. The owner decided on 21 October 2026 that a storekeeper sees no
   selling prices: `sell_minor` is in an item, stock, stock by location or valuation response only for a caller holding
-  `retail.sale.create`, `retail.price.edit` or `retail.profit.read` (`RetailCatalogue.maySeePrices`, prices are tenant wide),
+  `retail.sale.create`, `retail.price.edit`, `retail.sale.all_sellers` (the supervisor) or `retail.profit.read` (`RetailCatalogue.maySeePrices`, prices are tenant wide),
   and `GET /retail/products/{id}/price-history` is 403 otherwise. It reads names, codes, quantities and the stock movements of its
   branches with their quantities (a sale movement says how many left the shelf, not for how much).
   Purchasing (`retail_purchasing`) holds `retail.stock.read` and `retail.purchase.create` and is given on top of another
   role to the people the owner chooses (by default only the tenant admin holds `retail.purchase.create`). At its branches it
   records restocks, and with the `purchasing` capability purchase orders and goods received; it reads the restocks, orders and
-  receipts it recorded itself with their buying prices and totals (without `retail.profit.read`, `GET /retail/purchases`,
+  receipts it recorded itself with their buying prices and totals (without `retail.profit.read`, `GET /retail/purchases`, `/purchases/summary`,
   `/purchase-orders`, `/goods-receipts` and each record answer only the caller's own, the owner's decision of 21 October 2026); a restock paid in cash or by bank posts that money out of the branch's cash or
   bank account, as any restock does; and a restock's buying price becomes the item's cost for the whole business (the
   latest purchase sets the cost, ADR-020 decision 5). A new selling price on a restock or a goods receipt applies in every

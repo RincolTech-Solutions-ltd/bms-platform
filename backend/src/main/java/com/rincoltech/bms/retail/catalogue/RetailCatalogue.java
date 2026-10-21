@@ -26,15 +26,18 @@ public interface RetailCatalogue {
 
     /** What every selling price in a response says when it is left out (ADR-055). */
     String PRICE_ONLY =
-            "Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)";
+            "Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)";
 
     /**
      * ADR-055 (the owner's decision of 21 October 2026): selling prices are shown to whoever sells, sets prices or reads cost.
-     * A storekeeper, who holds none of those, sees no price in any response. Prices are tenant-wide, so any branch counts.
+     * A storekeeper, who holds none of those, sees no price in any response. A supervisor (who may see every seller's sales,
+     * {@code retail.sale.all_sellers}) oversees selling, so sees prices too, never cost. Prices are tenant-wide, so a
+     * permission held at any branch counts.
      */
     static boolean maySeePrices(Principal principal) {
         return principal.hasPermission("retail.sale.create")
                 || principal.hasPermission("retail.price.edit")
+                || principal.hasPermission("retail.sale.all_sellers")
                 || principal.hasPermission("retail.profit.read");
     }
 

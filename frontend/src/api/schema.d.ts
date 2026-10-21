@@ -8624,7 +8624,7 @@ export interface components {
             product_id?: string;
             /**
              * Format: int64
-             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
             /** @description The sum over the branches of the page */
@@ -10670,7 +10670,7 @@ export interface components {
             product_id?: string;
             /**
              * Format: int64
-             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
             /** @description The sum of the balances of each role present in the report */
@@ -11487,7 +11487,7 @@ export interface components {
             reserved_qty?: string;
             /**
              * Format: int64
-             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
             /**
@@ -12963,7 +12963,7 @@ export interface components {
             reserved_qty?: string;
             /**
              * Format: int64
-             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
             unit?: string;
@@ -13981,7 +13981,7 @@ export interface components {
             qty?: string;
             /**
              * Format: int64
-             * @description Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
+             * @description Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)
              */
             sell_minor?: number;
             unit?: string;

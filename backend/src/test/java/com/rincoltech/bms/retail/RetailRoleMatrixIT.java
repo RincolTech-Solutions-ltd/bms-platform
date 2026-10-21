@@ -291,6 +291,34 @@ class RetailRoleMatrixIT extends IntegrationTest {
                         get("/reports/profit/daily", Expect.FORBIDDEN)));
     }
 
+    /**
+     * The restocks summary adds up only what a buyer recorded: the owner's restock at the same branch is not counted.
+     * JUSTIFICATION-A3: a new test case for the summary's own-records rule; the anchor is only the insertion point.
+     */
+    @Test
+    void purchasingAddsUpOnlyTheRestocksItRecorded() {
+        String buyer = signIn(
+                "buyer3", new Role("retail_sales", t.headOffice()), new Role("retail_purchasing", t.headOffice()));
+        ownerPost("/purchases", restock(t.headOffice()));
+        ResponseEntity<JsonNode> mine = api.call(
+                HttpMethod.POST,
+                R + "/purchases",
+                restock(t.headOffice()),
+                buyer,
+                Map.of("Idempotency-Key", UUID.randomUUID().toString()));
+        assertThat(mine.getStatusCode()).as("%s", mine.getBody()).isEqualTo(HttpStatus.CREATED);
+        JsonNode summary =
+                api.get(R + "/purchases/summary?group_by=branch", buyer).getBody();
+        long count = 0;
+        for (JsonNode g : summary.get("items")) {
+            count += g.get("purchases_count").asLong();
+        }
+        assertThat(count).as("only the buyer's own restock").isEqualTo(1);
+        JsonNode owners = retail.get("/purchases/summary?group_by=branch&branch_id=" + t.headOffice(), OWNER)
+                .getBody();
+        assertThat(owners.get("items").get(0).get("purchases_count").asLong()).isEqualTo(2);
+    }
+
     /** The selling price applies in every shop: a goods receipt sets a new one only with the price permission. */
     @Test
     void purchasingCannotSetANewSellingPriceThroughAGoodsReceipt() {

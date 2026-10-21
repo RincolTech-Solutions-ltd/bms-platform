@@ -120,6 +120,7 @@ class ReportsService {
                     // ADR-055: a storekeeper sees no selling price.
                     principal.hasPermission("retail.sale.create")
                                     || principal.hasPermission("retail.price.edit")
+                                    || principal.hasPermission("retail.sale.all_sellers")
                                     || principal.hasPermission(PROFIT_READ)
                             ? h.sellMinor()
                             : null,

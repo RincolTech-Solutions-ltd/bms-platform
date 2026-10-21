@@ -36,7 +36,7 @@ own figures.
    price, is absent for it as for a seller (the valuation, the stock summary and stock health give quantities only without
    `retail.profit.read`). **The owner decided on 21 October 2026 that a storekeeper sees no selling prices.** A selling price
    (`sell_minor`) is in a response only for a caller who sells, sets prices or reads cost (`retail.sale.create`,
-   `retail.price.edit` or `retail.profit.read`, `RetailCatalogue.maySeePrices`): the items and one item, the stock list of a branch
+   `retail.price.edit` or `retail.profit.read`, and the supervisor's `retail.sale.all_sellers`, since it oversees selling; `RetailCatalogue.maySeePrices`; prices are tenant wide, so these permissions count at any branch): the items and one item, the stock list of a branch
    and of every branch, stock by location, the valuation and every item picker; the price history is refused (403). The storekeeper
    reads names, codes, quantities and the stock movements of its branches with their quantities.
 3. **Purchasing is a role the owner gives (`retail_purchasing`, migration `V73`)**, holding `retail.stock.read` and

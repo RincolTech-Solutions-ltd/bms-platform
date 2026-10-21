@@ -37,7 +37,7 @@ final class ReportsApi {
             @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
                     description =
-                            "Present only to whoever sells, sets prices or reads cost (retail.sale.create, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)")
+                            "Present only to whoever sells, oversees selling, sets prices or reads cost (retail.sale.create, retail.sale.all_sellers, retail.price.edit or retail.profit.read): the storekeeper sees no prices (ADR-055)")
             Long sellMinor,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
