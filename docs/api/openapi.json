@@ -3682,59 +3682,6 @@
           }
         }
       },
-      "Item" : {
-        "properties" : {
-          "app_version" : {
-            "type" : "string"
-          },
-          "created_at" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "has_screenshot" : {
-            "type" : "boolean"
-          },
-          "id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "kind" : {
-            "type" : "string"
-          },
-          "message" : {
-            "type" : "string"
-          },
-          "page_path" : {
-            "type" : "string"
-          },
-          "reply_note" : {
-            "type" : "string"
-          },
-          "sender_name" : {
-            "type" : "string"
-          },
-          "status" : {
-            "type" : "string"
-          },
-          "status_changed_at" : {
-            "format" : "date-time",
-            "type" : "string"
-          },
-          "tenant_id" : {
-            "format" : "uuid",
-            "type" : "string"
-          },
-          "tenant_name" : {
-            "type" : "string"
-          },
-          "tenant_slug" : {
-            "type" : "string"
-          },
-          "user_agent" : {
-            "type" : "string"
-          }
-        }
-      },
       "KycDecisionRequest" : {
         "properties" : {
           "decision" : {
@@ -5957,11 +5904,64 @@
           }
         }
       },
+      "PlatformFeedbackItem" : {
+        "properties" : {
+          "app_version" : {
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "has_screenshot" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "page_path" : {
+            "type" : "string"
+          },
+          "reply_note" : {
+            "type" : "string"
+          },
+          "sender_name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "status_changed_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "tenant_name" : {
+            "type" : "string"
+          },
+          "tenant_slug" : {
+            "type" : "string"
+          },
+          "user_agent" : {
+            "type" : "string"
+          }
+        }
+      },
       "PlatformFeedbackList" : {
         "properties" : {
           "items" : {
             "items" : {
-              "$ref" : "#/components/schemas/Item"
+              "$ref" : "#/components/schemas/PlatformFeedbackItem"
             },
             "type" : "array"
           }
@@ -27294,7 +27294,7 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Item"
+                  "$ref" : "#/components/schemas/PlatformFeedbackItem"
                 }
               }
             },

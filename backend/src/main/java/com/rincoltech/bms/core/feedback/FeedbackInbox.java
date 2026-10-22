@@ -1,5 +1,6 @@
 package com.rincoltech.bms.core.feedback;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -27,6 +28,7 @@ public interface FeedbackInbox {
     /** The item's screenshot, read with its tenant bound; 404 when it has none. */
     Screenshot screenshot(UUID id);
 
+    @Schema(name = "PlatformFeedbackItem")
     record Item(
             UUID id,
             UUID tenantId,

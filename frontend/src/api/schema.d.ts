@@ -7902,27 +7902,6 @@ export interface components {
             invitation?: components["schemas"]["InvitationLink"];
             user?: components["schemas"]["User"];
         };
-        Item: {
-            app_version?: string;
-            /** Format: date-time */
-            created_at?: string;
-            has_screenshot?: boolean;
-            /** Format: uuid */
-            id?: string;
-            kind?: string;
-            message?: string;
-            page_path?: string;
-            reply_note?: string;
-            sender_name?: string;
-            status?: string;
-            /** Format: date-time */
-            status_changed_at?: string;
-            /** Format: uuid */
-            tenant_id?: string;
-            tenant_name?: string;
-            tenant_slug?: string;
-            user_agent?: string;
-        };
         KycDecisionRequest: {
             decision: string;
             /** @description Required when rejected */
@@ -8903,8 +8882,29 @@ export interface components {
             monthly_minor?: number;
             reason?: string;
         };
+        PlatformFeedbackItem: {
+            app_version?: string;
+            /** Format: date-time */
+            created_at?: string;
+            has_screenshot?: boolean;
+            /** Format: uuid */
+            id?: string;
+            kind?: string;
+            message?: string;
+            page_path?: string;
+            reply_note?: string;
+            sender_name?: string;
+            status?: string;
+            /** Format: date-time */
+            status_changed_at?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+            user_agent?: string;
+        };
         PlatformFeedbackList: {
-            items?: components["schemas"]["Item"][];
+            items?: components["schemas"]["PlatformFeedbackItem"][];
         };
         PlatformFeedbackStatusRequest: {
             /** @description A reply the sender sees; null keeps the one there, an empty string clears it */
@@ -20806,7 +20806,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Item"];
+                    "application/json": components["schemas"]["PlatformFeedbackItem"];
                 };
             };
         };
