@@ -7,10 +7,13 @@
     <meta name="theme-color" content="#0077b6" />
     <!-- The saved theme, set before the first paint so the page never flashes the wrong one (issue #429). -->
     <script src="/theme-init.js"></script>
-    <!-- iOS: the icon of the home screen shortcut, and opening it as an app rather than a Safari tab (ADR-050). -->
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- The installed app's manifest and icon are the business's own, from its logo and name (ADR-064); the API
+         answers with the BMS ones where there is no logo or no business. -->
+    <link rel="manifest" href="/api/v1/branding/app/manifest.webmanifest" />
+    <!-- iOS: the icon of the home screen shortcut, and opening it as an app rather than a Safari tab (ADR-050). The
+         home screen name comes from the manifest, so the page sets no iPhone title of its own. -->
+    <link rel="apple-touch-icon" href="/api/v1/branding/app/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="BMS" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>BMS Platform</title>
   </head>
