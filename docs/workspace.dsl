@@ -409,7 +409,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             cloud = deploymentNode "Cloud provider" "Hetzner Cloud or AWS, the owner's choice, in the location or region the data protection decision names (NFR-DP-07); one Terraform root per provider (ADR-063)" "Hetzner Cloud or AWS" {
                 firewall = infrastructureNode "Firewall" "Inbound 22 from the admin address list only, 80 and 443 TCP and 443 UDP from anywhere, nothing else; a Hetzner firewall or an AWS security group, created by Terraform" "Cloud firewall"
                 vm = deploymentNode "Production VM" "Single cloud VM, 2 vCPU, 4 GB, 40 GB, created by Terraform with delete protection; cloud-init makes the ops user (SSH keys, no passwords, no root), the bms service user, Docker and the systemd units" "Hetzner Cloud server or AWS EC2 instance (the owner's choice), Ubuntu 24.04 LTS" {
-                    puller = infrastructureNode "Puller" "bms-pull.timer with the production pointer and compose.yml; installed by cloud-init, enabled only once the production pointer exists (proposed, ADR-063)" "systemd timer, pull-staging.sh"
+                    puller = infrastructureNode "Puller" "bms-pull.timer with the production pointer and compose.yml; installed by cloud-init, off until pull-staging.sh handles production and the production pointer exists (proposed, ADR-063 decision 6)" "systemd timer, pull-staging.sh"
                     backupJob = infrastructureNode "Nightly backup" "backup.sh at 01:15 as bms: pg_dump, encrypted on the host, uploaded to the backup bucket; BACKUP_RETENTION_ON_HOST=false, so the host deletes nothing" "cron, rclone"
                     hostChecks = infrastructureNode "Host checks" "bms-monitor.timer every five minutes: site, jobs, disk, certificates, backups and the restore drill, posted to the Telegram operator chat, then a heartbeat to the uptime monitor; bms-restore-drill.timer weekly (ADR-058); installed by cloud-init" "systemd timers, monitor.sh, restore-drill.sh"
                     compose = deploymentNode "Docker Compose" "Migrations run as a one-shot container before the app containers switch; failed health check rolls back" "Docker" {
@@ -433,7 +433,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             production.cloud.vm.hostChecks -> production.alertsNode.alertsChat "Posts PROBLEM, STILL FAILING and RESOLVED alerts; the bot token goes on stdin, never the command line" "HTTPS"
             production.cloud.vm.hostChecks -> production.uptimeNode.heartbeat "Pings the heartbeat after every run that sent all its alerts" "HTTPS"
             production.cloud.vm.puller -> production.github.registry "Reads the production pointer and verifies the cosign signatures (proposed, ADR-063)" "HTTPS"
-            production.github.registry -> production.cloud.vm.compose.proxy "Images pulled by deploy.sh with a short-lived token" "HTTPS"
+            production.github.registry -> production.cloud.vm.compose.proxy "Images pulled by deploy.sh with the bms user's read:packages login, verified against the host's cosign.pub" "HTTPS"
         }
     }
 

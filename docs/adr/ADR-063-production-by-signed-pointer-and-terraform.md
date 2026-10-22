@@ -32,7 +32,7 @@ person to remember.
 ## Decision
 
 1. **Terraform in `infra/production/`, applied once on production day.** Two roots create the same host, and the owner applies
-   only the one chosen: `hetzner/` (a server with delete and rebuild protection and Hetzner backups, a Hetzner firewall) and
+   only the one chosen: `hetzner/` (a server with delete and rebuild protection, Hetzner backups only if the owner chooses them, a Hetzner firewall) and
    `aws/` (an EC2 instance with termination protection, IMDSv2 only, an encrypted disk and an Elastic IP, a security group).
    The firewall is the same on both: 22 from an admin address list only (the whole internet is refused by validation), 80 and
    443 TCP and 443 UDP from anywhere, nothing else in. The location or region, the server size and the R2 location have no
@@ -51,12 +51,17 @@ person to remember.
    read on the one zone for Caddy's DNS-01 challenge. The backup token cannot change the lock or lifecycle rules, and the lock
    refuses its deletes and overwrites under `daily/` and `monthly/`; with `BACKUP_RETENTION_ON_HOST=false` the host deletes
    nothing. R2 has no put-only permission, so "the host can write but not delete a backup" is this combination, proven on the
-   day with a throwaway object. Only the Terraform token, kept on the maintainer's Mac and never on the host, can change the rules.
+   day with a throwaway object. The host's token cannot change the rules; a Cloudflare account administrator can, and so can the
+   Terraform token (it may create tokens, so it is as strong as an administrator). Both stay few, on the maintainer's side and
+   behind two-step sign-in, never on the host.
 5. **State.** The token values are in Terraform state, so state never goes in git. Before the first apply it moves to a private
    R2 state bucket in the existing account with its own access key; the host receives its values once, through
    `terraform output -raw host_env`.
-6. **The host pulls; nothing pushes** (still to build). The production host runs the same puller as staging with
-   `BMS_POINTER_TAG=production` and `BMS_COMPOSE_SOURCE=compose.yml`, verifies the cosign signatures of the api, web and proxy
+6. **The host pulls; nothing pushes** (still to build). The production host runs the staging puller with
+   `BMS_POINTER_TAG=production` and `BMS_COMPOSE_SOURCE=compose.yml` once three changes to `pull-staging.sh` are made: the edge
+   services it recreates are not hard-wired to `cloudflared` (production has none), the pointer may name a `vX.Y.Z` release and
+   not only `sha-<7>`, and the image prune keeps `vX.Y.Z` tags. Until then cloud-init installs the units with the production
+   drop-in but leaves the timer off, and releases go out by hand with `deploy.sh` (runbook step 7). It verifies the cosign signatures of the api, web and proxy
    digests against its own `/opt/bms/cosign.pub`, runs migrations before the swap and keeps its automatic rollback. There is no
    deploy SSH key anywhere. The `promote` and `deploy-production` jobs and the version-tag trigger leave `deploy.yml`.
 7. **The owner moves the pointer** (still to build). Promotion is a command run on the maintainer's Mac,
@@ -78,7 +83,8 @@ so the state bucket's key is as sensitive as the tokens; a production release ne
 signer already has); first-day secrets (`.env`, `cosign.pub`, the registry login) are manual steps; a locked backup cannot be
 removed early even on purpose (ADR-058).
 
-To watch: whether Cloudflare applies the token address condition to R2's S3 requests (the runbook checks it; the lock holds
+To watch: the Hetzner backups switch, which has no default because those images hold the whole disk unencrypted outside the
+locked backups; whether Cloudflare applies the token address condition to R2's S3 requests (the runbook checks it; the lock holds
 either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
 puller's downgrade guard against a deliberate rollback; the cutover rehearsal (apply, deploy a release, back up, run the restore
 drill, test the lock) before any tenant's real data moves.

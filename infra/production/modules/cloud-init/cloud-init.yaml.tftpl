@@ -79,7 +79,8 @@ write_files:
     permissions: "0644"
     encoding: b64
     content: ${base64encode(drill_timer)}
-  # The same puller as staging, pointed at the production pointer and the VM's own compose file.
+  # The staging puller, pointed at the production pointer and the VM's own compose file. Not enabled: pull-staging.sh
+  # needs the three changes of ADR-063 decision 6 before it can deploy production.
   - path: /etc/systemd/system/bms-pull.service.d/10-production.conf
     permissions: "0644"
     content: |

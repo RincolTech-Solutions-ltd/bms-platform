@@ -58,7 +58,7 @@ network. There is no Redis (ADR-008).
 The VM and everything it needs outside itself are code in `infra/production/`, reviewed and not applied
 until production day (runbook `docs/runbooks/terraform-production.md`). Two roots create the same host on
 two providers, and the owner applies only the one chosen: `hetzner/` (a server with delete and rebuild
-protection, Hetzner backups, a Hetzner firewall) and `aws/` (EC2 with termination protection, IMDSv2 only,
+protection, Hetzner backups only if the owner chooses them, a Hetzner firewall) and `aws/` (EC2 with termination protection, IMDSv2 only,
 an encrypted gp3 disk, an Elastic IP, a security group). Both use two shared modules:
 
 | Module | Creates |

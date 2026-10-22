@@ -11,7 +11,9 @@
 #      with BACKUP_RETENTION_ON_HOST=false and deletes nothing;
 #   3. the host token: object read and write on this one bucket only (it cannot change the lock or lifecycle
 #      rules, touch other buckets, or anything else in the account), usable only from the VM's own addresses.
-# Only the token Terraform itself runs with (on the maintainer's Mac, never on the host) can change the rules.
+# The host's token cannot change the rules. A Cloudflare account administrator can, and so can the token Terraform runs
+# with (it may create tokens, so it is as strong as an administrator): both stay few, on the maintainer's side, behind
+# two-step sign-in, never on the host (ADR-058 decision 5).
 
 locals {
   hostnames = concat(["bms", "bms-callbacks"], [for slug in var.tenant_slugs : "${slug}-bms"])
@@ -142,25 +144,16 @@ resource "cloudflare_r2_bucket_lifecycle" "backups" {
 # The host's tokens. Account-owned (they do not belong to a person and survive one leaving). Each value is in
 # Terraform state, which is why the state lives in its own private bucket (runbook, "State").
 
-data "cloudflare_account_api_token_permission_groups_list" "r2_item_write" {
+# The whole list, filtered here by exact name: the API's own name filter needs URL encoding, which the provider may
+# or may not add, and an empty result would only show up on production day.
+data "cloudflare_account_api_token_permission_groups_list" "all" {
   account_id = var.account_id
-  name       = "Workers%20R2%20Storage%20Bucket%20Item%20Write"
-}
-
-data "cloudflare_account_api_token_permission_groups_list" "dns_write" {
-  account_id = var.account_id
-  name       = "DNS%20Write"
-}
-
-data "cloudflare_account_api_token_permission_groups_list" "zone_read" {
-  account_id = var.account_id
-  name       = "Zone%20Read"
 }
 
 locals {
-  r2_item_write_id = one([for g in data.cloudflare_account_api_token_permission_groups_list.r2_item_write.result : g.id if g.name == "Workers R2 Storage Bucket Item Write"])
-  dns_write_id     = one([for g in data.cloudflare_account_api_token_permission_groups_list.dns_write.result : g.id if g.name == "DNS Write"])
-  zone_read_id     = one([for g in data.cloudflare_account_api_token_permission_groups_list.zone_read.result : g.id if g.name == "Zone Read"])
+  r2_item_write_id = one([for g in data.cloudflare_account_api_token_permission_groups_list.all.result : g.id if g.name == "Workers R2 Storage Bucket Item Write"])
+  dns_write_id     = one([for g in data.cloudflare_account_api_token_permission_groups_list.all.result : g.id if g.name == "DNS Write"])
+  zone_read_id     = one([for g in data.cloudflare_account_api_token_permission_groups_list.all.result : g.id if g.name == "Zone Read"])
 }
 
 # backup.sh, monitor.sh and restore-drill.sh: objects in the backup bucket only. It cannot change the lock or

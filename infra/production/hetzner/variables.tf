@@ -38,8 +38,12 @@ variable "admin_cidrs" {
   description = "Addresses allowed to reach SSH (port 22), for example [\"203.0.113.7/32\"]. Nothing else is opened for SSH."
   type        = list(string)
   validation {
-    condition     = length(var.admin_cidrs) > 0 && alltrue([for c in var.admin_cidrs : can(cidrhost(c, 0)) && !endswith(c, "/0")])
-    error_message = "Give at least one address in CIDR form and never the whole internet."
+    condition = length(var.admin_cidrs) > 0 && alltrue([
+      for c in var.admin_cidrs : can(cidrhost(c, 0)) && (
+        strcontains(c, ":") ? tonumber(split("/", c)[1]) >= 32 : tonumber(split("/", c)[1]) >= 16
+      )
+    ])
+    error_message = "Give at least one address in CIDR form, an IPv4 prefix of /16 or longer and an IPv6 prefix of /32 or longer; never the whole internet."
   }
 }
 
@@ -56,9 +60,8 @@ variable "image" {
 }
 
 variable "backups" {
-  description = "Hetzner's own daily server backups (about a fifth of the server price), in addition to the encrypted off-site database backups of backup.sh, not instead of them."
+  description = "Hetzner's own daily server backups (about a fifth of the server price). No default: they are unencrypted images of the whole disk, the database and /opt/bms/.env included, kept by Hetzner outside the encrypted and locked backups of ADR-058, so they are part of the data protection decision (runbook step 1)."
   type        = bool
-  default     = true
 }
 
 variable "enable_ipv6" {

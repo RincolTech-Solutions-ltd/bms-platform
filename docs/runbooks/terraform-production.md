@@ -9,7 +9,7 @@ Nothing here has been run. Cost starts at apply, not before. Read the whole runb
 
 | | Hetzner root (`infra/production/hetzner`) | AWS root (`infra/production/aws`) |
 |---|---|---|
-| VM | Server with delete and rebuild protection, Hetzner backups, IPv4 and IPv6 | EC2 instance with termination protection, IMDSv2 only, encrypted 40 GB gp3 disk kept on termination, Elastic IP (IPv4 only) |
+| VM | Server with delete and rebuild protection, Hetzner backups if chosen (step 1), IPv4 and IPv6 | EC2 instance with termination protection, IMDSv2 only, encrypted 40 GB gp3 disk kept on termination, Elastic IP (IPv4 only) |
 | Firewall | Hetzner firewall | Security group |
 | Both | 22 from `admin_cidrs` only; 80, 443 TCP and 443 UDP from anywhere; nothing else in; outbound open ||
 | Both | Cloud-init: `ops` (people, keys only, sudo), `bms` (service user, docker group), sshd without passwords or root, Docker, fail2ban, unattended upgrades, the `bms-pull`, `bms-monitor` and `bms-restore-drill` units installed, none enabled ||
@@ -30,8 +30,13 @@ None of these has a default, so `terraform plan` cannot run until they are decid
 4. **Size:** 2 vCPU, 4 GB, 40 GB (chapter 9 section 9.4). Hetzner `server_type` (for example `cx23` where it is sold); AWS
    `instance_type` (for example `t3.medium`, or `t4g.medium` with `architecture = "arm64"`).
 5. **Who pays** for the provider account and R2, named before the first apply.
-6. **Who may SSH:** the team's public keys and the fixed addresses SSH is allowed from (never `0.0.0.0/0`, validation refuses it).
-7. **Tenants** that go live on day one (`tenant_slugs`).
+6. **Who may SSH:** the team's public keys and the fixed addresses SSH is allowed from (never the whole internet: validation
+   refuses an IPv4 prefix shorter than /16 or an IPv6 prefix shorter than /32). On Hetzner, a key whose fingerprint is already in
+   the project makes `hcloud_ssh_key` fail: remove it there first or `terraform import` it.
+7. **Hetzner backups** (Hetzner root only, `backups`, no default): Hetzner's daily disk images cost about a fifth of the server and
+   hold the whole disk unencrypted, the database and `/opt/bms/.env` included, outside the encrypted and locked backups of
+   ADR-058 and in Hetzner's location. Choose `true` only if that is acceptable under the same data protection decision.
+8. **Tenants** that go live on day one (`tenant_slugs`).
 
 ## 2. Secrets: where each one comes from
 
@@ -71,6 +76,7 @@ Terraform state holds the host token values and the addresses, so it never goes 
        key                         = "production/terraform.tfstate"
        region                      = "auto"
        profile                     = "bms-tfstate"
+       use_lockfile                = true # Terraform 1.10 or later; if R2 refuses it, remove it and let one person apply
        endpoints                   = { s3 = "https://<account id>.r2.cloudflarestorage.com" }
        skip_credentials_validation = true
        skip_region_validation      = true
@@ -99,7 +105,7 @@ Read the plan before anything else. Expect, and nothing more:
 - Hetzner: 1 `hcloud_server` (delete and rebuild protection true), 1 `hcloud_firewall` with exactly four inbound rules, one
   `hcloud_ssh_key` per key. AWS: 1 `aws_instance` (`disable_api_termination = true`, `http_tokens = "required"`), 1
   `aws_security_group` with four ingress blocks, 1 `aws_eip`.
-- 2 DNS records per host name (A, and AAAA on Hetzner), never the apex and never a wildcard.
+- One A record per host name (plus one AAAA on Hetzner with IPv6), never the apex and never a wildcard.
 - 2 `cloudflare_r2_bucket`, 1 `cloudflare_r2_bucket_lock` with `daily-30d` and `monthly-365d`, 1 `cloudflare_r2_bucket_lifecycle`.
 - 3 `cloudflare_account_token`, each with a single policy on one bucket or the one zone, and a `request_ip` condition.
 - Nothing to change or destroy.
@@ -140,12 +146,13 @@ Until the promote command of ADR-063 exists there is no `production` pointer, so
 release is deployed by hand: the release that is live on staging (`curl -s https://bms-staging.rincoltech.com/version`).
 
 The host files come from the repository at that release's commit, the way the SSH deploy copies them (never from the image
-before it is verified). On the Mac, in a clean checkout:
+before it is verified). `cosign.pub` is left out on purpose: the host keeps the copy of step 6.4, never one a release brings. On the Mac, in a clean checkout:
 
 ```sh
 T=sha-<7>                                         # the tag live on staging
 git fetch origin && git archive "${T#sha-}" deploy \
-  | ssh ops@<ipv4> 'sudo -u bms tar -x --strip-components=1 -C /opt/bms'
+  | ssh ops@<ipv4> 'sudo -u bms tar -x --strip-components=1 -C /opt/bms \
+      --exclude=deploy/cosign.pub --exclude=deploy/runner --exclude=deploy/signer --exclude=deploy/tests'
 ssh ops@<ipv4> "cd /opt/bms && sudo -u bms ./deploy.sh $T"
 ```
 
@@ -171,7 +178,7 @@ in the dashboard, R2, the backup bucket.
 
 ## 9. Prove the lock refuses a delete (a throwaway object, never a real backup)
 
-On the host, as `bms`, with the host's own credentials, exactly as `restore-from-backup.md` section 7 step 5:
+On the host, in a shell as `bms` (`sudo -u bms bash`, since `bms` has no login shell), with the host's own credentials, exactly as `restore-from-backup.md` section 7 step 5:
 
 ```sh
 set -a; . /opt/bms/.env; set +a
@@ -182,7 +189,8 @@ echo lock-test > /tmp/lock-test.txt
 N="0-lock-test-$(date -u +%Y%m%dT%H%M%SZ).txt"
 rc copyto /tmp/lock-test.txt "r2:${R2_BACKUP_BUCKET}/production/daily/$N"
 rc deletefile "r2:${R2_BACKUP_BUCKET}/production/daily/$N"      # must FAIL (access denied or object locked)
-rc copyto /tmp/lock-test.txt "r2:${R2_BACKUP_BUCKET}/production/daily/$N"   # an overwrite must fail too
+echo lock-test-changed > /tmp/lock-test.txt                     # different content, so rclone really uploads
+rc copyto --ignore-times /tmp/lock-test.txt "r2:${R2_BACKUP_BUCKET}/production/daily/$N"   # an overwrite must FAIL too
 rc lsf "r2:${R2_BACKUP_BUCKET}/production/daily/" | grep "$N"   # still listed
 rm /tmp/lock-test.txt
 ```
@@ -191,8 +199,17 @@ If the delete succeeds, the lock is not on: stop, only the throwaway was lost; c
 module.cloudflare.cloudflare_r2_bucket_lock.backups` and the dashboard before anything else. The throwaway stays for its 30 days
 and the lifecycle removes it on day 31. Record the date and who ran the test in `restore-from-backup.md` section 7's table.
 
-Also check the token address condition: the same `rc lsf` from the Mac, with the host's keys, should be refused. If it is
-accepted, Cloudflare does not apply the condition to R2's S3 requests; the lock still holds, so note it in ADR-063 and carry on.
+Also check the token address condition from the Mac (no Docker there; the AWS CLI is enough), with the host's keys read from
+Terraform inside a subshell so they stay out of the shell history and environment:
+
+```sh
+( eval "$(terraform output -raw host_env | grep -E '^R2_(ENDPOINT|ACCESS_KEY_ID|SECRET_ACCESS_KEY|BACKUP_BUCKET)=')"
+  AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" AWS_PROFILE= \
+    aws s3 ls "s3://$R2_BACKUP_BUCKET/production/daily/" --endpoint-url "$R2_ENDPOINT" --region auto )
+```
+
+It should be refused. If it is accepted, Cloudflare does not apply the condition to R2's S3 requests; the lock still holds, so
+note it in ADR-063 and carry on.
 
 ## 10. Host checks and the first restore drill
 
@@ -216,5 +233,7 @@ The drill must finish under the 2 hour RTO before any tenant's real data moves (
 - The server is protected (Hetzner delete and rebuild protection; AWS termination protection) and the buckets and lock have
   `prevent_destroy`. To remove anything on purpose: a reviewed change that lifts the protection, apply, and only then destroy.
   Locked backups cannot be removed before their window ends, by anyone (ADR-058).
-- Rotating a host token: `terraform apply -replace=module.cloudflare.cloudflare_account_token.host_backups` (or the other two),
-  then step 6.2 again for the changed lines.
+- Rotating a host token: `terraform apply -replace=module.cloudflare.cloudflare_account_token.host_backups` (or the other two).
+  Then replace the changed lines in `/opt/bms/.env` in place (edit as `bms`; do not append step 6.2 again, which would leave the
+  old lines behind) and restart what reads them: nothing for the backup token (each run reads `.env`), the api for the documents
+  token, the proxy for the DNS token (`docker compose --project-name bms -f /opt/bms/compose.yml up -d --force-recreate api proxy`).
