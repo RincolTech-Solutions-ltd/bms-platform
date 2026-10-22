@@ -1,6 +1,6 @@
--- V80: lending increment 6 T1 (#264, part of #109): the penalty charges of the nightly arrears run and
--- the run's own record. The next free number after V79 (the Owner of a business, #442); the waivers
--- of T2 (#265) take V81 and the collection actions of T3 (#266) V82, each in its own pull request.
+-- V81: lending increment 6 T1 (#264, part of #109): the penalty charges of the nightly arrears run and
+-- the run's own record. The next free number after V80 (the in-app feedback, which merges first); the
+-- waivers of T2 (#265) take V82 and the collection actions of T3 (#266) V83, each in its own pull request.
 -- Additive only.
 
 -- ---------------------------------------------------------------------------------------------

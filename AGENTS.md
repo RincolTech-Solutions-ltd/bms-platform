@@ -171,7 +171,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   receipt and voucher numbers; the staff loan screens (`docs/specs/lending-ui-notes.md`); and the
   `seed-lending` command for a fabricated staging loan book (`docs/runbooks/seed-lending.md`).
   Deferred: waivers, collections and the reminder SMS (increment 6, pull requests #271, #272 and #290; the arrears job
-  and penalties are #270, migration `V80`), import (7), reports and the
+  and penalties are #270, migration `V81`), import (7), reports and the
   receipt, voucher and statement PDFs (8 and a documents follow-up).
 - **First run and guided tours (issues #19 and #86, ADR-025):** accepting an invitation signs the
   user in; the PWA walks a new user through password, an optional second factor and recovery codes;

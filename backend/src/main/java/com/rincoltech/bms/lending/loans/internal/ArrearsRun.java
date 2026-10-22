@@ -248,7 +248,8 @@ class ArrearsRun {
 
     /**
      * Marks the date finished, with the run's audit row, unless another run took the lease over (a stale attempt is
-     * refused). A loan that failed last night too is alerted to the branch's managers and the administrators by push,
+     * refused). A loan that failed on the business's previous finished run too (its last two finished runs, so a night
+     * with no run between them does not hide it) is alerted to the branch's managers and the administrators by push,
      * not only logged (the review of #270).
      */
     boolean finish(Result result, int attempt, List<UUID> failedIds) {
@@ -276,14 +277,17 @@ class ArrearsRun {
                             SELECT l.id, l.loan_no, l.branch_id FROM lending_loans l
                              WHERE l.id = ANY (?::uuid[])
                                AND EXISTS (SELECT 1 FROM lending_arrears_runs r
-                                            WHERE r.business_date = ? AND r.finished_at IS NOT NULL
+                                            WHERE r.business_date = (SELECT max(p.business_date)
+                                                                       FROM lending_arrears_runs p
+                                                                      WHERE p.business_date < ?
+                                                                        AND p.finished_at IS NOT NULL)
                                               AND l.id = ANY (r.failed_loan_ids))
                             """)
                     .params(
                             failedIds.stream()
                                     .map(UUID::toString)
                                     .collect(java.util.stream.Collectors.joining(",", "{", "}")),
-                            result.businessDate().minusDays(1))
+                            result.businessDate())
                     .query((rs, n) -> {
                         events.publishEvent(new PushNotice(
                                 FAILING_TWICE,

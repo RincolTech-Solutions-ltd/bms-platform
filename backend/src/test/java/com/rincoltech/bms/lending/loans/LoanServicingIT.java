@@ -24,6 +24,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -32,9 +33,11 @@ import tools.jackson.databind.JsonNode;
  * and recovery, idempotency and branch scope; every journal is checked line by line against
  * chapter 6 section 6.6.3, and the books are checked to agree with the subledger after each test.
  * Four users: an officer originates, an appraiser appraises, a manager approves and checks, a
- * cashier moves the money. All figures fabricated.
+ * cashier moves the money. The scheduler is off in this context, so the nightly arrears job never races the
+ * test's own run. All figures fabricated.
  */
 @org.springframework.test.context.event.RecordApplicationEvents
+@TestPropertySource(properties = "db-scheduler.enabled=false")
 class LoanServicingIT extends LoanFixtures {
 
     @Autowired
@@ -1692,35 +1695,173 @@ class LoanServicingIT extends LoanFixtures {
     /** The statement rows: date, then three amounts at the end of the line ("-" for none). */
     record Row(String line, long charged, long credited, long balance) {}
 
+    /** A word of a page, where it starts: x from the left edge, y (its baseline) from the top. */
+    record Word(String text, float x, float y) {}
+
     /**
-     * The statement's lines with a balance. A description too long for its cell wraps: the text has its first part on
-     * the line above the date and amounts and the rest on the line below, and both are put back into the row's line.
+     * A page's lines as the text stripper groups them, each a list of words with their positions. A word is cut at
+     * every space, so each one has the position of its own first letter.
+     */
+    static List<List<Word>> pageWords(byte[] pdf, int page) throws Exception {
+        List<List<Word>> lines = new ArrayList<>();
+        List<Word> current = new ArrayList<>();
+        try (org.apache.pdfbox.pdmodel.PDDocument d = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            org.apache.pdfbox.text.PDFTextStripper s = new org.apache.pdfbox.text.PDFTextStripper() {
+                @Override
+                protected void writeString(String text, List<org.apache.pdfbox.text.TextPosition> positions) {
+                    StringBuilder word = new StringBuilder();
+                    org.apache.pdfbox.text.TextPosition first = null;
+                    for (org.apache.pdfbox.text.TextPosition t : positions) {
+                        if (t.getUnicode().isBlank()) {
+                            if (first != null) {
+                                current.add(new Word(word.toString(), first.getXDirAdj(), first.getYDirAdj()));
+                            }
+                            word.setLength(0);
+                            first = null;
+                        } else {
+                            first = first == null ? t : first;
+                            word.append(t.getUnicode());
+                        }
+                    }
+                    if (first != null) {
+                        current.add(new Word(word.toString(), first.getXDirAdj(), first.getYDirAdj()));
+                    }
+                }
+
+                @Override
+                protected void writeLineSeparator() {
+                    if (!current.isEmpty()) {
+                        lines.add(List.copyOf(current));
+                        current.clear();
+                    }
+                }
+            };
+            s.setSortByPosition(true);
+            s.setStartPage(page);
+            s.setEndPage(page);
+            s.getText(d);
+        }
+        if (!current.isEmpty()) {
+            lines.add(List.copyOf(current));
+        }
+        return lines;
+    }
+
+    /**
+     * The statement's lines with a balance, read by position. A cell's text is centred on its row, so a description
+     * too long for its cell wraps around the line of the date and amounts: parts of it above, on and below that line.
+     * Every line of the grid that does not start with a date is a part of the nearest row's number or description
+     * (by its column), and a part with no row near it fails the reading rather than being glued to a wrong one. The
+     * row's line is put back together as date, number, description in reading order, then the three amounts.
      */
     static List<Row> statementRows(byte[] pdf) throws Exception {
-        java.util.regex.Pattern row = java.util.regex.Pattern.compile(
-                "^(\\d{1,2} [A-Z][a-z]{2} \\d{4}) (.*?)(-|[\\d,]+) (-|[\\d,]+) ([\\d,]+)$");
+        java.util.regex.Pattern date = java.util.regex.Pattern.compile("^\\d{1,2} [A-Z][a-z]{2} \\d{4}$");
+        java.util.regex.Pattern money = java.util.regex.Pattern.compile("^(-|[\\d,]+)$");
+        // A part of a wrapped cell is at most a line and a half from its row's line for the descriptions printed here.
+        float near = 20f;
         List<Row> rows = new ArrayList<>();
         for (int p = 1; p <= pages(pdf); p++) {
-            String before = null;
-            boolean wrapped = false;
-            for (String raw : pageText(pdf, p).split("\n")) {
-                String line = raw.strip().replaceAll("\\s+", " ");
-                java.util.regex.Matcher m = row.matcher(line);
-                if (m.matches()) {
-                    wrapped = m.group(2).isBlank() && before != null;
-                    String text = wrapped
-                            ? m.group(1) + " " + before + " "
-                                    + line.substring(m.group(1).length() + 1)
-                            : line;
-                    rows.add(new Row(text, amount(m.group(3)), amount(m.group(4)), amount(m.group(5))));
-                    before = null;
-                } else if (wrapped) {
-                    Row last = rows.removeLast();
-                    rows.add(new Row(last.line() + " " + line, last.charged(), last.credited(), last.balance()));
-                    wrapped = false;
-                } else {
-                    before = line;
+            List<List<Word>> lines = pageWords(pdf, p);
+            int header = -1;
+            for (int i = 0; i < lines.size() && header < 0; i++) {
+                List<String> texts = lines.get(i).stream().map(Word::text).toList();
+                header = texts.containsAll(List.of("Date", "Number", "Description", "Charged", "Credited", "Balance"))
+                        ? i
+                        : -1;
+            }
+            if (header < 0) {
+                continue;
+            }
+            float numberX = lines.get(header).stream()
+                    .filter(w -> w.text().equals("Number"))
+                    .findFirst()
+                    .orElseThrow()
+                    .x();
+            float descriptionX = lines.get(header).stream()
+                    .filter(w -> w.text().equals("Description"))
+                    .findFirst()
+                    .orElseThrow()
+                    .x();
+            // The rows (a note row too, which has no amounts but owns its wrapped parts) and the parts, up to Totals.
+            List<List<Word>> anchors = new ArrayList<>();
+            List<List<Word>> parts = new ArrayList<>();
+            for (List<Word> line : lines.subList(header + 1, lines.size())) {
+                String first = line.getFirst().text();
+                if (first.equals("Totals") || first.equals("Closing")) {
+                    break;
                 }
+                boolean dated = line.size() >= 3
+                        && date.matcher(first + " " + line.get(1).text() + " "
+                                        + line.get(2).text())
+                                .matches()
+                        && line.getFirst().x() < numberX - 1;
+                if (dated) {
+                    anchors.add(line);
+                } else if (line.getFirst().x() >= numberX - 1) {
+                    parts.add(line);
+                }
+            }
+            if (anchors.isEmpty()) {
+                continue;
+            }
+            float lastY = anchors.getLast().getFirst().y();
+            Map<List<Word>, List<Word>> cells = new LinkedHashMap<>();
+            anchors.forEach(a -> cells.put(a, new ArrayList<>(a.subList(3, a.size()))));
+            for (List<Word> part : parts) {
+                float y = part.getFirst().y();
+                if (y > lastY + near) {
+                    break; // below the grid of a page that continues on the next one: the page foot
+                }
+                List<Word> owner = anchors.stream()
+                        .min(java.util.Comparator.comparingDouble(
+                                a -> Math.abs(a.getFirst().y() - y)))
+                        .orElseThrow();
+                assertThat(Math.abs(owner.getFirst().y() - y))
+                        .as("a wrapped part of the statement near no row: %s", part)
+                        .isLessThanOrEqualTo(near);
+                cells.get(owner).addAll(part);
+            }
+            for (Map.Entry<List<Word>, List<Word>> e : cells.entrySet()) {
+                List<Word> anchor = e.getKey();
+                List<Word> rest = e.getValue();
+                int n = anchor.size();
+                boolean amounts = n >= 6
+                        && money.matcher(anchor.get(n - 1).text()).matches()
+                        && money.matcher(anchor.get(n - 2).text()).matches()
+                        && money.matcher(anchor.get(n - 3).text()).matches()
+                        && anchor.get(n - 3).x() > descriptionX;
+                if (!amounts) {
+                    continue; // a note row
+                }
+                List<Word> tail = anchor.subList(n - 3, n);
+                List<Word> text = new ArrayList<>(rest);
+                text.removeAll(tail);
+                java.util.Comparator<Word> reading =
+                        java.util.Comparator.comparingDouble(Word::y).thenComparingDouble(Word::x);
+                String number = text.stream()
+                        .filter(w -> w.x() < descriptionX - 1)
+                        .sorted(reading)
+                        .map(Word::text)
+                        .collect(java.util.stream.Collectors.joining(""));
+                String description = text.stream()
+                        .filter(w -> w.x() >= descriptionX - 1)
+                        .sorted(reading)
+                        .map(Word::text)
+                        .collect(java.util.stream.Collectors.joining(" "));
+                String line = java.util.stream.Stream.of(
+                                anchor.get(0).text() + " " + anchor.get(1).text() + " "
+                                        + anchor.get(2).text(),
+                                number,
+                                description,
+                                tail.get(0).text() + " " + tail.get(1).text() + " "
+                                        + tail.get(2).text())
+                        .filter(t -> !t.isEmpty())
+                        .collect(java.util.stream.Collectors.joining(" "));
+                rows.add(new Row(
+                        line,
+                        amount(tail.get(0).text()),
+                        amount(tail.get(1).text()),
+                        amount(tail.get(2).text())));
             }
         }
         return rows;
@@ -2194,8 +2335,8 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     /**
-     * The nightly job as the scheduler runs it, every active lending tenant, with today's run of this business made
-     * due again (as if it were the next night), so each call is a full run.
+     * The nightly run as the job runs it for each tenant, for this test's business only, with today's run made due
+     * again (as if it were the next night), so each call is a full run.
      */
     void runArrears() {
         arrearsSinceLongAgo();
@@ -2475,12 +2616,25 @@ class LoanServicingIT extends LoanFixtures {
         // The running balance: the charges again are printed on the day they were recorded, as the cancels were, so
         // no line between shows the penalties twice.
         String day = today.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH));
+        // Five daily penalties of 2,000 were cancelled and are charged again, all recorded today: one line each way, of
+        // 10,000.
         List<Row> rows = statementRows(render(loan, "loan_statement").getBody());
         assertThat(rows)
-                .filteredOn(r ->
-                        r.line().contains("Penalties charged again") || r.line().contains("Penalties cancelled"))
-                .isNotEmpty()
-                .allSatisfy(r -> assertThat(r.line()).startsWith(day));
+                .filteredOn(r -> r.line().contains("Penalties cancelled after a back-dated payment"))
+                .singleElement()
+                .satisfies(r -> {
+                    assertThat(r.line()).startsWith(day);
+                    assertThat(r.credited()).isEqualTo(10_000);
+                    assertThat(r.charged()).isZero();
+                });
+        assertThat(rows)
+                .filteredOn(r -> r.line().contains("Penalties charged again after a reversal"))
+                .singleElement()
+                .satisfies(r -> {
+                    assertThat(r.line()).startsWith(day);
+                    assertThat(r.charged()).isEqualTo(10_000);
+                    assertThat(r.credited()).isZero();
+                });
         JsonNode b = loan(loan).get("balances");
         assertThat(b.get("penalties_outstanding_minor").asLong()).isEqualTo(10_000);
         assertThat(b.get("penalties_assessed_minor").asLong()).isEqualTo(10_000);
@@ -2725,5 +2879,64 @@ class LoanServicingIT extends LoanFixtures {
             assertThat(n.template()).isEqualTo("lending.arrears_loan_failing");
             assertThat(n.eventRef()).startsWith(loan);
         });
+    }
+
+    /** A finished run of this business for a date, with these loans failed. */
+    void finishedRun(LocalDate day, String... failed) {
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at,
+                                                          failed_loan_ids)
+                        VALUES (?, ?, now(), now(), now(), ?::uuid[])
+                        """)
+                .params(t.tenantId(), day, "{" + String.join(",", failed) + "}")
+                .update();
+    }
+
+    /** Tonight's run finished with this loan failed, as the run's first attempt claimed it. */
+    boolean failsTonight(String loan) {
+        TestDatabase.owner().sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at,
+                                                          failed_loan_ids)
+                        VALUES (?, ?, now(), now() + interval '1 hour', NULL, '{}')
+                        """).params(t.tenantId(), today).update();
+        return com.rincoltech.bms.lending.loans.internal.ArrearsTestRun.finish(
+                context, t.tenantId(), today, 1, List.of(UUID.fromString(loan)));
+    }
+
+    List<com.rincoltech.bms.kernel.PushNotice> failingAlerts(String loan) {
+        return events.stream(com.rincoltech.bms.kernel.PushNotice.class)
+                .filter(n -> n.template().equals("lending.arrears_loan_failing")
+                        && n.eventRef().startsWith(loan))
+                .toList();
+    }
+
+    /**
+     * FR-ARR-01, the negative case: a loan that fails tonight but not on the business's previous finished run is not
+     * alerted, even though it failed on the run before that.
+     */
+    @Test
+    void frArr01_aLoanFailingTonightButNotOnThePreviousRunIsNotAlerted() {
+        String loan = approved(product("PENONCE", dailyPenalty(), List.of()), 1_200_000, 3, 58);
+        String other = approved(product("PENOTHR", dailyPenalty(), List.of()), 1_200_000, 3, 57);
+        finishedRun(today.minusDays(2), loan);
+        finishedRun(today.minusDays(1), other);
+        assertThat(failsTonight(loan)).isTrue();
+        assertThat(failingAlerts(loan)).isEmpty();
+        assertThat(failingAlerts(other)).isEmpty();
+    }
+
+    /**
+     * FR-ARR-01: "two nights running" is the business's last two finished runs, so a night with no run between them
+     * (the server was down) does not hide a loan that keeps failing.
+     */
+    @Test
+    void frArr01_aMissedNightDoesNotHideALoanFailingTwoRunsRunning() {
+        String loan = approved(product("PENMISS", dailyPenalty(), List.of()), 1_200_000, 3, 56);
+        finishedRun(today.minusDays(2), loan);
+        assertThat(failsTonight(loan)).isTrue();
+        assertThat(failingAlerts(loan))
+                .singleElement()
+                .satisfies(n -> assertThat(n.eventRef()).isEqualTo(loan + ":" + today));
     }
 }

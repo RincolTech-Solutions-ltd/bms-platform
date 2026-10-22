@@ -655,7 +655,7 @@ SMS and PDF are deferred.
 | FR-ARR-03 | The loan view shall show arrears amount, DPD, PAR bucket (chapter 14) and assessed penalties. | Tested with fixed clocks. | MVP |
 | FR-ARR-04 | A branch manager shall request a waiver of all or part of an assessed penalty (or, with accountant role, of fees or interest) with a reason; the waiver is maker-checker and is recorded on the item as `waived`. | Waived penalties are never posted to income. Waiving principal is not allowed (that is a write-off). | MVP |
 
-Built in increment 6 T1 (#264, migration V80): FR-ARR-01 and FR-ARR-03. The job ticks every
+Built in increment 6 T1 (#264, migration V81): FR-ARR-01 and FR-ARR-03. The job ticks every
 quarter hour and runs each lending tenant once per business date, at the first tick after the
 tenant's own midnight (so the 00:30 of the table above is now "shortly after midnight, tenant local
 time"; the approval expiry stays its own job, FR-ORG-08). The run claims its date in
@@ -680,7 +680,8 @@ part, never what was waived or paid, `lending_charge_cancels`), and a reversal t
 amount was owed after all charges it again as a new row (`penalty_recharge`), set before the
 surviving repayments are re-allocated so a penalty-first order meets them, so a bounced payment
 loses no penalty and a paid-up loan is never penalised. Penalties start at the later of the business's
-first run and the loan's own start in the system, and a loan that fails the run two nights running is
+first run and the loan's own start in the system, and a loan that fails the run two nights running
+(the business's last two finished runs, so a night with no run between them does not hide it) is
 pushed to its branch's managers and the administrators (`lending.arrears_loan_failing`). A
 repayment is stamped with the clock when it is recorded, under the loan's lock, so a receipt places
 the penalties it paid exactly. The loan's `balances` add `par_bucket` (`current`,

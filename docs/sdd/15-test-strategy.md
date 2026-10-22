@@ -384,7 +384,9 @@ refuses a stale attempt at finish and runs a business in another time zone for i
 it re-allocates the surviving payment (penalty first), the charges again and cancels printed on the
 day they were recorded, a back-dated partial payment through the reconcile with percent penalties and
 the cap freed by the cancelled amount, an imported loan not back-charged, and the push sent for a loan
-failing two nights running; the time-zone case runs on a pinned clock.
+failing two nights running, none for a loan that did not fail on the previous finished run, and the
+push still sent when a night with no run lies between the two failing runs; the time-zone case runs on a
+pinned clock.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

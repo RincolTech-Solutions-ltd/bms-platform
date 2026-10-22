@@ -15,9 +15,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.TestPropertySource;
 
-/** The arrears run's claim (the review of #270): a stale attempt never finishes a date; each business has its own date. */
+/**
+ * The arrears run's claim (the review of #270): a stale attempt never finishes a date; each business has its own date.
+ * The scheduler is off in this context, so only the test drives the run.
+ */
 @Import(MovableClockConfig.class)
+@TestPropertySource(properties = "db-scheduler.enabled=false")
 @ResourceLock(MovableClockConfig.LOCK)
 class ArrearsRunIT extends IntegrationTest {
 
