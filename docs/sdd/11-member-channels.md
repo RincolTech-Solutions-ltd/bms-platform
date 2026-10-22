@@ -131,12 +131,15 @@ Navigation (#455): one pattern on every screen size. The staff area and the oper
 their areas in a side menu, each item with an inline SVG icon, the current one marked
 `aria-current="page"` and the retail shortcuts as a group under Retail; the area tabs and the
 separate retail bar are gone. From 720px the menu is a sidebar at the left of the page (about 240px,
-folding to 64px of icons with the choice kept on the device, each folded item keeping its label as
-its accessible name and tooltip), and the content takes the remaining width. Below 720px a menu
+folding to 64px of icons, folded at first below 1024px and unfolded from there until the person
+chooses, the choice kept on the device, each folded item keeping its label as its accessible name and
+tooltip), and the content takes the remaining width. Below 720px a menu
 button at the top left of the staff bar opens the same list in a side drawer from the left (85% of
 the width, at most 320px, over a dimmed backdrop) with the person's name and Sign out at the bottom.
 The drawer is a modal dialog: focus moves in, stays in, and returns to the menu button; the page
-behind does not scroll; it closes on the backdrop, Escape, a left swipe or a chosen link. Both are
+behind does not scroll; it closes on the backdrop, Escape, a left swipe, a chosen link or any change
+of page. On a phone a primary Sell button beside the menu button opens the sale screen in one tap for
+anyone who can sell. Both are
 built from one list per layout, so the items and permission checks cannot drift apart, and both
 follow the theme and reduced motion. A guided tour step that points at a menu item finds it in the
 sidebar, unfolding it if folded, or opens the drawer on a phone. The member area has no area list

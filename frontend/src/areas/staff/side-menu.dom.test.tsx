@@ -10,13 +10,14 @@ import { router as appRouter } from '../../app/router';
 import { TourProvider, useTour } from '../../tour/host';
 import type { Tour } from '../../tour/model';
 import { StaffContext } from './context';
-import { StaffBar, StaffSideNav } from './route';
+import { PortalFrame } from '../platform/route';
+import { StaffBar, StaffSideNav, staffAreas } from './route';
 
 // The side menu of the staff area (issue #455), one list of areas on every screen size. Below 720px a menu button opens a drawer
 // from the left with the areas the session may open, the current one marked, the retail shortcuts as a group under Retail, and the
 // name and Sign out at the bottom. It closes on Escape, the backdrop, a left swipe or a chosen link and gives focus back to the
 // button. From 720px the same list is a sidebar that folds to its icons, the choice kept on the device. A tour step that points at
-// a menu item opens the drawer or unfolds the sidebar. Every name is invented.
+// a menu item opens the drawer or unfolds the sidebar. A phone has a one-tap Sell beside the menu button. Every name is invented.
 
 const TOURS_OFF = { 'tours-off': { status: 'dismissed', version: 1 } };
 
@@ -32,11 +33,29 @@ const officer = {
 
 const admin = { ...mockMe('admin'), tours: TOURS_OFF } as unknown as Me;
 
-function widthIs(phone: boolean) {
+// A window of the given width whose media queries answer by it; resize() changes the width and tells every listener.
+let width = 360;
+const listeners = new Set<() => void>();
+const fits = (query: string) => width <= Number(/max-width: (\d+)px/.exec(query)?.[1] ?? Infinity);
+function widthIs(px: number | boolean) {
+  width = typeof px === 'number' ? px : px ? 360 : 1280;
   vi.stubGlobal(
     'matchMedia',
-    vi.fn((query: string) => ({ matches: phone && query.includes('max-width: 719px'), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    vi.fn((query: string) => ({
+      get matches() {
+        return fits(query);
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    })),
   );
+}
+function resize(px: number) {
+  act(() => {
+    width = px;
+    for (const listener of [...listeners]) listener();
+  });
 }
 
 function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
@@ -73,10 +92,14 @@ const labels = (dialog: HTMLElement) =>
     .getAllByRole('link')
     .map((a) => a.textContent);
 
-beforeEach(() => widthIs(true));
+beforeEach(() => {
+  widthIs(true);
+  window.scrollTo = vi.fn();
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  listeners.clear();
   document.body.className = '';
   window.localStorage.clear();
 });
@@ -172,6 +195,63 @@ describe('the staff side menu on a phone (issue #455)', () => {
     expect(labels(lending)).not.toContain('Retail');
   });
 
+  it('closes on any change of page, the back button or a redirect too, and lets the page scroll again', async () => {
+    const { router } = show(officer);
+    openMenu();
+    await act(async () => {
+      await router.navigate({ to: '/staff/notifications' });
+    });
+    expect(drawer()).toBeNull();
+    expect(document.body.classList.contains('side-menu-open')).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(menuButton()));
+  });
+
+  it('holds the page where it was while open and gives the scroll position back on close', () => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 300 });
+    show(officer);
+    openMenu();
+    expect(document.body.style.getPropertyValue('--side-menu-scroll')).toBe('-300px');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.body.style.getPropertyValue('--side-menu-scroll')).toBe('');
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 300);
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
+  it('leaves no drawer, backdrop or scroll lock behind when the window widens while it is open', async () => {
+    show(officer);
+    openMenu();
+    resize(1280);
+    expect(drawer()).toBeNull();
+    expect(document.querySelector('.side-menu, .side-menu-backdrop')).toBeNull();
+    expect(document.body.classList.contains('side-menu-open')).toBe(false);
+    const first = document.querySelector('.side-nav .side-menu-links a');
+    await waitFor(() => expect(document.activeElement).toBe(first));
+  });
+
+  it('gives the focus to the menu button when the window narrows while it is in the sidebar', async () => {
+    widthIs(1280);
+    show(officer);
+    (document.querySelector('.side-nav .side-menu-links a') as HTMLElement).focus();
+    resize(360);
+    expect(document.querySelector('.side-nav')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(menuButton()));
+  });
+
+  it('has a one-tap Sell beside the menu button for anyone who can sell, straight to the sale screen', async () => {
+    const { router } = show(admin);
+    const sell = screen.getByRole('link', { name: 'Sell' });
+    expect(sell.getAttribute('href')).toBe('/staff/retail/sale');
+    expect(menuButton().nextElementSibling).toBe(sell);
+    fireEvent.click(sell);
+    await waitFor(() => expect(router.history.location.pathname).toBe('/staff/retail/sale'));
+    cleanup();
+    show(officer);
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+    cleanup();
+    show({ ...admin, permissions: (admin.permissions ?? []).filter((p) => p !== 'retail.sale.create') } as Me);
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+  });
+
   it('keeps the tour anchors in the page while closed, so optional tour steps are not skipped', () => {
     show(officer);
     for (const id of ['nav-areas', 'nav-approvals', 'nav-lending', 'nav-members', 'nav-insights', 'nav-notifications', 'nav-feedback']) {
@@ -217,8 +297,8 @@ describe('the staff side menu on a phone (issue #455)', () => {
 describe('the staff sidebar from 720px', () => {
   beforeEach(() => widthIs(false));
 
-  const sidebar = () => screen.getByRole('complementary');
-  const toggle = () => within(sidebar()).getByRole('button', { name: 'Show menu labels' });
+  const sidebar = () => document.querySelector('.side-nav') as HTMLElement;
+  const toggle = () => within(sidebar()).getByRole('button', { name: 'Menu labels' });
   // Every link of the list, the retail group included, by its accessible name.
   const allLinks = (root: HTMLElement) =>
     within(within(root).getByRole('navigation', { name: 'Staff areas' }))
@@ -235,6 +315,8 @@ describe('the staff sidebar from 720px', () => {
     expect(document.querySelector('.tabs')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+    expect(screen.queryByRole('complementary')).toBeNull();
   });
 
   it('comes before the staff bar, so Tab reaches the menu before the page', () => {
@@ -262,10 +344,43 @@ describe('the staff sidebar from 720px', () => {
     expect(within(sidebar()).getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
   });
 
+  it('keeps Retail current on a retail page without a shortcut, and draws it as the section above a current shortcut', () => {
+    show(admin, { at: '/staff/retail/catalogue' });
+    const retail = () => within(sidebar()).getByRole('link', { name: 'Retail' });
+    expect(retail().getAttribute('aria-current')).toBe('page');
+    expect(retail().classList.contains('side-menu-section')).toBe(false);
+    cleanup();
+    show(admin, { at: '/staff/retail/sale' });
+    expect(retail().getAttribute('aria-current')).toBeNull();
+    expect(retail().classList.contains('side-menu-section')).toBe(true);
+    const group = within(sidebar()).getByRole('list', { name: 'Retail' });
+    expect(within(group).getByRole('link', { name: 'Sale' }).getAttribute('aria-current')).toBe('page');
+    cleanup();
+    show(admin, { at: '/staff/retail' });
+    expect(retail().getAttribute('aria-current')).toBe('page');
+  });
+
+  it('starts folded to icons between 720 and 1023px and unfolded from 1024px, until the person chooses', () => {
+    widthIs(800);
+    show(officer);
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
+    fireEvent.click(toggle());
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    expect(window.localStorage.getItem('bms.sidebar')).toBe('open');
+    cleanup();
+    show(officer);
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    cleanup();
+    window.localStorage.clear();
+    widthIs(1024);
+    show(officer);
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+  });
+
   it('folds to its icons and back, and keeps the choice on this device', () => {
     show(officer);
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
-    expect(toggle().getAttribute('aria-controls')).toBe(within(sidebar()).getByRole('navigation').id);
+    expect(toggle().hasAttribute('aria-controls')).toBe(false);
     fireEvent.click(toggle());
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
@@ -275,7 +390,7 @@ describe('the staff sidebar from 720px', () => {
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(toggle());
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
-    expect(window.localStorage.getItem('bms.sidebar')).toBeNull();
+    expect(window.localStorage.getItem('bms.sidebar')).toBe('open');
   });
 
   it('keeps each folded item named, with its label as a tooltip, the retail group too', () => {
@@ -324,5 +439,80 @@ describe('the staff sidebar from 720px', () => {
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
     });
     await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
+  });
+});
+
+describe('the same areas for the same permissions on every size', () => {
+  const session = (permissions: string[], modules: string[]) => ({ ...officer, permissions, modules }) as unknown as Me;
+  const names = (me: Me, sells = true) => staffAreas(me, { sells }).map((a) => a.label);
+  const cases: { role: string; me: Me; has: string[]; lacks: string[] }[] = [
+    { role: 'collateral only', me: session(['lending.collateral.read'], ['lending']), has: ['Collateral'], lacks: ['Members', 'Retail', 'Business set-up'] },
+    { role: 'members and collateral', me: session(['lending.members.read', 'lending.collateral.read'], ['lending']), has: ['Members'], lacks: ['Collateral'] },
+    { role: 'settings manager', me: session(['core.settings.manage'], []), has: ['Business set-up'], lacks: ['Retail', 'Members'] },
+    { role: 'no settings', me: session(['core.approvals.read'], []), has: ['Approvals'], lacks: ['Business set-up'] },
+    { role: 'retail seller', me: { ...mockMe('sales'), tours: TOURS_OFF } as unknown as Me, has: ['Retail'], lacks: ['Business set-up', 'Members'] },
+    { role: 'retail admin', me: admin, has: ['Retail', 'Business set-up'], lacks: ['Collateral'] },
+    { role: 'retail switched off', me: { ...admin, modules: ['lending'] } as Me, has: ['Business set-up'], lacks: ['Retail'] },
+  ];
+
+  it.each(cases)('$role', ({ me, has, lacks }) => {
+    const list = names(me);
+    for (const label of [...has, 'Home', 'Notifications', 'Feedback']) expect(list, label).toContain(label);
+    for (const label of lacks) expect(list, label).not.toContain(label);
+    widthIs(1280);
+    show(me);
+    const wide = within(document.querySelector('.side-nav') as HTMLElement).getAllByRole('link').map((a) => a.textContent);
+    cleanup();
+    widthIs(360);
+    show(me);
+    expect(within(openMenu()).getAllByRole('link').map((a) => a.textContent)).toEqual(wide);
+  });
+
+  it('lists Sale under Retail only for a session that can sell', () => {
+    const group = (sells: boolean) => staffAreas(admin, { sells }).find((a) => a.label === 'Retail')?.groupPaths ?? [];
+    expect(group(true)).toContain('/staff/retail/sale');
+    expect(group(false)).not.toContain('/staff/retail/sale');
+  });
+});
+
+describe('the operator portal side menu (issue #455)', () => {
+  function portal(at = '/platform') {
+    const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
+    const signOut = vi.fn();
+    render(
+      <RouterContextProvider router={router}>
+        <TourProvider me={officer} saveProgress={false}>
+          <PortalFrame name="Test Operator 01" onSignOut={signOut}>
+            <p>Page</p>
+          </PortalFrame>
+        </TourProvider>
+      </RouterContextProvider>,
+    );
+    return { signOut };
+  }
+  const AREAS = ['Applications', 'Businesses', 'Plans and prices', 'Messages not sent', 'Feedback'];
+
+  it('shows the sidebar from 720px with the portal areas and Sign out in the bar', () => {
+    widthIs(1280);
+    const { signOut } = portal('/platform/businesses');
+    const nav = within(document.querySelector('.side-nav') as HTMLElement).getByRole('navigation', { name: 'Operator portal' });
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(AREAS);
+    expect(within(nav).getByRole('link', { name: 'Businesses' }).getAttribute('aria-current')).toBe('page');
+    expect(within(nav).getByRole('link', { name: 'Applications' }).getAttribute('aria-current')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the same areas in a drawer on a phone, with the name and Sign out at the bottom', () => {
+    const { signOut } = portal();
+    expect(document.querySelector('.side-nav')).toBeNull();
+    const dialog = openMenu();
+    expect(within(within(dialog).getByRole('navigation', { name: 'Operator portal' })).getAllByRole('link').map((a) => a.textContent)).toEqual(AREAS);
+    expect(within(dialog).getByText('Test Operator 01')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(drawer()).toBeNull();
   });
 });

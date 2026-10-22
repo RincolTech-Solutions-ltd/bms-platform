@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Link, Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
@@ -21,7 +21,7 @@ import { showCollateral, showMembers } from './lending/member-permissions';
 import { showLending } from './lending/permissions';
 import { showSavings } from './lending/savings-permissions';
 import { showReports } from './reports/permissions';
-import { RetailMenuGroup } from './retail/nav';
+import { RetailMenuGroup, shortcutsFor, useSells } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
 import { showReceivePayments } from './payments/state';
 import { showSms } from './sms/state';
@@ -126,9 +126,13 @@ function StaffLayout() {
   );
 }
 
-/** The areas the session may open, in menu order; Retail carries its shortcuts as a group. The sidebar and the drawer both list these. */
-function staffAreas(me: Me): MenuLink[] {
+/**
+ * The areas the session may open, in menu order; Retail carries its shortcuts as a group (`sells` from useSells decides Sale). The
+ * sidebar and the drawer both list these.
+ */
+export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
   const permissions = me.permissions ?? [];
+  const shortcuts = showRetail(me) ? shortcutsFor(me, { sells }) : [];
   const areas: (MenuLink | false)[] = [
     { to: '/staff', label: 'Home', icon: icons.home, exact: true },
     permissions.includes('core.approvals.read') && { to: '/staff/approvals', label: 'Approvals', icon: icons.approve, tour: 'nav-approvals' },
@@ -140,7 +144,14 @@ function staffAreas(me: Me): MenuLink[] {
     showInsights(me) && { to: '/staff/insights', label: 'Insights', icon: icons.salesAnalysis, tour: 'nav-insights' },
     canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.evaluation },
     showReports(me) && { to: '/staff/reports', label: 'Reports', icon: icons.documents },
-    showRetail(me) && { to: '/staff/retail', label: 'Retail', icon: icons.sale, tour: 'nav-retail', group: <RetailMenuGroup me={me} /> },
+    showRetail(me) && {
+      to: '/staff/retail',
+      label: 'Retail',
+      icon: icons.sale,
+      tour: 'nav-retail',
+      group: <RetailMenuGroup shortcuts={shortcuts} />,
+      groupPaths: shortcuts.map((s) => s.path),
+    },
     showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
     showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.banking },
     showUsers(me) && { to: '/staff/users', label: 'Users', icon: icons.user, tour: 'nav-users' },
@@ -154,20 +165,29 @@ function staffAreas(me: Me): MenuLink[] {
 /** The sidebar at the left from 720px (issue #455); nothing on a phone, where the staff bar's menu button opens the same list. */
 export function StaffSideNav({ me }: { me: Me }) {
   const phone = useIsPhone();
+  const sells = useSells(me);
   if (phone) return null;
-  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me)} tours={['retail-nav']} />;
+  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} />;
 }
 
 /**
  * Who is signed in, Help, the branch switcher and Sign out; below 720px also the menu button of the side menu, which then holds
- * Sign out (issue #455). With StaffSideNav it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
+ * Sign out, and a one-tap Sell for anyone who can sell (issue #455). With StaffSideNav it carries the data-tour anchors the
+ * first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; onSignOut: () => void }) {
   const phone = useIsPhone();
+  const sells = useSells(me);
   return (
     <header className="staff-bar">
       <div className="staff-bar-top">
-        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={staffAreas(me)} tours={['retail-nav']} name={me.full_name} onSignOut={onSignOut} />}
+        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} name={me.full_name} onSignOut={onSignOut} />}
+        {phone && sells && (
+          <Link to="/staff/retail/sale" className="btn btn-primary btn-sm staff-sell">
+            {icons.sale}
+            <span>Sell</span>
+          </Link>
+        )}
         <span className="staff-user">
           <span className="avatar">{icons.user}</span>
           <span className="staff-user-name">{me.full_name}</span>

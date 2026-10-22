@@ -106,15 +106,15 @@ export function Gate({ screen, title, children, wide }: { screen: RetailScreen; 
  * The roles of the branches (ADR-033): undefined while the capability is off, the session cannot read
  * stock, or the read is on its way, and then every branch behaves as before roles existed.
  */
-export function useBranchRoles(me: Pick<Me, 'permissions' | 'module_capabilities'>): BranchRole[] | undefined {
-  const enabled = capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read');
+export function useBranchRoles(me: Pick<Me, 'permissions' | 'module_capabilities'>, wanted = true): BranchRole[] | undefined {
+  const enabled = wanted && capabilityOn(me, 'retail', BRANCH_ROLES) && (me.permissions ?? []).includes('retail.stock.read');
   const roles = useQuery({ queryKey: ['retail', 'branch-roles'], queryFn: () => retail.branchRoles(), enabled, staleTime: 60_000, retry: 1 });
   return enabled ? roles.data : undefined;
 }
 
-/** True unless branch roles are on and every branch the session can sell at is a store. */
-export function useCanSellAnywhere(me: Me): boolean {
-  const roles = useBranchRoles(me);
+/** True unless branch roles are on and every branch the session can sell at is a store. `wanted` false skips the branch roles read. */
+export function useCanSellAnywhere(me: Me, wanted = true): boolean {
+  const roles = useBranchRoles(me, wanted);
   return sellingBranches(branchesWhere(me, 'retail.sale.create'), roles).length > 0;
 }
 

@@ -1,5 +1,5 @@
-import { Link } from '@tanstack/react-router';
-import { type KeyboardEvent, type ReactNode, type TouchEvent, createContext, useContext, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { type KeyboardEvent, type ReactNode, type TouchEvent, createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
@@ -8,24 +8,29 @@ import { icons } from './icons';
 // From 720px it is a sidebar at the left of the page (SideNav) that can fold to its icons; below 720px a menu button at the top left
 // of the bar opens the same list in a drawer from the left (SideMenu). Both draw MenuLinks, so the items, groups and the current
 // one (aria-current) cannot drift apart. The drawer closes on the backdrop, Escape, a left swipe or a chosen link, keeps focus
-// inside while open and gives it back to the menu button. A tour step that points at one of the data-tour anchors opens the drawer,
+// inside while open and gives it back to the menu button; any change of page closes it. Between 720 and 1023px the sidebar starts
+// folded, from 1024px unfolded, until the person chooses. A tour step that points at one of the data-tour anchors opens the drawer,
 // or unfolds the folded sidebar, for as long as the step is shown, without taking focus from the tour card.
 
 const PHONE = '(max-width: 719px)';
-const subscribePhone = (notify: () => void) => {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => undefined;
-  const query = window.matchMedia(PHONE);
-  query.addEventListener('change', notify);
-  return () => query.removeEventListener('change', notify);
-};
+const NARROW = '(max-width: 1023px)';
+
+function useMedia(media: string): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      if (typeof window === 'undefined' || !window.matchMedia) return () => undefined;
+      const query = window.matchMedia(media);
+      query.addEventListener('change', notify);
+      return () => query.removeEventListener('change', notify);
+    },
+    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(media).matches,
+    () => false,
+  );
+}
 
 /** True below 720px, the design system's phone width. False when rendered without a window. */
 export function useIsPhone(): boolean {
-  return useSyncExternalStore(
-    subscribePhone,
-    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(PHONE).matches,
-    () => false,
-  );
+  return useMedia(PHONE);
 }
 
 export interface MenuLink {
@@ -38,6 +43,8 @@ export interface MenuLink {
   exact?: boolean;
   /** Links shown as a group under this one in the side menu, such as the retail shortcuts. */
   group?: ReactNode;
+  /** The paths of the group's links: on one of them this item is drawn as the section and the group's link as the current one. */
+  groupPaths?: string[];
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -46,11 +53,24 @@ const SWIPE = 50;
 // True inside the folded sidebar, so a group's links fold with the items above them.
 const Folded = createContext(false);
 
-/** One link of the side menu: its icon and label, the label kept as the accessible name and shown as a tooltip when folded. */
-export function MenuItemLink({ to, label, icon, tour, exact }: { to: string; label: string; icon: ReactNode; tour?: string; exact?: boolean }) {
+const under = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
+
+/**
+ * One link of the side menu: its icon and label, the label kept as the accessible name and shown as a tooltip when folded. With
+ * `groupPaths`, on a page of its group it is drawn as the section (.side-menu-section) and the group's link is the current one.
+ */
+export function MenuItemLink({ to, label, icon, tour, exact, groupPaths }: { to: string; label: string; icon: ReactNode; tour?: string; exact?: boolean; groupPaths?: string[] }) {
   const folded = useContext(Folded);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const section = !!groupPaths?.some((path) => under(pathname, path));
   return (
-    <Link to={to as never} activeOptions={exact ? { exact: true } : undefined} data-tour={tour} title={folded ? label : undefined}>
+    <Link
+      to={to as never}
+      activeOptions={exact || section ? { exact: true } : undefined}
+      className={section ? 'side-menu-section' : undefined}
+      data-tour={tour}
+      title={folded ? label : undefined}
+    >
       {icon}
       <span className={folded ? 'visually-hidden' : undefined}>{label}</span>
     </Link>
@@ -58,14 +78,14 @@ export function MenuItemLink({ to, label, icon, tour, exact }: { to: string; lab
 }
 
 /** The list of areas both the sidebar and the drawer draw, the groups under their item. */
-function MenuLinks({ label, tour, links, id, folded = false }: { label: string; tour?: string; links: MenuLink[]; id?: string; folded?: boolean }) {
+function MenuLinks({ label, tour, links, folded = false }: { label: string; tour?: string; links: MenuLink[]; folded?: boolean }) {
   return (
     <Folded.Provider value={folded}>
-      <nav id={id} className="side-menu-links" aria-label={label} data-tour={tour}>
+      <nav className="side-menu-links" aria-label={label} data-tour={tour}>
         <ul>
           {links.map((l) => (
             <li key={l.to}>
-              <MenuItemLink to={l.to} label={l.label} icon={l.icon} tour={l.tour} exact={l.exact || !!l.group} />
+              <MenuItemLink to={l.to} label={l.label} icon={l.icon} tour={l.tour} exact={l.exact} groupPaths={l.groupPaths} />
               {l.group}
             </li>
           ))}
@@ -77,27 +97,33 @@ function MenuLinks({ label, tour, links, id, folded = false }: { label: string; 
 
 const FOLDED_KEY = 'bms.sidebar';
 
-function readFolded(): boolean {
+// The person's own choice, `folded` or `open`; null until they choose, and the width decides.
+function readFolded(): boolean | null {
   try {
-    return window.localStorage.getItem(FOLDED_KEY) === 'folded';
+    const kept = window.localStorage.getItem(FOLDED_KEY);
+    return kept === 'folded' ? true : kept === 'open' ? false : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 function keepFolded(folded: boolean) {
   try {
-    if (folded) window.localStorage.setItem(FOLDED_KEY, 'folded');
-    else window.localStorage.removeItem(FOLDED_KEY);
+    window.localStorage.setItem(FOLDED_KEY, folded ? 'folded' : 'open');
   } catch {
     // Storage blocked (a private window): the choice lasts until the page is reloaded.
   }
 }
 
-/** The sidebar from 720px: the same list as the drawer, about 240px wide, or 64px of icons when folded (kept per device). */
+/**
+ * The sidebar from 720px: the same list as the drawer, about 240px wide, or 64px of icons when folded. It starts folded below
+ * 1024px and unfolded from there; once the person folds or unfolds it, that choice is kept on the device.
+ */
 export function SideNav({ label, tour, links, tours = [] }: { label: string; tour?: string; links: MenuLink[]; tours?: string[] }) {
-  const [folded, setFolded] = useState(readFolded);
-  const listId = useId();
+  const [choice, setChoice] = useState(readFolded);
+  const narrow = useMedia(NARROW);
+  const folded = choice ?? narrow;
+  const root = useRef<HTMLDivElement>(null);
   const { target } = useTour();
   const anchors = [tour, ...links.map((l) => l.tour), ...tours].filter(Boolean);
   // Unfolded while a tour step points into it, so the step can show the label it talks about.
@@ -105,24 +131,32 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
 
   function toggle() {
     keepFolded(!folded);
-    setFolded(!folded);
+    setChoice(!folded);
   }
 
+  // Narrowed to a phone while the focus is in the sidebar: it goes to the menu button that now holds the list. A layout effect, so
+  // the sidebar is still in the page when its clean-up looks for the focus.
+  useLayoutEffect(() => {
+    const node = root.current;
+    return () => {
+      if (node?.contains(document.activeElement)) window.setTimeout(() => document.querySelector<HTMLElement>('.menu-button')?.focus(), 0);
+    };
+  }, []);
+
   return (
-    <aside className={shownFolded ? 'side-nav side-nav-folded' : 'side-nav'}>
+    <div ref={root} className={shownFolded ? 'side-nav side-nav-folded' : 'side-nav'}>
       <button
         type="button"
         className="btn-ghost side-nav-toggle"
-        aria-label="Show menu labels"
+        aria-label="Menu labels"
         aria-expanded={!shownFolded}
-        aria-controls={listId}
         title={shownFolded ? 'Show menu labels' : 'Hide menu labels'}
         onClick={toggle}
       >
         {icons.menu}
       </button>
-      <MenuLinks id={listId} label={label} tour={tour} links={links} folded={shownFolded} />
-    </aside>
+      <MenuLinks label={label} tour={tour} links={links} folded={shownFolded} />
+    </div>
   );
 }
 
@@ -138,11 +172,26 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
   // Opened by a tour step: shown at once, with no focus moved or kept, so the tour card keeps the keyboard.
   const shownForTour = target !== undefined && anchors.includes(target);
   const shown = open || shownForTour;
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   function close() {
     setOpen(false);
     window.setTimeout(() => button.current?.focus(), 0);
   }
+
+  // Any change of page closes the menu: a chosen link, the back button, a tour or a redirect.
+  // Closed by a new page, the page behind keeps the new page's scroll instead of getting the old position back.
+  const restoreScroll = useRef(true);
+  const shownAt = useRef(pathname);
+  useEffect(() => {
+    if (shownAt.current === pathname) return;
+    shownAt.current = pathname;
+    if (!open) return;
+    const hadFocus = panel.current?.contains(document.activeElement);
+    restoreScroll.current = false;
+    setOpen(false);
+    if (hadFocus) window.setTimeout(() => button.current?.focus(), 0);
+  }, [pathname, open]);
 
   // A tour that starts while the menu is open takes over; the menu waits for the steps that point into it.
   useEffect(() => {
@@ -151,7 +200,11 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
 
   useEffect(() => {
     if (!open) return;
-    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    const node = panel.current;
+    node?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    // The page behind stays where it was: iOS Safari scrolls a body with overflow hidden, so the body is fixed at the scroll position.
+    const scrollY = window.scrollY;
+    document.body.style.setProperty('--side-menu-scroll', `-${scrollY}px`);
     document.body.classList.add('side-menu-open');
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -161,8 +214,14 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
     };
     document.addEventListener('keydown', onKey);
     return () => {
+      // Widened past the phone width while open (the drawer is gone): the focus goes to the sidebar's first link.
+      const unmounted = !node?.isConnected;
       document.body.classList.remove('side-menu-open');
+      document.body.style.removeProperty('--side-menu-scroll');
+      if (restoreScroll.current) window.scrollTo(0, scrollY);
+      restoreScroll.current = true;
       document.removeEventListener('keydown', onKey);
+      if (unmounted) window.setTimeout(() => document.querySelector<HTMLElement>('.side-nav .side-menu-links a')?.focus(), 0);
     };
   }, [open]);
 

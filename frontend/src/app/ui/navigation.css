@@ -54,6 +54,16 @@
   flex: none;
 }
 
+/* The phone's one-tap Sell beside the menu button (issue #455): the sale screen without opening the menu. */
+.staff-sell {
+  flex: none;
+}
+
+.staff-sell svg {
+  width: 18px;
+  height: 18px;
+}
+
 .branch-picker {
   display: flex;
   align-items: center;
@@ -232,7 +242,12 @@
   }
 }
 
+/* The page behind does not scroll; iOS Safari ignores overflow on the body, so it is fixed where it was (SideMenu sets the offset). */
 body.side-menu-open {
+  position: fixed;
+  top: var(--side-menu-scroll, 0);
+  right: 0;
+  left: 0;
   overflow: hidden;
 }
 
@@ -289,6 +304,15 @@ body.side-menu-open {
 }
 
 .side-menu-links a[aria-current='page'] svg {
+  color: var(--color-link);
+}
+
+/* The section of the current page (Retail above its current shortcut): the colour of the current item without its tint or edge. */
+.side-menu-links a.side-menu-section {
+  color: var(--color-link);
+}
+
+.side-menu-links a.side-menu-section svg {
   color: var(--color-link);
 }
 

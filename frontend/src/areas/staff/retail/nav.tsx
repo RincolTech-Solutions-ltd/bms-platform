@@ -1,12 +1,13 @@
 import type { Me } from '../../../api/client';
 import { icons } from '../../../components/icons';
 import { MenuItemLink } from '../../../components/side-menu';
-import { SCREENS, canUse, type RetailScreen } from './permissions';
+import { SCREENS, canUse, showRetail, type RetailScreen } from './permissions';
 import { useCanSellAnywhere } from './ui';
 
 // The retail shortcuts (#95): the first retail screens the session may use, with short names. The pilot's order comes first (Sales,
 // Banked, Savings, Expenses, Advances, FR-RET-31), with customer orders right after Sale (issue #385), then the stock shortcuts.
-// Since issue #455 they are a group under Retail in the side menu on every screen size, not a bar of their own.
+// Since issue #455 they are a group under Retail in the side menu on every screen size, not a bar of their own, and a phone has a
+// one-tap Sell button in the staff bar for anyone who can sell.
 
 const SHORTCUTS: Partial<Record<RetailScreen, string>> = {
   sale: 'Sale', orders: 'Orders', banking: 'Banked', savings: 'Savings', expenses: 'Expenses', advances: 'Advances', stock: 'Stock', restock: 'Restock', stocktake: 'Count', usage: 'Usage',
@@ -21,9 +22,18 @@ export function shortcutsFor(me: Pick<Me, 'permissions' | 'module_capabilities'>
     .slice(0, MAX_SHORTCUTS);
 }
 
+/**
+ * True when the session may record a sale somewhere: retail is on, the sale screen is allowed and, with branch roles, some branch it
+ * sells at is not a store. The branch roles are read only when the first two hold.
+ */
+export function useSells(me: Me): boolean {
+  const may = showRetail(me) && canUse(me, 'sale');
+  const anywhere = useCanSellAnywhere(me, may);
+  return may && anywhere;
+}
+
 /** The shortcuts as a group under Retail in the side menu, the sidebar and the phone drawer alike (issue #455). */
-export function RetailMenuGroup({ me }: { me: Me }) {
-  const shortcuts = shortcutsFor(me, { sells: useCanSellAnywhere(me) });
+export function RetailMenuGroup({ shortcuts }: { shortcuts: ReturnType<typeof shortcutsFor> }) {
   if (shortcuts.length === 0) return null;
   return (
     <ul className="side-menu-group" aria-label="Retail" data-tour="retail-nav">
