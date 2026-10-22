@@ -127,8 +127,15 @@ export const WEDGE_MIN = 4;
  */
 export const WEDGE_IDLE_MS = 500;
 
-/** A whole code with a check digit (EAN-13, EAN-8, UPC-A) that comes out right. */
+/** The Code 128 code the system makes for an item's labels: IN and eight digits (Barcodes.GENERATED_PREFIX on the server). */
+const LABEL_CODE = /^IN\d{8}$/;
+
+/**
+ * A code whose shape proves it whole: an EAN-13, EAN-8 or UPC-A whose check digit comes out right, or one of the
+ * system's own label codes. A key a scanner left on its own before a stall is joined back only when it makes one.
+ */
 function checked(code: string): boolean {
+  if (LABEL_CODE.test(code)) return true;
   const c = checkBarcode(code);
   return c.ok && c.format !== 'code128';
 }
@@ -141,7 +148,8 @@ function checked(code: string): boolean {
  * ends the run, as does `end` (a Tab), so a person whose keys only now and then come within the gap keeps what they
  * typed. A scanner that stalls after its first key leaves that key as a run of its own: `earlier` is true when Enter
  * takes the code from that key on, which happens only when that key and the run after it make a code with a right
- * check digit and the run alone does not (a person who types one key just before a scan keeps it).
+ * check digit, or one of the system's IN label codes, and the run alone does not (a person who types one key just
+ * before a scan keeps it). Another Code 128 that stalls after its first key is still split.
  */
 export function createWedge(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
   let buffer = '';

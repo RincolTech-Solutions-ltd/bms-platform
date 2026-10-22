@@ -1317,8 +1317,9 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   after the stall join the code, so the whole code is looked up, the field keeps the value from before the first key, and four keys
   are still needed at Enter. A second stall ends the run, and so does a Tab, so a person whose keys only now and then come within
   the gap (1000 typed at 70 to 120 ms a key with one key rollover, or 12, Tab, 50) keeps what was typed and their Enter reaches the
-  form. A Code 128 that stalls right after its first key is still split (a known limit). A stall right after the first key is taken as one
-  code only when that key and the rest make an EAN-13, EAN-8 or UPC-A with a right check digit and the rest alone do not, so a
+  form. A stall right after the first key is taken as one code only when that key and the rest make an EAN-13, EAN-8 or UPC-A with a
+  right check digit, or one of the system's own label codes (`IN` and eight digits), and the rest alone do not. Any other Code 128
+  that stalls right after its first key is still split (a known limit). So a
   single key typed just before a scan stays in the field, and an Enter at scanner speed after a run of scanner keys never reaches the form, even when the
   keys after the stall are too few to be a code. On the sale screen the cursor waits in the scan box (on a device with a
   mouse or trackpad; "Keep the cursor in the scan box on the sale screen" in Notifications and app turns it off), so a scan too slow

@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { retail, type Product } from '../../../api/retail';
+import { useOffline } from '../../../offline/offline-context';
 import { useStaff } from '../context';
 import { WEDGE_GAP_CHOICES, WEDGE_GAP_MS, createWedge, findByBarcodeIn, saleScanFocus, saveSaleScanFocus, saveWedgeGap, spreadsheetDamaged, wedgeGap } from './barcode-state';
 import { holds } from './permissions';
@@ -150,6 +151,7 @@ type Outcome = { kind: 'added'; name: string } | { kind: 'refused'; message: str
 export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: string; branchId?: string; onFound: (product: Product, unitId?: string) => string | void; keepFocus?: boolean }) {
   const { me } = useStaff();
   const queryClient = useQueryClient();
+  const offline = useOffline();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -201,8 +203,13 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
       }
     } catch (error) {
       // No answer from the server (offline): the items this screen has already read carry their barcodes.
-      const cached = queryClient.getQueriesData<Product[] | { items?: Product[] }>({ queryKey: ['retail', 'products'] })
-        .flatMap(([, data]) => (Array.isArray(data) ? data : data?.items ?? []));
+      // The phone's offline catalogue (issue #458) holds the items of each selling branch with their barcodes too.
+      const onPhone = offline?.catalogue?.products ?? {};
+      const cached = [
+        ...(branchId ? onPhone[branchId] ?? [] : Object.values(onPhone).flat()),
+        ...queryClient.getQueriesData<Product[] | { items?: Product[] }>({ queryKey: ['retail', 'products'] })
+          .flatMap(([, data]) => (Array.isArray(data) ? data : data?.items ?? [])),
+      ];
       const hit = error instanceof TypeError ? findByBarcodeIn(cached, code) : null;
       if (hit) found(hit.product, hit.unitId);
       else {
@@ -307,6 +314,10 @@ export function ScannerSettings() {
       <p className="hint">
         A scanner types the code very fast and presses Enter. If scans from a slow Bluetooth scanner end up as typing, choose a
         slower speed here. This is kept on this device only.
+      </p>
+      <p className="hint">
+        A slower speed is closer to fast typing: a number typed very quickly and then Enter (for example 1000 on a count)
+        may then be taken for a scan, so keep Usual unless scans fail.
       </p>
       <label htmlFor="scanner-gap">Scanner speed</label>
       <select id="scanner-gap" value={gap} onChange={(e) => { const ms = Number(e.target.value); saveWedgeGap(ms); setGap(ms); }}>

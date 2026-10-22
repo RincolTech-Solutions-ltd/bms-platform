@@ -11,7 +11,9 @@ import { ReceiveBlindPage } from './goods-receive';
 import { RestockForm } from './restock';
 import { SaleForm } from './sale';
 import { StocktakePage } from './stocktake';
-import { ScannerSettings } from './scan';
+import { ScanBar, ScannerSettings } from './scan';
+import { OfflineProvider, type Offline } from '../../../offline/offline-context';
+import type { Product } from '../../../api/retail';
 import { TransferForm } from './transfer';
 import { PACK_UNUSABLE, wedgeGap } from './barcode-state';
 
@@ -197,6 +199,31 @@ describe('FR-RET-68 scanning on the sale form', () => {
     expect(qtyOf(0)).toBe('12');
     expect(qty.selectionStart).toBe(2);
     await waitFor(() => expect(qtyOf(0)).toBe('13'));
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
+  it('looks up a whole IN label code and keeps the quantity when the scan stalls after its first key', async () => {
+    // A Code 128 has no check digit, so the system's own label codes (IN and eight digits) are joined back by their shape.
+    const [made] = await retail.generateBarcodes([LAMP]);
+    const label = made?.code ?? '';
+    expect(label).toMatch(/^IN\d{8}$/);
+    screenOf(<SaleForm branchId={BRANCH} />);
+    wedge(label);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    const qty = document.getElementById('qty-0') as HTMLInputElement;
+    const submitted = vi.fn((e: Event) => e.preventDefault());
+    qty.form?.addEventListener('submit', submitted);
+    fireEvent.change(qty, { target: { value: '12' } });
+    qty.focus();
+    qty.setSelectionRange(2, 2);
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    expect(stalled(label, 1, 120).defaultPrevented).toBe(true);
+    // Without the IN rule the I stays in the quantity (12I) and N00000001 is looked up as unknown.
+    expect(qtyOf(0)).toBe('12');
+    expect(qty.selectionStart).toBe(2);
+    await waitFor(() => expect(qtyOf(0)).toBe('13'));
+    expect(lookUp).toHaveBeenCalledWith(label, BRANCH);
     expect(screen.queryByTestId('scan-unknown')).toBeNull();
     expect(submitted).not.toHaveBeenCalled();
   });
@@ -468,6 +495,22 @@ describe('FR-RET-68 a person typing fast is not a scan', () => {
     expect(screen.queryByTestId('scan-unknown')).toBeNull();
   });
 
+  it.each(Object.keys(SCREENS) as (keyof typeof SCREENS)[])('keeps 1000 typed at 60 ms a key into %s with the usual 35 ms gap', async (where) => {
+    // Under the Slower 80 ms setting the same keys make a burst; the default must leave them to the person.
+    const [field] = await SCREENS[where]();
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    field.focus();
+    field.select();
+    const seen = reached(field);
+    let at = (clock += 10000);
+    for (const ch of '1000') press(ch, (at += 60));
+    expect(press('Enter', (clock = at + 5)).defaultPrevented).toBe(false);
+    expect(field.value).toBe('1000');
+    expect(seen).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookUp).not.toHaveBeenCalled();
+  });
+
   it.each(CASES)('keeps 12, Tab, 50 typed into %s with a %i ms gap, and lets Enter through', async (where, gap) => {
     if (gap !== 35) localStorage.setItem('bms.scanner.gap-ms', String(gap));
     const [first, second] = await SCREENS[where]();
@@ -663,5 +706,23 @@ describe('FR-RET-68 the label sheet', () => {
     expect(screen.getByTestId('label-stock').textContent).toContain('zero margin');
     fireEvent.click(screen.getByRole('checkbox', { name: /keep 4 mm clear inside each label/ }));
     expect(screen.getByTestId('label-sheet').classList.contains('label-safe')).toBe(true);
+  });
+});
+
+describe('FR-RET-68 scanning with no network', () => {
+  it('finds a scanned item in the catalogue kept on the phone for offline selling', async () => {
+    const onPhone: Product = { id: LAMP, code: 'P003', description: 'Test offline lamp', unit: 'piece', active: true, barcodes: [{ id: 'b1', product_id: LAMP, code: EAN, format: 'ean13', generated: false }] };
+    vi.spyOn(retail, 'findByBarcode').mockRejectedValue(new TypeError('Failed to fetch'));
+    const offline = { catalogue: { pricesAsOf: '2026-10-22T08:00:00Z', products: { [BRANCH]: [onPhone] }, customers: [] } } as unknown as Offline;
+    const onFound = vi.fn();
+    screenOf(
+      <OfflineProvider value={offline}>
+        <ScanBar id="offline-scan" branchId={BRANCH} onFound={onFound} />
+      </OfflineProvider>,
+    );
+    wedge(EAN);
+    await waitFor(() => expect(onFound).toHaveBeenCalled());
+    // Without the phone's catalogue nothing on this screen holds the item, and the scan fails.
+    expect(onFound.mock.calls[0]?.[0]).toMatchObject({ id: LAMP, description: 'Test offline lamp' });
   });
 });
