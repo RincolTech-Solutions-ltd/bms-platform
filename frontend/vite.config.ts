@@ -34,7 +34,7 @@ export default defineConfig({
         // Staff data is never cached for offline use; API calls always go to the network
         // (ADR-009). Member read caches arrive with the member area.
         // The manifest and icons of the business (ADR-064) are under /api/ too, so they always come from the network.
-        navigateFallbackDenylist: [/^\/api\//, /^\/api\/v1\/branding\/app\//, /^\/healthz/, /^\/readyz/, /^\/version/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/healthz/, /^\/readyz/, /^\/version/],
       },
     }),
   ],

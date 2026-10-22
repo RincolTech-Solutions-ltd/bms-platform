@@ -14,10 +14,12 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.BreakIterator;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.CacheControl;
@@ -52,6 +54,9 @@ class AppManifestController {
 
     static final int SHORT_NAME_MAX = 12;
 
+    /** A cut at a word boundary is preferred when it keeps at least this many characters. */
+    static final int SHORT_NAME_WORD_MIN = 6;
+
     private static final Logger log = LoggerFactory.getLogger(AppManifestController.class);
 
     @Schema(name = "AppManifest", description = "A W3C web app manifest")
@@ -65,7 +70,10 @@ class AppManifestController {
             String scope,
             String display,
             String backgroundColor,
+
+            @Schema(defaultValue = DEFAULT_THEME, description = "The business's colour, or this one when it has none")
             String themeColor,
+
             List<Icon> icons) {}
 
     @Schema(name = "AppManifestIcon")
@@ -99,9 +107,10 @@ class AppManifestController {
     }
 
     /**
-     * One icon by its file name. With a logo it is drawn on the theme colour and cached by the logo's
-     * checksum, the colour and the variant (the ETag); without one, or when storage cannot be read,
-     * it is a redirect to the BMS icon of the same name. {@code v} only busts caches.
+     * One icon by its file name. With a logo it is drawn on the theme colour and cached per business
+     * by the drawing's version, the logo's checksum and the colour (with the variant, the ETag);
+     * without one, when storage cannot be read, or when the logo cannot be drawn, it is a redirect to
+     * the BMS icon of the same name, never a 500. {@code v} only busts caches.
      */
     @GetMapping(path = "/{file}", produces = MediaType.IMAGE_PNG_VALUE)
     @PublicEndpoint
@@ -132,8 +141,8 @@ class AppManifestController {
         }
         Logo logo = brand.logo().get();
         String colour = theme(brand);
-        String etag =
-                "\"" + sha256((logo.meta().sha256() + colour + variant.file).getBytes(StandardCharsets.UTF_8)) + "\"";
+        String drawing = AppIcons.RENDER_VERSION + ":" + logo.meta().sha256() + ":" + colour;
+        String etag = "\"" + sha256((drawing + ":" + variant.file).getBytes(StandardCharsets.UTF_8)) + "\"";
         boolean notModified = BrandingController.matches(ifNoneMatch, etag);
         ResponseEntity.BodyBuilder response = ResponseEntity.status(
                         notModified ? HttpStatus.NOT_MODIFIED : HttpStatus.OK)
@@ -144,8 +153,8 @@ class AppManifestController {
         if (notModified) {
             return response.build();
         }
-        Optional<byte[]> png =
-                AppIcons.cached(etag, () -> logoBytes(logo).map(b -> AppIcons.render(b, colour, variant)));
+        UUID business = TenantContext.current().orElseThrow();
+        Optional<byte[]> png = AppIcons.cached(business, drawing, variant, () -> logoBytes(logo), colour);
         if (png.isEmpty()) {
             return platformIcon(variant);
         }
@@ -175,7 +184,8 @@ class AppManifestController {
                 : brand.displayName().strip();
         List<Icon> icons;
         if (brand.logo().isPresent()) {
-            String v = "?v=" + brand.logo().get().id() + "-" + theme(brand).substring(1);
+            String v = "?v=" + AppIcons.RENDER_VERSION + "-"
+                    + brand.logo().get().id() + "-" + theme(brand).substring(1);
             icons = List.of(
                     new Icon(BASE + "/icon-192.png" + v, "192x192", "image/png", "any"),
                     new Icon(BASE + "/icon-512.png" + v, "512x512", "image/png", "any"),
@@ -203,12 +213,33 @@ class AppManifestController {
                 icons);
     }
 
-    /** At most {@value #SHORT_NAME_MAX} characters (code points), so a home screen label is not cut mid-letter. */
+    /**
+     * At most {@value #SHORT_NAME_MAX} characters as a reader counts them (grapheme clusters, so an
+     * emoji or an accented letter is never cut in half), cut at the last word boundary when that keeps
+     * at least {@value #SHORT_NAME_WORD_MIN} of them.
+     */
     static String shortName(String name) {
-        if (name.codePointCount(0, name.length()) <= SHORT_NAME_MAX) {
+        BreakIterator characters = BreakIterator.getCharacterInstance();
+        characters.setText(name);
+        int minimum = -1;
+        int cut = characters.first();
+        for (int n = 0; n < SHORT_NAME_MAX; n++) {
+            cut = characters.next();
+            if (cut == BreakIterator.DONE) {
+                return name;
+            }
+            if (n + 1 == SHORT_NAME_WORD_MIN) {
+                minimum = cut;
+            }
+        }
+        if (characters.next() == BreakIterator.DONE) {
             return name;
         }
-        return name.substring(0, name.offsetByCodePoints(0, SHORT_NAME_MAX)).strip();
+        BreakIterator words = BreakIterator.getWordInstance();
+        words.setText(name);
+        int word = words.isBoundary(cut) ? cut : words.preceding(cut);
+        int end = word != BreakIterator.DONE && word >= minimum ? word : cut;
+        return name.substring(0, end).strip();
     }
 
     private static String theme(AppBrand brand) {

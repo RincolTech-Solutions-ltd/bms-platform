@@ -11,9 +11,11 @@
          answers with the BMS ones where there is no logo or no business. -->
     <link rel="manifest" href="/api/v1/branding/app/manifest.webmanifest" />
     <!-- iOS: the icon of the home screen shortcut, and opening it as an app rather than a Safari tab (ADR-050). The
-         home screen name comes from the manifest, so the page sets no iPhone title of its own. -->
+         home screen name is this tag, which iOS reads instead of the manifest: the shell sets it to the business's
+         short name at runtime, the same cut as the manifest's short_name (ADR-064). -->
     <link rel="apple-touch-icon" href="/api/v1/branding/app/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BMS" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>BMS Platform</title>
   </head>

@@ -43,6 +43,32 @@ export function themeVars(brand: ShellBrand): Record<string, string> {
 
 export const THEME_PROPERTIES = ['--brand', '--brand-contrast'] as const;
 
+/** The home screen label's length, as the API's manifest cuts its short_name (ADR-064). */
+export const SHORT_NAME_MAX = 12;
+/** A cut at a word boundary is preferred when it keeps at least this many characters. */
+export const SHORT_NAME_WORD_MIN = 6;
+
+/**
+ * The name cut to {@link SHORT_NAME_MAX} characters as a reader counts them (an emoji is never split), at the last word boundary
+ * when that keeps at least {@link SHORT_NAME_WORD_MIN}: the same cut as the manifest's short_name.
+ */
+export function shortAppName(name: string): string {
+  const characters = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(name)];
+  if (characters.length <= SHORT_NAME_MAX) return name;
+  const cut = characters[SHORT_NAME_MAX]?.index ?? name.length;
+  const minimum = characters[SHORT_NAME_WORD_MIN]?.index ?? 0;
+  const word = [...new Intl.Segmenter('en', { granularity: 'word' }).segment(name)]
+    .map((s) => s.index)
+    .filter((i) => i <= cut)
+    .pop();
+  return name.slice(0, word !== undefined && word >= minimum ? word : cut).trim();
+}
+
+/** The iPhone's home screen name: the business's short name on its host, BMS on the platform's (as the manifest says). */
+export function appTitle(brand: ShellBrand): string {
+  return brand === PLATFORM_BRAND ? 'BMS' : shortAppName(brand.name);
+}
+
 /** The logo image. In local development the tenant travels as a header, which an <img> cannot send. */
 async function loadLogo(url: string): Promise<string> {
   const headers = tenantHeaders();

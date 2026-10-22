@@ -7,8 +7,12 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -29,9 +33,13 @@ class TenantResolutionFilter extends OncePerRequestFilter {
 
     /**
      * The installed app's manifest and icons (ADR-064) answer on any host: the business's own where the
-     * host resolves one, the platform's otherwise. Nothing else under this prefix runs without a tenant.
+     * host resolves one, the platform's otherwise. Exactly these paths, compared with the raw request
+     * path, so no encoding, dot segment or path parameter widens it; nothing else runs without a tenant.
      */
-    static final String TENANT_OPTIONAL = AppManifestController.BASE + "/";
+    static final Set<String> TENANT_OPTIONAL = Stream.concat(
+                    Stream.of(AppManifestController.BASE + "/manifest.webmanifest"),
+                    Arrays.stream(AppIcons.Variant.values()).map(v -> AppManifestController.BASE + "/" + v.file))
+            .collect(Collectors.toUnmodifiableSet());
 
     private final TenancyProperties properties;
     private final TenantHostPattern hosts;
@@ -64,7 +72,7 @@ class TenantResolutionFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         Optional<Resolved> tenant = slugFrom(request).flatMap(this::resolve);
-        if (tenant.isEmpty() && request.getRequestURI().startsWith(TENANT_OPTIONAL)) {
+        if (tenant.isEmpty() && TENANT_OPTIONAL.contains(request.getRequestURI())) {
             chain.doFilter(request, response);
             return;
         }

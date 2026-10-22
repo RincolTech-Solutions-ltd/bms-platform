@@ -4,17 +4,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.documents.Documents;
+import com.rincoltech.bms.kernel.CurrentPrincipal;
+import com.rincoltech.bms.kernel.Principal;
+import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.testsupport.ImageFixtures;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +37,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import tools.jackson.databind.JsonNode;
@@ -45,6 +56,12 @@ class AppManifestIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
+
+    @Autowired
+    Documents documents;
+
+    @Autowired
+    PlatformTransactionManager transactions;
 
     TestDatabase.Fixture t;
 
@@ -129,7 +146,8 @@ class AppManifestIT extends IntegrationTest {
         assertThat(m.get("scope").asString()).isEqualTo("/");
         assertThat(m.get("display").asString()).isEqualTo("standalone");
         assertThat(m.get("name").asString()).isEqualTo("Fabricated Trading Company");
-        assertThat(m.get("short_name").asString()).isEqualTo("Fabricated T");
+        // Twelve characters would cut "Fabricated T"; the word boundary after "Fabricated" is kept instead.
+        assertThat(m.get("short_name").asString()).isEqualTo("Fabricated");
         assertThat(m.get("theme_color").asString()).isEqualTo("#0D5C75");
         assertThat(m.get("icons")).hasSize(4);
         assertThat(srcs(m)).allMatch(s -> s.startsWith("/api/v1/branding/app/icon-") && s.contains("?v="));
@@ -223,6 +241,158 @@ class AppManifestIT extends IntegrationTest {
         // Every other branding route still refuses a host that is no business.
         assertThat(get("/api/v1/branding", "no-such-business", JsonNode.class).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    /** The icon's ETag and the manifest's {@code ?v=} change with a new logo and with a new colour. */
+    @Test
+    void aNewLogoOrColourIsANewIconVersion() throws Exception {
+        brand("Fabricated Versions", "#0D5C75");
+        uploadLogo(ImageFixtures.png(200, 200, Color.WHITE));
+        String etag1 = iconEtag();
+        String v1 = manifestVersion();
+
+        uploadLogo(ImageFixtures.png(300, 150, Color.YELLOW));
+        String etag2 = iconEtag();
+        String v2 = manifestVersion();
+        assertThat(etag2).isNotEqualTo(etag1);
+        assertThat(v2).isNotEqualTo(v1);
+        assertThat(decode(get("/api/v1/branding/app/icon-512.png", t.slug(), byte[].class)
+                                        .getBody())
+                                .getRGB(256, 256)
+                        & 0xFFFFFF)
+                .isEqualTo(0xFFFF00);
+
+        brand("Fabricated Versions", "#1B4332");
+        String etag3 = iconEtag();
+        String v3 = manifestVersion();
+        assertThat(etag3).isNotIn(etag1, etag2);
+        assertThat(v3).isNotIn(v1, v2);
+        assertThat(decode(get("/api/v1/branding/app/icon-512.png", t.slug(), byte[].class)
+                                        .getBody())
+                                .getRGB(0, 0)
+                        & 0xFFFFFF)
+                .isEqualTo(0x1B4332);
+    }
+
+    String iconEtag() {
+        ResponseEntity<byte[]> icon = get("/api/v1/branding/app/icon-512.png", t.slug(), byte[].class);
+        assertThat(icon.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return icon.getHeaders().getETag();
+    }
+
+    String manifestVersion() {
+        String src = srcs(get(MANIFEST, t.slug(), JsonNode.class).getBody()).getFirst();
+        return src.substring(src.indexOf("?v="));
+    }
+
+    /** A name with a double quote and an emoji: valid JSON, and the short name never splits the emoji. */
+    @Test
+    void aNameWithAQuoteAndAnEmoji() {
+        String family = "👨‍👩‍👧";
+        brand("Test \"Q\" " + family + " Shop", "#0D5C75");
+        ResponseEntity<String> raw = get(MANIFEST, t.slug(), String.class);
+        assertThat(raw.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(raw.getBody()).contains("\"name\":\"Test \\\"Q\\\" " + family + " Shop\"");
+        JsonNode m = get(MANIFEST, t.slug(), JsonNode.class).getBody();
+        assertThat(m.get("name").asString()).isEqualTo("Test \"Q\" " + family + " Shop");
+        // Twelve characters end inside "Shop"; the cut falls back to the word boundary after the whole emoji.
+        assertThat(m.get("short_name").asString()).isEqualTo("Test \"Q\" " + family);
+    }
+
+    /** A logo with a transparent background: the theme colour shows through it and in the corners. */
+    @Test
+    void aTransparentLogoShowsTheThemeColour() throws Exception {
+        brand("Fabricated Clear Logo", "#0D5C75");
+        BufferedImage logo = new BufferedImage(200, 200, BufferedImage.TYPE_INT_ARGB);
+        for (int x = 80; x < 120; x++) {
+            for (int y = 80; y < 120; y++) {
+                logo.setRGB(x, y, 0xFFFFFFFF);
+            }
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(logo, "png", out);
+        uploadLogo(out.toByteArray());
+
+        BufferedImage icon = decode(
+                get("/api/v1/branding/app/icon-192.png", t.slug(), byte[].class).getBody());
+        assertThat(icon.getRGB(0, 0) & 0xFFFFFF).isEqualTo(0x0D5C75);
+        assertThat(icon.getRGB(191, 191) & 0xFFFFFF).isEqualTo(0x0D5C75);
+        // Inside the logo's box but transparent there: the colour, not black or white.
+        assertThat(icon.getRGB(40, 96) & 0xFFFFFF).isEqualTo(0x0D5C75);
+        assertThat(icon.getRGB(96, 96) & 0xFFFFFF).isEqualTo(0xFFFFFF);
+    }
+
+    /**
+     * A stored logo that cannot be drawn (here bytes that are no image at all) is never a 500: every icon
+     * is the BMS icon of the same name, again on the next request, and the manifest still answers.
+     */
+    @Test
+    void aLogoThatCannotBeDrawnFallsBackToTheBmsIcons() throws Exception {
+        brand("Fabricated Broken Logo", "#0D5C75");
+        byte[] broken = "this is no picture at all".getBytes(StandardCharsets.US_ASCII);
+        String sha =
+                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(broken));
+        // Stored as the documents module stores any upload, by a signed-in member of staff, past the upload's own
+        // checks.
+        CurrentPrincipal.set(Principal.uniform(UUID.randomUUID(), "staff", Set.of(), true, Set.of()));
+        UUID document;
+        try {
+            document = TenantContext.callAs(
+                    t.tenantId(),
+                    () -> new TransactionTemplate(transactions)
+                            .execute(tx -> documents
+                                    .store(
+                                            new Documents.Prepared(broken, "image/png", "png", sha),
+                                            "core.tenant",
+                                            t.tenantId(),
+                                            null)
+                                    .id()));
+        } finally {
+            CurrentPrincipal.clear();
+        }
+        TestDatabase.owner().sql("""
+                        UPDATE tenant_settings
+                           SET settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('logo_document_id', ?::text)
+                         WHERE tenant_id = ?
+                        """).params(document.toString(), t.tenantId()).update();
+
+        ResponseEntity<JsonNode> manifest = get(MANIFEST, t.slug(), JsonNode.class);
+        assertThat(manifest.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(manifest.getBody().get("name").asString()).isEqualTo("Fabricated Broken Logo");
+
+        HttpClient client = HttpClient.newHttpClient();
+        for (int round = 0; round < 2; round++) {
+            for (String file : List.of(
+                    "icon-192.png",
+                    "icon-512.png",
+                    "icon-maskable-192.png",
+                    "icon-maskable-512.png",
+                    "apple-touch-icon.png")) {
+                HttpResponse<Void> r = client.send(
+                        HttpRequest.newBuilder(URI.create(http.getRootUri() + "/api/v1/branding/app/" + file))
+                                .header("X-Tenant", t.slug())
+                                .build(),
+                        HttpResponse.BodyHandlers.discarding());
+                assertThat(r.statusCode()).as("%s round %d", file, round).isEqualTo(302);
+                assertThat(r.headers().firstValue("Location")).hasValue("/icons/" + file);
+            }
+        }
+    }
+
+    /** Only the manifest and the five icon names answer without a business; nothing else under the prefix does. */
+    @Test
+    void onlyTheExactManifestAndIconPathsAnswerWithoutABusiness() {
+        assertThat(get("/api/v1/branding/app/manifest.webmanifest", "no-such-business", JsonNode.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        for (String path : List.of(
+                "/api/v1/branding/app/other",
+                "/api/v1/branding/app/icon-64.png",
+                "/api/v1/branding/app/icon-192.png/extra")) {
+            ResponseEntity<JsonNode> r = get(path, "no-such-business", JsonNode.class);
+            assertThat(r.getStatusCode()).as(path).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(r.getBody().get("code").asString()).as(path).isEqualTo("unknown_tenant");
+        }
     }
 
     /** NFR-ISO: one business's icon is never served on another's host. */

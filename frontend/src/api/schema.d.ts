@@ -6628,7 +6628,11 @@ export interface components {
             scope?: string;
             short_name?: string;
             start_url?: string;
-            theme_color?: string;
+            /**
+             * @description The business's colour, or this one when it has none
+             * @default #0077B6
+             */
+            theme_color: string;
         };
         AppManifestIcon: {
             purpose?: string;

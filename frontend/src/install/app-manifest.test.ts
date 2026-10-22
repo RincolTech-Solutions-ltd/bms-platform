@@ -13,7 +13,7 @@ describe('the app manifest and icon of the business', () => {
     expect(html).toContain('<link rel="manifest" href="/api/v1/branding/app/manifest.webmanifest" />');
     expect(html).toContain('<link rel="apple-touch-icon" href="/api/v1/branding/app/apple-touch-icon.png" />');
     expect(html).not.toContain('href="/icons/apple-touch-icon.png"');
-    expect(html).not.toContain('apple-mobile-web-app-title');
+    expect(html).toContain('<meta name="apple-mobile-web-app-title" content="BMS" />');
     expect(html.match(/rel="manifest"/g)).toHaveLength(1);
   });
 
@@ -22,6 +22,5 @@ describe('the app manifest and icon of the business', () => {
     expect(config).toContain("'icons/icon-maskable-512.png'");
     const deny = /navigateFallbackDenylist: \[(.*)\]/.exec(config)?.[1] ?? '';
     expect(deny).toContain('/^\\/api\\//');
-    expect(deny).toContain('/^\\/api\\/v1\\/branding\\/app\\//');
   });
 });

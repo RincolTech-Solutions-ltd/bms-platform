@@ -375,6 +375,8 @@
             "type" : "string"
           },
           "theme_color" : {
+            "default" : "#0077B6",
+            "description" : "The business's colour, or this one when it has none",
             "type" : "string"
           }
         }

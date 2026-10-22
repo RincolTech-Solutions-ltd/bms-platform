@@ -193,12 +193,11 @@ describe('the installed app theme colour', () => {
   it('has a manifest theme_color equal to the light colour, and a dark colour that is the dark surface', () => {
     const config = readFileSync(join(process.cwd(), 'vite.config.ts'), 'utf8');
     expect(config).toContain("'theme-init.js'");
-    // The manifest is the API's (ADR-064); a business without a readable colour gets this one.
-    const api = readFileSync(
-      join(process.cwd(), '../backend/src/main/java/com/rincoltech/bms/core/tenancy/internal/AppManifestController.java'),
-      'utf8',
-    );
-    expect(api).toContain(`DEFAULT_THEME = "${THEME_COLOURS.light.toUpperCase()}"`);
+    // The manifest is the API's (ADR-064); a business without a readable colour gets the contract's default.
+    const contract = JSON.parse(readFileSync(join(process.cwd(), '../docs/api/openapi.json'), 'utf8')) as {
+      components: { schemas: { AppManifest: { properties: { theme_color: { default?: string } } } } };
+    };
+    expect(contract.components.schemas.AppManifest.properties.theme_color.default).toBe(THEME_COLOURS.light.toUpperCase());
     const css = readFileSync(join(process.cwd(), 'src/app/theme.css'), 'utf8');
     const dark = css.match(/:root\[data-theme='dark'\]\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(dark).toContain(`--color-bg: ${THEME_COLOURS.dark};`);
