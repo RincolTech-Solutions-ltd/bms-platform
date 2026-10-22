@@ -145,6 +145,34 @@ describe('the staff side menu on a phone (issue #455)', () => {
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 
+  it('shows Sign out in the drawer busy while signing out, sends it once, and frees it when signing out is over', async () => {
+    let finish = () => undefined as void;
+    const { signOut } = show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
+    const dialog = openMenu();
+    const button = within(dialog).getByRole('button', { name: 'Sign out' });
+    expect(button.getAttribute('aria-busy')).toBeNull();
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.querySelector('.busy-spinner')).not.toBeNull();
+    expect(button.textContent).toBe('Sign out');
+    fireEvent.click(button);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    expect(button.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('shows Sign out in the bar busy while signing out from 720px', async () => {
+    widthIs(false);
+    let finish = () => undefined as void;
+    show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
+    const button = screen.getByRole('button', { name: 'Sign out' });
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    await act(async () => finish());
+    expect(button.getAttribute('aria-busy')).toBeNull();
+  });
+
   it('says Working inside the opened drawer, which hides the rest of the page, while Sign out runs', async () => {
     let finish = () => undefined as void;
     show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
