@@ -67,6 +67,8 @@ class SignInLimitsIT extends IntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // The limits answer the real refill time as Retry-After; the shared client would sleep through it and retry.
+        http = Api.withoutRetries(http);
         t = TestDatabase.tenant("limits", true);
         api = Api.tenant(http, t.slug());
     }

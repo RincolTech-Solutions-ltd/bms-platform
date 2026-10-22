@@ -49,6 +49,8 @@ class PasswordResetIT extends IntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // The limits answer the real refill time as Retry-After; the shared client would sleep through it and retry.
+        http = Api.withoutRetries(http);
         t = TestDatabase.tenant("reset", true);
         api = Api.tenant(http, t.slug());
         // Two-step sign-in is optional by default (issue #348, ADR-046); most cases here are about a business that
