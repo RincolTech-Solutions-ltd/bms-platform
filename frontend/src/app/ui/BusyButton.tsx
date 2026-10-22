@@ -16,6 +16,9 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 const working = () => busyCount > 0;
+// The modal announcers mounted now: while one is, the shell's steps aside, so a screen reader hears one Working at a time.
+let modalCount = 0;
+const inModal = () => modalCount > 0;
 
 function countBusy(delta: number) {
   const before = working();
@@ -25,10 +28,22 @@ function countBusy(delta: number) {
 
 /**
  * The polite live region the busy buttons speak through; the app shell mounts it once. An aria-modal dialog hides the shell's
- * one from a screen reader, so a modal that holds a busy button (the phone menu's Sign out) mounts a second inside itself.
+ * one from a screen reader, so a modal that holds a busy button (the phone menu's Sign out) mounts a `modal` one inside itself,
+ * and the shell's renders nothing while it is there.
  */
-export function BusyAnnouncer() {
+export function BusyAnnouncer({ modal = false }: { modal?: boolean }) {
   const now = useSyncExternalStore(subscribe, working, working);
+  const covered = useSyncExternalStore(subscribe, inModal, inModal);
+  useEffect(() => {
+    if (!modal) return;
+    modalCount += 1;
+    listeners.forEach((listener) => listener());
+    return () => {
+      modalCount -= 1;
+      listeners.forEach((listener) => listener());
+    };
+  }, [modal]);
+  if (!modal && covered) return null;
   return (
     <span className="visually-hidden" role="status" data-busy-announcer="">
       {now ? 'Working' : ''}

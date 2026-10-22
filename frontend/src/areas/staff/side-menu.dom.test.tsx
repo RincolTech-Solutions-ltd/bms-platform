@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import { RouterContextProvider, RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Me } from '../../api/client';
+import { api, type Me } from '../../api/client';
 import { retail } from '../../api/retail';
 import { mockMe } from '../../api/retail-mock';
 import { router as appRouter } from '../../app/router';
+import { BusyAnnouncer } from '../../app/ui/BusyButton';
+import { setAccessToken } from '../../auth/session';
 import { TourProvider, useTour } from '../../tour/host';
 import type { Tour } from '../../tour/model';
 import { StaffContext } from './context';
@@ -117,6 +119,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  setAccessToken(null);
   vi.unstubAllGlobals();
   listeners.clear();
   document.body.className = '';
@@ -162,6 +166,25 @@ describe('the staff side menu on a phone (issue #455)', () => {
     expect(button.getAttribute('aria-busy')).toBeNull();
   });
 
+  it('shows Sign out busy in the real staff route while signing out has not finished', async () => {
+    widthIs(false);
+    setAccessToken('test-token');
+    vi.spyOn(api, 'GET').mockImplementation(((path: string) =>
+      path === '/api/v1/me' ? Promise.resolve({ data: officer, response: new Response() }) : new Promise(() => undefined)) as never);
+    const logout = vi.spyOn(api, 'POST').mockImplementation((() => new Promise(() => undefined)) as never);
+    const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    const button = await screen.findByRole('button', { name: 'Sign out' }, { timeout: 5000 });
+    fireEvent.click(button);
+    await waitFor(() => expect(logout).toHaveBeenCalledWith('/api/v1/auth/logout'));
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+  });
+
   it('shows Sign out in the bar busy while signing out from 720px', async () => {
     widthIs(false);
     let finish = () => undefined as void;
@@ -184,6 +207,24 @@ describe('the staff side menu on a phone (issue #455)', () => {
     expect(within(dialog).getByRole('status').textContent).toBe('');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(document.querySelectorAll('[data-busy-announcer]')).toHaveLength(0);
+  });
+
+  it('has one Working live region at a time: the one in the opened drawer, then the shell one again once it closes', async () => {
+    let finish = () => undefined as void;
+    show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)), children: <BusyAnnouncer /> });
+    const announcers = () => Array.from(document.querySelectorAll('[data-busy-announcer]'));
+    expect(announcers()).toHaveLength(1);
+    const dialog = openMenu();
+    expect(announcers()).toHaveLength(1);
+    expect(dialog.contains(announcers()[0] as Node)).toBe(true);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    expect(announcers().map((a) => a.textContent)).toEqual(['Working']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(announcers()).toHaveLength(1);
+    expect(dialog.contains(announcers()[0] as Node)).toBe(false);
+    expect(announcers()[0]?.textContent).toBe('Working');
+    await act(async () => finish());
+    expect(announcers()[0]?.textContent).toBe('');
   });
 
   it('marks the current area with aria-current', () => {
@@ -296,7 +337,7 @@ describe('the staff side menu on a phone (issue #455)', () => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
   });
 
-  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('gives the scroll position back when a link opens elsewhere (%o)', (keys) => {
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }])('gives the scroll position back when a link opens elsewhere (%o)', (keys) => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 300 });
     const { router } = show(officer);
     fireEvent.click(within(openMenu()).getByRole('link', { name: 'Feedback' }), keys);
@@ -586,6 +627,65 @@ describe('the staff sidebar from 720px', () => {
       fireEvent.keyDown(screen.getByRole('heading', { name: 'Feedback here' }), { key: 'Escape' });
     });
     await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
+  });
+
+  // A tour of two sidebar steps, started by a button so it can run twice.
+  const twoSteps: Tour = {
+    id: 'test-sidebar-two-steps',
+    version: 1,
+    title: 'Test tour',
+    audience: () => true,
+    autoStart: false,
+    steps: [
+      { id: 'feedback', target: 'nav-feedback', title: 'Feedback here', body: 'Choose Feedback to write to us.' },
+      { id: 'notifications', target: 'nav-notifications', title: 'Notifications here', body: 'Choose Notifications to read them.' },
+    ],
+  };
+  function TourStarter() {
+    const { start } = useTour();
+    return (
+      <button type="button" onClick={() => start(twoSteps)}>
+        Start test tour
+      </button>
+    );
+  }
+  const tourKey = (key: string, title: string) =>
+    act(() => {
+      fireEvent.keyDown(screen.getByRole('heading', { name: title }), { key });
+    });
+
+  it('forgets a press when the step changes: back on the pressed step it is unfolded again', async () => {
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    window.localStorage.setItem('bms.sidebar', 'folded');
+    show(officer, { children: <TourStarter /> });
+    fireEvent.click(screen.getByRole('button', { name: 'Start test tour' }));
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    fireEvent.click(toggle());
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
+    tourKey('ArrowRight', 'Feedback here');
+    await screen.findByRole('heading', { name: 'Notifications here' });
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    tourKey('ArrowLeft', 'Notifications here');
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('forgets a press when the tour ends: the next run of the tour unfolds it again', async () => {
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    window.localStorage.setItem('bms.sidebar', 'folded');
+    show(officer, { children: <TourStarter /> });
+    fireEvent.click(screen.getByRole('button', { name: 'Start test tour' }));
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    fireEvent.click(toggle());
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
+    tourKey('Escape', 'Feedback here');
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Feedback here' })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Start test tour' }));
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
   });
 });
 

@@ -128,16 +128,22 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
   const { target } = useTour();
   const anchors = [tour, ...links.map((l) => l.tour), ...tours].filter(Boolean);
   const forTour = target !== undefined && anchors.includes(target);
-  // The step a press came during: from then on the press wins for that step, and the next step unfolds it again.
-  const [pressedFor, setPressedFor] = useState<string>();
+  // A press during a tour step wins for that step. A step that points somewhere else, or the tour ending, forgets the press, so
+  // the next step, going back to this one, or the next run of the tour unfolds it again.
+  const [pressed, setPressed] = useState(false);
+  const [pressTarget, setPressTarget] = useState(target);
+  if (pressTarget !== target) {
+    setPressTarget(target);
+    setPressed(false);
+  }
   // Unfolded while a tour step points into it, so the step can show the label it talks about, unless the person pressed.
-  const shownFolded = folded && !(forTour && pressedFor !== target);
+  const shownFolded = folded && (!forTour || pressed);
 
   // From what the person sees: unfolded for a tour step, a press folds it, and the choice is kept.
   function toggle() {
     keepFolded(!shownFolded);
     setChoice(!shownFolded);
-    if (forTour) setPressedFor(target);
+    if (forTour) setPressed(true);
   }
 
   // Narrowed to a phone while the focus is in the sidebar: it goes to the menu button that now holds the list. A layout effect, so
@@ -294,8 +300,9 @@ export function SideMenu({ label, tour, links, name, onSignOut, busy = false, to
             {icons.signOut}
             <span>Sign out</span>
           </BusyButton>
-          {/* The drawer the person opened is aria-modal, which hides the shell's announcer, so it carries its own while open. */}
-          {open && <BusyAnnouncer />}
+          {/* The drawer the person opened is aria-modal, which hides the shell's announcer, so it carries its own while open and
+              the shell's steps aside, so there is one Working at a time. */}
+          {open && <BusyAnnouncer modal />}
         </div>
       </div>
     </div>

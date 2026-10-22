@@ -147,8 +147,8 @@ button[aria-disabled='true'],
 /*
  * The spinner takes the last 0.85em of the end padding (0.25em in, 0.6em wide), so a busy button keeps at
  * least 1.1em there and the label never runs under it. --busy-pad-end is the size's own end padding, so a
- * size whose padding already holds the spinner keeps its width and a tighter one (.btn-sm) grows only by
- * the difference. A class that sets its own padding sets its own --busy-pad-end too, or it takes 18px.
+ * size whose padding already holds the spinner keeps its width. A small busy button (.btn-sm) has the same
+ * end padding when idle, so it keeps its width too. A class that sets its own padding sets its own --busy-pad-end too, or it takes 18px.
  */
 .busy-button {
   --busy-pad-end: 18px;
@@ -162,6 +162,7 @@ button[aria-disabled='true'],
   --busy-pad-end: 12px;
 }
 
+.btn-sm.busy-button,
 .busy-button[aria-busy='true'] {
   padding-inline-end: max(1.1em, var(--busy-pad-end));
 }
