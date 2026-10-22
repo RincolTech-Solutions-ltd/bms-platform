@@ -3339,7 +3339,17 @@ class LoanServicingIT extends LoanFixtures {
                 .isEqualTo("invalid_bucket");
     }
 
+    /** An action's performer is a foreign key to users (chapter 6, lending_collection_actions), so the officer is. */
+    void officerIsStaff() {
+        TestDatabase.owner()
+                .sql("INSERT INTO users (id, tenant_id, kind, full_name, email, status)"
+                        + " VALUES (?, ?, 'staff', 'Test Officer', ?, 'active') ON CONFLICT DO NOTHING")
+                .params(officer, t.tenantId(), officer + "@example.test")
+                .update();
+    }
+
     ResponseEntity<JsonNode> logAction(String loan, Map<String, Object> body) {
+        officerIsStaff();
         return send(
                 HttpMethod.POST,
                 LOANS + "/" + loan + "/collection-actions",
@@ -3709,6 +3719,7 @@ class LoanServicingIT extends LoanFixtures {
         String loan = approved(exampleB("PROMORD"), 1_200_000, 3, 63);
         disburse(loan, today.minusMonths(1).minusDays(3));
         String later = UUID.randomUUID().toString();
+        officerIsStaff();
         TestDatabase.owner()
                 .sql("""
                         INSERT INTO lending_collection_actions (id, tenant_id, loan_id, action_type, note, promised_date,
