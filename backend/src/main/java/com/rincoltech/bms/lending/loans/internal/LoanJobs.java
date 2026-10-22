@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -28,8 +29,11 @@ class LoanJobs {
      * transaction ({@code callAs}): the run claims its date with a lease and takes one short transaction per loan
      * ({@link ArrearsRun}). One tenant's failure is logged and does not stop the others. The insights snapshot (00:45)
      * computes its positions itself from the items and transactions of each date, so it does not wait for this run.
+     * Switched off by {@code bms.lending.arrears-job-enabled=false}, which the integration tests set so that a tick
+     * never charges penalties on a test's loans; the tests drive {@link ArrearsRun} themselves. On everywhere else.
      */
     @Bean
+    @ConditionalOnProperty(name = "bms.lending.arrears-job-enabled", havingValue = "true", matchIfMissing = true)
     RecurringTask<Void> loanArrears(TenantJobs tenantJobs, ArrearsRun arrears, JdbcClient jdbc) {
         return Tasks.recurring(ARREARS, Schedules.cron("0 0/15 * * * *", BusinessClock.DEFAULT_ZONE))
                 .execute((instance, context) -> {

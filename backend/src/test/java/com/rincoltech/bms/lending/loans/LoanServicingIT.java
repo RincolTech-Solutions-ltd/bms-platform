@@ -24,7 +24,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -33,11 +32,10 @@ import tools.jackson.databind.JsonNode;
  * and recovery, idempotency and branch scope; every journal is checked line by line against
  * chapter 6 section 6.6.3, and the books are checked to agree with the subledger after each test.
  * Four users: an officer originates, an appraiser appraises, a manager approves and checks, a
- * cashier moves the money. The scheduler is off in this context, so the nightly arrears job never races the
- * test's own run. All figures fabricated.
+ * cashier moves the money. The nightly arrears job is off in every test context ({@code IntegrationTest}), so it
+ * never races the test's own run. All figures fabricated.
  */
 @org.springframework.test.context.event.RecordApplicationEvents
-@TestPropertySource(properties = "db-scheduler.enabled=false")
 class LoanServicingIT extends LoanFixtures {
 
     @Autowired
@@ -2297,10 +2295,6 @@ class LoanServicingIT extends LoanFixtures {
     }
 
     // ---- Arrears (FR-ARR-01, FR-ARR-03, R-PEN, R-DPD) ----------------------------------------
-
-    @Autowired
-    @org.springframework.beans.factory.annotation.Qualifier("loanArrears")
-    com.github.kagkarlsson.scheduler.task.helper.RecurringTask<Void> arrearsTask;
 
     /**
      * The business has run arrears since long ago (penalties start at its first run), so a loan's periods since its
