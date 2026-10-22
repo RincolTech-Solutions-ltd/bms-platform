@@ -149,7 +149,8 @@ query, so the number is the token.
   drawer's Tab cycle skips any control inside a `[hidden]` ancestor. The folded sections are kept per person in `localStorage`
   under `bms.menu.sections.<user id>` (a list of ids, read and written inside `try`/`catch`), read again when another person
   signs in. A folded section shows its links while the page is one of them or of their groups (`groupPaths`), and while a tour
-  step points at one of its links or its `tours` (`retail-nav` for Shop). In the folded
+  step points at one of its links or its `tours` (`retail-nav` for Shop). The heading acts on what the person sees, as the
+  sidebar button does: a press on a section held open folds it and wins until the page or the tour step changes. In the folded
   sidebar the heading is its icon, with the label as its accessible name and `title`. With one section, or none, the list stays
   flat with no heading, as before. On a phone the one-tap Sell is there only while retail is on, and Sale stays in Shop too.
 - **Folding the sidebar:** a button at its top (the `menu` icon, the constant name `aria-label="Menu labels"`, `aria-expanded`

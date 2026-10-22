@@ -129,17 +129,33 @@ function keepFoldedSections(person: string, ids: string[]) {
  * One section's heading, a button that folds its links, and the links. Unfolded while the page is one of its links or their groups,
  * so the current link is never hidden, and while a tour step points into it.
  */
-function MenuSectionBlock({ section, links, folded, onToggle }: { section: MenuSection; links: MenuLink[]; folded: boolean; onToggle: () => void }) {
+function MenuSectionBlock({ section, links, folded, onFold }: { section: MenuSection; links: MenuLink[]; folded: boolean; onFold: (fold: boolean) => void }) {
   const iconsOnly = useContext(Folded);
   const list = useId();
   const { target } = useTour();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const anchors = [...links.map((l) => l.tour), ...(section.tours ?? [])].filter(Boolean);
   const here = links.some((l) => (l.exact ? pathname === l.to : under(pathname, l.to)) || !!l.groupPaths?.some((path) => under(pathname, path)));
-  const shut = folded && !here && !(target !== undefined && anchors.includes(target));
+  const forced = here || (target !== undefined && anchors.includes(target));
+  // As in SideNav, a press while the section is held open wins for that tour step and page. Another step, the tour ending or
+  // another page forgets the press, so the section is held open again.
+  const [pressed, setPressed] = useState(false);
+  const [pressAt, setPressAt] = useState({ target, pathname });
+  if (pressAt.target !== target || pressAt.pathname !== pathname) {
+    setPressAt({ target, pathname });
+    setPressed(false);
+  }
+  const shut = folded && (!forced || pressed);
+
+  // From what the person sees: a press on a held-open section folds it, and the choice is kept.
+  function toggle() {
+    onFold(!shut);
+    if (forced) setPressed(true);
+  }
+
   return (
     <div className="side-menu-block">
-      <button type="button" className="side-menu-heading" aria-expanded={!shut} aria-controls={list} title={iconsOnly ? section.label : undefined} onClick={onToggle}>
+      <button type="button" className="side-menu-heading" aria-expanded={!shut} aria-controls={list} title={iconsOnly ? section.label : undefined} onClick={toggle}>
         {section.icon}
         <span className={iconsOnly ? 'visually-hidden' : undefined}>{section.label}</span>
         {!iconsOnly && <span className="side-menu-caret" aria-hidden="true" />}
@@ -164,8 +180,8 @@ function MenuLinks({ label, tour, links, folded = false, sections = [], person =
   const grouped = used.length > 1;
   const first = links.findIndex((l) => l.section !== undefined);
 
-  function toggle(id: string) {
-    const next = shut.includes(id) ? shut.filter((s) => s !== id) : [...shut, id];
+  function fold(id: string, folding: boolean) {
+    const next = folding ? [...shut.filter((s) => s !== id), id] : shut.filter((s) => s !== id);
     keepFoldedSections(person, next);
     setKept({ person, ids: next });
   }
@@ -177,7 +193,7 @@ function MenuLinks({ label, tour, links, folded = false, sections = [], person =
           <>
             <MenuItems links={links.slice(0, first)} />
             {used.map((s) => (
-              <MenuSectionBlock key={s.id} section={s} links={links.filter((l) => l.section === s.id)} folded={shut.includes(s.id)} onToggle={() => toggle(s.id)} />
+              <MenuSectionBlock key={s.id} section={s} links={links.filter((l) => l.section === s.id)} folded={shut.includes(s.id)} onFold={(folding) => fold(s.id, folding)} />
             ))}
             <MenuItems links={links.slice(first).filter((l) => l.section === undefined)} />
           </>

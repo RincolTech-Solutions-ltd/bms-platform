@@ -837,6 +837,61 @@ describe('a business with both Shop and Lending (issue #471)', () => {
     await waitFor(() => expect(heading.getAttribute('aria-expanded')).toBe('false'));
   });
 
+  it('folds a section held open for a tour step on a press, for that step only', async () => {
+    widthIs(1280);
+    window.localStorage.setItem(`bms.menu.sections.${both.user_id}`, JSON.stringify(['lending']));
+    const tour: Tour = {
+      id: 'test-section-press',
+      version: 1,
+      title: 'Test tour',
+      audience: () => true,
+      autoStart: false,
+      steps: [{ id: 'here', target: 'nav-lending', title: 'Look here', body: 'This part of the menu.' }],
+    };
+    function Starter() {
+      const { start } = useTour();
+      return (
+        <button type="button" onClick={() => start(tour)}>
+          Start the test tour
+        </button>
+      );
+    }
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    show(both, { children: <Starter /> });
+    fireEvent.click(screen.getByRole('button', { name: 'Start the test tour' }));
+    await screen.findByRole('heading', { name: 'Look here' });
+    const heading = within(document.querySelector('.side-nav') as HTMLElement).getByRole('button', { name: 'Lending' });
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(heading);
+    expect(heading.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('link', { name: 'Loans' })).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(`bms.menu.sections.${both.user_id}`) ?? '[]')).toEqual(['lending']);
+    act(() => {
+      fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    });
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Look here' })).toBeNull());
+    expect(heading.getAttribute('aria-expanded')).toBe('false');
+    // The next run of the tour holds it open again.
+    fireEvent.click(screen.getByRole('button', { name: 'Start the test tour' }));
+    await screen.findByRole('heading', { name: 'Look here' });
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('folds the section of the page on a press, and unfolds it on the next', () => {
+    widthIs(1280);
+    window.localStorage.setItem(`bms.menu.sections.${both.user_id}`, JSON.stringify(['lending']));
+    show(both, { at: '/staff/lending/members' });
+    const heading = screen.getByRole('button', { name: 'Lending' });
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(heading);
+    expect(heading.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('link', { name: 'Members' })).toBeNull();
+    fireEvent.click(heading);
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+    expect(JSON.parse(window.localStorage.getItem(`bms.menu.sections.${both.user_id}`) ?? '[]')).toEqual([]);
+  });
+
   it('skips the links of a folded section when tabbing round the drawer', () => {
     show(both);
     const dialog = openMenu();
