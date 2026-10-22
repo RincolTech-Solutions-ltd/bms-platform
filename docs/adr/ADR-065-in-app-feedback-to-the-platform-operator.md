@@ -5,8 +5,8 @@
 Proposed (issue #447, FR-FBK-01 to FR-FBK-05). Builds on ADR-003 (row-level security), ADR-016 (the platform reads and changes
 tenants through SECURITY DEFINER functions), ADR-024 (the platform outbox and its operator alert), ADR-049 (every route has a page
 tour) and ADR-053 (an image a module shows is a `core.documents` upload served from the same origin). Migration `V86` (`V80` to
-`V85` are claimed by open pull requests; renumbered at merge if needed). The two numbers before this one, pending ADR-063 and
-pending ADR-064, are claimed by open pull requests.
+`V85` are claimed by open pull requests; renumbered at merge if needed). ADR-063 is on main and the number before this one,
+pending ADR-064, is claimed by an open pull request.
 
 ## Context
 
