@@ -416,6 +416,82 @@ describe('FR-RET-68 scanning on the stock count', () => {
   });
 });
 
+describe('FR-RET-68 a person typing fast is not a scan', () => {
+  // For each gap: one pair of keys within it (a key rollover), the others a person's 70 to 120 ms apart.
+  const PACES = { 35: [20, 100, 110], 80: [70, 100, 120] } as const;
+  type Gap = keyof typeof PACES;
+
+  /** The sale's first quantity and price, after one scan made the line. */
+  async function saleFields(): Promise<[HTMLInputElement, HTMLInputElement]> {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    wedge(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    return [document.getElementById('qty-0') as HTMLInputElement, document.getElementById('price-0') as HTMLInputElement];
+  }
+
+  /** The first two count boxes of the count sheet. */
+  async function countFields(): Promise<[HTMLInputElement, HTMLInputElement]> {
+    screenOf(<StocktakePage />);
+    await waitFor(() => expect(document.querySelectorAll('.rt-card input[id^="count-"]').length).toBeGreaterThan(1));
+    const [a, b] = document.querySelectorAll<HTMLInputElement>('.rt-card input[id^="count-"]');
+    return [a as HTMLInputElement, b as HTMLInputElement];
+  }
+
+  const SCREENS = { 'the sale quantity': saleFields, 'the count sheet': countFields } as const;
+  const CASES = (Object.keys(SCREENS) as (keyof typeof SCREENS)[]).flatMap((where) => ([35, 80] as Gap[]).map((gap) => [where, gap] as const));
+
+  /** Whether Enter got past the scanner listener to the field's form (or, with no form, the field's row). */
+  function reached(field: HTMLInputElement) {
+    const seen = vi.fn();
+    (field.form ?? field.parentElement)?.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Enter') seen();
+    });
+    return seen;
+  }
+
+  it.each(CASES)('keeps 1000 typed into %s with a %i ms gap, and lets Enter through', async (where, gap) => {
+    if (gap !== 35) localStorage.setItem('bms.scanner.gap-ms', String(gap));
+    const [field] = await SCREENS[where]();
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    field.focus();
+    field.select();
+    const seen = reached(field);
+    let at = (clock += 10000);
+    press('1', at);
+    PACES[gap].forEach((step) => press('0', (at += step)));
+    expect(press('Enter', (clock = at + 5)).defaultPrevented).toBe(false);
+    expect(field.value).toBe('1000');
+    expect(seen).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+  });
+
+  it.each(CASES)('keeps 12, Tab, 50 typed into %s with a %i ms gap, and lets Enter through', async (where, gap) => {
+    if (gap !== 35) localStorage.setItem('bms.scanner.gap-ms', String(gap));
+    const [first, second] = await SCREENS[where]();
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    first.focus();
+    first.select();
+    let at = (clock += 10000);
+    press('1', at);
+    press('2', (at += 20));
+    press('Tab', (at += 100));
+    second.focus();
+    second.select();
+    const seen = reached(second);
+    press('5', (at += 100));
+    press('0', (at += 20));
+    expect(press('Enter', (clock = at + 5)).defaultPrevented).toBe(false);
+    expect(first.value).toBe('12');
+    expect(second.value).toBe('50');
+    expect(seen).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookUp).not.toHaveBeenCalled();
+  });
+});
+
 describe('FR-RET-68 scanning on the restock form', () => {
   it('asks for a branch first when none is chosen at the top, and adds the item there once one is', async () => {
     await retail.addBarcode(LAMP, { code: EAN });

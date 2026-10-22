@@ -101,7 +101,12 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
         prior = null;
         return;
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Tab') {
+        // A person moving to the next field: the keys after it are a new run, never joined to the ones before.
+        wedge.end();
+        before = null;
+        prior = null;
+      } else if (e.key === 'Enter') {
         const at = e.timeStamp || performance.now();
         const scanner = wedge.scanner(at);
         const { code, earlier } = wedge.enter(at);
