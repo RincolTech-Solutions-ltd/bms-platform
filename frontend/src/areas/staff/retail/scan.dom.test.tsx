@@ -303,6 +303,25 @@ describe('FR-RET-68 scanning on the sale form', () => {
     expect(screen.queryByRole('button', { name: 'Add this barcode to a product' })).toBeNull();
   });
 
+  it('takes no scan while a dialog is open over the form, and scans again once it is closed', async () => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    const dialog = document.body.appendChild(document.createElement('div'));
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    // Focus is in the dialog, as it is in a real one, not in the sale's scan box.
+    dialog.appendChild(document.createElement('button')).focus();
+    try {
+      wedge(EAN);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(document.querySelectorAll('[id^="qty-"]')).toHaveLength(0);
+    } finally {
+      dialog.remove();
+    }
+    wedge(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+  });
+
   it('lets an administrator add a GTIN-14 as printed (Code 128), as the item form does', async () => {
     const GTIN = '10012345678902';
     screenOf(<SaleForm branchId={BRANCH} />);

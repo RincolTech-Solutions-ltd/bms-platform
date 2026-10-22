@@ -1281,7 +1281,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   single key typed just before a scan stays in the field, and an Enter at scanner speed after a run of scanner keys never reaches the form, even when the
   keys after the stall are too few to be a code. On the sale screen the cursor waits in the scan box (on a device with a
   mouse or trackpad; "Keep the cursor in the scan box on the sale screen" in Notifications and app turns it off), so a scan too slow
-  to be told from typing still lands there and its Enter never submits the sale. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
+  to be told from typing still lands there and its Enter never submits the sale. While a dialog is open over the form (a sheet, the help, a tour step, the menu drawer) the wedge takes no keys, so a scan cannot add a line behind it. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
   with pack sizes on); on the stock count it adds one to the count, or the pack factor, and clears the search so the counted line shows; an item not on the branch's count sheet is refused with "<item> is not on the count sheet of this branch." "Added <item>." is read out politely, with a
   short beep and buzz where the device allows. On the restock the quantity goes to the branch chosen at the top; with none chosen a scan says "Choose the branch at the top of the page first".
 - **Unknown code:** "No item has the barcode <code>." An administrator gets **Add this barcode to a product**: the item search

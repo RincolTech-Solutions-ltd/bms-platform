@@ -55,6 +55,11 @@ function editable(target: EventTarget | null): target is HTMLInputElement | HTML
   return target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit'].includes(target.type));
 }
 
+/** A modal is open over the form (a sheet, the help, a tour step, a drawer): keys there are not a scan for the form. */
+function dialogOpen(): boolean {
+  return document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"]') !== null;
+}
+
 /** Puts a value into a React controlled input as if typed, so its onChange runs. */
 function setFieldValue(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -90,6 +95,12 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
     let prior: FieldSnapshot | null = null;
     const down = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (dialogOpen()) {
+        wedge.enter(0);
+        before = null;
+        prior = null;
+        return;
+      }
       if (e.key === 'Enter') {
         const at = e.timeStamp || performance.now();
         const scanner = wedge.scanner(at);
