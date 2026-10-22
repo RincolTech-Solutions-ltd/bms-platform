@@ -12,6 +12,21 @@ import { useStaff } from './context';
 // colour rule is the same one the API enforces (app/contrast.ts), so the preview and the save agree.
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
+const HINT = { display: 'block', fontSize: '0.875em', opacity: 0.8 } as const;
+
+/** What the reports cover, in the words of the modules the business has on (issue #468); null modules means an older /me without the list. */
+export function reportsWording(modules: string[] | null | undefined): string {
+  const retail = !modules || modules.includes('retail');
+  const lending = !modules || modules.includes('lending');
+  if (retail && lending) return 'sales, stock, profit, portfolio at risk and others';
+  if (lending) return 'portfolio at risk and others';
+  return 'sales, stock, profit and others';
+}
+
+/** The phone notices are all retail ones today, so a business without retail is not promised them (issue #468). */
+export function noticesWording(modules: string[] | null | undefined): string {
+  return !modules || modules.includes('retail') ? ' (new orders, low stock, credit to collect)' : '';
+}
 
 /** The dominant colour of a chosen image, from a small copy of it; null when it cannot be read. */
 async function suggestFrom(file: File): Promise<string | null> {
@@ -222,12 +237,30 @@ export function Setup() {
       <div style={{ display: 'grid', gap: 12, maxWidth: 480 }}>
         <label data-tour="setup-name">
           Business name
-          <input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
+          <span id="name-hint" style={HINT}>The name your staff and customers see on the app, receipts and text messages.</span>
+          <input value={name} maxLength={100} aria-describedby="name-hint" onChange={(e) => setName(e.target.value)} style={{ display: 'block', width: '100%' }} />
         </label>
         <label>
           Receipt footer
-          <textarea value={footer} maxLength={500} onChange={(e) => setFooter(e.target.value)} style={{ display: 'block', width: '100%' }} />
+          <span id="footer-hint" style={HINT}>
+            A short line printed at the bottom of every receipt, for example a thank-you, your phone or Instagram, or how returns work.
+          </span>
+          <textarea
+            value={footer}
+            maxLength={500}
+            placeholder="Thank you for shopping with us. Returns within 7 days with this receipt."
+            aria-describedby="footer-hint"
+            onChange={(e) => setFooter(e.target.value)}
+            style={{ display: 'block', width: '100%' }}
+          />
         </label>
+        {footer.trim() !== '' && (
+          <div data-testid="footer-preview" aria-label="Bottom of a receipt" style={{ fontFamily: 'monospace', border: '1px dashed', padding: 8, maxWidth: 320, textAlign: 'center', whiteSpace: 'pre-wrap' }}>
+            <div>TOTAL ...</div>
+            <div>--------------------</div>
+            {footer.trim()}
+          </div>
+        )}
 
         <fieldset data-tour="setup-logo">
           <legend>Logo</legend>
@@ -252,6 +285,7 @@ export function Setup() {
 
         <fieldset data-tour="setup-colour">
           <legend>Theme colour</legend>
+          <p style={HINT}>The colour of the app's top bar and buttons for your staff and customers. Dark colours keep white text readable.</p>
           <label>
             Colour
             <input type="color" value={check.ok || check.reason === 'contrast' ? colour : '#0d5c75'} onChange={(e) => { setColour(e.target.value.toUpperCase()); setSuggested(false); }} aria-label="Pick a colour" />
@@ -286,7 +320,7 @@ export function Setup() {
           <legend>Reports</legend>
           <label>
             <input type="checkbox" checked={current.reports_enabled === true} disabled={busy} onChange={(e) => setReports(e.target.checked)} />{' '}
-            Let staff run reports (portfolio at risk and others), prepared in the background and kept for 30 days
+            Let staff run reports ({reportsWording(me.modules)}), prepared in the background and kept for 30 days
           </label>
         </fieldset>
 
@@ -321,8 +355,8 @@ export function Setup() {
         <fieldset>
           <legend>Notifications</legend>
           <p>
-            <Link to={'/staff/setup/notifications' as never}>Notifications for the business</Link>: which notices your staff get on their phones (new
-            orders, low stock, credit to collect) and when the daily summary goes.
+            <Link to={'/staff/setup/notifications' as never}>Notifications for the business</Link>: which notices your staff get on their phones
+            {noticesWording(me.modules)} and when the daily summary goes.
           </p>
         </fieldset>
 

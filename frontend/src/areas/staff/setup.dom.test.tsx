@@ -51,7 +51,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
   Link: ({ children }: { children: ReactNode }) => <a href="#test">{children}</a>,
 }));
 
-const { Setup } = await import('./setup');
+const { Setup, noticesWording, reportsWording } = await import('./setup');
 const { ICON_VERSION_KEY, NewLogoCard } = await import('../../install/NewIcon');
 
 const REAL_AGENT = navigator.userAgent;
@@ -69,11 +69,11 @@ afterEach(() => {
   Object.defineProperty(navigator, 'userAgent', { value: REAL_AGENT, configurable: true });
 });
 
-function show({ card = false } = {}) {
+function show({ card = false, modules }: { card?: boolean; modules?: string[] } = {}) {
   const me = mockMe('owner');
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <StaffContext.Provider value={{ me: { ...me, permissions: ['core.settings.manage'] }, branch: null, chooseBranch: () => {} }}>
+      <StaffContext.Provider value={{ me: { ...me, permissions: ['core.settings.manage'], modules: modules ?? me.modules }, branch: null, chooseBranch: () => {} }}>
         {card && <NewLogoCard />}
         <Setup />
       </StaffContext.Provider>
@@ -135,5 +135,48 @@ describe('the set-up note on the new icon', () => {
     await screen.findByTestId('new-icon-note');
     expect(localStorage.getItem(ICON_VERSION_KEY)).toBe('/api/v1/branding/logo?v=00000000-0000-4000-8000-0000000000a1|');
     expect(screen.queryByTestId('new-logo-card')).toBeNull();
+  });
+});
+
+// Issue #468: the page explains its fields in plain words and speaks only of the modules the business has on.
+describe('the set-up hints and module wording', () => {
+  it('explains the receipt footer and previews the bottom of a receipt', async () => {
+    show();
+    const footer = (await screen.findByLabelText(/Receipt footer/)) as HTMLTextAreaElement;
+    expect(footer.getAttribute('aria-describedby')).toBe('footer-hint');
+    expect(document.getElementById('footer-hint')?.textContent).toContain('A short line printed at the bottom of every receipt');
+    expect(footer.placeholder).not.toBe('');
+    expect(screen.queryByTestId('footer-preview')).toBeNull();
+    fireEvent.change(footer, { target: { value: 'Thank you, call 0700 000000' } });
+    expect(screen.getByTestId('footer-preview').textContent).toContain('Thank you, call 0700 000000');
+  });
+
+  it('explains the business name and the theme colour', async () => {
+    show();
+    await screen.findByRole('heading', { name: 'Business set-up' });
+    expect(document.getElementById('name-hint')?.textContent).toContain('on the app, receipts and text messages');
+    expect(screen.getByText(/colour of the app's top bar and buttons/)).toBeTruthy();
+  });
+
+  it('keeps lending words off a retail-only business', async () => {
+    show({ modules: ['retail'] });
+    const reports = await screen.findByLabelText(/Let staff run reports/);
+    expect(reports.parentElement?.textContent).toContain('sales, stock, profit and others');
+    expect(document.body.textContent).not.toContain('portfolio at risk');
+    expect(document.body.textContent).toContain('new orders, low stock, credit to collect');
+  });
+
+  it('keeps retail words off a lending-only business', async () => {
+    show({ modules: ['lending'] });
+    const reports = await screen.findByLabelText(/Let staff run reports/);
+    expect(reports.parentElement?.textContent).toContain('portfolio at risk and others');
+    expect(document.body.textContent).not.toMatch(/low stock|sales, stock/);
+  });
+
+  it('names both when both modules are on, or when /me has no module list', () => {
+    expect(reportsWording(['lending', 'retail'])).toBe('sales, stock, profit, portfolio at risk and others');
+    expect(reportsWording(undefined)).toBe(reportsWording(['lending', 'retail']));
+    expect(noticesWording(undefined)).toBe(noticesWording(['retail']));
+    expect(noticesWording([])).toBe('');
   });
 });
