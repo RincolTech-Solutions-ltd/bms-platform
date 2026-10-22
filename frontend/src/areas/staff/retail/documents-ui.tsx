@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { retail, type DocumentSeries, type DocumentType, type RetailDocument } from '../../../api/retail';
 import { Highlight } from '../../../app/ui/SearchBox';
 import { useStaff } from '../context';
@@ -65,9 +66,9 @@ export function CreditNotePdf({ returnId, branchId }: { returnId: string; branch
   if (!canIssueDocuments(me) || !holdsAt(me, DOCUMENT_ISSUE, branchId)) return null;
   return (
     <p>
-      <button type="button" className="btn-sm" disabled={open.isPending} data-tour="credit-note-pdf" onClick={() => open.mutate()}>
+      <BusyButton busy={open.isPending} type="button" className="btn-sm" data-tour="credit-note-pdf" onClick={() => open.mutate()}>
         {open.isPending ? 'Opening' : 'Open the credit note as a PDF'}
-      </button>
+      </BusyButton>
       <Problem error={open.error} />
     </p>
   );
@@ -95,9 +96,9 @@ export function PdfButton({ doc, label = 'Open PDF' }: { doc: Pick<RetailDocumen
   const open = useMutation({ mutationFn: () => openDocumentPdf(doc) });
   return (
     <>
-      <button type="button" className="btn-sm" disabled={open.isPending} aria-label={`${label} of ${doc.number ?? 'the document'}`} onClick={() => open.mutate()}>
+      <BusyButton busy={open.isPending} type="button" className="btn-sm" aria-label={`${label} of ${doc.number ?? 'the document'}`} onClick={() => open.mutate()}>
         {open.isPending ? 'Opening' : label}
-      </button>
+      </BusyButton>
       <Problem error={open.error} />
     </>
   );
@@ -154,9 +155,9 @@ export function SeriesRow({ series, canEdit, saving, onSave }: { series: Documen
             <label htmlFor={`prefix-${type}`}>Prefix</label>
             <input id={`prefix-${type}`} value={typed} maxLength={8} aria-invalid={problem !== null} onChange={(e) => setTyped(tidyPrefix(e.target.value))} />
           </div>
-          <button type="button" disabled={!changed || problem !== null || saving} aria-label={`Save the ${typeLabel(type)} prefix`} onClick={() => onSave(type, typed)}>
+          <BusyButton busy={saving ?? false} type="button" disabled={!changed || problem !== null} aria-label={`Save the ${typeLabel(type)} prefix`} onClick={() => onSave(type, typed)}>
             Save
-          </button>
+          </BusyButton>
         </div>
       ) : (
         <p>Prefix {series.prefix}</p>
@@ -222,9 +223,9 @@ export function SaleDocuments({ saleId, status, branchId }: { saleId: string; st
       )}
       <div className="rt-row">
         {more.map((t) => (
-          <button key={t} type="button" disabled={issue.isPending} onClick={() => issue.mutate(t)}>
+          <BusyButton key={t} busy={issue.isPending && issue.variables === t} type="button" disabled={issue.isPending} onClick={() => issue.mutate(t)}>
             {issue.isPending && issue.variables === t ? 'Making' : `Make ${typeLabel(t).toLowerCase()}`}
-          </button>
+          </BusyButton>
         ))}
       </div>
       {status === 'voided' && <p className="hint">A voided sale takes no new document.</p>}
@@ -251,7 +252,7 @@ export function TransferDocument({ transferId, branchId, status }: { transferId:
       {made ? (
         <ul style={{ listStyle: 'none', padding: 0 }}><DocumentCard doc={made} /></ul>
       ) : (
-        <button type="button" disabled={issue.isPending} onClick={() => issue.mutate()}>{issue.isPending ? 'Making' : 'Make delivery note'}</button>
+        <BusyButton busy={issue.isPending} type="button" onClick={() => issue.mutate()}>{issue.isPending ? 'Making' : 'Make delivery note'}</BusyButton>
       )}
       <Problem error={issue.error} />
     </section>
