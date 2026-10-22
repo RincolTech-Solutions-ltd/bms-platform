@@ -40,7 +40,7 @@ final class Penalties {
      * charged nothing, even for a missed period (the safer side for the borrower, finding 3).
      *
      * @param charged the period numbers already charged for this item, cancelled ones included
-     * @param chargedSoFar the item's penalties charged so far, waived and cancelled ones included, for the cap
+     * @param chargedSoFar the item's penalties charged so far, net of cancels, waivers included, for the cap
      */
     static List<Charge> due(
             Item item,
