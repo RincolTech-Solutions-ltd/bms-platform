@@ -17,6 +17,7 @@ import { mayManageCollateral, mayReleaseCollateral } from './member-permissions'
 import { CollateralGate } from './member-ui';
 import { PhotoQueueControl, usePhotoQueue, type Sender } from './photo-queue';
 import { SaveGuardNotice, useSaveGuard } from './save-guard';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // One collateral item (FR-COL-01 to FR-COL-04): the facts, the photos and scans, valuations over time, the custody history
 // with the changes that are allowed from where the item is now, and the request to give it back. Giving an item back is not
@@ -47,17 +48,21 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
   const docs = useQuery({ queryKey: ['collateral', 'documents', id], queryFn: () => api.listDocuments(id) });
   const queue = usePhotoQueue();
   const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const sender: Sender<unknown> = async (p, o) => {
     const out = await api.uploadDocument(id, p.blob, p.fileName, o);
     void queryClient.invalidateQueries({ queryKey: ['collateral', 'documents', id] });
     return out;
   };
   const open = async (documentId: string) => {
+    setOpening(documentId);
     setError(null);
     try {
       await openInNewTab(() => api.documentUrl(documentId));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The file could not be opened.');
+    } finally {
+      setOpening(null);
     }
   };
   const items = docs.data ?? [];
@@ -73,7 +78,7 @@ function Photos({ id, canAdd }: { id: string; canAdd: boolean }) {
           <li key={d.document_id} className="rt-card cluster">
             <span>Photo or scan {i + 1}</span>
             <span className="hint">{d.created_at ? d.created_at.slice(0, 10) : ''}</span>
-            <button type="button" className="btn-sm" aria-label={`Open photo or scan ${i + 1}`} onClick={() => void open(d.document_id ?? '')}>Open</button>
+            <BusyButton busy={opening === (d.document_id ?? '')} type="button" className="btn-sm" aria-label={`Open photo or scan ${i + 1}`} onClick={() => void open(d.document_id ?? '')}>Open</BusyButton>
           </li>
         ))}
       </ul>

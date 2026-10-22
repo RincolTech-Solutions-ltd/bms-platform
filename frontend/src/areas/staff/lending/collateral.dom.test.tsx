@@ -125,7 +125,7 @@ describe('the collateral item page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask to give it back' }));
     type(/^Who is collecting it/, 'Test Owner 01');
     fireEvent.click(screen.getByRole('button', { name: 'Send the request' }));
-    expect((await screen.findByRole('status')).textContent).toMatch(/second person must agree in the approvals inbox/);
+    expect((await screen.findByText(/second person must agree in the approvals inbox/)).closest('[role="status"]')).not.toBeNull();
   });
 
   it('lists the loan cover value apart from the estimate', () => {
