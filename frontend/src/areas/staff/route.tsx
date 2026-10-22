@@ -132,7 +132,7 @@ function StaffLayout() {
  */
 export const STAFF_SECTIONS: MenuSection[] = [
   { id: 'shop', label: 'Shop', icon: icons.stock, tours: ['retail-nav'] },
-  { id: 'lending', label: 'Lending', icon: icons.banking },
+  { id: 'lending', label: 'Lending', icon: icons.lending },
 ];
 
 /**

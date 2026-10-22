@@ -61,20 +61,24 @@ function resize(px: number) {
 function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
   const signOut = vi.fn();
-  render(
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const tree = (who: Me) => (
     <RouterContextProvider router={router}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })}>
-        <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? null }}>
-          <TourProvider me={me} saveProgress={false}>
-            <StaffSideNav me={me} />
-            <StaffBar me={me} branch={null} onBranch={() => undefined} onSignOut={signOut} />
+      <QueryClientProvider client={client}>
+        <StaffContext.Provider value={{ me: who, branch: who.branches?.[0]?.id ?? null }}>
+          <TourProvider me={who} saveProgress={false}>
+            <StaffSideNav me={who} />
+            <StaffBar me={who} branch={null} onBranch={() => undefined} onSignOut={signOut} />
             {children}
           </TourProvider>
         </StaffContext.Provider>
       </QueryClientProvider>
-    </RouterContextProvider>,
+    </RouterContextProvider>
   );
-  return { router, signOut };
+  const { rerender } = render(tree(me));
+  // Another person signed in, without the menu leaving the page.
+  const signIn = (who: Me) => rerender(tree(who));
+  return { router, signOut, signIn };
 }
 
 const menuButton = () => screen.getByRole('button', { name: 'Menu' });
@@ -527,6 +531,78 @@ describe('a business with both Shop and Lending (issue #471)', () => {
     show({ ...both, user_id: '00000000-0000-4000-8000-0000000000f2' } as Me);
     expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('link', { name: 'Loans' })).toBeTruthy();
+  });
+
+  it('reads the folded sections again when another person signs in on the device', () => {
+    widthIs(1280);
+    const other = { ...both, user_id: '00000000-0000-4000-8000-0000000000f3' } as Me;
+    window.localStorage.setItem(`bms.menu.sections.${other.user_id}`, JSON.stringify(['lending']));
+    const { signIn } = show(both);
+    expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('true');
+    signIn(other);
+    expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('false');
+    signIn(both);
+    expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it.each([
+    { at: '/staff/lending/members', section: 'Lending', link: 'Members' },
+    { at: '/staff/retail/sale', section: 'Shop', link: 'Sale' },
+  ])('shows a folded section while the page is one of its links: $at', async ({ at, section, link }) => {
+    widthIs(1280);
+    window.localStorage.setItem(`bms.menu.sections.${both.user_id}`, JSON.stringify(['shop', 'lending']));
+    show(both, { at });
+    await waitFor(() => expect(screen.getByRole('button', { name: section }).getAttribute('aria-expanded')).toBe('true'));
+    expect(screen.getByRole('link', { name: link }).getAttribute('aria-current')).toBe('page');
+    const otherSection = section === 'Shop' ? 'Lending' : 'Shop';
+    expect(screen.getByRole('button', { name: otherSection }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it.each([
+    { target: 'nav-lending', section: 'Lending' },
+    { target: 'nav-retail', section: 'Shop' },
+    { target: 'retail-nav', section: 'Shop' },
+  ])('unfolds a folded section for a tour step on $target', async ({ target, section }) => {
+    widthIs(1280);
+    window.localStorage.setItem(`bms.menu.sections.${both.user_id}`, JSON.stringify(['shop', 'lending']));
+    const tour: Tour = {
+      id: `test-section-tour-${target}`,
+      version: 1,
+      title: 'Test tour',
+      audience: () => true,
+      autoStart: false,
+      steps: [{ id: 'here', target, title: 'Look here', body: 'This part of the menu.' }],
+    };
+    function Starter() {
+      const { start } = useTour();
+      useEffect(() => start(tour), [start]);
+      return null;
+    }
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    show(both, { children: <Starter /> });
+    await screen.findByRole('heading', { name: 'Look here' });
+    const heading = within(document.querySelector('.side-nav') as HTMLElement).getByRole('button', { name: section });
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+    act(() => {
+      fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    });
+    await waitFor(() => expect(heading.getAttribute('aria-expanded')).toBe('false'));
+  });
+
+  it('skips the links of a folded section when tabbing round the drawer', () => {
+    show(both);
+    const dialog = openMenu();
+    const heading = within(dialog).getByRole('button', { name: 'Lending' });
+    fireEvent.click(heading);
+    expect(heading.getAttribute('aria-expanded')).toBe('false');
+    const lists = dialog.querySelectorAll<HTMLElement>('.side-menu-links > ul');
+    const nextShared = within(lists[lists.length - 1] as HTMLElement).getAllByRole('link')[0] as HTMLElement;
+    heading.focus();
+    fireEvent.keyDown(heading, { key: 'Tab' });
+    expect(document.activeElement).toBe(nextShared);
+    fireEvent.keyDown(nextShared, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(heading);
   });
 
   it('keeps the one-tap Sell on a 360px phone and Sale in the Shop section', () => {

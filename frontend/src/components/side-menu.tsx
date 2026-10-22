@@ -13,6 +13,7 @@ import { icons } from './icons';
 // or unfolds the folded sidebar, for as long as the step is shown, without taking focus from the tour card. When the links name two or
 // more sections (issue #471, a business with both Shop and Lending), each section's links sit under a heading that folds them, the
 // folded ones kept per person on the device; the links of no section stay above and below them. With one section the list is flat.
+// A folded section shows its links while the page is one of them, or while a tour step points into it.
 
 const PHONE = '(max-width: 719px)';
 const NARROW = '(max-width: 1023px)';
@@ -123,13 +124,18 @@ function keepFoldedSections(person: string, ids: string[]) {
   }
 }
 
-/** One section's heading, a button that folds its links, and the links. Unfolded while a tour step points into it. */
+/**
+ * One section's heading, a button that folds its links, and the links. Unfolded while the page is one of its links or their groups,
+ * so the current link is never hidden, and while a tour step points into it.
+ */
 function MenuSectionBlock({ section, links, folded, onToggle }: { section: MenuSection; links: MenuLink[]; folded: boolean; onToggle: () => void }) {
   const iconsOnly = useContext(Folded);
   const list = useId();
   const { target } = useTour();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const anchors = [...links.map((l) => l.tour), ...(section.tours ?? [])].filter(Boolean);
-  const shut = folded && !(target !== undefined && anchors.includes(target));
+  const here = links.some((l) => (l.exact ? pathname === l.to : under(pathname, l.to)) || !!l.groupPaths?.some((path) => under(pathname, path)));
+  const shut = folded && !here && !(target !== undefined && anchors.includes(target));
   return (
     <div className="side-menu-block">
       <button type="button" className="side-menu-heading" aria-expanded={!shut} aria-controls={list} title={iconsOnly ? section.label : undefined} onClick={onToggle}>
@@ -149,7 +155,10 @@ function MenuSectionBlock({ section, links, folded, onToggle }: { section: MenuS
  * shared links before the first sectioned one come first, then each section under its heading, then the other shared links.
  */
 function MenuLinks({ label, tour, links, folded = false, sections = [], person = '' }: { label: string; tour?: string; links: MenuLink[]; folded?: boolean; sections?: MenuSection[]; person?: string }) {
-  const [shut, setShut] = useState(() => readFoldedSections(person));
+  const [kept, setKept] = useState(() => ({ person, ids: readFoldedSections(person) }));
+  // Another person signed in on the device: their own folded sections, read again.
+  const shut = kept.person === person ? kept.ids : readFoldedSections(person);
+  if (kept.person !== person) setKept({ person, ids: shut });
   const used = sections.filter((s) => links.some((l) => l.section === s.id));
   const grouped = used.length > 1;
   const first = links.findIndex((l) => l.section !== undefined);
@@ -157,7 +166,7 @@ function MenuLinks({ label, tour, links, folded = false, sections = [], person =
   function toggle(id: string) {
     const next = shut.includes(id) ? shut.filter((s) => s !== id) : [...shut, id];
     keepFoldedSections(person, next);
-    setShut(next);
+    setKept({ person, ids: next });
   }
 
   return (
@@ -314,7 +323,8 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [], sect
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!open || event.key !== 'Tab') return;
-    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+    // The links of a folded section are in the page but hidden: they take no part in the cycle.
+    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter((el) => !el.closest('[hidden]'));
     if (controls.length === 0) return;
     const at = controls.indexOf(document.activeElement as HTMLElement);
     const next = event.shiftKey ? (at <= 0 ? controls.length - 1 : at - 1) : at === controls.length - 1 ? 0 : at + 1;

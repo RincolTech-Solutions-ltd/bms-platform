@@ -140,13 +140,15 @@ query, so the number is the token.
   page, so Tab reaches the menu before the content. Sign out stays in the staff bar.
 - **Sections for a business with Shop and Lending (#471, FR-UXN-04):** each item of `staffAreas` names its module with
   `section` (`shop` for Retail, `lending` for Loans, Members, Collateral, Savings, Investments, Insights and the AI assistant),
-  and the layout passes `STAFF_SECTIONS` (Shop with the `stock` icon, Lending with the `banking` icon). When the links name two
+  and the layout passes `STAFF_SECTIONS` (Shop with the `stock` icon, Lending with its own `lending` icon, a coin on an open hand, since `banking` is Receive payments'). When the links name two
   sections, `MenuLinks` draws the shared items before the first sectioned one (Home, Approvals), then each section, then the
   other shared items (Reports, SMS, Receive payments, Users, Notifications, Feedback, Business set-up). A section is a
   `.side-menu-block` with a rule above it and a heading button (`.side-menu-heading`: small muted capitals, its icon, a caret,
-  `aria-expanded`, `aria-controls` on the list) that folds its links; folded, the links leave the page. The folded sections are
-  kept per person in `localStorage` under `bms.menu.sections.<user id>` (a list of ids, read and written inside `try`/`catch`).
-  A tour step on a link of a folded section, or on its `tours` (`retail-nav` for Shop), unfolds it while shown. In the folded
+  `aria-expanded`, `aria-controls` on the list) that folds its links; folded, the links stay in the page under `hidden`, and the
+  drawer's Tab cycle skips any control inside a `[hidden]` ancestor. The folded sections are kept per person in `localStorage`
+  under `bms.menu.sections.<user id>` (a list of ids, read and written inside `try`/`catch`), read again when another person
+  signs in. A folded section shows its links while the page is one of them or of their groups (`groupPaths`), and while a tour
+  step points at one of its links or its `tours` (`retail-nav` for Shop). In the folded
   sidebar the heading is its icon, with the label as its accessible name and `title`. With one section, or none, the list stays
   flat with no heading, as before. On a phone the one-tap Sell is there only while retail is on, and Sale stays in Shop too.
 - **Folding the sidebar:** a button at its top (the `menu` icon, the constant name `aria-label="Menu labels"`, `aria-expanded`
