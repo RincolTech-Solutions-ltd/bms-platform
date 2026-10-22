@@ -3,11 +3,12 @@ import type { ReactNode } from 'react';
 // The pictures beside the iPhone install steps (issue #448): our own simple drawings of the part of Safari each step is about,
 // not screenshots and not Apple artwork. Like src/components/illustrations.tsx they carry no colour of their own: the classes in
 // src/app/ui/illustrations.css paint them from the tokens, so they follow the light and dark themes and the business's colour.
-// Each one is an image with a label that repeats its step, for a screen reader; the words of the step stay beside it.
+// Each one is an image with a short label that describes the drawing, not the step, so a screen reader does not read a step twice;
+// the words of the step stay beside it. The 100 unit viewBox is drawn at 104px, so the 11 unit labels read at about 11px.
 
-function Picture({ label, children }: { label: string; children: ReactNode }) {
+function Picture({ label, height = 76, children }: { label: string; height?: number; children: ReactNode }) {
   return (
-    <svg className="ill ios-step-pic" viewBox="0 0 120 90" role="img" aria-label={label}>
+    <svg className="ill ios-step-pic" viewBox={`0 0 100 ${height}`} role="img" aria-label={label}>
       {children}
     </svg>
   );
@@ -15,12 +16,12 @@ function Picture({ label, children }: { label: string; children: ReactNode }) {
 
 /** Safari in a normal tab: the address bar at the foot of a light page, no Private label. */
 export const safariTab = (
-  <Picture label="Use Safari, in a normal tab, not a Private one.">
-    <rect className="ill-surface" x="20" y="4" width="80" height="82" rx="10" />
-    <path className="ill-line" d="M32 20h56M32 30h40M32 40h48" />
-    <rect className="ill-tint" x="28" y="56" width="64" height="16" rx="8" />
-    <path className="ill-accent-line" d="M36 64h4" />
-    <text className="ill-text" x="46" y="67">
+  <Picture label="Picture: Safari with a normal tab open.">
+    <rect className="ill-surface" x="16" y="2" width="68" height="72" rx="10" />
+    <path className="ill-line" d="M26 16h48M26 26h34M26 36h40" />
+    <rect className="ill-tint" x="22" y="48" width="56" height="18" rx="9" />
+    <path className="ill-accent-line" d="M30 57h3" />
+    <text className="ill-text" x="39" y="61">
       bms
     </text>
   </Picture>
@@ -28,49 +29,53 @@ export const safariTab = (
 
 /** The bottom toolbar, Share (the square with an arrow) ringed, the address bar above and the ⋯ button beside it. */
 export const shareButton = (
-  <Picture label="Tap Share, the square with an arrow. If the buttons are hidden, tap the address bar. If you still do not see Share, tap the more button.">
-    <rect className="ill-surface" x="4" y="10" width="112" height="70" rx="10" />
-    <rect className="ill-tint" x="14" y="20" width="76" height="16" rx="8" />
-    <text className="ill-text" x="24" y="31">
+  <Picture label="Picture: Safari's Share button, ringed, in the bottom toolbar. On an iPad, Share is at the top right.">
+    <rect className="ill-surface" x="2" y="6" width="96" height="64" rx="10" />
+    <rect className="ill-tint" x="8" y="12" width="66" height="18" rx="9" />
+    <text className="ill-text" x="16" y="25">
       bms
     </text>
-    <text className="ill-text ill-text-strong" x="96" y="32">
+    <text className="ill-text ill-text-strong" x="80" y="25">
       ⋯
     </text>
-    <path className="ill-line" d="M18 60l-5 5 5 5M34 60l5 5-5 5M86 58h12v12H86z" />
-    <circle className="ill-accent-ring" cx="60" cy="63" r="12" />
-    <path className="ill-accent-line" d="M57 60h-3v10h12V60h-3M60 66V54M56 58l4-4 4 4" />
+    <path className="ill-line ill-thin" d="M14 47l-4 5 4 5M26 47l4 5-4 5M76 46h10v10H76z" />
+    <circle className="ill-accent-ring" cx="50" cy="52" r="11" />
+    <path className="ill-accent-line ill-thin" d="M47 49h-3v9h12v-9h-3M50 54V43M46.5 46.5l3.5-3.5 3.5 3.5" />
   </Picture>
 );
 
-/** The share sheet's list with Add to Home Screen picked out, and the View More row under it. */
+/**
+ * The share sheet's Add to Home Screen row picked out, and View More in a frame of its own under it, because on some iPhones
+ * the row is only found behind View More, so the two are not always seen together.
+ */
 export const addToHomeScreen = (
-  <Picture label="Tap Add to Home Screen. If it is not in the list, scroll down, or tap View More and it is there.">
-    <rect className="ill-surface" x="4" y="4" width="112" height="82" rx="10" />
-    <path className="ill-line" d="M14 20h60" />
-    <rect className="ill-tint" x="10" y="30" width="100" height="22" rx="6" />
-    <rect className="ill-accent-ring" x="14" y="35" width="12" height="12" rx="3" />
-    <path className="ill-accent-line" d="M20 38v6M17 41h6" />
-    <text className="ill-text ill-text-strong" x="32" y="45">
-      Add to Home Screen
+  <Picture label="Picture: Add to Home Screen, ringed, and View More as a second place to look." height={84}>
+    <rect className="ill-surface" x="2" y="2" width="96" height="46" rx="10" />
+    <rect className="ill-accent-ring" x="8" y="8" width="84" height="34" rx="6" />
+    <text className="ill-text ill-text-strong" x="50" y="22" textAnchor="middle">
+      Add to
     </text>
-    <text className="ill-text" x="14" y="74">
-      View More
+    <text className="ill-text ill-text-strong" x="50" y="35" textAnchor="middle">
+      Home Screen
     </text>
-    <path className="ill-line" d="M100 66l4 4-4 4" />
+    <rect className="ill-surface ill-dashed" x="2" y="56" width="96" height="26" rx="8" />
+    <text className="ill-text" x="10" y="73">
+      or View More
+    </text>
+    <path className="ill-line ill-thin" d="M86 64l4 5-4 5" />
   </Picture>
 );
 
 /** The Add button at the top right, above the new icon. */
 export const addButton = (
-  <Picture label="Tap Add, at the top right. Then open BMS from its new icon.">
-    <rect className="ill-surface" x="4" y="4" width="112" height="82" rx="10" />
-    <path className="ill-line" d="M12 16h22" />
-    <rect className="ill-accent-ring" x="82" y="8" width="28" height="18" rx="6" />
-    <text className="ill-text ill-text-accent" x="87" y="21">
+  <Picture label="Picture: the Add button, ringed, at the top right, and the new icon.">
+    <rect className="ill-surface" x="2" y="2" width="96" height="72" rx="10" />
+    <path className="ill-line" d="M10 15h20" />
+    <rect className="ill-accent-ring" x="64" y="6" width="30" height="18" rx="6" />
+    <text className="ill-text ill-text-accent" x="79" y="19" textAnchor="middle">
       Add
     </text>
-    <rect className="ill-primary" x="44" y="38" width="32" height="32" rx="8" />
-    <path className="ill-line" d="M44 80h32" />
+    <rect className="ill-primary" x="36" y="32" width="28" height="28" rx="7" />
+    <path className="ill-line" d="M36 68h28" />
   </Picture>
 );

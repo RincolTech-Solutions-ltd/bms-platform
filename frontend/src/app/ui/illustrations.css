@@ -240,7 +240,15 @@
 .ill-text {
   fill: var(--color-text-muted);
   font-family: inherit;
-  font-size: 8px;
+  font-size: 11px;
+}
+
+.ill-thin {
+  stroke-width: 2;
+}
+
+.ill-dashed {
+  stroke-dasharray: 4 3;
 }
 
 .ill-text-strong {

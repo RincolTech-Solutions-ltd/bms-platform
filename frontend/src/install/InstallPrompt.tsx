@@ -17,9 +17,9 @@ function useInstall() {
  * (other iOS browsers can add to the Home Screen too, from menus that differ). The Share button is often out of sight: Safari
  * folds its toolbar away when the page scrolls, and in some layouts Share sits behind the ⋯ button. A first pilot owner stopped
  * at "tap Share" because she could not see it, so the steps say what to do when it is not there, rather than which phone or
- * which iOS layout she has, which she cannot be expected to know. Newer iPhones keep Add to Home Screen behind View More. Each
- * step has a small drawing beside its words (issue #448, ios-pictures.tsx), since a picture of what to look for is followed more
- * easily than words alone.
+ * which iOS layout she has, which she cannot be expected to know. On an iPad Share is at the top right, not in a bottom
+ * toolbar. Newer iPhones keep Add to Home Screen behind View More. Each step has a small drawing beside its words (issue #448,
+ * ios-pictures.tsx), since a picture of what to look for is followed more easily than words alone.
  */
 export function IosSteps() {
   return (
@@ -36,7 +36,8 @@ export function IosSteps() {
         <div className="ios-step">
           <span className="ios-step-text">
             Tap <strong>Share</strong>: the square with an arrow. If the buttons are hidden, tap the address bar once so they
-            show. If you still do not see Share, tap <strong>⋯</strong> and Share is there.
+            show. If you still do not see Share, tap <strong>⋯</strong> and Share is there. On an iPad, Share is at the top
+            right.
           </span>
           {shareButton}
         </div>
