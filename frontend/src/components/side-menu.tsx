@@ -264,9 +264,12 @@ export function SideMenu({ label, tour, links, name, onSignOut, busy = false, to
         aria-labelledby={heading}
         onKeyDown={onKeyDown}
         onClick={(event) => {
-          if (!open || !(event.target instanceof Element) || !event.target.closest('a')) return;
-          // A chosen link opens a new page, which keeps its own scroll, not the old page's position.
-          restoreScroll.current = false;
+          const link = event.target instanceof Element ? event.target.closest('a') : null;
+          if (!open || !link) return;
+          // A link to another page opens it here, and it keeps its own scroll, not the old page's position. The same page, or a
+          // link opened elsewhere (Ctrl, Cmd, Shift or a middle click), leaves this page, so its position comes back.
+          const elsewhere = event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0;
+          if (link.pathname !== pathname && !elsewhere) restoreScroll.current = false;
           close();
         }}
         onTouchStart={(event) => {

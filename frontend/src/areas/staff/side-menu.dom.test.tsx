@@ -228,6 +228,25 @@ describe('the staff side menu on a phone (issue #455)', () => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
   });
 
+  it('gives the scroll position back when the tapped link is the page already shown', () => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 300 });
+    show(officer, { at: '/staff/feedback' });
+    fireEvent.click(within(openMenu()).getByRole('link', { name: 'Feedback' }));
+    expect(drawer()).toBeNull();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 300);
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('gives the scroll position back when a link opens elsewhere (%o)', (keys) => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 300 });
+    const { router } = show(officer);
+    fireEvent.click(within(openMenu()).getByRole('link', { name: 'Feedback' }), keys);
+    expect(drawer()).toBeNull();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 300);
+    expect(router.history.location.pathname).toBe('/staff');
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
   it('leaves no drawer, backdrop or scroll lock behind when the window widens while it is open', async () => {
     show(officer);
     openMenu();
