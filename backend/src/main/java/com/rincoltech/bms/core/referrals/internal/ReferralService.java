@@ -34,7 +34,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Referrals and commissions (issue #464, ADR-069) through the SECURITY DEFINER functions of V89. The business's own view reads
+ * Referrals and commissions (issue #464, ADR-069) through the SECURITY DEFINER functions of V88. The business's own view reads
  * inside the bound tenant; the operator's reads and writes run with no tenant bound, except the commission of a payment, which
  * runs in the paying business's transaction. Every operator write is audited in {@code platform_audit_log} with the reason.
  */

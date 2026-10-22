@@ -6,7 +6,7 @@
  * lines; a payment the operator records for a referred business adds its line from the rule in force. The app records
  * commissions and never pays them. The owner and administrators of a business read its own link and referrals at
  * {@code /api/v1/referrals}. Public API: {@link com.rincoltech.bms.core.referrals.Referrals}, which {@code core.onboarding}
- * and {@code core.platform} use; every write goes through the SECURITY DEFINER functions of migration V89 (ADR-016).
+ * and {@code core.platform} use; every write goes through the SECURITY DEFINER functions of migration V88 (ADR-016).
  */
 @ApplicationModule(
         id = "core.referrals",

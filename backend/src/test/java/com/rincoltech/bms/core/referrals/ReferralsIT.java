@@ -1023,7 +1023,7 @@ class ReferralsIT extends IntegrationTest {
 
     // ---- The default rule (ADR-069 decision 14) ----------------------------------------------
 
-    /** The default rule V89 seeds: 10% of each payment for the first 12 paid months, no cap. */
+    /** The default rule V88 seeds: 10% of each payment for the first 12 paid months, no cap. */
     static final UUID SEEDED_DEFAULT = UUID.fromString("00000000-0000-4000-8000-000000000890");
 
     /** Puts the seeded default back in force, whatever an earlier test left. */

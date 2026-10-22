@@ -1,6 +1,6 @@
--- V89: referral links and commission tracking (issue #464, ADR-069). V81 to V88 are claimed by open pull requests (lending
--- V81 to V84, payments V85 and V86, offline sales V87, shop logos V88); Flyway runs with outOfOrder off, so this file is renamed
--- at merge if those land after it.
+-- V88: referral links and commission tracking (issue #464, ADR-069). V85 is shop logos (#465); V86 (offline sales, #463) and
+-- V87 (barcodes, #470) are the ordered claims before this one; Flyway runs with outOfOrder off, so this file is renamed at
+-- merge if that order changes.
 --
 -- Expand only, safe on a populated database. Every business gets a referral code (a trigger on tenants, and a backfill for the
 -- businesses that exist); the public sign-up records the code an applicant brings; Activate turns it into a referral; the

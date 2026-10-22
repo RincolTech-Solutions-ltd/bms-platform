@@ -5,9 +5,9 @@
 Accepted (issue #464, FR-REF-01 to FR-REF-08). Builds on ADR-003 (row-level security), ADR-016 (the platform reads and changes
 tenants through SECURITY DEFINER functions), ADR-024 (self-onboarding; its decision 5 on commission rules, which this record
 narrows to referrals) and ADR-056 (manual subscription payments; its decision 8 deferred commission lines, which this record
-builds). Migration `V89`: `V81` to `V88` are claimed by open pull requests (lending `V81` to `V84`, payments `V85` and `V86`,
-offline sales `V87`, shop logos `V88`), and the file is renamed at merge if they land after it. The two numbers before this
-record are claimed by open pull requests: pending ADR-067 (offline sales) and pending ADR-068 (shop logos).
+builds). Migration `V88`: `V85` is shop logos (#465), and offline sales `V86` (#463) and barcodes `V87` (#470) are the ordered
+claims before it; the file is renamed at merge if that order changes. The two numbers before this
+record are pending ADR-067 (offline sales, an open pull request) and ADR-068 (shop logos).
 
 ## Context
 
@@ -21,7 +21,7 @@ data, and a business must not be able to refer itself.
 ## Decision
 
 1. **Every business has one referral code and a link.** A trigger on `tenants` gives each new business a code when it is created
-   and `V89` backfills every business that exists: up to five letters of the slug and two characters from an alphabet without 0,
+   and `V88` backfills every business that exists: up to five letters of the slug and two characters from an alphabet without 0,
    1, I and O (for example `DODOS7K`), four characters after ten taken tries, eight random characters after twenty or for a slug
    with fewer than two letters. Codes are unique, stored in upper case, matched without case, and never change
    (`referral_codes`, append-only). The link is the platform sign-up with the code: `{platform origin}/sign-up?ref=CODE`.
@@ -42,7 +42,7 @@ data, and a business must not be able to refer itself.
    optional cap on the referral's total), `fixed_first_payment` (a fixed amount once, on the referred business's first payment)
    and `fixed_per_month` (a fixed amount per paid month for the first N paid months). The operator sets a platform default rule
    and may override it on any one referral at any time, each with a reason, audited. Rules are append-only: a change is a new rule
-   and the pointer moves (`referral_settings.default_rule_id`, `tenant_referrals.rule_id`). `V89` seeds the platform default
+   and the pointer moves (`referral_settings.default_rule_id`, `tenant_referrals.rule_id`). `V88` seeds the platform default
    the product owner decided (decision 14); every other rate or amount is typed by the operator, and no plan price appears in
    code, migrations or fixtures.
 5. **A payment the operator records adds the commission line from the rule in force at that moment.** In the same transaction as
@@ -133,7 +133,7 @@ The product owner decided the default rule on 22 Oct 2026.
     Growing business that pays for a year upfront earns its referrer 10 percent of that one payment, and nothing on later
     payments.
 
-    `V89` stores this as the platform default rule (`percent_of_payment`, 1000 basis points, 12 months, no cap) with a
+    `V88` stores this as the platform default rule (`percent_of_payment`, 1000 basis points, 12 months, no cap) with a
     `platform.referral.default_rule_changed` audit row giving the product owner's decision as the reason, and only when no
     default is set, so it never overwrites one the operator chose. The operator can change the default at any time (later
     payments follow the new default; lines already worked out keep the rule they used) and can override the rule on any one

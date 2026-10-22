@@ -346,6 +346,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/branches/{branch_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A shop's own logo image (public, cacheable) */
+        get: operations["getBranchLogo"];
+        /** Upload or replace a shop's own logo: the rules of the business logo, PNG, JPEG or WebP, 1 MB, 128 px or more (issue #461, ADR-068) */
+        put: operations["uploadBranchLogo"];
+        post?: never;
+        /** Remove a shop's own logo; it shows the business logo again and the file is kept (issue #461) */
+        delete: operations["removeBranchLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches/{branch_id}/reopen": {
         parameters: {
             query?: never;
@@ -1321,6 +1340,23 @@ export interface paths {
         put?: never;
         /** Create a draft application (FR-ORG-01) */
         post: operations["createLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/loans/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Home's Lending card: loans due today and in arrears, with what is owed (issue #471) */
+        get: operations["getLoanHomeSummary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7185,6 +7221,8 @@ export interface components {
             id?: string;
             is_head_office?: boolean;
             location?: string;
+            /** @description Same-origin URL of the shop's own logo, versioned by its document id, or null: the shop shows the business logo (issue #461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store: it holds stock and takes transfers but does not sell (ADR-048) */
             sells_goods?: boolean;
@@ -8692,6 +8730,35 @@ export interface components {
             member_id: string;
             relationship?: string;
         };
+        /** @description The Lending card on Home (issue #471, ADR-072): active loans in the caller's lending.loans.read scope and in the business's currency, read live from the schedule, not from the nightly arrears run */
+        LoanHomeSummary: {
+            currency?: string;
+            /**
+             * Format: date
+             * @description The business date the figures are for
+             */
+            date?: string;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due today that is not fully paid
+             */
+            due_today_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due today
+             */
+            due_today_minor?: number;
+            /**
+             * Format: int32
+             * @description Loans with an instalment due before today that is not fully paid
+             */
+            in_arrears_count?: number;
+            /**
+             * Format: int64
+             * @description What is still owed on the instalments due before today
+             */
+            in_arrears_minor?: number;
+        };
         LoanListItem: {
             /** Format: int64 */
             approved_principal_minor?: number;
@@ -9044,6 +9111,8 @@ export interface components {
             /** Format: uuid */
             id?: string;
             is_head_office?: boolean;
+            /** @description Same-origin URL of the shop's own logo, or null: show the business logo (#461, ADR-068) */
+            logo_url?: string;
             name?: string;
             /** @description false for a Store, a branch that holds stock but does not sell: the sale form, the default selling branch and the till skip it; restock, goods receipt, transfer and stock-take forms include it (#366) */
             sells_goods?: boolean;
@@ -17722,6 +17791,146 @@ export interface operations {
             };
         };
     };
+    getBranchLogo: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ETag still matches */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description No such branch, no logo of its own, or an unknown host */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Storage cannot be read (logo_unavailable) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+        };
+    };
+    uploadBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Over 1 MB (file_too_large) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description Not PNG, JPEG or WebP, or not decodable (unsupported_file_type) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description svg_not_allowed, image_too_small, image_too_large (over 4 megapixels) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
+    removeBranchLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No such branch in the caller's scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            /** @description The branch is closed (invalid_status_transition) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+        };
+    };
     reopenBranch: {
         parameters: {
             query?: never;
@@ -19514,6 +19723,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Loan"];
+                };
+            };
+        };
+    };
+    getLoanHomeSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanHomeSummary"];
                 };
             };
         };

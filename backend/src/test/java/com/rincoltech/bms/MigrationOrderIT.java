@@ -1475,7 +1475,7 @@ class MigrationOrderIT {
                 .as("the existing tables keep their shape")
                 .isEqualTo(before);
         // V48 adds no permission; V55 (the AI assistant, #226) adds the two advisor ones, V57 (#233) the payment
-        // account one, V83 (collections, #266) the two collection list ones and V89 (referrals, #464)
+        // account one, V83 (collections, #266) the two collection list ones and V88 (referrals, #464)
         // core.referrals.read, which are not V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
@@ -1995,19 +1995,19 @@ class MigrationOrderIT {
      * #464 (ADR-069): the referral migration gives every business that already exists its own code, and a business made
      * afterwards gets one from the trigger; the default commission rule is the product owner's (ADR-069 decision 14), audited
      * once.
-     * JUSTIFICATION-A3: a new test case; no existing case migrates a database with businesses across V89.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a database with businesses across V88.
      */
     @Test
     void referralsMigrationGivesEveryExistingBusinessACode() {
         try (PostgreSQLContainer postgres = database()) {
             postgres.start();
-            String before = VERSIONS.get(VERSIONS.indexOf("89") - 1);
+            String before = VERSIONS.get(VERSIONS.indexOf("88") - 1);
             assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
             JdbcClient owner = JdbcClient.create(
                     new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
             for (String slug : List.of("dodos-shop", "dodos-mart", "x9-42")) {
                 owner.sql(
-                                "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Tenant V89', '00000000-0000-4000-8000-000000000001')")
+                                "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Tenant V88', '00000000-0000-4000-8000-000000000001')")
                         .params(UUID.randomUUID(), slug)
                         .update();
             }
