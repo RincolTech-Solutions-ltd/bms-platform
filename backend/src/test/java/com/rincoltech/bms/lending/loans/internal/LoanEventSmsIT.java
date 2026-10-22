@@ -918,12 +918,14 @@ class LoanEventSmsIT extends LoanFixtures {
     // ---- Reminders and arrears notices (#227) -----------------------------------------------------
 
     @Autowired
-    @org.springframework.beans.factory.annotation.Qualifier("loanArrears")
-    com.github.kagkarlsson.scheduler.task.helper.RecurringTask<Void> arrearsTask;
+    org.springframework.context.ApplicationContext context;
 
-    /** The nightly arrears job as the scheduler runs it: every active lending tenant, one transaction each. */
+    /**
+     * The nightly arrears job as the scheduler runs it for each tenant, for this test's business only (no test context
+     * schedules the job itself, {@code IntegrationTest}).
+     */
     void nightly() {
-        arrearsTask.execute(null, null);
+        ArrearsTestRun.run(context, t.tenantId());
     }
 
     Instant notBefore(String template) {
