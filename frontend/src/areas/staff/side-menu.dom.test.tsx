@@ -475,6 +475,72 @@ describe('the same areas for the same permissions on every size', () => {
   });
 });
 
+describe('a business with both Shop and Lending (issue #471)', () => {
+  const both = { ...admin, permissions: [...(admin.permissions ?? []), 'lending.loans.read', 'lending.members.read'], modules: ['lending', 'retail'] } as unknown as Me;
+  const headings = (root: HTMLElement) => Array.from(root.querySelectorAll('.side-menu-heading')).map((b) => b.textContent);
+  const sectionLinks = (root: HTMLElement, name: string) => {
+    const heading = within(root).getByRole('button', { name });
+    const list = document.getElementById(heading.getAttribute('aria-controls') ?? '') as HTMLElement;
+    return within(list).queryAllByRole('link').map((a) => a.textContent);
+  };
+
+  it('groups the menu under Shop and Lending with the shared areas around them, on a phone and from 720px alike', () => {
+    widthIs(1280);
+    show(both);
+    const sidebar = document.querySelector('.side-nav') as HTMLElement;
+    expect(headings(sidebar)).toEqual(['Shop', 'Lending']);
+    expect(sectionLinks(sidebar, 'Lending')).toEqual(['Loans', 'Members']);
+    expect(sectionLinks(sidebar, 'Shop')[0]).toBe('Retail');
+    const wide = within(sidebar).getAllByRole('link').map((a) => a.textContent);
+    expect(wide.slice(0, 2)).toEqual(['Home', 'Retail']);
+    expect(wide.slice(-3)).toEqual(['Notifications', 'Feedback', 'Business set-up']);
+    cleanup();
+    widthIs(360);
+    show(both);
+    const dialog = openMenu();
+    expect(headings(dialog)).toEqual(['Shop', 'Lending']);
+    expect(labels(dialog)).toEqual(wide);
+  });
+
+  it('keeps a one-module menu flat, with no heading', () => {
+    widthIs(1280);
+    show(admin);
+    expect(headings(document.querySelector('.side-nav') as HTMLElement)).toEqual([]);
+    cleanup();
+    show(officer);
+    expect(headings(document.querySelector('.side-nav') as HTMLElement)).toEqual([]);
+  });
+
+  it('folds a section and remembers it for that person only', () => {
+    widthIs(1280);
+    show(both);
+    const heading = screen.getByRole('button', { name: 'Lending' });
+    expect(heading.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(heading);
+    expect(heading.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('link', { name: 'Loans' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Retail' })).toBeTruthy();
+    cleanup();
+    show(both);
+    expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('false');
+    cleanup();
+    show({ ...both, user_id: '00000000-0000-4000-8000-0000000000f2' } as Me);
+    expect(screen.getByRole('button', { name: 'Lending' }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('link', { name: 'Loans' })).toBeTruthy();
+  });
+
+  it('keeps the one-tap Sell on a 360px phone and Sale in the Shop section', () => {
+    show(both);
+    expect(screen.getByRole('link', { name: 'Sell' }).getAttribute('href')).toBe('/staff/retail/sale');
+    const dialog = openMenu();
+    expect(sectionLinks(dialog, 'Shop')).toContain('Sale');
+    expect(sectionLinks(dialog, 'Lending')).not.toContain('Sale');
+    cleanup();
+    show({ ...both, modules: ['lending'] } as Me);
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+  });
+});
+
 describe('the operator portal side menu (issue #455)', () => {
   function portal(at = '/platform') {
     const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
