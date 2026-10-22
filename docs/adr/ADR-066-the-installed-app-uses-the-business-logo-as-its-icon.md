@@ -4,8 +4,8 @@
 
 Proposed (owner request of 22 Oct 2026, issue #446, FR-TEN-08). Builds on ADR-050 (BMS installs as an app) and on the tenant branding
 of FR-TEN-08 (the logo as a core document, the theme colour rule). Amends ADR-050 decision 1 only in where the manifest and the iPhone
-icon come from; every other decision of ADR-050 stands. Numbered ADR-066 because pending ADR-064 (collection lists) and ADR-065
-(in-app feedback) are taken by open pull requests.
+icon come from; every other decision of ADR-050 stands. Numbered ADR-066 because ADR-065 (in-app feedback) is taken and pending ADR-064 (collection lists) is claimed by an
+open pull request.
 
 ## Context
 
