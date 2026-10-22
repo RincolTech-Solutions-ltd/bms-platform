@@ -23,7 +23,10 @@ function countBusy(delta: number) {
   if (working() !== before) listeners.forEach((listener) => listener());
 }
 
-/** The single polite live region the busy buttons speak through; the app shell mounts it once. */
+/**
+ * The polite live region the busy buttons speak through; the app shell mounts it once. An aria-modal dialog hides the shell's
+ * one from a screen reader, so a modal that holds a busy button (the phone menu's Sign out) mounts a second inside itself.
+ */
 export function BusyAnnouncer() {
   const now = useSyncExternalStore(subscribe, working, working);
   return (

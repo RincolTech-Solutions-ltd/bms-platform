@@ -1,7 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { type KeyboardEvent, type ReactNode, type TouchEvent, createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { BusyButton } from '../app/ui/BusyButton';
+import { BusyAnnouncer, BusyButton } from '../app/ui/BusyButton';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
 
@@ -294,6 +294,8 @@ export function SideMenu({ label, tour, links, name, onSignOut, busy = false, to
             {icons.signOut}
             <span>Sign out</span>
           </BusyButton>
+          {/* The drawer the person opened is aria-modal, which hides the shell's announcer, so it carries its own while open. */}
+          {open && <BusyAnnouncer />}
         </div>
       </div>
     </div>

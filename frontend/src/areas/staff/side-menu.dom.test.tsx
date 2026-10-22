@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../api/client';
 import { retail } from '../../api/retail';
@@ -59,7 +59,25 @@ function resize(px: number) {
   });
 }
 
-function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
+// The staff bar as the staff route draws it: Sign out is busy from the press until signing out is over.
+function SigningOutBar({ me, signOut, done }: { me: Me; signOut: () => void; done: Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <StaffBar
+      me={me}
+      branch={null}
+      onBranch={() => undefined}
+      busy={busy}
+      onSignOut={() => {
+        setBusy(true);
+        signOut();
+        void done.then(() => setBusy(false));
+      }}
+    />
+  );
+}
+
+function show(me: Me, { at = '/staff', children = null as ReactNode, signingOut = undefined as Promise<void> | undefined } = {}) {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
   const signOut = vi.fn();
   render(
@@ -68,7 +86,7 @@ function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
         <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? null }}>
           <TourProvider me={me} saveProgress={false}>
             <StaffSideNav me={me} />
-            <StaffBar me={me} branch={null} onBranch={() => undefined} onSignOut={signOut} />
+            {signingOut ? <SigningOutBar me={me} signOut={signOut} done={signingOut} /> : <StaffBar me={me} branch={null} onBranch={() => undefined} onSignOut={signOut} />}
             {children}
           </TourProvider>
         </StaffContext.Provider>
@@ -125,6 +143,19 @@ describe('the staff side menu on a phone (issue #455)', () => {
     expect(within(dialog).getByText('Test Officer 01')).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('says Working inside the opened drawer, which hides the rest of the page, while Sign out runs', async () => {
+    let finish = () => undefined as void;
+    show(officer, { signingOut: new Promise<void>((resolve) => (finish = resolve)) });
+    const dialog = openMenu();
+    expect(within(dialog).getByRole('status').textContent).toBe('');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Sign out' }));
+    expect(within(dialog).getByRole('status').textContent).toBe('Working');
+    await act(async () => finish());
+    expect(within(dialog).getByRole('status').textContent).toBe('');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelectorAll('[data-busy-announcer]')).toHaveLength(0);
   });
 
   it('marks the current area with aria-current', () => {
