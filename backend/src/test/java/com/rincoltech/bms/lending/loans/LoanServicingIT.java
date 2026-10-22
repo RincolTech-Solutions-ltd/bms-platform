@@ -3803,4 +3803,34 @@ class LoanServicingIT extends LoanFixtures {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
     }
+
+    /**
+     * Issue #471 and ADR-064: a loan officer's Lending card counts only their own portfolio, like the collections lists;
+     * the branch manager, who holds lending.collections.all_officers, counts the branch.
+     */
+    @Test
+    void issue471_aLoanOfficersHomeSummaryCountsOnlyTheirOwnLoans() {
+        String product = exampleB("HOMEOWN");
+        String mine = approved(product, 1_200_000, 3, 77);
+        disburse(mine, today.minusMonths(2).minusDays(5));
+        String theirs = approved(product, 1_200_000, 3, 76);
+        disburse(theirs, today.minusMonths(2).minusDays(5));
+        UUID other = staffUser("loan_officer", t.headOffice());
+        assertThat(send(
+                                HttpMethod.PUT,
+                                LOANS + "/" + theirs + "/officer",
+                                as(manager, managerPerms, "*", null),
+                                Map.of("officer_user_id", other.toString(), "reason", "Test portfolio split"))
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        JsonNode own = asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(own.get("in_arrears_count").asInt()).isEqualTo(1);
+        assertThat(own.get("in_arrears_minor").asLong()).isEqualTo(owed(mine, false));
+
+        JsonNode branch = send(HttpMethod.GET, LOANS + "/summary", as(manager, managerPerms, "*", null), null)
+                .getBody();
+        assertThat(branch.get("in_arrears_count").asInt()).isEqualTo(2);
+        assertThat(branch.get("in_arrears_minor").asLong()).isEqualTo(owed(mine, false) + owed(theirs, false));
+    }
 }

@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed (owner request of 22 Oct 2026, issue #471, FR-UXN-04 and FR-UXN-05). Builds on ADR-001 (core plus vertical modules),
-ADR-003 (row-level security), ADR-055 (sellers who see only their own figures) and on the side menu of issue #455.
+Accepted (owner request of 22 Oct 2026, issue #471, FR-UXN-04 and FR-UXN-05, after the review of pull request #473). Builds on
+ADR-001 (core plus vertical modules), ADR-003 (row-level security), ADR-055 (sellers who see only their own figures), ADR-064
+(a loan officer sees their own portfolio) and on the side menu of issue #455.
 
 ## Context
 
@@ -14,9 +15,11 @@ for approval.
 
 Most of that is already served. The retail dashboard (`GET /retail/reports/dashboard`) has today's sales total and count and the
 low-stock count; the orders board (`GET /retail/orders/board`) has the open orders at each step; the approvals inbox
-(`GET /approvals`) lists the pending requests. Nothing served the loans due today or the arrears to a holder of
-`lending.loans.read`: the portfolio of insights needs `lending.insights.read` and reads the nightly snapshot, and the loan list
-would have to be paged in full to add it up on the phone.
+(`GET /approvals`) lists the pending requests. The collection lists of FR-CLN-02 and FR-CLN-03 (`GET /lending/collections/due`
+and `/arrears`, ADR-064) now carry each loan due and in arrears, with the borrower's name and phone, but they need
+`lending.collections.read`, page at most 500 lines, and the arrears list reads the nightly `days_past_due` of the arrears run, so
+adding them up on the phone would be both heavy and a day old. The portfolio of insights needs `lending.insights.read` and reads the
+nightly snapshot, and the loan list would have to be paged in full.
 
 ## Decision
 
@@ -32,7 +35,9 @@ would have to be paged in full to add it up on the phone.
    amount still owed of the active loans with an instalment due today and with an instalment due before today, read live from
    `lending_schedule_items` (what is due less what is paid, waived and written off), in the business's currency. It is tenant-scoped
    by RLS like every read, adds no table, column, migration or permission, and is a lending route, not a core one, so the core never
-   learns a vertical's figures.
+   learns a vertical's figures. It applies the ADR-064 officer limit exactly as the collection lists do (the same filter,
+   `CollectionsRepository.filters`): in a branch where the caller lacks `lending.collections.all_officers`, a loan officer there,
+   it counts only the loans they are the responsible officer for, so the card never shows a figure the lists would hide.
 4. **The waiting requests come from the approvals inbox**, counted on the phone for the lending action types only
    (`LENDING_APPROVALS` in `areas/staff/home-cards.tsx`), shown with a `+` when the inbox has more pages.
 

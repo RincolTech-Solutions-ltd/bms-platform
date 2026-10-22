@@ -607,20 +607,19 @@ class LoanRepository {
 
     /**
      * Issue #471: what is left on the active loans' instalments due today and due before today, in {@code currency}.
-     * {@code branchIds} already intersected with the scope, null for every branch.
+     * {@code branchIds} already intersected with the scope, null for every branch; {@code officers} is the ADR-064
+     * limit, so a loan officer counts only their own portfolio, as on the collections lists.
      */
-    HomeFigures homeFigures(List<UUID> branchIds, LocalDate today, String currency) {
+    HomeFigures homeFigures(
+            List<UUID> branchIds, CollectionsRepository.Officers officers, LocalDate today, String currency) {
         if (branchIds != null && branchIds.isEmpty()) {
             return new HomeFigures(0, 0, 0, 0);
         }
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("today", today);
         p.put("currency", currency);
-        String branches = "";
-        if (branchIds != null) {
-            branches = " AND l.branch_id IN (:branchIds)";
-            p.put("branchIds", branchIds);
-        }
+        StringBuilder filters = new StringBuilder();
+        CollectionsRepository.filters(filters, p, branchIds, officers);
         return jdbc.sql("""
                         WITH owed AS (
                             SELECT i.loan_id, i.due_date,
@@ -637,7 +636,7 @@ class LoanRepository {
                                count(DISTINCT loan_id) FILTER (WHERE due_date < :today) AS arrears_count,
                                coalesce(sum(left_minor) FILTER (WHERE due_date < :today), 0) AS arrears_minor
                         FROM owed WHERE left_minor > 0
-                        """.formatted(branches))
+                        """.formatted(filters))
                 .params(p)
                 .query((rs, n) -> new HomeFigures(
                         rs.getInt("due_count"),

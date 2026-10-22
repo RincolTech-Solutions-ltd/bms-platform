@@ -169,14 +169,20 @@ class LoanService {
         return respond(inScope(id, "lending.loans.read"));
     }
 
-    /** The Lending card on Home (issue #471, ADR-072), on the business date in the caller's lending.loans.read scope. */
+    /**
+     * The Lending card on Home (issue #471, ADR-072), on the business date in the caller's lending.loans.read scope;
+     * where the caller lacks lending.collections.all_officers only their own portfolio (ADR-064).
+     */
     @Transactional(readOnly = true)
     HomeSummary homeSummary(List<UUID> branchIds) {
         Principal principal = CurrentPrincipal.require();
         CurrentTenant.Profile profile = currentTenant.profile();
         LocalDate today = clock.today(profile.timezone());
-        LoanRepository.HomeFigures f =
-                repo.homeFigures(principal.branchFilter("lending.loans.read", branchIds), today, profile.currency());
+        LoanRepository.HomeFigures f = repo.homeFigures(
+                principal.branchFilter("lending.loans.read", branchIds),
+                CollectionsService.officerFor(principal, null),
+                today,
+                profile.currency());
         return new HomeSummary(
                 today,
                 profile.currency(),
