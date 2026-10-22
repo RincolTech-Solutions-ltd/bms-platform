@@ -4,6 +4,7 @@ import { type ChangeEvent, useEffect, useRef, useState } from 'react';
 import { api, fetchSettings, problemOf, type TenantSettings } from '../../api/client';
 import { useShellBrand } from '../../app/branding';
 import { checkColour, colourMessage, suggestColour } from '../../app/contrast';
+import { NewIconNote } from '../../install/NewIcon';
 import { useStaff } from './context';
 
 // Business set-up (FR-TEN-08): name, logo, theme colour and receipt footer, with a checklist a new
@@ -52,6 +53,8 @@ export function Setup() {
   const [suggested, setSuggested] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A saved logo is the installed app's icon too (ADR-066), so the admin is told how it reaches a phone (issue #453).
+  const [logoSaved, setLogoSaved] = useState(false);
 
   // The form is filled once from the saved settings and then belongs to the admin: a logo upload,
   // removal or dismissal changes the settings version but must not wipe what has been typed.
@@ -123,6 +126,7 @@ export function Setup() {
       });
       if (error) throw new Error(problemOf(error).detail ?? 'Could not upload the logo.');
       await refresh();
+      setLogoSaved(true);
       const found = await suggestFrom(file);
       if (found) {
         setColour(found);
@@ -138,6 +142,7 @@ export function Setup() {
       const { error } = await api.DELETE('/api/v1/settings/logo');
       if (error) throw new Error(problemOf(error).detail ?? 'Could not remove the logo.');
       await refresh();
+      setLogoSaved(false);
       return 'Logo removed.';
     });
   }
@@ -226,6 +231,7 @@ export function Setup() {
               Remove the logo
             </button>
           )}
+          {logoSaved && current.logo_document_id && <NewIconNote />}
         </fieldset>
 
         <fieldset data-tour="setup-colour">

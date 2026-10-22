@@ -284,7 +284,10 @@ is dismissed (`setup_dismissed`, tenant wide).
   and accept-invitation pages of the tenant host; the colour drives the accent through CSS custom
   properties (chapter 11 section 11.2.5). The installed app (ADR-050) takes the business's name, colour and
   logo as its name and home screen icon from a manifest the API serves per host (ADR-066, issue #446): Android
-  updates an installed app by itself, an iPhone only when the app is added to the home screen again. The
+  updates an installed app by itself, an iPhone only when the app is added to the home screen again. So after
+  a logo is saved the set-up screen says how the new icon reaches a phone, and the installed app on an iPhone
+  or iPad shows a one-time card with the steps when the business's logo or colour has changed since that
+  device last opened it (issue #453; never on Android, a desktop or a browser tab). The
   same logo is the browser tab and address bar icon.
   Everything else keeps the platform look. The platform
   host shows the Rincoltech brand.

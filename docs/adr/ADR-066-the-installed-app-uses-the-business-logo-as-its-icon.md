@@ -51,7 +51,14 @@ resolves the business from the host on every request and already serves the logo
    API (`/api/*`) and neither Caddyfile changes.
 6. **When a change reaches a phone.** Android Chrome checks the manifest of an installed app from time to time and updates its icon
    and name by itself (it may ask the person to confirm). An iPhone takes the icon and the name when Add to Home Screen is tapped and
-   never looks again, so after a logo change the business's staff remove the app and add it again on an iPhone.
+   never looks again, so after a logo change the business's staff remove the app and add it again on an iPhone. The app says so
+   (issue #453): after a logo is saved, the set-up screen notes that the logo is now the app's icon, that Android updates it by itself
+   and that an iPhone needs the app removed and added again, with the existing iPhone steps one tap away. On an iPhone or iPad
+   running the installed app (display mode `standalone` or `navigator.standalone`), the staff area remembers per device in
+   `localStorage` (`bms.install.iconVersion`, per host and so per business) the icon version the shell already computes from the
+   logo address and the colour. The first run only stores it. When the business's version later differs, a one-time card tells the
+   person to remove the app and add it again, with the same steps; Done stores the new version, so that version never shows the card
+   again. It never shows on Android, on a desktop or in a browser tab, and a device whose storage cannot be read shows nothing.
 
 ## Consequences
 
@@ -65,7 +72,8 @@ resolves the business from the host on every request and already serves the logo
 - The manifest is no longer a static file: the API must be up for a browser to read it, and a phone that installs while the API is down
   sees no manifest.
 - Drawing an icon costs some milliseconds of CPU the first time per logo, colour and size on each API instance.
-- An iPhone keeps the old icon until the app is added again.
+- An iPhone keeps the old icon until the app is added again. The installed app on an iPhone or iPad says so once per new logo or
+  colour (issue #453), but the person still has to remove the app and add it again; a phone that does not open the app never sees it.
 
 **Watch for:**
 
