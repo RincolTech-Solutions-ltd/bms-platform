@@ -87,12 +87,15 @@ class OfflineSalesRepository {
     }
 
     /** The sale recorded with this client sale id and who recorded it, if one is (ADR-067 decision 5). */
-    record Recorded(UUID saleId, UUID createdBy) {}
+    record Recorded(UUID saleId, UUID createdBy, String requestHash) {}
 
     Optional<Recorded> saleByClient(UUID clientSaleId) {
-        return jdbc.sql("SELECT id, created_by FROM retail_sales WHERE client_sale_id = ?")
+        return jdbc.sql("SELECT id, created_by, request_hash FROM retail_sales WHERE client_sale_id = ?")
                 .param(clientSaleId)
-                .query((rs, n) -> new Recorded(rs.getObject("id", UUID.class), rs.getObject("created_by", UUID.class)))
+                .query((rs, n) -> new Recorded(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("created_by", UUID.class),
+                        rs.getString("request_hash")))
                 .optional();
     }
 
@@ -110,6 +113,15 @@ class OfflineSalesRepository {
                         .query(Long.class)
                         .single()
                 > 0;
+    }
+
+    /** The fingerprint of a reported sale request ({@link SalesService#requestHash}); null when it is not a sale request. */
+    String requestHash(Map<String, Object> request) {
+        try {
+            return SalesService.requestHash(mapper.convertValue(request, SalesApi.SaleRequest.class));
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** A reported sale request as the JSON it is stored as. */

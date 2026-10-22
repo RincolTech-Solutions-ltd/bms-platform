@@ -990,13 +990,20 @@ class RetailOfflineSalesIT extends IntegrationTest {
         Map<String, Object> second = offlineSale(crossed, Instant.now().minus(Duration.ofHours(1)), "1", 2_000);
         ResponseEntity<JsonNode> soldToo = send(second, UUID.randomUUID().toString());
         assertThat(soldToo.getStatusCode()).as("%s", soldToo.getBody()).isEqualTo(HttpStatus.CREATED);
-        TestDatabase.owner().sql("""
+        TestDatabase.owner()
+                .sql("""
                         INSERT INTO retail_offline_failures (id, tenant_id, client_sale_id, branch_id, made_by, occurred_at,
                             payment_method, total_minor, request, code, message)
                         SELECT gen_random_uuid(), tenant_id, client_sale_id, branch_id, created_by, occurred_at, 'cash',
-                               2000, '{}'::jsonb, 'period_closed', 'The period is closed.'
+                               2000, ?::jsonb, 'period_closed', 'The period is closed.'
                           FROM retail_sales WHERE client_sale_id = ?
-                        """).param(crossed).update();
+                        """)
+                .params(
+                        "{\"branch_id\":\"" + t.headOffice()
+                                + "\",\"payment_method\":\"cash\",\"lines\":[{\"product_id\":\"" + product
+                                + "\",\"qty\":\"1\",\"unit_price_minor\":2000}]}",
+                        crossed)
+                .update();
         client = crossed;
         saleId = soldToo.getBody().get("id").asString();
         String id = TestDatabase.owner()
@@ -1045,6 +1052,42 @@ class RetailOfflineSalesIT extends IntegrationTest {
                         .get("status")
                         .asString())
                 .isEqualTo("open");
+    }
+
+    /**
+     * A conflict report, then the same request reported again under another code (its resend met an outage and gave up): it
+     * stays open with no sale, because sameness is decided by the request hash, never by the code the device sends.
+     */
+    @Test
+    void aConflictReportedAgainUnderAnotherCodeStaysOpenWithNoSale() {
+        api.stockUp(t.headOffice(), product, "5");
+        UUID client = UUID.randomUUID();
+        ResponseEntity<JsonNode> sold = send(
+                offlineSale(client, Instant.now().minus(Duration.ofHours(2)), "1", 2_000),
+                UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> changed = offlineSale(client, Instant.now().minus(Duration.ofHours(2)), "2", 2_000);
+        Map<String, Object> report = failureReport(client, changed);
+        report.put("code", "client_sale_conflict");
+        report.put("message", "This client sale id was used for a different sale.");
+        assertThat(api.post("/offline-failures", report, SALES)
+                        .getBody()
+                        .get("status")
+                        .asString())
+                .isEqualTo("open");
+
+        report.put("code", "not_taken_after_retries");
+        report.put("message", "The server did not take the sale after several tries.");
+        ResponseEntity<JsonNode> again = api.post("/offline-failures", report, SALES);
+        assertThat(again.getStatusCode()).as("%s", again.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(again.getBody().get("status").asString()).isEqualTo("open");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status || ':' || coalesce(sale_id::text, 'null') FROM retail_offline_failures"
+                                + " WHERE client_sale_id = ?")
+                        .param(client)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("open:null");
     }
 
     /**

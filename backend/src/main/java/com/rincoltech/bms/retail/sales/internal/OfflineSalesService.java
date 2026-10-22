@@ -94,7 +94,8 @@ class OfflineSalesService {
     /**
      * The device of the person who made the sale reports a refusal. Idempotent on the client sale id: a second report of an
      * open one returns it; a retry refused again goes back to open with the new words; a decided one is returned as it is. A
-     * report of a sale already recorded under its id is closed by that sale, unless the refusal is client_sale_conflict.
+     * report of a sale already recorded under its id is closed by that sale only when it is the same request (the same
+     * request hash); any other is a conflict and stays open, whatever refusal code the device sends.
      */
     @Transactional
     Failure report(FailureRequest r) {
@@ -130,10 +131,8 @@ class OfflineSalesService {
             throw ApiException.rule(
                     "client_sale_id_reused", "This client sale id belongs to a sale someone else recorded.");
         }
-        // A conflict means the sale recorded under this id is not the one refused: the report stays open for a manager.
-        UUID saleId = r.code().equals("client_sale_conflict")
-                ? null
-                : sale.map(OfflineSalesRepository.Recorded::saleId).orElse(null);
+        // A different request under this id is a conflict: the report stays open for a manager.
+        UUID saleId = sameSale(sale, r.request()).orElse(null);
         if (!repo.insertFailure(r, by, saleId)) {
             Failure existing = repo.failureByClient(r.clientSaleId(), true).orElseThrow();
             if (!existing.madeBy().equals(by)) {
@@ -286,13 +285,12 @@ class OfflineSalesService {
                         "This is your own sale: give a second reason of at least 5 characters.")));
             }
         }
-        // A conflict means the sale recorded under this id is not the one refused: it never closes the report.
-        Optional<OfflineSalesRepository.Recorded> sale =
-                f.code().equals("client_sale_conflict") ? Optional.empty() : repo.saleByClient(f.clientSaleId());
+        // A different request recorded under this id is a conflict: it never closes the report.
+        Optional<UUID> sale = sameSale(repo.saleByClient(f.clientSaleId()), f.request());
         if (sale.isPresent()) {
             // The sale was recorded after all (a report that crossed its send): closed by it, never discarded. The
             // close is kept although the request is refused.
-            repo.closeAsRecorded(f.id(), sale.get().saleId());
+            repo.closeAsRecorded(f.id(), sale.get());
             throw new ApiException(
                     HttpStatus.CONFLICT,
                     "offline_failure_decided",
@@ -307,5 +305,14 @@ class OfflineSalesService {
                     "This sale was already " + f.status() + ".");
         }
         return f;
+    }
+
+    /**
+     * The sale recorded under the client sale id when it is the reported request itself: decided by comparing the request
+     * hash ({@link SalesService#requestHash}) with the one recorded, never by the refusal code the device sends.
+     */
+    private Optional<UUID> sameSale(Optional<OfflineSalesRepository.Recorded> sale, Map<String, Object> request) {
+        return sale.filter(s -> s.requestHash() != null && s.requestHash().equals(repo.requestHash(request)))
+                .map(OfflineSalesRepository.Recorded::saleId);
     }
 }

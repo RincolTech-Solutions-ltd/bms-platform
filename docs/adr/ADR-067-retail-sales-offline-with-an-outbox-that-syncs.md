@@ -108,8 +108,11 @@ left, the branch, the period, the person's roles.
    discard) a sale they made themselves: 403 `own_offline_sale`. An administrator (`tenant_admin`, the Owner included) may
    discard their own, never ask for it again, and only with a second written reason (`self_discard_reason`, at least 5
    characters and not the first reason again; else 422), audited `retail.offline_sale.self_discard` with both reasons (decision
-   11 d). A failure whose client sale id already has a sale (a refusal reported for a sale whose answer was lost) is written,
-   or closed, as `recorded` with that sale, and is never discarded: 409 `offline_failure_decided`. A send of the sale locks
+   11 d). A failure whose client sale id already has a sale made from the same request (the reported request's
+   `request_hash`, decision 5, equals the sale's: a refusal reported for a sale whose answer was lost) is written, or
+   closed, as `recorded` with that sale, and is never discarded: 409 `offline_failure_decided`. Sameness is decided by the
+   request hash, never by the refusal code the device sends: a different request under that id stays open as a conflict,
+   with no sale, whatever its code. A send of the sale locks
    the failure row before it checks for a discard, so a discard and a send of the same sale at once end with exactly one of
    them.
 9. **Sign-out safety.** Signing out while anything is queued or failed asks first ("3 sales are waiting to sync. Sync now,
