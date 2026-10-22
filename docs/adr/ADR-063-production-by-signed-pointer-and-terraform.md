@@ -2,61 +2,83 @@
 
 ## Status
 
-Proposed. The owner decided on 2026-10-18 that the production server lives in a Rincol Tech Hetzner account (not the KimFam
-one) while DNS and storage stay in the existing Cloudflare account, that the server is created when production is ready and not before, and that for now only the Terraform
-is prepared. Supersedes the production half of ADR-006 (a version tag deploys over SSH from a GitHub
-Environment on a hosted runner) and builds on ADR-018 (pull-based deploy, cosign verification by the host) and
-ADR-040 (no hosted minutes; signing on the maintainer's Mac).
+Proposed, and it stays Proposed until three things that are still proposals are done: the owner chooses the provider, the
+location or region and the server size (the region is the data protection decision of NFR-DP-07, Uganda PDPO, and needs its
+own record); the promote command of decision 3 is built and reviewed; and the `promote` and `deploy-production` jobs leave
+`deploy.yml`. Until then the documented production path is still ADR-006's. Nothing in `infra/production/` has been applied.
+
+First written as ADR-041 in pull request #301 (issue #300) and renumbered at rebase: ADR-041 on `main` is the branch closing
+record. The owner decided on 2026-10-18 that the server is created when production is ready and not before, that DNS and storage
+stay in the existing Cloudflare account, and that for now only the Terraform is prepared. Supersedes the production half of
+ADR-006 once accepted (a version tag deploys over SSH from a GitHub Environment on a hosted runner). Builds on ADR-018 (pull-based
+deploy, cosign verification by the host), ADR-040 (no hosted minutes; signing on the maintainer's Mac) and ADR-058 (host checks,
+restore drill, backups the host cannot delete). Design: chapter 9 section 9.3.1. Runbook: `docs/runbooks/terraform-production.md`.
 
 ## Context
 
-There is no production server. The documented path (a `vX.Y.Z` tag, a `production` GitHub Environment with a
-required reviewer, an SSH key held as a repository secret, a job on `ubuntu-latest`) cannot run: hosted
-minutes are exhausted and will not be bought, and an SSH key that lets CI log in to the production host is the
-kind of standing credential ADR-018 removed for staging. Staging already shows the alternative: the host pulls
-a signed pointer and verifies the signature with a key only it holds; nothing reaches into the host.
+There is no production server; it is the launch blocker. The documented path (a `vX.Y.Z` tag, a `production` GitHub Environment
+with a required reviewer, an SSH key held as a repository secret, a job on a hosted runner) needs a standing credential that lets
+CI log in to the production host, the kind ADR-018 removed for staging. Staging shows the alternative every day: the host pulls a
+signed pointer and verifies the signature with a key only it holds; nothing reaches into the host.
 
-Existing facts: the staging puller (`deploy/pull-staging.sh`) already reads its pointer tag and compose file
-from `BMS_POINTER_TAG` and `BMS_COMPOSE_SOURCE`, and `deploy/compose.yml` is the production stack. The
-KimFam server was considered as a home and rejected: it is a production box for another project with about
-500 MB of memory free, and it holds personal WhatsApp sessions and tokens.
+Two providers are open: a Rincol Tech Hetzner Cloud project and a Rincol Tech AWS account. Neither is chosen, and the region is
+a data protection question as much as a price one. The repository is public, so nothing that identifies the accounts or hosts
+can be written in it.
+
+The launch audit (#416, item M12) named the costliest single risk: the host's R2 token could delete every backup. ADR-058 decided
+the fix (lock and lifecycle rules in the bucket, a host token that cannot change them) but left it as dashboard steps for a
+person to remember.
 
 ## Decision
 
-1. **Terraform in `infra/production/`, applied on production day.** It creates, in the Rincol Tech Hetzner
-   Cloud project, one server (delete and rebuild protection on, Hetzner backups on by default), a firewall (SSH
-   from named addresses only; 80, 443 and 443/udp from anywhere) and the Cloudflare DNS records (`bms`,
-   `bms-callbacks` and `<slug>-bms` per tenant, DNS only). Cloud-init prepares the host: Docker, a locked
-   `ops` user with the team's keys, hardened sshd, the dedicated `bms` service user and the puller units. No
-   secret passes through Terraform or its state: `/opt/bms/.env`, `cosign.pub` and the registry login are put on
-   the host by hand (runbook). The processing region has no default; it must be decided and recorded first
-   (NFR-DP-07).
-2. **The host pulls; nothing pushes.** The production host runs the same puller as staging with
-   `BMS_POINTER_TAG=production` and `BMS_COMPOSE_SOURCE=compose.yml`, verifies the cosign signatures of the api,
-   web and proxy digests against its own `/opt/bms/cosign.pub`, runs migrations before the swap and keeps its
-   automatic rollback. There is no deploy SSH key anywhere. The `promote` and `deploy-production` jobs and the
-   version-tag trigger leave `deploy.yml`.
-3. **The owner moves the pointer.** Promotion is a command run on the maintainer's Mac,
-   `deploy/signer/bms_promote.py` (built before cutover, reviewed like the signer). It refuses unless the
-   release is signed with `deploy/cosign.pub`, its commit is on `main`, that commit is the one live on staging
-   (`/version`) and the new release is not older than the current `production` pointer; it then waits for the
-   owner to confirm, tags the three images `vX.Y.Z` and moves `production` by digest. This replaces the
-   required reviewer of the GitHub Environment: the dev lead's approval is the act of running it.
-4. **Rollback is a promote of an earlier signed release** with an explicit flag; the host's own downgrade guard
-   is adjusted to accept a pointer move the owner made on purpose (runbook `rollback.md`).
-5. **State.** Terraform state stays out of git. Before the first apply it moves to a private R2 bucket of the
-   existing Cloudflare account, the one that already holds the `rincoltech.com` zone (runbook), because the server is delete-protected and losing the state would
-   make the next change a manual import.
+1. **Terraform in `infra/production/`, applied once on production day.** Two roots create the same host, and the owner applies
+   only the one chosen: `hetzner/` (a server with delete and rebuild protection and Hetzner backups, a Hetzner firewall) and
+   `aws/` (an EC2 instance with termination protection, IMDSv2 only, an encrypted disk and an Elastic IP, a security group).
+   The firewall is the same on both: 22 from an admin address list only (the whole internet is refused by validation), 80 and
+   443 TCP and 443 UDP from anywhere, nothing else in. The location or region, the server size and the R2 location have no
+   default, so a plan cannot run until the owner has decided them.
+2. **One cloud-init for both** (`modules/cloud-init`): the `ops` user for people with the team's SSH keys and sudo, sshd with
+   no passwords and no root, Docker from Docker's apt repository, unattended upgrades, fail2ban, the `bms` service user (no
+   password, no key, no login shell, in the docker group) and the units the repository ships in `deploy/systemd`: the puller,
+   the host checks and the weekly restore drill. They are installed but not enabled; the runbook enables them once the host has
+   its `.env`. No secret goes into cloud-init, because user data is readable from the provider's metadata service.
+3. **The Cloudflare side is one module** (`modules/cloudflare`) in the existing account: the DNS records (`bms`,
+   `bms-callbacks`, `<slug>-bms`, DNS only), the R2 backup and documents buckets, and the backup protection of ADR-058 as code:
+   lock rules (`production/daily/` 30 days, `production/monthly/` 365 days), lifecycle rules a day after each lock, and
+   `prevent_destroy` on both buckets and the lock.
+4. **The host's tokens are narrow and made by Terraform.** Three account-owned tokens, each usable only from the VM's
+   addresses: object read and write on the backup bucket only, the same on the documents bucket only, and DNS edit plus zone
+   read on the one zone for Caddy's DNS-01 challenge. The backup token cannot change the lock or lifecycle rules, and the lock
+   refuses its deletes and overwrites under `daily/` and `monthly/`; with `BACKUP_RETENTION_ON_HOST=false` the host deletes
+   nothing. R2 has no put-only permission, so "the host can write but not delete a backup" is this combination, proven on the
+   day with a throwaway object. Only the Terraform token, kept on the maintainer's Mac and never on the host, can change the rules.
+5. **State.** The token values are in Terraform state, so state never goes in git. Before the first apply it moves to a private
+   R2 state bucket in the existing account with its own access key; the host receives its values once, through
+   `terraform output -raw host_env`.
+6. **The host pulls; nothing pushes** (still to build). The production host runs the same puller as staging with
+   `BMS_POINTER_TAG=production` and `BMS_COMPOSE_SOURCE=compose.yml`, verifies the cosign signatures of the api, web and proxy
+   digests against its own `/opt/bms/cosign.pub`, runs migrations before the swap and keeps its automatic rollback. There is no
+   deploy SSH key anywhere. The `promote` and `deploy-production` jobs and the version-tag trigger leave `deploy.yml`.
+7. **The owner moves the pointer** (still to build). Promotion is a command run on the maintainer's Mac,
+   `deploy/signer/bms_promote.py`, reviewed like the signer. It refuses unless the release is signed with `deploy/cosign.pub`,
+   its commit is on `main`, that commit is the one live on staging (`/version`) and the release is not older than the current
+   `production` pointer; it then waits for the owner to confirm, tags the three images `vX.Y.Z` and moves `production` by digest.
+   This replaces the required reviewer of the GitHub Environment. Rollback is a promote of an earlier signed release with an
+   explicit flag; the host's downgrade guard is adjusted to accept a pointer move the owner made on purpose.
 
 ## Consequences
 
-Better: no standing credential reaches the production host; no hosted minutes; the server is reproducible and
-reviewable; a typo cannot delete the database; the production path is the one staging proves every day.
+Better: the server, its firewall, DNS, buckets, backup lock and host tokens are reproducible and reviewable before any cost; the
+host's backup token can no longer delete a backup inside its window, and that no longer depends on a person remembering dashboard
+steps; no standing credential reaches the production host once decisions 6 and 7 are built; a typo cannot destroy the server or
+the backup bucket; the provider choice is one directory, not a rewrite.
 
-Worse: a production release needs the owner's Mac (the same dependency the signer already has); first-day
-secrets are manual steps; Hetzner backups, the server and a Cloudflare R2 state bucket are a monthly cost the
-owner pays from the day of apply (nothing before); a second ADR is needed for the region before apply.
+Worse: two provider roots to keep in step (the modules hold everything they share); host token values live in Terraform state,
+so the state bucket's key is as sensitive as the tokens; a production release needs the owner's Mac (the same dependency the
+signer already has); first-day secrets (`.env`, `cosign.pub`, the registry login) are manual steps; a locked backup cannot be
+removed early even on purpose (ADR-058).
 
-To watch: the puller's downgrade guard against a deliberate rollback; the cutover rehearsal (apply, deploy
-a release, run the backup, run the restore drill, destroy a copy) before any tenant's real data moves;
-the owner's choice of payer for the Rincol Tech Hetzner project, which is stated before the first apply.
+To watch: whether Cloudflare applies the token address condition to R2's S3 requests (the runbook checks it; the lock holds
+either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
+puller's downgrade guard against a deliberate rollback; the cutover rehearsal (apply, deploy a release, back up, run the restore
+drill, test the lock) before any tenant's real data moves.
