@@ -8,3 +8,6 @@ crash.log
 *.tfvars
 !terraform.tfvars.example
 backend.tf
+# Encrypted state copies belong in the offline store, never here (runbook step 3.4).
+tfstate-*.enc
+*.enc

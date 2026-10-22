@@ -50,8 +50,9 @@ person to remember.
    addresses if Cloudflare enforces the IP condition (the runbook checks whether it does on R2's S3 requests; if not, the lock
    below still holds): object read and write on the backup bucket only, the same on the documents bucket only, and DNS edit
    plus zone read on the whole `rincoltech.com` zone for Caddy's DNS-01 challenge. That last token is not narrow: whoever takes
-   over the host could also change MX or the Resend DKIM records and send mail as Rincol Tech. The owner accepts this risk for
-   launch and does not build the fix now; the fix is a separate validation domain that `_acme-challenge` names point to by
+   over the host could also change MX or the Resend DKIM records and send mail as Rincol Tech. Accepted for launch on 22 Oct 2026
+   by the Dev Lead under the owner's delegation to decide in his place; the owner can reverse it by buying a separate validation
+   domain (runbook, "Decide first", item 10). The fix is not built now; the fix is a separate validation domain that `_acme-challenge` names point to by
    CNAME, with Caddy's `override_domain` and a token for that domain only (runbook, "Decide first"). The backup token cannot change the lock or lifecycle rules, and the lock
    refuses its deletes and overwrites under `daily/` and `monthly/`; with `BACKUP_RETENTION_ON_HOST=false` the host deletes
    nothing. R2 has no put-only permission, so "the host can write but not delete a backup" is this combination, proven on the

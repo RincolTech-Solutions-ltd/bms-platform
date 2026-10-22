@@ -47,7 +47,8 @@ recorded decisions the plan cannot check.
    backup from the day it is written.
 10. **The DNS-01 token's reach** (accepted risk, ADR-063 decision 4). Caddy's token can edit every DNS record of
     `rincoltech.com`, so whoever takes over the host could also change MX or the Resend DKIM records and send mail as Rincol Tech.
-    The owner has accepted this for launch and not built the fix. The fix, when he chooses it: buy a separate validation domain,
+    Accepted for launch on 22 Oct 2026 by the Dev Lead under the owner's delegation to decide in his place; the owner can reverse
+    it by buying a separate validation domain (this item). The fix, when he chooses it: buy a separate validation domain,
     point `_acme-challenge.rincoltech.com` (and the per-host names) at it with a CNAME, give Caddy a token for that domain only
     and set Caddy's `override_domain`, which removes the risk.
 
@@ -140,11 +141,15 @@ Terraform state holds the host token values and the addresses, so it never goes 
    keep an encrypted copy in the offline store (chapter 8 section 8.7), the same place as the backup key:
 
    ```sh
-   terraform state pull | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -out "tfstate-$(date -u +%Y%m%dT%H%M%SZ).enc"
+   mkdir -p "$HOME/bms-offline" && chmod 700 "$HOME/bms-offline"
+   terraform state pull | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+     -out "$HOME/bms-offline/tfstate-$(date -u +%Y%m%dT%H%M%SZ).enc"
    ```
 
-   It asks for a passphrase; that passphrase is kept with the backup key. Move the file to the offline store and delete it from
-   the Mac. The state holds the host token values in clear.
+   The copy is written OUTSIDE the repository on purpose: this repository is public, and a stray `git add` of an encrypted
+   state would publish every host token behind a passphrase anyone can attack offline (`infra/production/.gitignore` also
+   refuses `*.enc`, as a second guard). It asks for a passphrase; that passphrase is kept with the backup key. Move the file to
+   the offline store and delete it from the Mac. The state holds the host token values in clear.
 
 ## 4. Clear the host names first
 
@@ -198,9 +203,16 @@ terraform output                                  # ipv4, ipv6, hostnames, bucke
 Then keep the encrypted state copy (step 3.4).
 
 Before the first SSH, verify the host key out of band: the provider console shows the server's boot log, where cloud-init
-prints the host key fingerprints between `BEGIN SSH HOST KEY FINGERPRINTS` and `END` (Hetzner: the server's Console; AWS:
-the instance, Actions, Monitor and troubleshoot, Get system log). Compare the ED25519 line with the fingerprint `ssh` shows
-on first connect, and answer `yes` only if they match; otherwise stop, someone is between the Mac and the server.
+prints the host key fingerprints between `BEGIN SSH HOST KEY FINGERPRINTS` and `END` (AWS: the instance, Actions, Monitor and
+troubleshoot, Get system log). Compare the ED25519 line with the fingerprint `ssh` shows on first connect, and answer `yes`
+only if they match; otherwise stop, someone is between the Mac and the server.
+
+Hetzner has no boot-log view, only the live console (the server, Console). Nobody can sign in there (no user has a password),
+so the console cannot run `ssh-keyscan localhost`; instead open it right after the apply and read the fingerprint block that
+cloud-init prints at the end of first boot, which stays on screen above the login prompt. If it has already scrolled away,
+`sudo reboot` is not a fix (the block is printed once); fall back to comparing `ssh-keyscan -t ed25519 <ipv4> | ssh-keygen -lf -`
+from the Mac and from a second network (a phone hotspot): both must match the key `ssh` offers. That is a weaker check; record
+in the cutover notes that the console check was missed.
 
 Then wait for cloud-init: `ssh ops@<ipv4> cloud-init status --wait` should end in `status: done`. Check the hardening:
 `ssh root@<ipv4>` and a password sign-in are refused; `sudo sshd -T | grep -E 'passwordauth|permitroot'` shows `no`.
