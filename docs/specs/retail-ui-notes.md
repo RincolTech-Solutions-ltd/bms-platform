@@ -1288,7 +1288,8 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   opens, Choose puts the barcode on that item and adds it to the form. For a code that looks like spreadsheet damage (all digits of
   6, 7, 9, 10, 11 or 14, such as a GTIN-14 or a UPC-E) the search shows "This code is exactly as printed (Code 128)", as the item
   form does, and with it ticked the code is added as Code 128. Anyone else reads "Ask an administrator to add it to the
-  item, or find the item by name above."
+  item, or find the item by name above." A scanned code holding % ; ? # / or \ (a foreign Code 128) is
+  never sent to the server: no item can hold it, so it gets the unknown code message at once, without the add button.
 - **Camera** (`camera-scan.tsx`, loaded on Scan): the back camera full screen, "Hold the barcode inside the frame, about a hand
   away.", Close the camera. The browser's BarcodeDetector reads the frames; on an iPhone Quagga2 (loaded only then) reads a still
   four times a second. A blocked camera says how to allow it (on an iPhone: Settings, Safari, Camera); a missing or busy camera and

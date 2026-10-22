@@ -121,6 +121,9 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
   }, [enabled]);
 }
 
+/** The signs checkBarcode refuses in a stored code, which also cannot travel in the lookup's path. */
+const UNSTORABLE = /[%;?#/\\]/;
+
 type Outcome = { kind: 'added'; name: string } | { kind: 'refused'; message: string } | { kind: 'unknown'; code: string } | { kind: 'failed'; error: unknown } | null;
 
 /**
@@ -165,6 +168,14 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
     setBusy(true);
     setAssigning(false);
     setAsPrinted(false);
+    // A foreign Code 128 with a sign no barcode here may hold would be refused in the address; no item can have it.
+    if (UNSTORABLE.test(code)) {
+      setBusy(false);
+      feedback(false);
+      setOutcome({ kind: 'unknown', code });
+      refocus();
+      return;
+    }
     try {
       const match = await retail.findByBarcode(code, branchId);
       if (match?.product) found(match.product, match.unit_id);
@@ -236,7 +247,7 @@ export function ScanBar({ id, branchId, onFound, keepFocus = false }: { id: stri
       {outcome?.kind === 'unknown' && (
         <div role="alert" className="alert alert-warning" data-testid="scan-unknown">
           <p>No item has the barcode {outcome.code}.{canAssign ? '' : ' Ask an administrator to add it to the item, or find the item by name above.'}</p>
-          {canAssign && !assigning && (
+          {canAssign && !assigning && !UNSTORABLE.test(outcome.code) && (
             <button type="button" onClick={() => setAssigning(true)}>
               Add this barcode to a product
             </button>

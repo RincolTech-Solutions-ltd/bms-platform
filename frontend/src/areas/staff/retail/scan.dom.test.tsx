@@ -294,6 +294,15 @@ describe('FR-RET-68 scanning on the sale form', () => {
     expect((await retail.findByBarcode('TEST-UNKNOWN'))?.product?.id).toBe(LAMP);
   });
 
+  it('says a scanned code with a sign no barcode here may hold is unknown, without looking it up', async () => {
+    const lookup = vi.spyOn(retail, 'findByBarcode');
+    screenOf(<SaleForm branchId={BRANCH} />);
+    wedge('TEST/7%3B?#');
+    await waitFor(() => expect(screen.getByTestId('scan-unknown').textContent).toContain('No item has the barcode TEST/7%3B?#.'));
+    expect(lookup).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Add this barcode to a product' })).toBeNull();
+  });
+
   it('lets an administrator add a GTIN-14 as printed (Code 128), as the item form does', async () => {
     const GTIN = '10012345678902';
     screenOf(<SaleForm branchId={BRANCH} />);
