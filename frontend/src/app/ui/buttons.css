@@ -133,3 +133,40 @@ button[aria-disabled='true'],
   height: 20px;
   flex: none;
 }
+
+/*
+ * Busy (#456, BusyButton in src/app/ui): while its request runs a button that writes keeps its label,
+ * is disabled and aria-busy, and shows a small spinner beside the label. The spinner's margins cancel its
+ * own width and the gap, so it sits in the end padding and the button never changes width. Under reduced
+ * motion it is a dot that pulses instead of turning.
+ */
+.busy-button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.busy-spinner {
+  display: inline-block;
+  flex: none;
+  width: 0.7em;
+  height: 0.7em;
+  margin-inline-start: calc(0.15em - var(--space-2));
+  margin-inline-end: -0.85em;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-focus);
+  border-radius: 50%;
+  animation: rt-spin 0.8s linear infinite;
+}
+
+@keyframes rt-busy-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-spinner {
+    border: 0;
+    background: var(--color-focus);
+    animation: rt-busy-pulse 1.6s ease-in-out infinite !important;
+  }
+}
