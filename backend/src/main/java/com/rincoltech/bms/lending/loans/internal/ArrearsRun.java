@@ -275,8 +275,9 @@ class ArrearsRun {
             jdbc.sql("""
                             SELECT l.id, l.loan_no, l.branch_id FROM lending_loans l
                              WHERE l.id = ANY (?::uuid[])
-                               AND l.id = ANY ((SELECT failed_loan_ids FROM lending_arrears_runs
-                                                 WHERE business_date = ? AND finished_at IS NOT NULL))
+                               AND EXISTS (SELECT 1 FROM lending_arrears_runs r
+                                            WHERE r.business_date = ? AND r.finished_at IS NOT NULL
+                                              AND l.id = ANY (r.failed_loan_ids))
                             """)
                     .params(
                             failedIds.stream()
