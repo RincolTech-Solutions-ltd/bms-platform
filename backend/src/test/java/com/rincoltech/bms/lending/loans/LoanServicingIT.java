@@ -1692,15 +1692,34 @@ class LoanServicingIT extends LoanFixtures {
     /** The statement rows: date, then three amounts at the end of the line ("-" for none). */
     record Row(String line, long charged, long credited, long balance) {}
 
+    /**
+     * The statement's lines with a balance. A description too long for its cell wraps: the text has its first part on
+     * the line above the date and amounts and the rest on the line below, and both are put back into the row's line.
+     */
     static List<Row> statementRows(byte[] pdf) throws Exception {
         java.util.regex.Pattern row = java.util.regex.Pattern.compile(
-                "^(\\d{1,2} [A-Z][a-z]{2} \\d{4}) .*?(-|[\\d,]+) (-|[\\d,]+) ([\\d,]+)$");
+                "^(\\d{1,2} [A-Z][a-z]{2} \\d{4}) (.*?)(-|[\\d,]+) (-|[\\d,]+) ([\\d,]+)$");
         List<Row> rows = new ArrayList<>();
         for (int p = 1; p <= pages(pdf); p++) {
-            for (String line : pageText(pdf, p).split("\n")) {
-                java.util.regex.Matcher m = row.matcher(line.strip().replaceAll("\\s+", " "));
+            String before = null;
+            boolean wrapped = false;
+            for (String raw : pageText(pdf, p).split("\n")) {
+                String line = raw.strip().replaceAll("\\s+", " ");
+                java.util.regex.Matcher m = row.matcher(line);
                 if (m.matches()) {
-                    rows.add(new Row(line.strip(), amount(m.group(2)), amount(m.group(3)), amount(m.group(4))));
+                    wrapped = m.group(2).isBlank() && before != null;
+                    String text = wrapped
+                            ? m.group(1) + " " + before + " "
+                                    + line.substring(m.group(1).length() + 1)
+                            : line;
+                    rows.add(new Row(text, amount(m.group(3)), amount(m.group(4)), amount(m.group(5))));
+                    before = null;
+                } else if (wrapped) {
+                    Row last = rows.removeLast();
+                    rows.add(new Row(last.line() + " " + line, last.charged(), last.credited(), last.balance()));
+                    wrapped = false;
+                } else {
+                    before = line;
                 }
             }
         }
