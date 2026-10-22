@@ -1,7 +1,11 @@
 #cloud-config
-# First boot of the BMS production server (ADR-063). It prepares the host and nothing else. No secret is
-# written here: /opt/bms/.env, cosign.pub, the read:packages registry login and the first files are put on the
-# host by hand afterwards (docs/runbooks/terraform-production.md), so none of them is in Terraform state.
+# First boot of the BMS production server (ADR-063), the same on every provider. It prepares the host and
+# nothing else. No secret is written here (user data is readable from the provider's metadata service):
+# /opt/bms/.env, cosign.pub, the read:packages registry login and the first files are put on the host by hand
+# afterwards (docs/runbooks/terraform-production.md).
+#
+# Two users: ops, for the people (SSH keys only, sudo), and bms, the service user that runs the puller, the
+# host checks, the restore drill and the backup (no password, no SSH key, no login shell).
 
 package_update: true
 package_upgrade: true
@@ -57,6 +61,24 @@ write_files:
     permissions: "0644"
     encoding: b64
     content: ${base64encode(pull_timer)}
+  # The host checks and the weekly restore drill of ADR-058 (#427), as shipped in deploy/systemd. They run as
+  # bms, which is also the deploy user on this host, so no User= drop-in is needed.
+  - path: /etc/systemd/system/bms-monitor.service
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(monitor_service)}
+  - path: /etc/systemd/system/bms-monitor.timer
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(monitor_timer)}
+  - path: /etc/systemd/system/bms-restore-drill.service
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(drill_service)}
+  - path: /etc/systemd/system/bms-restore-drill.timer
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(drill_timer)}
   # The same puller as staging, pointed at the production pointer and the VM's own compose file.
   - path: /etc/systemd/system/bms-pull.service.d/10-production.conf
     permissions: "0644"
@@ -76,5 +98,6 @@ runcmd:
   - install -d -o bms -g bms -m 750 /opt/bms /opt/bms/state
   - systemctl daemon-reload
   - systemctl enable --now fail2ban
-  # Deliberately NOT enabled: bms-pull.timer. It starts only after .env, cosign.pub and the registry login exist
-  # (the puller refuses every release without cosign.pub, by design).
+  # Deliberately NOT enabled: bms-pull.timer, bms-monitor.timer and bms-restore-drill.timer. They start only
+  # after .env, cosign.pub, the registry login and the first files exist (the puller refuses every release
+  # without cosign.pub, by design; the checks would only report a host that is not set up yet).
