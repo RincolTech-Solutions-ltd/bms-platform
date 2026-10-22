@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.rincoltech.bms.lending.loans.internal.LoanLedger.After;
 import com.rincoltech.bms.lending.loans.internal.LoanLedger.Deduction;
 import com.rincoltech.bms.lending.loans.internal.LoanLedger.Entry;
-import com.rincoltech.bms.lending.loans.internal.LoanLedger.PenaltyCharge;
+import com.rincoltech.bms.lending.loans.internal.LoanLedger.PenaltyEvent;
 import com.rincoltech.bms.lending.loans.internal.LoanLedger.Statement;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Allocation;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Item;
@@ -218,11 +218,15 @@ class LoanLedgerTest {
         return String.format("%,d", minor);
     }
 
+    static PenaltyEvent charged(int itemNo, LocalDate date, java.time.Instant at, long amountMinor) {
+        return new PenaltyEvent(itemNo, date, at, amountMinor, PenaltyEvent.Kind.CHARGED);
+    }
+
     static Statement statement(Book b, boolean writtenOff, long outstandingNow) {
         return statement(b, writtenOff, outstandingNow, List.of());
     }
 
-    static Statement statement(Book b, boolean writtenOff, long outstandingNow, List<PenaltyCharge> penalties) {
+    static Statement statement(Book b, boolean writtenOff, long outstandingNow, List<PenaltyEvent> penalties) {
         return LoanLedger.statement(
                 b.transactions(),
                 b.scheduleRows(writtenOff),
@@ -366,12 +370,12 @@ class LoanLedgerTest {
         Book b = new Book();
         b.disburse();
         LocalDate due = b.contracted.get(0).dueDate;
-        List<PenaltyCharge> penalties = new ArrayList<>();
-        penalties.add(new PenaltyCharge(1, due.plusDays(1), b.next(), 2_000));
-        penalties.add(new PenaltyCharge(1, due.plusDays(2), b.next(), 2_000));
-        penalties.add(new PenaltyCharge(2, due.plusDays(2), b.next(), 1_000));
+        List<PenaltyEvent> penalties = new ArrayList<>();
+        penalties.add(charged(1, due.plusDays(1), b.next(), 2_000));
+        penalties.add(charged(1, due.plusDays(2), b.next(), 2_000));
+        penalties.add(charged(2, due.plusDays(2), b.next(), 1_000));
         UUID p1 = b.repay(300_000, due.plusDays(2));
-        penalties.add(new PenaltyCharge(1, due.plusDays(3), b.next(), 2_000));
+        penalties.add(charged(1, due.plusDays(3), b.next(), 2_000));
 
         long outstanding = b.outstanding() + 7_000;
         Statement st = statement(b, false, outstanding, penalties);
@@ -397,5 +401,39 @@ class LoanLedgerTest {
                         .outstandingMinor())
                 .as("the three penalties recorded before the payment count, the later one does not")
                 .isEqualTo(1_590_000 + 5_000 - 300_000);
+    }
+
+    /**
+     * The review of #270: a penalty cancelled because a back-dated repayment paid the item up is a credit on the
+     * statement on the day it was cancelled, and a receipt recorded before the cancel still counts the penalty.
+     */
+    @Test
+    void aCancelledPenaltyIsCreditedOnTheDayItWasCancelled() {
+        Book b = new Book();
+        b.disburse();
+        LocalDate due = b.contracted.get(0).dueDate;
+        List<PenaltyEvent> penalties = new ArrayList<>();
+        penalties.add(charged(1, due.plusDays(1), b.next(), 2_000));
+        penalties.add(charged(1, due.plusDays(3), b.next(), 2_000));
+        // Recorded after both charges, dated between them: the later charge is cancelled.
+        UUID p1 = b.repay(1_000, due.plusDays(2));
+        penalties.add(new PenaltyEvent(1, due.plusDays(3), b.next(), 2_000, PenaltyEvent.Kind.CANCELLED));
+
+        long outstanding = b.outstanding() + 2_000;
+        Statement st = statement(b, false, outstanding, penalties);
+        assertRunningBalance(st);
+        assertThat(st.closingMinor()).isEqualTo(outstanding);
+        assertThat(st.entries()).noneMatch(e -> e.description().startsWith("Other adjustments"));
+        assertThat(st.entries())
+                .filteredOn(e -> e.description().startsWith("Penalties cancelled"))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.date()).isEqualTo(due.plusDays(3));
+                    assertThat(e.creditedMinor()).isEqualTo(2_000L);
+                });
+        assertThat(LoanLedger.after(b.transactions(), b.scheduleRows(false), penalties, p1)
+                        .outstandingMinor())
+                .as("both charges were recorded before the receipt, the cancel after it")
+                .isEqualTo(1_590_000 + 4_000 - 1_000);
     }
 }

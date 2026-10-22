@@ -50,10 +50,27 @@ final class LoanLedger {
     record Deduction(String name, long amountMinor) {}
 
     /**
-     * One penalty charge (R-PEN) on schedule item {@code itemNo}: the business date it is charged for,
-     * and when the nightly run recorded it, which places it among the transactions for a receipt.
+     * A penalty charged (R-PEN) or cancelled on schedule item {@code itemNo}: the business date it is
+     * for, and when it was recorded, which places it among the transactions for a receipt. A charge is
+     * cancelled when a repayment dated before it turns out to have paid the item up (the review of #270).
      */
-    record PenaltyCharge(int itemNo, LocalDate date, Instant recordedAt, long amountMinor) {}
+    record PenaltyEvent(int itemNo, LocalDate date, Instant recordedAt, long amountMinor, Kind kind) {
+
+        enum Kind {
+            CHARGED("Penalties charged"),
+            CANCELLED("Penalties cancelled, paid before they were charged");
+
+            final String text;
+
+            Kind(String text) {
+                this.text = text;
+            }
+        }
+
+        boolean credit() {
+            return kind != Kind.CHARGED;
+        }
+    }
 
     /** The loan as it stood right after one transaction. */
     record After(long outstandingMinor, long creditMinor, LocalDate nextDue, boolean writtenOff) {}
@@ -67,7 +84,7 @@ final class LoanLedger {
     static Statement statement(
             List<LoanTransaction> txns,
             List<ScheduleRow> items,
-            List<PenaltyCharge> penalties,
+            List<PenaltyEvent> penalties,
             List<Deduction> deductions,
             LocalDate asAt,
             long outstandingNow,
@@ -87,14 +104,15 @@ final class LoanLedger {
                 .thenComparingInt(LoanLedger::rank)
                 .thenComparing(LoanTransaction::id));
 
-        List<PenaltyCharge> unprinted = new ArrayList<>(penalties);
-        unprinted.sort(Comparator.comparing(PenaltyCharge::date));
+        List<PenaltyEvent> unprinted = new ArrayList<>(penalties);
+        unprinted.sort(Comparator.comparing(PenaltyEvent::date)
+                .thenComparing(PenaltyEvent::credit)
+                .thenComparing(PenaltyEvent::recordedAt));
         List<Entry> entries = new ArrayList<>();
         long[] balance = {0};
         for (LoanTransaction t : printed) {
             if (!t.txnType().equals("disbursement")) {
-                // The nightly run charges at the start of the business date, before that day's payments.
-                penaltiesUpTo(entries, balance, unprinted, t.valueDate());
+                penaltiesBefore(entries, balance, unprinted, t);
             }
             String number = t.receiptNo() == null ? "" : t.receiptNo();
             switch (t.txnType()) {
@@ -194,7 +212,7 @@ final class LoanLedger {
                             t.txnType().replace('_', ' ') + ": " + money.apply(t.amountMinor()));
             }
         }
-        penaltiesUpTo(entries, balance, unprinted, LocalDate.MAX);
+        penaltiesBefore(entries, balance, unprinted, null);
         long difference = outstandingNow - balance[0];
         if (difference > 0) {
             charge(entries, balance, asAt, "", "Other adjustments, see the loan's audit trail", difference);
@@ -210,7 +228,7 @@ final class LoanLedger {
      * before it, count, so it is the same whenever the receipt is first opened, and a later payment,
      * reversal or penalty never changes it.
      */
-    static After after(List<LoanTransaction> txns, List<ScheduleRow> items, List<PenaltyCharge> penalties, UUID txnId) {
+    static After after(List<LoanTransaction> txns, List<ScheduleRow> items, List<PenaltyEvent> penalties, UUID txnId) {
         List<LoanTransaction> recorded = new ArrayList<>(txns);
         recorded.sort(Comparator.comparing(LoanTransaction::createdAt)
                 .thenComparingInt(LoanLedger::rank)
@@ -222,9 +240,9 @@ final class LoanLedger {
                 .findFirst()
                 .orElseThrow()
                 .createdAt();
-        for (PenaltyCharge p : penalties) {
+        for (PenaltyEvent p : penalties) {
             if (!p.recordedAt().isAfter(at)) {
-                remaining.merge(p.itemNo(), p.amountMinor(), Long::sum);
+                remaining.merge(p.itemNo(), p.credit() ? -p.amountMinor() : p.amountMinor(), Long::sum);
             }
         }
         long credit = 0;
@@ -256,17 +274,38 @@ final class LoanLedger {
         return new After(outstanding, credit, next, writtenOff);
     }
 
-    /** Prints, one line per date, the penalties charged on or before {@code until}, and removes them. */
-    private static void penaltiesUpTo(
-            List<Entry> entries, long[] balance, List<PenaltyCharge> unprinted, LocalDate until) {
-        while (!unprinted.isEmpty() && !unprinted.getFirst().date().isAfter(until)) {
-            LocalDate date = unprinted.getFirst().date();
+    /**
+     * Prints the penalty events that come before transaction {@code t} (all that are left when it is
+     * null), one line per date and kind. The nightly run charges at the start of the business date,
+     * so a day's charges come before its payments; a cancel takes its place by when it was recorded.
+     */
+    private static void penaltiesBefore(
+            List<Entry> entries, long[] balance, List<PenaltyEvent> unprinted, LoanTransaction t) {
+        while (!unprinted.isEmpty() && before(unprinted.getFirst(), t)) {
+            PenaltyEvent first = unprinted.getFirst();
             long sum = 0;
-            while (!unprinted.isEmpty() && unprinted.getFirst().date().equals(date)) {
+            while (!unprinted.isEmpty()
+                    && unprinted.getFirst().date().equals(first.date())
+                    && unprinted.getFirst().kind() == first.kind()
+                    && before(unprinted.getFirst(), t)) {
                 sum = Math.addExact(sum, unprinted.removeFirst().amountMinor());
             }
-            charge(entries, balance, date, "", "Penalties charged", sum);
+            if (first.credit()) {
+                credit(entries, balance, first.date(), "", first.kind().text, sum);
+            } else {
+                charge(entries, balance, first.date(), "", first.kind().text, sum);
+            }
         }
+    }
+
+    private static boolean before(PenaltyEvent e, LoanTransaction t) {
+        if (t == null || e.date().isBefore(t.valueDate())) {
+            return true;
+        }
+        if (e.date().isAfter(t.valueDate())) {
+            return false;
+        }
+        return !e.credit() || e.recordedAt().isBefore(t.createdAt());
     }
 
     /** The sum of a transaction's own allocation rows that move the balance; with {@code rebate} the rebate rows too. */

@@ -368,7 +368,13 @@ nightly job on a loan five days overdue: five penalty charges, DPD 5, the `1_30`
 arrears, nothing more on a rerun, a repayment that pays the penalty first and posts it to penalty
 income, a statement with one penalty line per day that reconciles, and a charge that the owner
 cannot delete or change. `LoanLedgerTest` places penalties on their own dates and keeps a later
-penalty out of an earlier receipt.
+penalty out of an earlier receipt. After the review of #270: `PenaltiesTest` also checks that nothing is
+charged before the first run and that a percent rounding to nothing charges nothing; `ServicingTest`
+that a payment never pays a penalty charged after its value date; `LoanLedgerTest` that a cancelled
+penalty is credited on its own day and kept on an earlier receipt; and `LoanServicingIT` a back-dated
+repayment that pays an item up and cancels the five later penalties, a first run that charges only
+its own day, and a run held by another worker's lease, taken over when the lease lapses and not run
+again once finished.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

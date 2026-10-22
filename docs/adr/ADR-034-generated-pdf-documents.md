@@ -195,3 +195,13 @@ payments, because the run charges at the start of the business date), and a rece
 this payment" adds only the penalties recorded before the payment. The known limit above is
 closed. `PenaltyDatingGuardTest` now checks that `LoanLedger` never reads the items' penalties and
 that only the nightly run writes them; a later writer (a waiver) must keep the same dating.
+
+## Addendum of 2026-10-22 (review of #270): cancelled penalties
+
+A repayment reaches only the penalties charged on or before its value date. When a repayment dated
+before a penalty pays the item's principal, interest and fees, the penalties charged after that date
+that nothing paid or waived are cancelled (`lending_loan_charges.cancelled_on` and `cancelled_at`):
+the statement keeps the charge on its own date and credits the cancel ("Penalties cancelled, paid
+before they were charged") on the day it was made, and a receipt recorded before the cancel still
+counts the penalty, so a receipt never changes after it is first opened. `PenaltyDatingGuardTest`
+allows the cancel as the one other writer of the items' penalties due.

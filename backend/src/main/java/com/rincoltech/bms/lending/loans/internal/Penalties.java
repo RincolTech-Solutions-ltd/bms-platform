@@ -26,14 +26,25 @@ final class Penalties {
     record Charge(int periodNo, LocalDate chargeDate, long amountMinor) {}
 
     /**
-     * The charges still to make on {@code businessDate}: every period whose date has come and that
-     * is not in {@code charged}, in period order.
+     * The charges still to make on {@code businessDate}: every period whose date has come, is on or
+     * after {@code from}, and is not in {@code charged}, in period order. Periods dated before
+     * {@code from} (the first arrears run of the business) are never charged, so switching the run on
+     * does not charge a long overdue item every period since its due date in one night (the review of
+     * #270, finding 2). A missed night is caught up with each period on its own date. The percent
+     * base is what is unpaid now, which is never more than it was on an earlier period's date, so a
+     * late run never charges more than a punctual one would have; and an item no longer overdue is
+     * charged nothing, even for a missed period (the safer side for the borrower, finding 3).
      *
-     * @param charged the period numbers already charged for this item
-     * @param chargedSoFar the item's penalties charged so far, for the cap
+     * @param charged the period numbers already charged for this item, cancelled ones included
+     * @param chargedSoFar the item's penalties charged so far, waived and cancelled ones included, for the cap
      */
     static List<Charge> due(
-            Item item, PenaltyRule rule, LocalDate businessDate, Set<Integer> charged, long chargedSoFar) {
+            Item item,
+            PenaltyRule rule,
+            LocalDate businessDate,
+            LocalDate from,
+            Set<Integer> charged,
+            long chargedSoFar) {
         List<Charge> out = new ArrayList<>();
         if (rule == null || !rule.charges() || !overdue(item, businessDate)) {
             return out;
@@ -46,7 +57,7 @@ final class Penalties {
             if (on.isAfter(businessDate)) {
                 break;
             }
-            if (charged.contains(k)) {
+            if (charged.contains(k) || on.isBefore(from)) {
                 continue;
             }
             long amount = rule.method().equals("flat_per_period")
@@ -56,7 +67,7 @@ final class Penalties {
                 amount = Math.min(amount, cap - total);
             }
             if (amount <= 0) {
-                break; // the cap is reached; later periods charge nothing either
+                break; // the cap is reached, or the percent rounds to nothing; later periods charge nothing either
             }
             out.add(new Charge(k, on, amount));
             total = Math.addExact(total, amount);

@@ -18,7 +18,9 @@ import org.junit.jupiter.api.Test;
  *
  * <p>This test fails when {@link LoanLedger} reads the item's penalties, or when anything other than
  * the nightly arrears run ({@link ArrearsRun}, which writes the dated charge in the same statement
- * group) and {@link ServicingRepository}'s two reads touches the column. Whoever adds a new writer
+ * group), the cancel of a charge a back-dated repayment made wrong ({@link ServicingRepository}, which
+ * stamps the charge row's cancel date in the same transaction) and {@link ServicingRepository}'s two
+ * reads touches the column. Whoever adds a new writer
  * (a waiver, say) records it with its date too and updates this guard.
  */
 class PenaltyDatingGuardTest {
@@ -47,12 +49,15 @@ class PenaltyDatingGuardTest {
                         penalties_due_minor is used somewhere new. A penalty must be recorded with the date it
                         was charged so LoanLedger (statement lines and the receipt's loan after this payment)
                         can place it in time; see ADR-034, then update this guard.""")
-                .hasSize(3)
+                .hasSize(4)
                 .allSatisfy(l -> assertThat(l)
                         .satisfiesAnyOf(
                                 r -> assertThat(r)
                                         .startsWith("ServicingRepository.java:")
                                         .contains("rs.getLong("),
+                                r -> assertThat(r)
+                                        .startsWith("ServicingRepository.java:")
+                                        .contains("penalties_due_minor = penalties_due_minor - ?"),
                                 r -> assertThat(r)
                                         .startsWith("ArrearsRun.java:")
                                         .contains("penalties_due_minor = penalties_due_minor + ?")));

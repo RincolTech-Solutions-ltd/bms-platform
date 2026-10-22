@@ -7,27 +7,52 @@ import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Item;
 import com.rincoltech.bms.lending.products.ProductCatalog;
 import com.rincoltech.bms.lending.products.ProductCatalog.PenaltyRule;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * FR-ARR-01, the nightly arrears run for one tenant: for every active loan, the penalty periods due
  * by today (R-PEN, {@link Penalties}) become charges on their items, then item statuses, DPD and
- * arrears are recomputed (R-DPD). A charge is keyed by (item, period) in the database, so a rerun for
- * the same business date changes nothing. Charges are memorandum items: nothing is posted here.
+ * arrears are recomputed (R-DPD). Charges are memorandum items: nothing is posted here.
+ *
+ * <p>How it stays safe to run twice (the review of #270, finding 4, and ADR-008):
+ *
+ * <ul>
+ *   <li>The run for a business date is claimed in {@code lending_arrears_runs} with a time-bounded lease that it
+ *       renews as it goes; a second worker finds the lease held and does nothing, a crashed run is taken over once
+ *       its lease has lapsed, and a finished run is never run again for that date. The attempt number fences a run
+ *       whose lease was taken over: it stops at its next renewal and cannot mark the date finished.
+ *   <li>Each loan is one short transaction of its own under the loan's row lock, so one loan that fails (a missing
+ *       product version, an overflow) is logged and counted and the others go on, and no lock is held past the loan.
+ *   <li>A charge is keyed by (item, period) in the database ({@code ON CONFLICT DO NOTHING}), so even two runs over
+ *       the same loan at once never charge a period twice; and the recompute writes only what moved, so a rerun
+ *       writes nothing.
+ * </ul>
  */
 @Service
 class ArrearsRun {
+
+    private static final Logger log = LoggerFactory.getLogger(ArrearsRun.class);
+
+    /** How long a claim holds without a renewal. */
+    static final Duration LEASE = Duration.ofMinutes(10);
+
+    /** The lease is renewed after this many loans. */
+    static final int RENEW_EVERY = 50;
 
     private final JdbcClient jdbc;
     private final LoanRepository loans;
@@ -37,6 +62,7 @@ class ArrearsRun {
     private final CurrentTenant currentTenant;
     private final BusinessClock clock;
     private final AuditLog audit;
+    private final TransactionTemplate tx;
 
     ArrearsRun(
             JdbcClient jdbc,
@@ -46,7 +72,8 @@ class ArrearsRun {
             LoanServicer servicer,
             CurrentTenant currentTenant,
             BusinessClock clock,
-            AuditLog audit) {
+            AuditLog audit,
+            PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.loans = loans;
         this.repo = repo;
@@ -55,82 +82,177 @@ class ArrearsRun {
         this.currentTenant = currentTenant;
         this.clock = clock;
         this.audit = audit;
+        this.tx = new TransactionTemplate(transactionManager);
     }
 
-    record Result(LocalDate businessDate, int loans, int charges, long chargedMinor) {}
+    record Result(LocalDate businessDate, int loans, int charges, long chargedMinor, int failedLoans) {}
 
-    /** Runs inside the tenant's job transaction (TenantJobs binds the tenant). */
-    @Transactional(propagation = Propagation.MANDATORY)
-    Result run() {
-        LocalDate today = clock.today(currentTenant.profile().timezone());
-        List<UUID> active = jdbc.sql("SELECT id FROM lending_loans WHERE status = 'active' ORDER BY id")
+    /** What one loan's step did. */
+    record Outcome(int charges, long chargedMinor) {}
+
+    /**
+     * The bound tenant's run for its business date today, called outside any transaction (the job binds the tenant
+     * with {@code TenantJobs.callAs}). Empty when that date's run has finished or another worker holds its lease.
+     */
+    Optional<Result> runIfDue() {
+        LocalDate today = tx.execute(s -> clock.today(currentTenant.profile().timezone()));
+        Integer attempt = tx.execute(s -> claim(today));
+        if (attempt == null) {
+            return Optional.empty();
+        }
+        // Penalties start at the business's first arrears run (finding 2 of the review of #270).
+        LocalDate from = tx.execute(s -> jdbc.sql("SELECT min(business_date) FROM lending_arrears_runs")
+                .query((rs, n) -> rs.getObject(1, LocalDate.class))
+                .single());
+        List<UUID> active = tx.execute(s -> jdbc.sql("SELECT id FROM lending_loans WHERE status = 'active' ORDER BY id")
                 .query(UUID.class)
-                .list();
+                .list());
+        Map<UUID, PenaltyRule> rules = new HashMap<>();
         int charges = 0;
         long charged = 0;
+        int failed = 0;
+        int done = 0;
         for (UUID id : active) {
-            Loan loan = loans.lock(id).orElseThrow();
-            if (!loan.status().equals("active")) {
-                continue; // moved since the list was read
+            if (done > 0 && done % RENEW_EVERY == 0 && !Boolean.TRUE.equals(tx.execute(s -> renew(today, attempt)))) {
+                log.warn(
+                        "arrears run for {} lost its lease after {} loans; the run that took it over goes on",
+                        today,
+                        done);
+                return Optional.empty();
             }
-            PenaltyRule rule =
-                    products.version(loan.productVersionId()).orElseThrow().penalty();
-            List<Item> items = repo.items(id);
-            if (rule.charges()) {
-                Map<UUID, Set<Integer>> periods = new HashMap<>();
-                Map<UUID, Long> sums = new HashMap<>();
-                jdbc.sql("SELECT schedule_item_id, period_no, amount_minor FROM lending_loan_charges"
-                                + " WHERE loan_id = ? AND charge_type = 'penalty'")
-                        .param(id)
-                        .query((rs, n) -> {
-                            UUID item = rs.getObject(1, UUID.class);
-                            periods.computeIfAbsent(item, k -> new HashSet<>()).add(rs.getInt(2));
-                            sums.merge(item, rs.getLong(3), Long::sum);
-                            return null;
-                        })
-                        .list();
-                boolean added = false;
-                for (Item item : items) {
-                    for (Penalties.Charge c : Penalties.due(
-                            item,
-                            rule,
-                            today,
-                            periods.getOrDefault(item.id, Set.of()),
-                            sums.getOrDefault(item.id, 0L))) {
-                        int inserted = jdbc.sql("""
-                                        INSERT INTO lending_loan_charges (id, tenant_id, loan_id, schedule_item_id,
-                                            charge_type, period_no, business_date, amount_minor)
-                                        VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, 'penalty', ?, ?, ?)
-                                        ON CONFLICT (tenant_id, schedule_item_id, period_no) WHERE charge_type = 'penalty'
-                                        DO NOTHING
-                                        """)
-                                .params(UUID.randomUUID(), id, item.id, c.periodNo(), c.chargeDate(), c.amountMinor())
+            done++;
+            try {
+                Outcome o = tx.execute(s -> one(id, today, from, rules));
+                if (o != null) {
+                    charges += o.charges();
+                    charged = Math.addExact(charged, o.chargedMinor());
+                }
+            } catch (RuntimeException e) {
+                failed++;
+                log.error(
+                        "arrears run for {} failed on loan {} error={}",
+                        today,
+                        id,
+                        e.getClass().getSimpleName(),
+                        e);
+            }
+        }
+        Result result = new Result(today, active.size(), charges, charged, failed);
+        return Boolean.TRUE.equals(tx.execute(s -> finish(result, attempt))) ? Optional.of(result) : Optional.empty();
+    }
+
+    /** One loan in its own transaction: its charges, then its position. */
+    private Outcome one(UUID id, LocalDate today, LocalDate from, Map<UUID, PenaltyRule> rules) {
+        Loan loan = loans.lock(id).orElseThrow();
+        if (!loan.status().equals("active")) {
+            return new Outcome(0, 0); // moved since the list was read
+        }
+        PenaltyRule rule = rules.computeIfAbsent(
+                loan.productVersionId(), v -> products.version(v).orElseThrow().penalty());
+        List<Item> items = repo.items(id);
+        int charges = 0;
+        long charged = 0;
+        if (rule.charges()) {
+            Map<UUID, Set<Integer>> periods = new HashMap<>();
+            Map<UUID, Long> sums = new HashMap<>();
+            jdbc.sql("SELECT schedule_item_id, period_no, amount_minor FROM lending_loan_charges"
+                            + " WHERE loan_id = ? AND charge_type = 'penalty'")
+                    .param(id)
+                    .query((rs, n) -> {
+                        UUID item = rs.getObject(1, UUID.class);
+                        periods.computeIfAbsent(item, k -> new HashSet<>()).add(rs.getInt(2));
+                        sums.merge(item, rs.getLong(3), Long::sum);
+                        return null;
+                    })
+                    .list();
+            for (Item item : items) {
+                for (Penalties.Charge c : Penalties.due(
+                        item,
+                        rule,
+                        today,
+                        from,
+                        periods.getOrDefault(item.id, Set.of()),
+                        sums.getOrDefault(item.id, 0L))) {
+                    int inserted = jdbc.sql("""
+                                    INSERT INTO lending_loan_charges (id, tenant_id, loan_id, schedule_item_id,
+                                        charge_type, period_no, business_date, amount_minor)
+                                    VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, 'penalty', ?, ?, ?)
+                                    ON CONFLICT (tenant_id, schedule_item_id, period_no) WHERE charge_type = 'penalty'
+                                    DO NOTHING
+                                    """)
+                            .params(UUID.randomUUID(), id, item.id, c.periodNo(), c.chargeDate(), c.amountMinor())
+                            .update();
+                    if (inserted == 1) {
+                        jdbc.sql("UPDATE lending_schedule_items SET penalties_due_minor = penalties_due_minor + ?,"
+                                        + " updated_at = now() WHERE id = ?")
+                                .params(c.amountMinor(), item.id)
                                 .update();
-                        if (inserted == 1) {
-                            jdbc.sql("UPDATE lending_schedule_items SET penalties_due_minor = penalties_due_minor + ?,"
-                                            + " updated_at = now() WHERE id = ?")
-                                    .params(c.amountMinor(), item.id)
-                                    .update();
-                            charges++;
-                            charged = Math.addExact(charged, c.amountMinor());
-                            added = true;
-                        }
+                        charges++;
+                        charged = Math.addExact(charged, c.amountMinor());
                     }
                 }
-                if (added) {
-                    items = repo.items(id);
-                }
             }
-            servicer.refreshPosition(id, items, today);
+            if (charges > 0) {
+                items = repo.items(id);
+            }
         }
-        Result result = new Result(today, active.size(), charges, charged);
+        servicer.refreshPosition(id, items, today);
+        return new Outcome(charges, charged);
+    }
+
+    /** Claims the run for {@code today}; returns the attempt number, or null when it is finished or leased. */
+    private Integer claim(LocalDate today) {
+        return jdbc.sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until)
+                        VALUES (current_setting('app.tenant_id')::uuid, ?, clock_timestamp(),
+                                clock_timestamp() + ? * interval '1 second')
+                        ON CONFLICT (tenant_id, business_date) DO UPDATE
+                           SET started_at = clock_timestamp(), lease_until = EXCLUDED.lease_until,
+                               attempts = lending_arrears_runs.attempts + 1
+                         WHERE lending_arrears_runs.finished_at IS NULL
+                           AND lending_arrears_runs.lease_until < clock_timestamp()
+                        RETURNING attempts
+                        """)
+                .params(today, LEASE.toSeconds())
+                .query(Integer.class)
+                .optional()
+                .orElse(null);
+    }
+
+    private boolean renew(LocalDate today, int attempt) {
+        return jdbc.sql("""
+                        UPDATE lending_arrears_runs SET lease_until = clock_timestamp() + ? * interval '1 second'
+                         WHERE business_date = ? AND attempts = ? AND finished_at IS NULL
+                        """).params(LEASE.toSeconds(), today, attempt).update() == 1;
+    }
+
+    /** Marks the date finished, with the run's audit row, unless another run took the lease over. */
+    private boolean finish(Result result, int attempt) {
+        int marked = jdbc.sql("""
+                        UPDATE lending_arrears_runs SET finished_at = clock_timestamp(), loans = ?, charges = ?,
+                            charged_minor = ?, failed_loans = ?
+                         WHERE business_date = ? AND attempts = ? AND finished_at IS NULL
+                        """)
+                .params(
+                        result.loans(),
+                        result.charges(),
+                        result.chargedMinor(),
+                        result.failedLoans(),
+                        result.businessDate(),
+                        attempt)
+                .update();
+        if (marked != 1) {
+            return false;
+        }
         Map<String, Object> after = new LinkedHashMap<>();
-        after.put("business_date", today.toString());
+        after.put("business_date", result.businessDate().toString());
         after.put("loans", result.loans());
         after.put("penalty_charges", result.charges());
         after.put("penalties_charged_minor", result.chargedMinor());
+        after.put("failed_loans", result.failedLoans());
+        after.put("attempt", attempt);
         audit.record(
                 AuditLog.Entry.created("lending.arrears.run", "lending.arrears", null, null, after), null, "system");
-        return result;
+        return true;
     }
 }

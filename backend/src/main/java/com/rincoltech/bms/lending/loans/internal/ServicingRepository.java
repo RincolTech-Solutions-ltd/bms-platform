@@ -61,7 +61,7 @@ class ServicingRepository {
 
     /** The loan's items in item order, with what has been paid and waived. */
     List<Item> items(UUID loanId) {
-        return jdbc.sql("SELECT * FROM lending_schedule_items WHERE loan_id = ? ORDER BY item_no")
+        List<Item> items = jdbc.sql("SELECT * FROM lending_schedule_items WHERE loan_id = ? ORDER BY item_no")
                 .param(loanId)
                 .query((rs, n) -> {
                     Item i = new Item(
@@ -83,6 +83,49 @@ class ServicingRepository {
                     return i;
                 })
                 .list();
+        Map<UUID, Item> byId = new LinkedHashMap<>();
+        items.forEach(i -> byId.put(i.id, i));
+        jdbc.sql("""
+                        SELECT schedule_item_id, business_date, amount_minor FROM lending_loan_charges
+                         WHERE loan_id = ? AND charge_type = 'penalty' AND cancelled_on IS NULL
+                        """)
+                .param(loanId)
+                .query((rs, n) -> {
+                    Item i = byId.get(rs.getObject(1, UUID.class));
+                    if (i != null) {
+                        i.chargedOn(rs.getObject(2, LocalDate.class), rs.getLong(3));
+                    }
+                    return null;
+                })
+                .list();
+        return items;
+    }
+
+    /**
+     * Cancels the penalty charges of {@code item} dated after {@code after} that nothing waived, when a repayment of
+     * that value date paid the item up (the review of #270), and takes them off the item's penalties due, the
+     * dated charges and the item in memory. Returns the amounts cancelled by business date.
+     */
+    Map<LocalDate, Long> cancelPenaltiesAfter(Item item, LocalDate after, LocalDate today) {
+        Map<LocalDate, Long> cancelled = new LinkedHashMap<>();
+        jdbc.sql("""
+                        UPDATE lending_loan_charges SET cancelled_on = ?, cancelled_at = clock_timestamp()
+                         WHERE schedule_item_id = ? AND charge_type = 'penalty' AND business_date > ?
+                           AND cancelled_on IS NULL AND waived_minor = 0
+                        RETURNING business_date, amount_minor
+                        """)
+                .params(today, item.id, after)
+                .query((rs, n) -> cancelled.merge(rs.getObject(1, LocalDate.class), rs.getLong(2), Long::sum))
+                .list();
+        long sum = cancelled.values().stream().mapToLong(Long::longValue).sum();
+        if (sum > 0) {
+            jdbc.sql("UPDATE lending_schedule_items SET penalties_due_minor = penalties_due_minor - ?,"
+                            + " updated_at = now() WHERE id = ?")
+                    .params(sum, item.id)
+                    .update();
+            item.cancelled(cancelled);
+        }
+        return cancelled;
     }
 
     /** Writes each item's paid, waived and status columns as they stand on {@code today}. */
@@ -107,6 +150,16 @@ class ServicingRepository {
                             i.settled() ? i.paidOn : null,
                             i.id)
                     .update();
+        }
+    }
+
+    /** The nightly run's write (FR-ARR-01): each item's status as it stands on {@code today}, only where it moved. */
+    void saveStatuses(List<Item> items, LocalDate today) {
+        for (Item i : items) {
+            jdbc.sql("""
+                            UPDATE lending_schedule_items SET status = ?, updated_at = now(), version = version + 1
+                             WHERE id = ? AND status IS DISTINCT FROM ?
+                            """).params(i.status(today), i.id, i.status(today)).update();
         }
     }
 
@@ -270,21 +323,30 @@ class ServicingRepository {
         return rows;
     }
 
-    /** The loan's penalty charges (R-PEN) with their dates, for the statement and the receipts (ADR-034). */
-    List<LoanLedger.PenaltyCharge> penaltyCharges(UUID loanId) {
+    /**
+     * The loan's penalty charges (R-PEN) and their cancels with their dates, for the statement and the receipts
+     * (ADR-034).
+     */
+    List<LoanLedger.PenaltyEvent> penaltyEvents(UUID loanId) {
         return jdbc.sql("""
-                        SELECT s.item_no, c.business_date, c.created_at, c.amount_minor
+                        SELECT s.item_no, c.business_date, c.created_at, c.amount_minor, 'CHARGED'
                           FROM lending_loan_charges c
                           JOIN lending_schedule_items s ON s.id = c.schedule_item_id
                          WHERE c.loan_id = ? AND c.charge_type = 'penalty'
-                         ORDER BY c.business_date, s.item_no, c.period_no
+                        UNION ALL
+                        SELECT s.item_no, c.cancelled_on, c.cancelled_at, c.amount_minor, 'CANCELLED'
+                          FROM lending_loan_charges c
+                          JOIN lending_schedule_items s ON s.id = c.schedule_item_id
+                         WHERE c.loan_id = ? AND c.charge_type = 'penalty' AND c.cancelled_on IS NOT NULL
+                         ORDER BY 2, 3, 1
                         """)
-                .param(loanId)
-                .query((rs, n) -> new LoanLedger.PenaltyCharge(
+                .params(loanId, loanId)
+                .query((rs, n) -> new LoanLedger.PenaltyEvent(
                         rs.getInt(1),
                         rs.getObject(2, LocalDate.class),
                         rs.getObject(3, OffsetDateTime.class).toInstant(),
-                        rs.getLong(4)))
+                        rs.getLong(4),
+                        LoanLedger.PenaltyEvent.Kind.valueOf(rs.getString(5))))
                 .list();
     }
 
@@ -348,7 +410,8 @@ class ServicingRepository {
     Optional<LoanBalances> balances(UUID loanId) {
         return jdbc.sql("""
                         SELECT l.*, (SELECT coalesce(sum(c.amount_minor), 0) FROM lending_loan_charges c
-                                      WHERE c.loan_id = l.id AND c.charge_type = 'penalty') AS penalties_assessed
+                                      WHERE c.loan_id = l.id AND c.charge_type = 'penalty'
+                                        AND c.cancelled_on IS NULL) AS penalties_assessed
                           FROM lending_loans l WHERE l.id = ?
                         """)
                 .param(loanId)
@@ -391,20 +454,10 @@ class ServicingRepository {
 
     /** The balances, arrears and DPD of R-DPD as computed from the items. */
     void position(UUID loanId, Position p) {
-        position(loanId, p, true);
-    }
-
-    /**
-     * {@code bumpVersion} false is the nightly recompute (FR-ARR-01): the DPD moves every night, and
-     * a version bump would make every pending approval on the loan stale overnight, while each
-     * approval re-checks its own facts when it runs.
-     */
-    void position(UUID loanId, Position p, boolean bumpVersion) {
         jdbc.sql("""
                         UPDATE lending_loans SET principal_outstanding_minor = ?, interest_outstanding_minor = ?,
                             fees_outstanding_minor = ?, penalties_outstanding_minor = ?, arrears_minor = ?,
-                            days_past_due = ?, next_due_date = ?, updated_at = now(),
-                            version = version + CASE WHEN ? THEN 1 ELSE 0 END
+                            days_past_due = ?, next_due_date = ?, updated_at = now(), version = version + 1
                          WHERE id = ?
                         """)
                 .params(
@@ -415,8 +468,40 @@ class ServicingRepository {
                         p.arrearsMinor(),
                         p.daysPastDue(),
                         p.nextDueDate(),
-                        bumpVersion,
                         loanId)
+                .update();
+    }
+
+    /**
+     * The nightly recompute (FR-ARR-01): writes the position only when it moved, and keeps the loan's version, so a
+     * rerun writes nothing and a pending approval is not made stale overnight (ADR-015 addendum of 2026-10-22).
+     */
+    void positionIfChanged(UUID loanId, Position p) {
+        jdbc.sql("""
+                        UPDATE lending_loans SET principal_outstanding_minor = ?, interest_outstanding_minor = ?,
+                            fees_outstanding_minor = ?, penalties_outstanding_minor = ?, arrears_minor = ?,
+                            days_past_due = ?, next_due_date = ?, updated_at = now()
+                         WHERE id = ?
+                           AND (principal_outstanding_minor, interest_outstanding_minor, fees_outstanding_minor,
+                                penalties_outstanding_minor, arrears_minor, days_past_due, next_due_date)
+                               IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?::date)
+                        """)
+                .params(
+                        p.principalOutstandingMinor(),
+                        p.interestOutstandingMinor(),
+                        p.feesOutstandingMinor(),
+                        p.penaltiesOutstandingMinor(),
+                        p.arrearsMinor(),
+                        p.daysPastDue(),
+                        p.nextDueDate(),
+                        loanId,
+                        p.principalOutstandingMinor(),
+                        p.interestOutstandingMinor(),
+                        p.feesOutstandingMinor(),
+                        p.penaltiesOutstandingMinor(),
+                        p.arrearsMinor(),
+                        p.daysPastDue(),
+                        p.nextDueDate())
                 .update();
     }
 

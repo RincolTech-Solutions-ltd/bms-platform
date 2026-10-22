@@ -695,9 +695,7 @@ class RlsIsolationIT {
         owner.sql("""
                         INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at)
                         VALUES (?, DATE '2026-02-17', now(), now(), now())
-                        """)
-                .params(t.tenantId())
-                .update();
+                        """).params(t.tenantId()).update();
         UUID repayment = UUID.randomUUID();
         owner.sql("""
                         INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor,

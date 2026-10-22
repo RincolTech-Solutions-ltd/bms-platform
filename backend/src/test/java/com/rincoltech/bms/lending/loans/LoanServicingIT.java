@@ -23,6 +23,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -2140,9 +2141,45 @@ class LoanServicingIT extends LoanFixtures {
     @org.springframework.beans.factory.annotation.Qualifier("loanArrears")
     com.github.kagkarlsson.scheduler.task.helper.RecurringTask<Void> arrearsTask;
 
-    /** The nightly job as the scheduler runs it: every active lending tenant, one transaction each. */
+    /**
+     * The business has run arrears since long ago (penalties start at its first run), so a loan's periods since its
+     * due date are all chargeable.
+     */
+    void arrearsSinceLongAgo() {
+        TestDatabase.owner().sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at)
+                        VALUES (?, DATE '2000-01-01', now(), now(), now()) ON CONFLICT DO NOTHING
+                        """).param(t.tenantId()).update();
+    }
+
+    /**
+     * The nightly job as the scheduler runs it, every active lending tenant, with today's run of this business made
+     * due again (as if it were the next night), so each call is a full run.
+     */
     void runArrears() {
+        arrearsSinceLongAgo();
+        TestDatabase.owner()
+                .sql("DELETE FROM lending_arrears_runs WHERE tenant_id = ? AND business_date > DATE '2000-01-01'")
+                .param(t.tenantId())
+                .update();
         arrearsTask.execute(null, null);
+    }
+
+    long cancelledCharges(String loan) {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM lending_loan_charges WHERE loan_id = ?::uuid AND cancelled_on IS NOT NULL")
+                .param(loan)
+                .query(Long.class)
+                .single();
+    }
+
+    Map<String, Object> dailyPenalty() {
+        Map<String, Object> penalty = new LinkedHashMap<>();
+        penalty.put("penalty_method", "flat_per_period");
+        penalty.put("penalty_period_unit", "day");
+        penalty.put("penalty_grace_days", 0);
+        penalty.put("penalty_flat_minor", 2_000);
+        return penalty;
     }
 
     long penaltyCharges(String loan) {
@@ -2257,5 +2294,98 @@ class LoanServicingIT extends LoanFixtures {
                 decide(r.getBody().get("approval_request_id").asString(), admin, adminPerms);
         assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.OK);
         assertThat(loan(loan).get("status").asString()).isEqualTo("written_off");
+    }
+
+    /**
+     * The review of #270, finding 1: item 1 is five days overdue with five daily penalties. A repayment of exactly its
+     * principal and interest, dated its due date, pays no penalty (none existed on that date), pays the item up, and
+     * the five penalties charged after that date are cancelled: a paid-up loan is never penalised. The next run
+     * charges nothing more, and the statement still reconciles.
+     */
+    @Test
+    void frArr01_aBackDatedRepaymentNeverPaysALaterPenaltyAndCancelsIt() throws Exception {
+        String loan = approved(product("PENBACK", dailyPenalty(), List.of()), 1_200_000, 3, 97);
+        disburse(loan, today.minusMonths(1).minusDays(5));
+        runArrears();
+        assertThat(penaltyCharges(loan)).isEqualTo(5);
+        LocalDate due = LocalDate.parse(
+                get(loan, "/schedule").get("items").get(0).get("due_date").asString());
+
+        JsonNode paid = repaid(loan, 520_000, due).get("transaction");
+        assertThat(lines(paid.get("journal_entry_id").asString())).noneMatch(l -> l.startsWith("loan_penalty_income"));
+        JsonNode b = loan(loan).get("balances");
+        assertThat(b.get("penalties_outstanding_minor").asLong()).isZero();
+        assertThat(b.get("penalties_assessed_minor").asLong()).isZero();
+        assertThat(b.get("days_past_due").asInt()).isZero();
+        assertThat(get(loan, "/schedule").get("items").get(0).get("status").asString())
+                .isEqualTo("paid");
+        assertThat(cancelledCharges(loan)).isEqualTo(5);
+
+        runArrears();
+        assertThat(penaltyCharges(loan)).as("nothing new on a paid item").isEqualTo(5);
+        byte[] statement = render(loan, "loan_statement").getBody();
+        assertReconciles(
+                statement,
+                loan(loan).get("balances").get("total_outstanding_minor").asLong());
+        booksAgree();
+    }
+
+    /**
+     * The review of #270, finding 2: a business that switches the run on today is charged from today, not for every
+     * period since a long overdue item fell due.
+     */
+    @Test
+    void frArr01_theFirstRunChargesNothingBeforeItsOwnDate() {
+        String loan = approved(product("PENFIRST", dailyPenalty(), List.of()), 1_200_000, 3, 98);
+        disburse(loan, today.minusMonths(1).minusDays(5));
+        TestDatabase.owner()
+                .sql("DELETE FROM lending_arrears_runs WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        arrearsTask.execute(null, null);
+        assertThat(penaltyCharges(loan)).as("only today's period").isEqualTo(1);
+        assertThat(loan(loan).get("balances").get("days_past_due").asInt()).isEqualTo(5);
+    }
+
+    /**
+     * The review of #270, finding 4: a run held by another worker's live lease is left alone, a lapsed lease is taken
+     * over (the charges keyed by item and period make the second pass safe), and a finished date is not run again.
+     */
+    @Test
+    void frArr01_aRunIsClaimedOnceAndALapsedLeaseIsTakenOver() {
+        String loan = approved(product("PENLEASE", dailyPenalty(), List.of()), 1_200_000, 3, 99);
+        disburse(loan, today.minusMonths(1).minusDays(5));
+        arrearsSinceLongAgo();
+        JdbcClient owner = TestDatabase.owner();
+        owner.sql("DELETE FROM lending_arrears_runs WHERE tenant_id = ? AND business_date > DATE '2000-01-01'")
+                .param(t.tenantId())
+                .update();
+        owner.sql("""
+                        INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until)
+                        VALUES (?, ?, now(), now() + interval '1 hour')
+                        """).params(t.tenantId(), today).update();
+        arrearsTask.execute(null, null);
+        assertThat(penaltyCharges(loan)).as("another worker holds today's run").isZero();
+
+        owner.sql("UPDATE lending_arrears_runs SET lease_until = now() - interval '1 minute'"
+                        + " WHERE tenant_id = ? AND business_date = ?")
+                .params(t.tenantId(), today)
+                .update();
+        arrearsTask.execute(null, null);
+        assertThat(penaltyCharges(loan)).isEqualTo(5);
+        assertThat(owner.sql("SELECT attempts FROM lending_arrears_runs WHERE tenant_id = ? AND business_date = ?"
+                                + " AND finished_at IS NOT NULL")
+                        .params(t.tenantId(), today)
+                        .query(Integer.class)
+                        .single())
+                .isEqualTo(2);
+
+        arrearsTask.execute(null, null);
+        assertThat(owner.sql("SELECT attempts FROM lending_arrears_runs WHERE tenant_id = ? AND business_date = ?")
+                        .params(t.tenantId(), today)
+                        .query(Integer.class)
+                        .single())
+                .as("a finished date is not claimed again")
+                .isEqualTo(2);
     }
 }

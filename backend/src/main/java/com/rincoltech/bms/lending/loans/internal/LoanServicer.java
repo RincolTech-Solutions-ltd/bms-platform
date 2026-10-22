@@ -415,6 +415,17 @@ class LoanServicer implements LoanServicing {
         }
         if (!recovery) {
             repo.insertAllocations(txnId, txnId, applied.allocations());
+            long cancelled = 0;
+            for (Item i : items) {
+                if (i.hasPenaltiesToCancelAfter(valueDate)) {
+                    cancelled += repo.cancelPenaltiesAfter(i, valueDate, today).values().stream()
+                            .mapToLong(Long::longValue)
+                            .sum();
+                }
+            }
+            if (cancelled > 0) {
+                after.put("penalties_cancelled_minor", cancelled);
+            }
             repo.saveItems(items, today);
             credit += applied.excessMinor();
             after.put("payoff", applied.payoff());
@@ -826,11 +837,14 @@ class LoanServicer implements LoanServicing {
 
     // ---- Shared ---------------------------------------------------------------------------
 
-    /** FR-ARR-01: the nightly run's recompute of statuses, DPD and arrears for one loan. */
+    /**
+     * FR-ARR-01: the nightly run's recompute of statuses, DPD and arrears for one loan. Nothing is paid overnight, so
+     * only an item whose status moved is written, and the loan only when its position moved: a rerun writes nothing.
+     */
     Position refreshPosition(UUID loanId, List<Item> items, LocalDate today) {
-        repo.saveItems(items, today);
+        repo.saveStatuses(items, today);
         Position position = Servicing.position(items, today);
-        repo.position(loanId, position, false);
+        repo.positionIfChanged(loanId, position);
         return position;
     }
 
