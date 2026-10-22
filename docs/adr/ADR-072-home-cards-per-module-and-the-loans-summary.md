@@ -28,8 +28,12 @@ nightly snapshot, and the loan list would have to be paged in full.
    requires, and a card with no figure the session may see is not drawn; the server still decides every figure.
 2. **The Shop card reuses what exists.** Today's sales and the low-stock count come from the retail dashboard, so they need
    `retail.sale.read` with `retail.sale.all_sellers` (ADR-055: the total is everybody's) and, for the stock count,
-   `retail.stock.read`; a seller who sees only their own sales does not get the shop total here. The open orders come from the
-   orders board (`retail.order.manage`).
+   `retail.stock.read`; a seller who sees only their own sales does not get the shop total here, nor does a supervisor in a branch
+   where they lack `retail.sale.all_sellers` (checked per branch, so a partial holder never gets a 403 card). Home asks with
+   `period=today` under the dashboard screen's own query key, so the two share one answer. The dashboard has no today-only form:
+   every call reads the last 30 days of sales (the 7 and 30 day figures and the shops), a cost Home accepts rather than add a
+   second endpoint; if it shows in the database benchmarks, a `today` short path in `DashboardService` is the fix. The open orders
+   come from the orders board (`retail.order.manage`).
 3. **One new endpoint for lending: `GET /api/v1/lending/loans/summary`** (`lending.loans.read`, optional `branch_id`, the caller's
    branch scope of that permission applied as on the loan list). It answers the business date, the currency, and the count and the
    amount still owed of the active loans with an instalment due today and with an instalment due before today, read live from
@@ -38,13 +42,16 @@ nightly snapshot, and the loan list would have to be paged in full.
    learns a vertical's figures. It applies the ADR-064 officer limit exactly as the collection lists do (the same filter,
    `CollectionsRepository.filters`): in a branch where the caller lacks `lending.collections.all_officers`, a loan officer there,
    it counts only the loans they are the responsible officer for, so the card never shows a figure the lists would hide.
-4. **The waiting requests come from the approvals inbox**, counted on the phone for the lending action types only
-   (`LENDING_APPROVALS` in `areas/staff/home-cards.tsx`), shown with a `+` when the inbox has more pages.
+4. **The waiting requests come from the approvals inbox**, asked with its existing `action_type` filter for the lending action
+   types only (`LENDING_APPROVALS` in `areas/staff/home-cards.tsx`), so the server counts them and another module's requests never
+   fill the page; shown with a `+` when the inbox has more pages. A test reads each `ApprovalAction`'s `TYPE` in the backend's
+   lending packages and fails when the list and the backend differ.
 
 ## Consequences
 
 - The arrears on Home are live: a repayment taken this morning lowers them at once. They can differ from the nightly
   `days_past_due` and `arrears_minor` of the loan, which the arrears run (FR-ARR-01) recomputes once a day and insights read.
-- A new lending approval action has to be added to `LENDING_APPROVALS` to be counted on the card.
+- A new lending approval action has to be added to `LENDING_APPROVALS` to be counted on the card; the test above fails until it is.
+- Each Home visit with the Shop card costs one 30 day dashboard read (shared with the dashboard screen's Today range).
 - A core, vertical-neutral summary that every module contributes to was considered and left out: it needs a new port in the core
   and a response shape that cannot be typed per module, for three figures one lending route can give.

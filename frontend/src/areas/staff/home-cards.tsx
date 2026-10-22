@@ -10,8 +10,8 @@ import { icons } from '../../components/icons';
 import { useStaff } from './context';
 import { money as lendingMoney } from './lending/loan-state';
 import { showLending } from './lending/permissions';
-import { ALL_SELLERS, canUse, holds, showRetail } from './retail/permissions';
-import { money as retailMoney } from './retail/ui';
+import { ALL_SELLERS, canUse, holds, holdsAt, showRetail } from './retail/permissions';
+import { money as retailMoney, useBranchView } from './retail/ui';
 
 // Home's card per module the business uses (issue #471, ADR-072): Shop with today's sales, the items low on stock and the open
 // customer orders; Lending with the loans due today, those in arrears and the lending requests waiting for approval. A business with
@@ -19,17 +19,24 @@ import { money as retailMoney } from './retail/ui';
 // dashboard (every seller's sales, so retail.sale.all_sellers too, ADR-055; its stock part needs retail.stock.read), the orders board
 // (retail.order.manage), the loans summary (lending.loans.read) and the approvals inbox (core.approvals.read).
 
-/** The approval actions of the lending module, so the Lending card counts only its own requests. */
-export const LENDING_APPROVALS = new Set([
-  'collateral_release', 'loan_disbursement', 'repayment_reversal', 'loan_write_off', 'savings_reversal', 'savings_withdrawal',
-  'investment_funding', 'investment_early_withdrawal', 'investment_reversal',
-]);
+/**
+ * The approval actions of the lending module (each action's TYPE in the backend's lending packages, checked by a test), asked of the
+ * inbox as its action_type filter so the Lending card counts only its own requests.
+ */
+export const LENDING_APPROVALS = [
+  'collateral_release', 'loan_disbursement', 'repayment_reversal', 'loan_write_off', 'charge_waiver', 'savings_reversal',
+  'savings_withdrawal', 'investment_funding', 'investment_early_withdrawal', 'investment_reversal',
+];
 
-/** Which figures each card shows the session; a card with none is not drawn. */
-export function homeParts(me: Me) {
+/**
+ * Which figures each card shows the session in the active branch; a card with none is not drawn. The shop total needs
+ * retail.sale.all_sellers in the branch chosen (ADR-055); over every branch the server keeps to the shops the session supervises.
+ */
+export function homeParts(me: Me, branch: string | null = null) {
   const permissions = me.permissions ?? [];
   const retail = showRetail(me);
-  const sales = retail && canUse(me, 'salesHistory') && holds(me, ALL_SELLERS);
+  const one = branch && branch !== ALL_BRANCHES ? branch : null;
+  const sales = retail && canUse(me, 'salesHistory') && (one ? holdsAt(me, ALL_SELLERS, one) : holds(me, ALL_SELLERS));
   const lendingOn = !me.modules || me.modules.includes('lending');
   return {
     sales,
@@ -54,10 +61,13 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 function ShopCard({ parts }: { parts: ReturnType<typeof homeParts> }) {
   const { branch } = useStaff();
   const branchId = branch && branch !== ALL_BRANCHES ? branch : undefined;
+  // The dashboard's own query for the range Today, so Home and the dashboard share one answer. The endpoint has no today-only
+  // form: it always reads the last 30 days (ADR-072).
+  const view = useBranchView();
   const dashboard = useQuery({
-    queryKey: ['retail', 'dashboard', branchId ?? 'all', 'home'],
-    queryFn: () => retailAnalytics.dashboard({ branchId }),
-    enabled: parts.sales && branch !== null,
+    queryKey: ['retail', 'dashboard', view.all ? 'all' : view.branchId, 'today', '', ''],
+    queryFn: () => retailAnalytics.dashboard({ branchId: view.all ? undefined : (view.branchId ?? ''), period: 'today' }),
+    enabled: parts.sales && (view.all || view.branchId !== null),
   });
   const board = useQuery({
     queryKey: ['retail', 'orders', 'board', branchId ?? 'all'],
@@ -92,15 +102,15 @@ function LendingCard({ parts }: { parts: ReturnType<typeof homeParts> }) {
     enabled: parts.loans && branch !== null,
   });
   const approvals = useQuery({
-    queryKey: ['approvals', branch],
-    queryFn: () => listPendingApprovals(branchIds),
+    queryKey: ['approvals', branch, 'lending'],
+    queryFn: () => listPendingApprovals(branchIds, LENDING_APPROVALS),
     enabled: parts.approvals && branch !== null,
   });
   const s = summary.data;
-  const waiting = (approvals.data?.items ?? []).filter((a) => LENDING_APPROVALS.has(a.action_type ?? '')).length;
+  const waiting = approvals.data?.items?.length ?? 0;
   return (
     <article className="card home-card" aria-labelledby="home-lending">
-      <h2 id="home-lending" className="card-title">{icons.banking}<span>Lending</span></h2>
+      <h2 id="home-lending" className="card-title">{icons.lending}<span>Lending</span></h2>
       <dl className="home-figures">
         {parts.loans && (
           <Figure label="Due today" query={summary}>
@@ -125,8 +135,8 @@ function LendingCard({ parts }: { parts: ReturnType<typeof homeParts> }) {
 
 /** The cards of the modules the business uses, Shop then Lending as in the side menu. */
 export function HomeCards() {
-  const { me } = useStaff();
-  const parts = homeParts(me);
+  const { me, branch } = useStaff();
+  const parts = homeParts(me, branch);
   const shop = parts.sales || parts.orders;
   const lendingCard = parts.loans || parts.approvals;
   if (!shop && !lendingCard) return null;
