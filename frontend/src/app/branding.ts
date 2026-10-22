@@ -16,6 +16,8 @@ export interface ShellBrand {
   logoSrc: string | null;
   themePrimary: string | null;
   themeText: string | null;
+  /** Changes when the logo or the colour changes, so the tab icon's address changes with them (ADR-066). */
+  iconVersion?: string;
 }
 
 export const PLATFORM_BRAND: ShellBrand = {
@@ -31,6 +33,7 @@ export function brandOf(branding: Branding, logoSrc: string | null): ShellBrand 
     logoSrc,
     themePrimary: branding.theme_primary ?? null,
     themeText: branding.theme_text ?? null,
+    iconVersion: branding.logo_url ? `${branding.logo_url}|${branding.theme_primary ?? ''}` : undefined,
   };
 }
 

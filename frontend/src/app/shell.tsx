@@ -68,6 +68,11 @@ export function Shell({ brand = PLATFORM_BRAND, actions, children }: { brand?: S
     });
     // iOS takes the home screen name from this tag when the page is added, not from the manifest (ADR-066).
     document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', appTitle(brand));
+    // The tab icon is the logo too; a new address when the logo or colour changes, as Safari keeps favicons a long time.
+    const icon = '/api/v1/branding/app/icon-192.png';
+    document
+      .querySelector('link[rel="icon"]')
+      ?.setAttribute('href', brand.iconVersion ? `${icon}?v=${encodeURIComponent(brand.iconVersion)}` : icon);
   }, [brand]);
 
   return (

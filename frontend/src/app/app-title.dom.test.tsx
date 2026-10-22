@@ -25,4 +25,17 @@ describe('the iPhone home screen name', () => {
     render(<Shell brand={PLATFORM_BRAND}>x</Shell>);
     expect(title()).toBe('BMS');
   });
+
+  it('versions the tab icon by logo and colour, and keeps it plain without a logo', () => {
+    document.head.innerHTML = '<link rel="icon" href="/api/v1/branding/app/icon-192.png" />';
+    const href = () => document.querySelector('link[rel="icon"]')?.getAttribute('href');
+    const shop = { display_name: 'Fabricated Trading Company', logo_url: '/api/v1/branding/logo?v=a1', theme_primary: '#112233' };
+    const { rerender } = render(<Shell brand={brandOf(shop, null)}>x</Shell>);
+    const first = href();
+    rerender(<Shell brand={brandOf({ ...shop, logo_url: '/api/v1/branding/logo?v=b2' }, null)}>x</Shell>);
+    expect(first).toMatch(/icon-192\.png\?v=/);
+    expect(href()).not.toBe(first);
+    rerender(<Shell brand={PLATFORM_BRAND}>x</Shell>);
+    expect(href()).toBe('/api/v1/branding/app/icon-192.png');
+  });
 });

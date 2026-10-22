@@ -45,7 +45,8 @@ resolves the business from the host on every request and already serves the logo
    run time to the business's short name, the same cut as the manifest's (`fixtures/app-short-names.json` holds the cases both test).
    The browser tab and address bar icon is the same logo: `index.html` links `/api/v1/branding/app/icon-192.png` as its only
    `rel="icon"` (owner request of 22 Oct 2026), so a business with a logo sees it in the tab too, and every other host gets the BMS icon
-   through the same 302 fallback.
+   through the same 302 fallback. The shell adds `?v=` from the logo address and colour to that link, so a new logo is a new tab icon
+   address (Safari keeps favicons long).
 5. **Under `/api/v1/branding/`.** The routes sit with the other public branding routes, so the edge proxy already sends them to the
    API (`/api/*`) and neither Caddyfile changes.
 6. **When a change reaches a phone.** Android Chrome checks the manifest of an installed app from time to time and updates its icon
