@@ -30,7 +30,19 @@ final class UserApi {
     record UpdateUserRequest(
             @Size(min = 1, max = 200) String fullName,
             @Email @Size(max = 320) String email,
-            @Size(max = 20) String phone) {}
+            @Size(max = 20) String phone,
+
+            @Size(max = 20)
+            @Schema(
+                    description =
+                            "Only for the Owner changing their own email or phone (ADR-062): the current code from their authenticator app")
+            String totpCode,
+
+            @Size(max = 200)
+            @Schema(
+                    description =
+                            "Only for the Owner changing their own email or phone (ADR-062), when they have no two-step sign-in: their own password")
+            String password) {}
 
     @Schema(name = "RoleAssignment")
     record RoleAssignment(String roleKey, String roleName, UUID branchId) {}
@@ -97,7 +109,10 @@ final class UserApi {
 
             @Size(max = 200)
             @Schema(description = "The Owner's own current password, for an Owner with no two-step sign-in")
-            String password) {}
+            String password,
+
+            @Size(max = 300) @Schema(description = "Optional: why, kept in the audit row")
+            String reason) {}
 
     @Schema(name = "InvitedUser")
     record InvitedUserResponse(UserResponse user, InvitationLink invitation) {}

@@ -123,7 +123,7 @@ export function InviteScreen() {
 
         <div data-tour="invite-role">
         <RolePick
-          roles={offeredChoices(roleChoices(roles.data ?? [], me.modules), me, people.data ?? []).filter((r) => !(ADD_ONS as readonly string[]).includes(r.key))}
+          roles={offeredChoices(roleChoices(roles.data ?? [], me.modules), me, people.data ?? null).filter((r) => !(ADD_ONS as readonly string[]).includes(r.key))}
           branches={branches.data ?? []}
           roleKey={draft.roleKey}
           branchIds={draft.branchIds}

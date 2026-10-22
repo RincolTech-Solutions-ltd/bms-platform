@@ -82,9 +82,13 @@ export function canActOn(me: Pick<Me, 'permissions' | 'is_owner' | 'user_id'>, u
   return isAdministrator(user) ? mayChangeAdministrators(me, people) : true;
 }
 
-/** The role choices the signed-in person may give: the administrator role only when they may change administrators. */
-export function offeredChoices(choices: RoleChoice[], me: Pick<Me, 'permissions' | 'is_owner'>, people: Pick<StaffUser, 'is_owner'>[]): RoleChoice[] {
-  return mayChangeAdministrators(me, people) ? choices : choices.filter((c) => c.key !== TENANT_ADMIN);
+/**
+ * The role choices the signed-in person may give: the administrator role only when they may change administrators. `people` is
+ * null while the staff list is loading: then only the Owner is offered the administrator role, so it never flashes for others.
+ */
+export function offeredChoices(choices: RoleChoice[], me: Pick<Me, 'permissions' | 'is_owner'>, people: Pick<StaffUser, 'is_owner'>[] | null): RoleChoice[] {
+  const may = people === null ? canManageUsers(me) && me.is_owner === true : mayChangeAdministrators(me, people);
+  return may ? choices : choices.filter((c) => c.key !== TENANT_ADMIN);
 }
 
 /** Who ownership can go to: the other active administrators, offered to the Owner only. */

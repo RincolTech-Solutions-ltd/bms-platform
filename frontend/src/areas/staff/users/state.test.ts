@@ -279,6 +279,9 @@ describe('the owner', () => {
     const choices = roleChoices([{ key: 'tenant_admin' }, { key: 'cashier' }], ['lending']);
     expect(offeredChoices(choices, ownerMe, people).map((c) => c.key)).toEqual(['tenant_admin', 'cashier']);
     expect(offeredChoices(choices, adminMe, people).map((c) => c.key)).toEqual(['cashier']);
+    // While the staff list loads, only the Owner sees the administrator role, so it never flashes for anyone else.
+    expect(offeredChoices(choices, adminMe, null).map((c) => c.key)).toEqual(['cashier']);
+    expect(offeredChoices(choices, ownerMe, null).map((c) => c.key)).toEqual(['tenant_admin', 'cashier']);
   });
 
   it('hands ownership only to another active administrator, and only from the owner', () => {

@@ -64,6 +64,18 @@ public interface TenantAdmins {
     UUID transferOwnership(UUID userId, UUID platformUserId, String reason);
 
     /**
+     * Everything {@link #reissueFirstAdminInvitation} would refuse, read-only, before the operator's code is spent (ADR-062).
+     */
+    void requireInvitedFirstAdmin(UUID userId);
+
+    /**
+     * A new one-time invitation link (72 hours) for a business's first administrator who never joined: the invited Owner, or an
+     * invited administrator of a business with no Owner and no active administrator (ADR-062). The earlier link stops working;
+     * the link is also sent through the notification port. Refuses anyone else with 422 {@code not_an_invited_owner}.
+     */
+    Invitation reissueFirstAdminInvitation(UUID userId, UUID platformUserId);
+
+    /**
      * @param twoStepRequired whether the new admin must turn on two-step sign-in (a role that requires it, or the tenant's
      *     policy, ADR-046); the activation email says so only then (issue #396)
      */

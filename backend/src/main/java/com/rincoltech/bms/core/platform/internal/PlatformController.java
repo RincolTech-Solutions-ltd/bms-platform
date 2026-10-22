@@ -516,6 +516,29 @@ class PlatformController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * ADR-062: a new business whose first administrator (its Owner) never joined, and whose invitation expired, is not stuck:
+     * the operator sends a new link, with a reason and the operator's own code, shown once. Only for that invited first
+     * administrator; the target is checked before the code is spent.
+     */
+    @PostMapping("/tenants/{tenant_id}/users/{user_id}/invitation")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary =
+                    "Issue a new invitation link for the first administrator (the Owner) of a business who never joined, with a reason; shown once; needs a current code from the operator's own authenticator (FR-IAM-18)",
+            operationId = "platformReissueOwnerInvitation")
+    FirstAdminInvitation reissueOwnerInvitation(
+            @PathVariable("tenant_id") UUID tenantId,
+            @PathVariable("user_id") UUID userId,
+            @Valid @RequestBody StepUpRequest request,
+            HttpServletResponse response) {
+        NoStore.apply(response);
+        service.requireInvitedFirstAdmin(tenantId, userId);
+        security.requireTotp(request.totpCode());
+        TenantAdmins.Invitation invitation = service.reissueFirstAdminInvitation(tenantId, userId, request.reason());
+        return new FirstAdminInvitation(invitation.userId(), invitation.url(), invitation.expiresAt());
+    }
+
     @PostMapping("/tenants/{tenant_id}/users/{user_id}/mfa/reset")
     @RequiresPermission("platform.tenants.manage")
     @Operation(

@@ -431,8 +431,12 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   rules. Only the Owner invites or promotes an administrator and changes, deactivates, resets the second factor of or re-invites
   another administrator (403 `owner_only`); nobody inside the business does any of it to the Owner (403 `owner_protected`), and the
   Owner cannot drop their own administrator role (422 `owner_must_transfer_first`). `POST /users/{user_id}/transfer-ownership`
-  (the Owner's code, else password) and `POST /platform/tenants/{tenant_id}/users/{user_id}/make-owner` (the operator's code and a
-  reason) hand ownership to an active administrator only, audited on both sides for the operator. The first administrator of a new
+  (the Owner's code, else password, an optional reason; refused for 24 hours after the Owner's email, phone or password changed,
+  `users.contact_changed_at`) and `POST /platform/tenants/{tenant_id}/users/{user_id}/make-owner` (the operator's code and a
+  reason) hand ownership to an active administrator only, audited on both sides for the operator; the Owner's own email or phone
+  change needs the same step-up and tells the old address (`identity.contact_changed`); `POST
+  /platform/tenants/{tenant_id}/users/{user_id}/invitation` (code and reason) sends a new link to an invited Owner who never joined.
+  One advisory lock per business (exclusive to make or move the Owner, shared for every owner rule) serialises them. The first administrator of a new
   business is its Owner from creation; a business with no Owner keeps the rules of before. `User.is_owner`, `Me.is_owner`,
   `TenantAdmin.is_owner`. The PWA: the Owner badge, the owner-only actions hidden, Transfer ownership (`transfer-owner.tsx`), the
   two-step prompt for the Owner, the Owner line in "Who can do what", `page-users` tour v5; on the Business page the badge and Make

@@ -90,12 +90,21 @@ class UserController {
 
     @PatchMapping("/{user_id}")
     @RequiresPermission("core.users.manage")
-    @Operation(summary = "Change a staff user's name or contact", operationId = "updateUser")
+    @Operation(
+            summary =
+                    "Change a staff user's name or contact; the Owner changing their own email or phone also sends totp_code or password (ADR-062)",
+            operationId = "updateUser")
     ResponseEntity<UserResponse> update(
             @PathVariable("user_id") UUID userId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @Valid @RequestBody UpdateUserRequest request) {
-        UserResponse user = service.update(userId, ifMatch, request);
+        // ADR-062: the Owner's own email or phone is where a reset link goes, so changing it needs the step-up first.
+        boolean steppedUp = false;
+        if (service.contactChangeNeedsStepUp(userId, request)) {
+            stepUp(request.totpCode(), request.password());
+            steppedUp = true;
+        }
+        UserResponse user = service.update(userId, ifMatch, request, steppedUp);
         return ResponseEntity.ok().eTag(String.valueOf(user.version())).body(user);
     }
 
@@ -180,7 +189,7 @@ class UserController {
             @PathVariable("user_id") UUID userId, @Valid @RequestBody TransferOwnershipRequest request) {
         service.precheckTransfer(userId);
         stepUp(request.totpCode(), request.password());
-        return service.transferOwnership(userId);
+        return service.transferOwnership(userId, request.reason());
     }
 
     /**

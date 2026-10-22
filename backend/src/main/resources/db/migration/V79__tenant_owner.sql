@@ -27,16 +27,21 @@
 -- of before this change) until a platform operator assigns an Owner. Each assignment writes a system audit row in the
 -- tenant's log and a row in the platform log.
 --
--- Locking: ADD COLUMN with a constant default rewrites nothing; the check is added NOT VALID and then validated, which
--- reads the users table under SHARE UPDATE EXCLUSIVE; the index is built on a small table. All behind a five second
--- lock_timeout so a busy table fails the deploy instead of stalling sign-ins.
+-- users.contact_changed_at: when the user's email or phone last changed, set by the application. The Owner's own transfer is
+-- refused for 24 hours after the Owner's contact or password changed (ADR-062 decision 4), so a stolen session that changes the
+-- Owner's email and resets the password cannot hand the business over at once.
+--
+-- Locking: ADD COLUMN takes ACCESS EXCLUSIVE on users and holds it until the migration commits; with a constant default (or
+-- none) it rewrites nothing, and the check, its validation and the index then run on the small table under that same lock.
+-- So sign-ins wait for the few milliseconds the migration takes; the five second lock_timeout makes a busy table fail the
+-- deploy instead of queueing sign-ins behind it.
 
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE users ADD COLUMN is_owner boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN contact_changed_at timestamptz;
 ALTER TABLE users ADD CONSTRAINT users_owner_is_staff
-    CHECK (NOT is_owner OR (kind = 'staff' AND status <> 'deactivated')) NOT VALID;
-ALTER TABLE users VALIDATE CONSTRAINT users_owner_is_staff;
+    CHECK (NOT is_owner OR (kind = 'staff' AND status <> 'deactivated'));
 CREATE UNIQUE INDEX users_one_owner ON users (tenant_id) WHERE is_owner;
 
 -- The Owner must hold the administrator role at the moment they are made the Owner. A user is inserted before any role can
@@ -63,23 +68,27 @@ REVOKE ALL ON FUNCTION bms_owner_must_be_admin() FROM PUBLIC;
 CREATE TRIGGER users_owner_is_admin BEFORE INSERT OR UPDATE OF is_owner ON users
     FOR EACH ROW WHEN (NEW.is_owner) EXECUTE FUNCTION bms_owner_must_be_admin();
 
--- The administrator role of the Owner is never revoked or moved: the Owner hands ownership on first.
+-- The administrator role of the Owner is never revoked, moved or deleted: the Owner hands ownership on first. An update
+-- that leaves the row an active administrator row of the same user (a version bump) passes.
 CREATE FUNCTION bms_owner_keeps_admin() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'UPDATE' AND NEW.role_key = 'tenant_admin' AND NEW.revoked_at IS NULL AND NEW.user_id = OLD.user_id
+       AND NEW.tenant_id = OLD.tenant_id THEN
+        RETURN NEW;
+    END IF;
     IF EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = OLD.tenant_id AND u.id = OLD.user_id AND u.is_owner) THEN
         RAISE EXCEPTION 'user_role_assignments_owner_keeps_admin: the Owner stays an administrator until ownership is handed on'
             USING ERRCODE = 'check_violation';
     END IF;
-    RETURN NEW;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
 END
 $$;
 REVOKE ALL ON FUNCTION bms_owner_keeps_admin() FROM PUBLIC;
 
-CREATE TRIGGER user_role_assignments_owner_keeps_admin BEFORE UPDATE ON user_role_assignments
+CREATE TRIGGER user_role_assignments_owner_keeps_admin BEFORE UPDATE OR DELETE ON user_role_assignments
     FOR EACH ROW
-    WHEN (OLD.role_key = 'tenant_admin' AND OLD.revoked_at IS NULL
-          AND (NEW.revoked_at IS NOT NULL OR NEW.role_key <> 'tenant_admin' OR NEW.user_id <> OLD.user_id))
+    WHEN (OLD.role_key = 'tenant_admin' AND OLD.revoked_at IS NULL)
     EXECUTE FUNCTION bms_owner_keeps_admin();
 
 -- ---------------------------------------------------------------------------------------------
@@ -97,7 +106,7 @@ WITH admins AS (
         SELECT DISTINCT ON (o.activated_tenant) o.activated_tenant AS tenant_id, lower(o.contact_email) AS email
           FROM onboarding_applications o
          WHERE o.status = 'activated' AND o.activated_tenant IS NOT NULL
-         ORDER BY o.activated_tenant, o.activated_at DESC, o.id),
+         ORDER BY o.activated_tenant, o.activated_at DESC NULLS LAST, o.id),
      chosen AS (
         SELECT DISTINCT ON (a.tenant_id) a.tenant_id, a.id,
                coalesce(a.email = r.email, false) AS by_recorded_email
@@ -114,10 +123,11 @@ WITH admins AS (
         SELECT gen_random_uuid(), m.tenant_id, 'system', 'core.user.owner_assigned', 'core.user', m.id,
                jsonb_build_object(
                    'before', jsonb_build_object('owner', NULL),
-                   'after', jsonb_build_object('owner', m.id),
-                   'reason', CASE WHEN m.by_recorded_email
-                                  THEN 'V79: the administrator with the email the business signed up with (ADR-062)'
-                                  ELSE 'V79: the earliest active administrator (ADR-062)' END)
+                   'after', jsonb_build_object(
+                       'owner', m.id,
+                       'reason', CASE WHEN m.by_recorded_email
+                                      THEN 'V79: the administrator with the email the business signed up with (ADR-062)'
+                                      ELSE 'V79: the earliest active administrator (ADR-062)' END))
           FROM marked m
         RETURNING 1)
 INSERT INTO platform_audit_log (id, action, tenant_id, data)

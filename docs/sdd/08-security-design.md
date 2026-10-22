@@ -224,7 +224,8 @@ checked in `core.identity` (`Owners`) on top of `core.users.manage`:
 | Invite an administrator, make someone an administrator | Y | 403 `owner_only` |
 | Change another administrator's roles or contact, deactivate them, reset their two-step sign-in, send them a new link | Y | 403 `owner_only` |
 | Any of those on the Owner | own contact only; not their own administrator role (422 `owner_must_transfer_first`) | 403 `owner_protected` |
-| Transfer ownership to another active administrator (step-up: authenticator code, else own password) | Y | 403 `owner_only` |
+| Change one's own email or phone | Y, with the step-up (authenticator code, else own password); the old address is told | Y |
+| Transfer ownership to another active administrator (step-up: authenticator code, else own password; not within 24 hours of the Owner's email, phone or password change) | Y | 403 `owner_only` |
 | Lift a sign-in lock (any staff member) | Y | Y |
 
 The database holds it too: one Owner per business (`users_one_owner`), never a deactivated user
@@ -232,7 +233,9 @@ The database holds it too: one Owner per business (`users_one_owner`), never a d
 the Owner's administrator role cannot be revoked (`user_role_assignments_owner_keeps_admin`). A
 platform operator makes an active administrator the Owner with a reason and the operator's own
 authenticator code (`POST /platform/tenants/{tenant_id}/users/{user_id}/make-owner`), audited on
-both sides. A business with no Owner yet (one with no active administrator when V79 ran) keeps the
+both sides, and sends a new invitation link to an invited Owner who never joined (`.../invitation`).
+One advisory lock per business serialises everything that makes or moves the Owner against every
+owner rule (ADR-062 decision 9). A business with no Owner yet (one with no active administrator when V79 ran) keeps the
 rules of before until the operator assigns one. Two-step sign-in is not forced on the Owner; the
 Users screen prompts the Owner to turn it on.
 

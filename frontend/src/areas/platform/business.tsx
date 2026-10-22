@@ -12,6 +12,7 @@ import {
   resetOwnerSignIn,
   resetOwnerTwoStep,
   makeOwner,
+  reissueOwnerInvitation,
   resumeBusiness,
   setBusinessModules,
   setBusinessPilot,
@@ -285,7 +286,7 @@ type Open =
   | { kind: 'none' }
   | { kind: 'confirm'; action: Action; value?: string; planName?: string }
   | { kind: 'payment'; reviewing: boolean }
-  | { kind: 'rescue'; admin: TenantAdmin; what: 'sign-in' | 'two-step' | 'owner' };
+  | { kind: 'rescue'; admin: TenantAdmin; what: 'sign-in' | 'two-step' | 'owner' | 'invite' };
 
 function newKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? `pay-${crypto.randomUUID()}` : `pay-${Date.now()}-${Math.random()}`;
@@ -311,6 +312,8 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
   const [code, setCode] = useState('');
   const [rescueReason, setRescueReason] = useState('');
   const [link, setLink] = useState<string | null>(null);
+  // An invitation link lasts 72 hours, a reset link one hour (ADR-062, ADR-042).
+  const [linkIsInvitation, setLinkIsInvitation] = useState(false);
   const key = useRef<string>(newKey());
   const today = todayInKampala();
 
@@ -425,7 +428,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     );
   }
 
-  function rescue(admin: TenantAdmin, what: 'sign-in' | 'two-step' | 'owner') {
+  function rescue(admin: TenantAdmin, what: 'sign-in' | 'two-step' | 'owner' | 'invite') {
     if (busy) return;
     if (!/^\d{6}$/.test(code.trim())) {
       setError('Type the 6 digit code from your own authenticator app.');
@@ -439,12 +442,20 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     setBusy(true);
     setError(null);
     const call =
-      what === 'owner'
+      what === 'invite'
+        ? reissueOwnerInvitation(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then((r) => {
+            setLinkIsInvitation(true);
+            setLink(r.url ?? null);
+          })
+        : what === 'owner'
         ? makeOwner(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then(() =>
             setDone(`${admin.full_name ?? 'The administrator'} is now the owner of the business.`),
           )
         : what === 'sign-in'
-        ? resetOwnerSignIn(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then((r) => setLink(r.url ?? null))
+        ? resetOwnerSignIn(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then((r) => {
+            setLinkIsInvitation(false);
+            setLink(r.url ?? null);
+          })
         : resetOwnerTwoStep(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then(() =>
             setDone(`${admin.full_name ?? 'The owner'} can sign in with the password and set up two-step sign-in again.`),
           );
@@ -492,7 +503,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
       {link && (
         <section role="status" className="alert alert-success">
           <div>
-            <p>Shown once. Copy it and send it to the owner. It works for one hour, one time.</p>
+            <p>Shown once. Copy it and send it to the owner. It works {linkIsInvitation ? 'for 72 hours' : 'for one hour'}, one time.</p>
             <p className="wrap-anywhere">
               <code>{link}</code>
             </p>
@@ -764,6 +775,13 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                     <span>Two-step sign-in {a.mfa_enabled ? 'on' : 'off'}</span>
                     <span>Last sign-in: {a.last_login_at ? formatMoment(a.last_login_at) : 'never'}</span>
                   </p>
+                  {a.status === 'invited' && a.is_owner === true && (
+                    <div className="ln-actions">
+                      <button type="button" onClick={() => setOpen({ kind: 'rescue', admin: a, what: 'invite' })}>
+                        Send a new invitation link
+                      </button>
+                    </div>
+                  )}
                   {a.status === 'active' && (
                     <div className="ln-actions">
                       <button type="button" onClick={() => setOpen({ kind: 'rescue', admin: a, what: 'sign-in' })}>
@@ -791,7 +809,9 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                     >
                       <p>
                         <strong>
-                          {open.what === 'owner'
+                          {open.what === 'invite'
+                            ? `Make a new invitation link for ${a.full_name ?? 'the owner'}? The old link stops working. The new one works for 72 hours and is shown to you once.`
+                            : open.what === 'owner'
                             ? `Make ${a.full_name ?? 'this administrator'} the owner of the business? Only they can then add, remove or change an administrator, and nobody in the business can remove them. ${(detail.admins ?? []).find((x) => x.is_owner === true)?.full_name ?? 'The owner of now'} stays an administrator.`
                             : open.what === 'sign-in'
                             ? `Make a one-time link for ${a.full_name ?? 'the owner'} to set a new password? It works for one hour and is shown to you once.`
@@ -827,7 +847,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                       )}
                       <div className="cluster">
                         <button type="submit" className="btn-primary" disabled={busy}>
-                          {busy ? 'Working' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
+                          {busy ? 'Working' : open.what === 'invite' ? 'Yes, make the link' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
                         </button>
                         <button type="button" className="btn-ghost" onClick={close} disabled={busy}>
                           Cancel

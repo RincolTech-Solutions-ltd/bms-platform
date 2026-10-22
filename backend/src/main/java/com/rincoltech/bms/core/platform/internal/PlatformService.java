@@ -437,6 +437,34 @@ class PlatformService implements TenantProvisioning {
                 }));
     }
 
+    /** Read-only: what {@link #reissueFirstAdminInvitation} would refuse, before the operator's code is spent. */
+    void requireInvitedFirstAdmin(UUID tenantId, UUID userId) {
+        transactions.execute(status -> tenant(tenantId));
+        TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    tenantAdmins.requireInvitedFirstAdmin(userId);
+                    return null;
+                }));
+    }
+
+    /** ADR-062: a new link for the first administrator (the Owner) who never joined; audited in both logs with the reason. */
+    TenantAdmins.Invitation reissueFirstAdminInvitation(UUID tenantId, UUID userId, String reason) {
+        UUID operator = CurrentPrincipal.require().userId();
+        transactions.execute(status -> tenant(tenantId));
+        return TenantContext.callAs(
+                tenantId,
+                () -> transactions.execute(status -> {
+                    TenantAdmins.Invitation invitation = tenantAdmins.reissueFirstAdminInvitation(userId, operator);
+                    platformAudit.record(
+                            "platform.tenant_owner.invitation_reissued",
+                            operator,
+                            tenantId,
+                            Map.of("user_id", userId, "reason", reason.trim()));
+                    return invitation;
+                }));
+    }
+
     /** Read-only: what {@link #resetAdminSignIn} would refuse, checked before the operator's authenticator code is spent. */
     void requireResettableAdmin(UUID tenantId, UUID userId) {
         transactions.execute(status -> tenant(tenantId));

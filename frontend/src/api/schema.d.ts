@@ -2911,6 +2911,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/invitation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a new invitation link for the first administrator (the Owner) of a business who never joined, with a reason; shown once; needs a current code from the operator's own authenticator (FR-IAM-18) */
+        post: operations["platformReissueOwnerInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/make-owner": {
         parameters: {
             query?: never;
@@ -8798,7 +8815,7 @@ export interface components {
             /** Format: date */
             next_status_change_on?: string;
             owner_email?: string;
-            /** @description The first tenant admin (the owner), or null */
+            /** @description The Owner of the business (ADR-062), or null while it has none */
             owner_name?: string;
             /**
              * Format: date
@@ -8999,6 +9016,8 @@ export interface components {
         TransferOwnershipRequest: {
             /** @description The Owner's own current password, for an Owner with no two-step sign-in */
             password?: string;
+            /** @description Optional: why, kept in the audit row */
+            reason?: string;
             /** @description The current 6 digit code from the Owner's own authenticator app */
             totp_code?: string;
         };
@@ -16170,7 +16189,11 @@ export interface components {
             /** Format: email */
             email?: string;
             full_name?: string;
+            /** @description Only for the Owner changing their own email or phone (ADR-062), when they have no two-step sign-in: their own password */
+            password?: string;
             phone?: string;
+            /** @description Only for the Owner changing their own email or phone (ADR-062): the current code from their authenticator app */
+            totp_code?: string;
         };
         User: {
             /** Format: date-time */
@@ -21245,7 +21268,7 @@ export interface operations {
             };
         };
     };
-    platformTransferOwnership: {
+    platformReissueOwnerInvitation: {
         parameters: {
             query?: never;
             header?: never;
@@ -21263,6 +21286,33 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstAdminInvitation"];
+                };
+            };
+        };
+    };
+    platformTransferOwnership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
