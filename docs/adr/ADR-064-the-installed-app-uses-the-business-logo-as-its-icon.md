@@ -4,7 +4,7 @@
 
 Proposed (owner request of 22 Oct 2026, issue #446, FR-TEN-08). Builds on ADR-050 (BMS installs as an app) and on the tenant branding
 of FR-TEN-08 (the logo as a core document, the theme colour rule). Amends ADR-050 decision 1 only in where the manifest and the iPhone
-icon come from; every other decision of ADR-050 stands. The number after pending ADR-063 (claimed by an open pull request);
+icon come from; every other decision of ADR-050 stands. The next number after ADR-063 on main;
 renumbered at merge if needed.
 
 ## Context
