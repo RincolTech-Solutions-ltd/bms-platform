@@ -33,3 +33,8 @@ the branch, although they collect only their own.
 - A loan officer's lists are short and theirs; a manager reassigning loans still sees the branch.
 - Watch for: a custom role that holds collections read without either permission sees only its own (usually empty)
   portfolio with masked phones; that is the safe default.
+- What is protected is the bulk contact book: a cashier can still read one member's phone at a time through
+  `GET /lending/members/{id}` (`lending.members.read`), as they need to serve the member at the counter; each such read is
+  one record, scoped by branch.
+- The whole-branch view is decided per branch: a person who is a branch manager in one branch and a loan officer in
+  another sees every officer's loans in the first and only their own in the second.

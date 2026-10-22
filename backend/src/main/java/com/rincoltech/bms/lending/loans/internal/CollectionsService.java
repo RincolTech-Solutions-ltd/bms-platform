@@ -191,11 +191,13 @@ class CollectionsService {
     static final String ALL_OFFICERS = "lending.collections.all_officers";
 
     /**
-     * ADR-064: without {@code lending.collections.all_officers} (the loan officer) a list covers only the caller's own
-     * portfolio, whatever officer was asked for; branch managers, administrators and the back office see the branch.
+     * ADR-064: in a branch where the caller lacks {@code lending.collections.all_officers} (a loan officer there) a
+     * list covers only the caller's own portfolio, whatever officer was asked for; decided per branch, so a manager in
+     * one branch who is a loan officer in another sees only their own loans in the other.
      */
-    static UUID officerFor(Principal principal, UUID requested) {
-        return principal.hasPermission(ALL_OFFICERS) ? requested : principal.userId();
+    static CollectionsRepository.Officers officerFor(Principal principal, UUID requested) {
+        return new CollectionsRepository.Officers(
+                requested, principal.branchFilter(ALL_OFFICERS, null), principal.userId());
     }
 
     static final int MAX_LIMIT = 500;
@@ -250,7 +252,7 @@ class CollectionsService {
         Principal principal = CurrentPrincipal.require();
         List<UUID> scope = scope(branchIds);
         int size = limit(limit);
-        UUID officer = officerFor(principal, officerId);
+        CollectionsRepository.Officers officer = officerFor(principal, officerId);
         List<ArrearsLine> lines = repo.arrears(scope, officer, bucket, size + 1);
         Map<String, long[]> totals = repo.arrearsTotals(scope, officer);
         List<ArrearsBucket> buckets = new ArrayList<>();

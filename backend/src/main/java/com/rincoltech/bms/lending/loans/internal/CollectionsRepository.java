@@ -98,7 +98,7 @@ class CollectionsRepository {
     }
 
     /** FR-CLN-02: every item of an active loan due in the range. */
-    List<DueLine> dueList(List<UUID> branchIds, UUID officerId, LocalDate from, LocalDate to, int limit) {
+    List<DueLine> dueList(List<UUID> branchIds, Officers officers, LocalDate from, LocalDate to, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -117,7 +117,7 @@ class CollectionsRepository {
                 """);
         p.put("from", from);
         p.put("to", to);
-        filters(sql, p, branchIds, officerId);
+        filters(sql, p, branchIds, officers);
         sql.append(
                 " ORDER BY u.full_name NULLS LAST, l.officer_user_id, i.due_date, l.loan_no, i.item_no LIMIT :limit");
         p.put("limit", limit);
@@ -157,7 +157,7 @@ class CollectionsRepository {
     }
 
     /** FR-CLN-03: per PAR bucket, how many loans and how much in arrears, every loan counted. */
-    Map<String, long[]> arrearsTotals(List<UUID> branchIds, UUID officerId) {
+    Map<String, long[]> arrearsTotals(List<UUID> branchIds, Officers officers) {
         Map<String, long[]> out = new LinkedHashMap<>();
         if (branchIds != null && branchIds.isEmpty()) {
             return out;
@@ -170,7 +170,7 @@ class CollectionsRepository {
                   FROM lending_loans l
                  WHERE l.status = 'active' AND l.days_past_due > 0
                 """);
-        filters(sql, p, branchIds, officerId);
+        filters(sql, p, branchIds, officers);
         sql.append(" GROUP BY 1");
         jdbc.sql(sql.toString())
                 .params(p)
@@ -181,7 +181,7 @@ class CollectionsRepository {
     }
 
     /** FR-CLN-03: active loans with DPD above 0 (in one bucket when given), most overdue first, at most {@code limit}. */
-    List<ArrearsLine> arrears(List<UUID> branchIds, UUID officerId, String bucket, int limit) {
+    List<ArrearsLine> arrears(List<UUID> branchIds, Officers officers, String bucket, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -201,7 +201,7 @@ class CollectionsRepository {
                                       ORDER BY a.promised_date, a.id LIMIT 1) op ON true
                  WHERE l.status = 'active' AND l.days_past_due > 0
                 """);
-        filters(sql, p, branchIds, officerId);
+        filters(sql, p, branchIds, officers);
         if (bucket != null) {
             sql.append(bucketRange(bucket));
         }
@@ -232,7 +232,7 @@ class CollectionsRepository {
     }
 
     /** Promises to pay with one status, earliest promised date first. */
-    List<PromiseLine> promises(List<UUID> branchIds, UUID officerId, String status, int limit) {
+    List<PromiseLine> promises(List<UUID> branchIds, Officers officers, String status, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -246,7 +246,7 @@ class CollectionsRepository {
                  WHERE a.action_type = 'promise_to_pay' AND a.promise_status = :status
                 """);
         p.put("status", status);
-        filters(sql, p, branchIds, officerId);
+        filters(sql, p, branchIds, officers);
         sql.append(" ORDER BY a.promised_date, l.loan_no, a.id LIMIT :limit");
         p.put("limit", limit);
         return jdbc.sql(sql.toString())
@@ -331,15 +331,34 @@ class CollectionsRepository {
                 == 1;
     }
 
-    private static void filters(StringBuilder sql, Map<String, Object> p, List<UUID> branchIds, UUID officerId) {
+    /**
+     * Whose loans a list covers (ADR-064): the officer asked for, if any, in the branches where the caller sees every
+     * officer's loans ({@code wholeBranches}, null for every branch), and only the caller's own loans elsewhere.
+     */
+    record Officers(UUID requested, List<UUID> wholeBranches, UUID me) {}
+
+    private static void filters(StringBuilder sql, Map<String, Object> p, List<UUID> branchIds, Officers o) {
         if (branchIds != null) {
             sql.append(" AND l.branch_id IN (:branchIds)");
             p.put("branchIds", branchIds);
         }
-        if (officerId != null) {
-            sql.append(" AND l.officer_user_id = :officerId");
-            p.put("officerId", officerId);
+        String asked = "";
+        if (o.requested() != null) {
+            asked = " AND l.officer_user_id = :officerId";
+            p.put("officerId", o.requested());
         }
+        if (o.wholeBranches() == null) {
+            sql.append(asked);
+            return;
+        }
+        p.put("me", o.me());
+        if (o.wholeBranches().isEmpty()) {
+            sql.append(" AND l.officer_user_id = :me");
+            return;
+        }
+        sql.append(" AND ((l.branch_id IN (:wholeBranches)" + asked + ") OR (l.branch_id NOT IN (:wholeBranches)"
+                + " AND l.officer_user_id = :me))");
+        p.put("wholeBranches", o.wholeBranches());
     }
 
     private static Instant instant(Timestamp t) {

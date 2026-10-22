@@ -3206,4 +3206,53 @@ class LoanServicingIT extends LoanFixtures {
                 .singleElement()
                 .satisfies(n -> assertThat(n.eventRef()).isEqualTo(loan + ":" + today));
     }
+
+    /**
+     * ADR-064, decided per branch: a caller who sees every officer's loans in the head office only (a manager there and a
+     * loan officer elsewhere) sees in the second branch only their own loans, here none.
+     */
+    @Test
+    void cln03_everyOfficersLoansIsDecidedPerBranch() {
+        String hq = approved(exampleB("PERBRA"), 1_200_000, 3, 65);
+        disburse(hq, today.minusMonths(1).minusDays(3));
+        String second = approvedIn(t.secondBranch(), exampleB("PERBRB"), 64);
+        disburse(second, today.minusMonths(1).minusDays(3));
+        runArrears();
+        HttpHeaders h = as(manager, managerPerms, "*", null);
+        h.add("X-Dev-Scopes", "lending.collections.all_officers=" + t.headOffice());
+        ResponseEntity<JsonNode> r = send(HttpMethod.GET, "/api/v1/lending/collections/arrears", h, null);
+        assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(r.getBody().get("buckets").get(0).get("items"))
+                .singleElement()
+                .satisfies(l -> assertThat(l.get("loan_id").asString()).isEqualTo(hq));
+    }
+
+    /** Promise order: the promise made later but due sooner takes the one payment first. */
+    @Test
+    void cln05_aPromiseDueSoonerIsKeptFirstEvenIfMadeLater() {
+        String loan = approved(exampleB("PROMORD"), 1_200_000, 3, 63);
+        disburse(loan, today.minusMonths(1).minusDays(3));
+        String later = UUID.randomUUID().toString();
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_collection_actions (id, tenant_id, loan_id, action_type, note, promised_date,
+                            promised_amount_minor, promise_status, performed_by, performed_at)
+                        VALUES (?::uuid, ?, ?::uuid, 'promise_to_pay', 'Test promise', ?, 100000, 'pending', ?,
+                                now() - interval '2 days')
+                        """)
+                .params(later, t.tenantId(), loan, today.plusDays(10), officer)
+                .update();
+        String sooner = logAction(loan, promise(today.plusDays(2), 100_000))
+                .getBody()
+                .get("id")
+                .asString();
+        repaid(loan, 100_000, today);
+        runArrears();
+        assertThat(lending("/collections/promises?promise_status=kept").get("items"))
+                .singleElement()
+                .satisfies(p -> assertThat(p.get("action_id").asString()).isEqualTo(sooner));
+        assertThat(lending("/collections/promises").get("items"))
+                .singleElement()
+                .satisfies(p -> assertThat(p.get("action_id").asString()).isEqualTo(later));
+    }
 }
