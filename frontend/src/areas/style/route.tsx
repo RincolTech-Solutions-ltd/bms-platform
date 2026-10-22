@@ -285,8 +285,8 @@ function StylePage() {
         </dialog>
       </Section>
 
-      <Section title="Phone side menu">
-        <p className="hint">Below 720px the area tabs give way to this menu button and drawer.</p>
+      <Section title="Side menu on a phone">
+        <p className="hint">Below 720px the sidebar gives way to this menu button and drawer, with the same items.</p>
         <div className="staff-bar-top">
           <SideMenu
             label="Example areas"

@@ -203,7 +203,7 @@ export const adminWelcome: Tour = {
       id: 'modules',
       target: 'nav-areas',
       title: 'Your modules',
-      body: 'Each part of the business you use has a tab here, like Retail or Lending. On a phone they are in the menu at the top left. To add or remove one, contact us.',
+      body: 'Each part of the business you use has its own item in the menu, like Retail or Lending. On a phone, open the menu at the top left. To add or remove one, contact us.',
     },
     {
       id: 'billing',
@@ -525,7 +525,7 @@ export const retailSales: Tour = {
       module: 'retail',
       optional: true,
       title: 'Shortcuts',
-      body: 'Your most used retail pages are here. On a phone they are in the menu at the top left, under Retail.',
+      body: 'Your most used retail pages are listed under Retail in the menu. On a phone, open the menu at the top left first.',
     },
     notifications,
     feedback,

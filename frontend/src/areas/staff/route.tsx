@@ -10,7 +10,7 @@ import { TurnOnCard } from '../../push/TurnOnCard';
 import { HelpMenu, TourProvider } from '../../tour/host';
 import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
 import { icons } from '../../components/icons';
-import { AreaTabs, type MenuLink, SideMenu, useIsPhone } from '../../components/side-menu';
+import { type MenuLink, SideMenu, SideNav, useIsPhone } from '../../components/side-menu';
 import { BrandLoader } from '../../components/states';
 import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
@@ -20,7 +20,7 @@ import { showCollateral, showMembers } from './lending/member-permissions';
 import { showLending } from './lending/permissions';
 import { showSavings } from './lending/savings-permissions';
 import { showReports } from './reports/permissions';
-import { RetailMenuGroup, RetailNav } from './retail/nav';
+import { RetailMenuGroup } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
 import { showReceivePayments } from './payments/state';
 import { showSms } from './sms/state';
@@ -69,7 +69,6 @@ function StaffLayout() {
     if (signedIn && !mock) void push.sync();
   }, [signedIn, mock]);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const phone = useIsPhone();
   // Feedback sends the page the person came from (issue #447).
   useEffect(() => rememberPage(pathname), [pathname]);
   const managesSettings = (me.data?.permissions ?? []).includes('core.settings.manage');
@@ -103,25 +102,29 @@ function StaffLayout() {
     <StaffContext.Provider value={{ me: profile, branch, chooseBranch: choose }}>
       <TourProvider me={profile} saveProgress={!mock}>
         <CrumbProvider>
-        <StaffBar me={profile} branch={branch} onBranch={choose} onSignOut={() => void signOut()} />
-        <InstallPrompt />
-        {!mock && <TurnOnCard push={push} />}
-        {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
-          <p role="status" className="alert alert-warning">
-            You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
-          </p>
-        )}
-        <TwoStepNotices me={profile} pathname={pathname} />
-        {!phone && pathname.startsWith('/staff/retail') && showRetail(profile) && <RetailNav me={profile} />}
-        <StaffBreadcrumbs />
-        {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
+          <div className="nav-layout">
+            <StaffSideNav me={profile} />
+            <div className="nav-layout-main">
+              <StaffBar me={profile} branch={branch} onBranch={choose} onSignOut={() => void signOut()} />
+              <InstallPrompt />
+              {!mock && <TurnOnCard push={push} />}
+              {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
+                <p role="status" className="alert alert-warning">
+                  You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
+                </p>
+              )}
+              <TwoStepNotices me={profile} pathname={pathname} />
+              <StaffBreadcrumbs />
+              {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
+            </div>
+          </div>
         </CrumbProvider>
       </TourProvider>
     </StaffContext.Provider>
   );
 }
 
-/** The areas the session may open, in tab order; Retail carries its shortcuts as a group for the phone side menu. */
+/** The areas the session may open, in menu order; Retail carries its shortcuts as a group. The sidebar and the drawer both list these. */
 function staffAreas(me: Me): MenuLink[] {
   const permissions = me.permissions ?? [];
   const areas: (MenuLink | false)[] = [
@@ -146,17 +149,23 @@ function staffAreas(me: Me): MenuLink[] {
   return areas.filter((a): a is MenuLink => a !== false);
 }
 
+/** The sidebar at the left from 720px (issue #455); nothing on a phone, where the staff bar's menu button opens the same list. */
+export function StaffSideNav({ me }: { me: Me }) {
+  const phone = useIsPhone();
+  if (phone) return null;
+  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me)} tours={['retail-nav']} />;
+}
+
 /**
- * Who is signed in, Help, the branch switcher, sign out and the area tabs; below 720px the tabs, the name's Sign out and the
- * retail bar give way to the side menu (issue #455). Carries the data-tour anchors the first-run tours light up (tour/tours.ts).
+ * Who is signed in, Help, the branch switcher and Sign out; below 720px also the menu button of the side menu, which then holds
+ * Sign out (issue #455). With StaffSideNav it carries the data-tour anchors the first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; onSignOut: () => void }) {
   const phone = useIsPhone();
-  const areas = staffAreas(me);
   return (
     <header className="staff-bar">
       <div className="staff-bar-top">
-        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={areas} tours={['retail-nav']} name={me.full_name} onSignOut={onSignOut} />}
+        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={staffAreas(me)} tours={['retail-nav']} name={me.full_name} onSignOut={onSignOut} />}
         <span className="staff-user">
           <span className="avatar">{icons.user}</span>
           <span className="staff-user-name">{me.full_name}</span>
@@ -165,7 +174,6 @@ export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: 
         <BranchPicker me={me} branch={branch} onChoose={onBranch} />
         {!phone && <button className="btn-ghost btn-sm" onClick={onSignOut}>Sign out</button>}
       </div>
-      {!phone && <AreaTabs label="Staff areas" tour="nav-areas" links={areas} />}
     </header>
   );
 }

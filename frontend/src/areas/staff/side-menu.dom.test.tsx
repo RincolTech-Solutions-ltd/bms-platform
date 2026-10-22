@@ -10,12 +10,13 @@ import { router as appRouter } from '../../app/router';
 import { TourProvider, useTour } from '../../tour/host';
 import type { Tour } from '../../tour/model';
 import { StaffContext } from './context';
-import { StaffBar } from './route';
+import { StaffBar, StaffSideNav } from './route';
 
-// The phone side menu of the staff bar (issue #455): below 720px a menu button opens a drawer from the left with the areas the
-// session may open (the same checks as the tabs), the current one marked, the retail shortcuts as a group under Retail, and the
+// The side menu of the staff area (issue #455), one list of areas on every screen size. Below 720px a menu button opens a drawer
+// from the left with the areas the session may open, the current one marked, the retail shortcuts as a group under Retail, and the
 // name and Sign out at the bottom. It closes on Escape, the backdrop, a left swipe or a chosen link and gives focus back to the
-// button. From 720px the tabs are unchanged. A tour step that points at a menu item opens the drawer. Every name is invented.
+// button. From 720px the same list is a sidebar that folds to its icons, the choice kept on the device. A tour step that points at
+// a menu item opens the drawer or unfolds the sidebar. Every name is invented.
 
 const TOURS_OFF = { 'tours-off': { status: 'dismissed', version: 1 } };
 
@@ -46,6 +47,7 @@ function show(me: Me, { at = '/staff', children = null as ReactNode } = {}) {
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })}>
         <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? null }}>
           <TourProvider me={me} saveProgress={false}>
+            <StaffSideNav me={me} />
             <StaffBar me={me} branch={null} onBranch={() => undefined} onSignOut={signOut} />
             {children}
           </TourProvider>
@@ -76,6 +78,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   document.body.className = '';
+  window.localStorage.clear();
 });
 
 describe('the staff side menu on a phone (issue #455)', () => {
@@ -211,15 +214,115 @@ describe('the staff side menu on a phone (issue #455)', () => {
   });
 });
 
-describe('the staff bar from 720px', () => {
-  it('keeps the tabs and the Sign out button, with no menu button', () => {
-    widthIs(false);
+describe('the staff sidebar from 720px', () => {
+  beforeEach(() => widthIs(false));
+
+  const sidebar = () => screen.getByRole('complementary');
+  const toggle = () => within(sidebar()).getByRole('button', { name: 'Show menu labels' });
+  // Every link of the list, the retail group included, by its accessible name.
+  const allLinks = (root: HTMLElement) =>
+    within(within(root).getByRole('navigation', { name: 'Staff areas' }))
+      .getAllByRole('link')
+      .map((a) => a.textContent);
+
+  it('shows the sidebar with the areas and no tabs, no menu button, and Sign out in the staff bar', () => {
     show(admin);
-    const tabs = screen.getByRole('navigation', { name: 'Staff areas' });
-    expect(tabs.className).toBe('tabs');
-    expect(tabs.getAttribute('data-tour')).toBe('nav-areas');
-    expect(within(tabs).getByRole('link', { name: 'Retail' }).getAttribute('data-tour')).toBe('nav-retail');
+    const nav = within(sidebar()).getByRole('navigation', { name: 'Staff areas' });
+    expect(nav.getAttribute('data-tour')).toBe('nav-areas');
+    expect(within(nav).getByRole('link', { name: 'Retail' }).getAttribute('data-tour')).toBe('nav-retail');
+    expect(within(nav).getByRole('list', { name: 'Retail' }).getAttribute('data-tour')).toBe('retail-nav');
+    expect(screen.getAllByRole('navigation', { name: 'Staff areas' })).toHaveLength(1);
+    expect(document.querySelector('.tabs')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
+  });
+
+  it('comes before the staff bar, so Tab reaches the menu before the page', () => {
+    show(officer);
+    const bar = document.querySelector('.staff-bar') as Element;
+    expect(sidebar().compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('lists the same items as the phone drawer for the same permissions', () => {
+    for (const me of [officer, admin]) {
+      show(me);
+      const wide = allLinks(sidebar());
+      cleanup();
+      widthIs(true);
+      show(me);
+      expect(allLinks(openMenu()), me.full_name).toEqual(wide);
+      cleanup();
+      widthIs(false);
+    }
+  });
+
+  it('marks the current area with aria-current', () => {
+    show(officer, { at: '/staff/notifications' });
+    expect(within(sidebar()).getByRole('link', { name: 'Notifications' }).getAttribute('aria-current')).toBe('page');
+    expect(within(sidebar()).getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
+  });
+
+  it('folds to its icons and back, and keeps the choice on this device', () => {
+    show(officer);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(toggle().getAttribute('aria-controls')).toBe(within(sidebar()).getByRole('navigation').id);
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
+    expect(window.localStorage.getItem('bms.sidebar')).toBe('folded');
+    cleanup();
+    show(officer);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(window.localStorage.getItem('bms.sidebar')).toBeNull();
+  });
+
+  it('keeps each folded item named, with its label as a tooltip, the retail group too', () => {
+    window.localStorage.setItem('bms.sidebar', 'folded');
+    show(admin);
+    const retail = within(sidebar()).getByRole('link', { name: 'Retail' });
+    expect(retail.getAttribute('title')).toBe('Retail');
+    const group = within(sidebar()).getByRole('list', { name: 'Retail' });
+    for (const link of within(group).getAllByRole('link')) expect(link.getAttribute('title')).toBe(link.textContent);
+  });
+
+  it('still works when the browser blocks storage', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    show(officer);
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    vi.restoreAllMocks();
+  });
+
+  it('unfolds for a tour step that points at a menu item', async () => {
+    window.localStorage.setItem('bms.sidebar', 'folded');
+    const tour: Tour = {
+      id: 'test-sidebar-tour',
+      version: 1,
+      title: 'Test tour',
+      audience: () => true,
+      autoStart: false,
+      steps: [{ id: 'feedback', target: 'nav-feedback', title: 'Feedback here', body: 'Choose Feedback to write to us.' }],
+    };
+    function Starter() {
+      const { start } = useTour();
+      useEffect(() => start(tour), [start]);
+      return null;
+    }
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    show(officer, { children: <Starter /> });
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    act(() => {
+      fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    });
+    await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
   });
 });

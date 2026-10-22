@@ -1,14 +1,12 @@
-import { Link } from '@tanstack/react-router';
 import type { Me } from '../../../api/client';
 import { icons } from '../../../components/icons';
+import { MenuItemLink } from '../../../components/side-menu';
 import { SCREENS, canUse, type RetailScreen } from './permissions';
 import { useCanSellAnywhere } from './ui';
 
-// The retail menu (#95): the retail home and the first shortcuts the session may use, with the short
-// names a phone's bottom bar has room for. The pilot's order comes first (Sales, Banked, Savings,
-// Expenses, Advances, FR-RET-31), with customer orders right after Sale (issue #385), then the stock shortcuts; five fit at 360px beside Retail. Fixed to
-// the bottom on a phone, a row of links above the title on a wider screen. Drawn by the staff layout from 720px; on a phone the
-// same shortcuts are a group under Retail in the side menu (issue #455).
+// The retail shortcuts (#95): the first retail screens the session may use, with short names. The pilot's order comes first (Sales,
+// Banked, Savings, Expenses, Advances, FR-RET-31), with customer orders right after Sale (issue #385), then the stock shortcuts.
+// Since issue #455 they are a group under Retail in the side menu on every screen size, not a bar of their own.
 
 const SHORTCUTS: Partial<Record<RetailScreen, string>> = {
   sale: 'Sale', orders: 'Orders', banking: 'Banked', savings: 'Savings', expenses: 'Expenses', advances: 'Advances', stock: 'Stock', restock: 'Restock', stocktake: 'Count', usage: 'Usage',
@@ -23,25 +21,7 @@ export function shortcutsFor(me: Pick<Me, 'permissions' | 'module_capabilities'>
     .slice(0, MAX_SHORTCUTS);
 }
 
-export function RetailNav({ me }: { me: Me }) {
-  const shortcuts = shortcutsFor(me, { sells: useCanSellAnywhere(me) });
-  return (
-    <nav className="bottom-nav" aria-label="Retail" data-tour="retail-nav">
-      <Link to="/staff/retail" activeOptions={{ exact: true }}>
-        {icons.home}
-        <span>Retail</span>
-      </Link>
-      {shortcuts.map((s) => (
-        <Link key={s.screen} to={s.path as never}>
-          {icons[s.screen as keyof typeof icons]}
-          <span>{SHORTCUTS[s.screen]}</span>
-        </Link>
-      ))}
-    </nav>
-  );
-}
-
-/** The same shortcuts as a group under Retail in the phone side menu (issue #455). */
+/** The shortcuts as a group under Retail in the side menu, the sidebar and the phone drawer alike (issue #455). */
 export function RetailMenuGroup({ me }: { me: Me }) {
   const shortcuts = shortcutsFor(me, { sells: useCanSellAnywhere(me) });
   if (shortcuts.length === 0) return null;
@@ -49,10 +29,7 @@ export function RetailMenuGroup({ me }: { me: Me }) {
     <ul className="side-menu-group" aria-label="Retail" data-tour="retail-nav">
       {shortcuts.map((s) => (
         <li key={s.screen}>
-          <Link to={s.path as never}>
-            {icons[s.screen as keyof typeof icons]}
-            <span>{SHORTCUTS[s.screen]}</span>
-          </Link>
+          <MenuItemLink to={s.path} label={SHORTCUTS[s.screen] ?? s.screen} icon={icons[s.screen as keyof typeof icons]} />
         </li>
       ))}
     </ul>
