@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { classifyHost, loadHostConfig } from '../../app/hosts';
 import { landingCopy } from '../../app/landing';
 import { icons } from '../../components/icons';
+import { SideMenu } from '../../components/side-menu';
 import { illustrations, type IllustrationName } from '../../components/illustrations';
 import { BrandLoader, EmptyState, SkeletonList, StatusPanel } from '../../components/states';
 
@@ -282,6 +283,21 @@ function StylePage() {
             <button>Close</button>
           </form>
         </dialog>
+      </Section>
+
+      <Section title="Phone side menu">
+        <p className="hint">Below 720px the area tabs give way to this menu button and drawer.</p>
+        <div className="staff-bar-top">
+          <SideMenu
+            label="Example areas"
+            links={[
+              { to: '/style', label: 'Style page', icon: icons.settings },
+              { to: '/', label: 'Landing page', icon: icons.home, exact: true },
+            ]}
+            name="Test User 01"
+            onSignOut={() => undefined}
+          />
+        </div>
       </Section>
 
       <Section title="Icons">

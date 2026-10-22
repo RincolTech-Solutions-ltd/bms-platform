@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { type KeyboardEvent, type ReactNode, type TouchEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type KeyboardEvent, type ReactNode, type TouchEvent, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
 
@@ -57,6 +57,7 @@ export function AreaTabs({ label, tour, links }: { label: string; tour?: string;
 /** The menu button and its drawer. `label` names the list of links, `tour` is its data-tour id, `tours` the ids inside the groups. */
 export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { label: string; tour?: string; links: MenuLink[]; name?: string; onSignOut: () => void; tours?: string[] }) {
   const [open, setOpen] = useState(false);
+  const heading = useId();
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
@@ -124,7 +125,7 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
           className="side-menu-panel"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="side-menu-title"
+          aria-labelledby={heading}
           onKeyDown={onKeyDown}
           onClick={(event) => {
             if (open && event.target instanceof Element && event.target.closest('a')) close();
@@ -136,7 +137,7 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
           onTouchEnd={onTouchEnd}
         >
           <div className="side-menu-head">
-            <h2 id="side-menu-title" className="side-menu-title">Menu</h2>
+            <h2 id={heading} className="side-menu-title">Menu</h2>
             <button type="button" className="btn-ghost menu-button" aria-label="Close menu" onClick={close}>
               {icons.close}
             </button>

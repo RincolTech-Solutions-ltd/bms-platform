@@ -1,6 +1,6 @@
 # Design system
 
-**Status:** Draft · **Chore:** #95, #106 (visual polish), #429 (light and dark theme) · **Chapter:** `docs/sdd/11-member-channels.md` section 11.2.6 · **Builds on:** #87 (tenant branding, FR-TEN-08)
+**Status:** Draft · **Chore:** #95, #106 (visual polish), #429 (light and dark theme), #455 (phone side menu) · **Chapter:** `docs/sdd/11-member-channels.md` section 11.2.6 · **Builds on:** #87 (tenant branding, FR-TEN-08)
 
 The look of the PWA: calm, trustworthy business software in Rincol Tech blue. One design layer serves the
 landing page, the sign-in family, the staff area, every retail screen, the member portal and the platform
@@ -20,7 +20,7 @@ placeholder. Screens use class names from this catalogue and never write a raw c
 | `ui/tables.css` | Tables and `.table-wrap` |
 | `ui/feedback.css` | `.alert-*`, `.badge-*`, `.empty-state`, `.loading`, `.spinner`, `.skeleton`, `.toast`, `.toast-success`, `.toast-danger`, the header refresh button (`.refresh`, `.refresh-status` readable by assistive tech but off screen below 720px, `.refresh-problem` visible at every width) |
 | `ui/illustrations.css` | The paint classes of the illustrations (`.ill-*`), the state components (`.empty-state-art`, `.status-panel`, `.brand-loader`, `.skeleton-list`) and the shared keyframes |
-| `ui/navigation.css` | The staff bar, `.tabs`, the retail `.bottom-nav` |
+| `ui/navigation.css` | The staff bar, `.tabs`, the phone side menu (`.menu-button`, `.side-menu`), the retail `.bottom-nav` |
 | `ui/pages.css` | The landing page (hero, trust line, module cards), `.auth-card` and `.auth-art`, the portal cards, the approvals decision cell, the style page |
 | `ui/retail.css` | The retail classes (`.rt`, `.rt-card`, `.rt-row`, `.rt-total`, `.rt-flag`, `.rt-primary`), `.tile-grid`, `.tile`, `.line-foot` |
 | `ui/search.css` | The shared search box (#241): `.sb`, `.sb-field`, `.sb-clear`, `.sb-status`, `.sb-searching`, `.sb-results` (dimmed while `aria-busy`), `.sb-mark` |
@@ -84,10 +84,11 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Card | `.card`, `.card-muted`, `.card-raised`, `.card-interactive` | White, 8px corners, soft shadow; `.card-interactive` (a card that is a link) lifts on hover and sinks on press |
 | Table | `<div className="table-wrap" tabIndex={0}><table>` | Scrolls inside its card on a phone with edge shadows; `.num` cells right-aligned in tabular figures; `tabIndex` lets a keyboard scroll it |
 | Table as cards | `.table-wrap.table-cards` and `data-label` on every `<td>` | Below 560px each row is a card of label and value pairs (no sideways scroll); `.cell-stack` puts controls under their label. Used by approvals and the member list |
-| Tabs | `<nav className="tabs">` of `<Link>` | Active by the router's `data-status="active"`; scroll sideways on a phone |
+| Tabs | `AreaTabs` (`components/side-menu.tsx`): `<nav className="tabs">` of `<Link>` | Active by the router's `data-status="active"`; from 720px only, a phone gets the side menu (see Navigation) |
+| Side menu | `SideMenu` (`components/side-menu.tsx`), `.menu-button`, `.side-menu`, `.side-menu-panel`, `.side-menu-group` | Below 720px: the menu button and the drawer of areas (see Navigation) |
 | Breadcrumbs | `StaffBreadcrumbs` (`components/breadcrumbs.tsx`): `<nav aria-label="Breadcrumb">` with an `<ol>` | One trail under the staff bar from the routes' `crumb` labels (FR-UXN-01); the last item is `aria-current="page"`; below 720px only Back to the parent and the current page |
 | Category group | `GroupControls`, `GroupedBodies`, `GroupedCards` (`areas/staff/retail/category-groups.tsx`), `.cat-head` | A list in expandable category sections: a full-width header button (`aria-expanded`, `aria-controls`) with the count and subtotal, a Group by category switch, Expand all and Collapse all (FR-UXN-02) |
-| Retail bottom bar | `RetailNav` (`areas/staff/retail/nav.tsx`) | Retail home and three shortcuts the user may use; fixed to the bottom on a phone, pills above the title from 720px |
+| Retail bottom bar | `RetailNav` (`areas/staff/retail/nav.tsx`) | Retail home and up to five shortcuts the user may use, as pills above the title from 720px; on a phone the staff layout does not draw it and `RetailMenuGroup` lists the same shortcuts under Retail in the side menu (#455) |
 | Tile | `.tile-grid` of `.tile` | Retail home: icon, label, hint; two per row on a phone |
 | Stat tile | `.an-stats` of `.an-stat` (`.an-stat-label`, `.an-stat-value`, a `.hint`) | The retail dashboard: a figure with its label, two per row on a phone and four from 720px; `.an-placeholder` (dashed) marks a slot for a figure that does not exist yet and shows no number |
 | Bars | `Bars` (`areas/staff/retail/analytics-ui.tsx`): an `<ol class="bars">` of a name, a figure and an inline `<svg class="bar">` | A ranking drawn as bars scaled to the largest. The figure is text; the SVG is `aria-hidden` and is colour from `.bar-fill` and `.bar-track`, never an attribute |
@@ -112,6 +113,33 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Tour anchor | `data-tour="<id>"` on the element a tour step lights up | Stable ids, never a CSS class; `tour/tours.test.tsx` fails when one disappears |
 | Tour rules (issue #292) | `tour/model.ts` `autoTourFor`, `host.tsx` | At most one tour starts by itself per page load; the rest wait for the next visit. A user with no tour history gets only the first-run (Welcome) tour, and every "New:" tour is marked seen for them at that moment, since they have nothing to compare against. One "Do not show tours again" checkbox (progress key `tours-off`) stops every automatic tour, "New:" ones included; Help still replays any tour |
 | Help | `HelpMenu` in the staff bar | A `dialog.sheet` with Take the tour and Show me this page |
+
+## Navigation (#455)
+
+The staff area and the operator portal list their areas one way from 720px and another way below it. The breakpoint is the
+design system's phone width, `(max-width: 719px)`, read in code by `useIsPhone` (`components/side-menu.tsx`; the retail screens
+re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media query, so the number is
+the token.
+
+- **From 720px:** the row of tabs (`AreaTabs`), Sign out in the staff bar, and on retail pages the `RetailNav` row of pills.
+  Unchanged by #455.
+- **Below 720px:** a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top left of the staff bar opens a
+  side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop (`--color-scrim`). It lists the same links
+  as the tabs, built from one list in the layout so the permission checks cannot drift apart, each with an inline SVG icon that
+  takes `currentColor`. The current area is marked `aria-current="page"` (tinted, with an accent edge). The retail shortcuts of
+  `RetailNav` are a group under Retail (`RetailMenuGroup`, `data-tour="retail-nav"`), and the separate retail row is not drawn.
+  Notifications and Feedback are always there; the person's name and Sign out sit at the bottom.
+- **Closing:** the backdrop, Escape, a left swipe on the drawer (50px, more sideways than down) or choosing a link.
+- **Accessibility:** the drawer is `role="dialog"` with `aria-modal="true"` and the heading Menu; focus moves to its first
+  control, Tab and Shift+Tab stay inside, and focus returns to the menu button on close. The menu button carries
+  `aria-expanded`. The page behind does not scroll (`body.side-menu-open`).
+- **Phone edges and motion:** the drawer pads itself with `env(safe-area-inset-top)`, `-bottom` and `-left`, slides in over
+  `--motion` (once in 1ms under reduced motion) and draws only with theme roles, so it follows light and dark.
+- **Guided tours:** the closed drawer stays in the page with `hidden`, so every `data-tour` anchor of a menu item exists for a
+  tour's checks. When a step points at one (`nav-areas`, `nav-approvals`, `nav-retail`, `retail-nav` and the rest), the tour
+  host's current target (`useTour().target`) opens the drawer at once, without animation and without taking focus from the
+  tour card, and the drawer closes again when the step moves on. A tour that starts while the menu is open closes it first.
+- **Where it applies:** the staff area and the operator portal (five tabs). The member area has no tab row.
 
 ## Light and dark theme (#429, #452)
 

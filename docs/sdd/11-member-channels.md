@@ -127,6 +127,18 @@ dark theme follow (#429): the person picks Light, Dark or Same as my phone with 
 right of the header, or under Appearance on the Notifications and app page (#452), kept on the device; the tokens, the
 menu and the dark pairs are in `docs/ui/design-system.md`.
 
+Navigation on a phone (#455): below 720px a row of area tabs runs off the screen, so the staff area
+and the operator portal replace it with a menu button at the top left of the staff bar. It opens a
+side drawer from the left (85% of the width, at most 320px, over a dimmed backdrop) that lists the
+same areas with the same permission checks as the tabs, each with an inline SVG icon, the current one
+marked `aria-current="page"`, the retail shortcuts as a group under Retail (the separate retail
+bottom bar is not drawn on a phone), and the person's name and Sign out at the bottom. It is a modal
+dialog: focus moves in, stays in, and returns to the menu button; the page behind does not scroll; it
+closes on the backdrop, Escape, a left swipe or a chosen link. It keeps clear of the iPhone safe areas
+and follows the theme and reduced motion. A guided tour step that points at a menu item opens the
+drawer while the step is shown. From 720px the tabs and the retail row are unchanged. The member
+area has no tab row and keeps its layout. Details in `docs/ui/design-system.md`, "Navigation".
+
 ## 11.3 SMS
 
 ### 11.3.1 Events and default templates
