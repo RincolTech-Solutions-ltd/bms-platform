@@ -6199,7 +6199,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Change a staff user's name or contact */
+        /** Change a staff user's name or contact; the Owner changing their own email or phone also sends totp_code or password (ADR-062) */
         patch: operations["updateUser"];
         trace?: never;
     };
@@ -6271,23 +6271,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/users/{user_id}/transfer-ownership": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Hand ownership of the business to another active administrator; the Owner only; needs the Owner's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-18) */
-        post: operations["transferOwnership"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/users/{user_id}/roles": {
         parameters: {
             query?: never;
@@ -6299,6 +6282,23 @@ export interface paths {
         /** Replace a user's roles and branch scopes (FR-IAM-01) */
         put: operations["setUserRoles"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{user_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hand ownership of the business to another active administrator; the Owner only; needs the Owner's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-18) */
+        post: operations["transferOwnership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8313,13 +8313,13 @@ export interface components {
         };
         Me: {
             all_branches?: boolean;
-            /** @description True when the signed-in user is the Owner of the business (ADR-062): the PWA offers the owner-only actions and the Transfer ownership action only then */
-            is_owner?: boolean;
             branches?: components["schemas"]["MeBranch"][];
             /** Format: uuid */
             default_branch_id?: string;
             email?: string;
             full_name?: string;
+            /** @description True when the signed-in user is the Owner of the business (ADR-062): the PWA offers the owner-only actions and the Transfer ownership action only then */
+            is_owner?: boolean;
             kind?: string;
             /**
              * Format: date-time
@@ -9010,15 +9010,6 @@ export interface components {
             /** @description The admin's own current password, for an admin with no two-step sign-in */
             password?: string;
             /** @description The current 6 digit code from the admin's own authenticator app */
-            totp_code?: string;
-        };
-        /** @description Proof that the signed-in Owner is still themselves, as for the reset of a sign-in: the code from their authenticator app when they have two-step sign-in, otherwise their own password; never logged */
-        TransferOwnershipRequest: {
-            /** @description The Owner's own current password, for an Owner with no two-step sign-in */
-            password?: string;
-            /** @description Optional: why, kept in the audit row */
-            reason?: string;
-            /** @description The current 6 digit code from the Owner's own authenticator app */
             totp_code?: string;
         };
         RetailAccountAllocation: {
@@ -15795,10 +15786,10 @@ export interface components {
             full_name?: string;
             /** Format: uuid */
             id?: string;
-            /** Format: date-time */
-            last_login_at?: string;
             /** @description True for the Owner of the business, listed first (ADR-062) */
             is_owner?: boolean;
+            /** Format: date-time */
+            last_login_at?: string;
             mfa_enabled?: boolean;
             phone?: string;
             /** @description invited, active or deactivated */
@@ -15952,6 +15943,15 @@ export interface components {
              * @description The tour version the user saw; a higher one shows again
              */
             version?: number;
+        };
+        /** @description Proof that the signed-in Owner is still themselves, as for the reset of a sign-in: the code from their authenticator app when they have two-step sign-in, otherwise their own password; never logged */
+        TransferOwnershipRequest: {
+            /** @description The Owner's own current password, for an Owner with no two-step sign-in */
+            password?: string;
+            /** @description Optional: why, kept in the audit row */
+            reason?: string;
+            /** @description The current 6 digit code from the Owner's own authenticator app */
+            totp_code?: string;
         };
         UnlockSignInRequest: {
             /** @description Why; kept in the tenant's audit log */
@@ -21311,8 +21311,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -27356,7 +27356,7 @@ export interface operations {
             };
         };
     };
-    transferOwnership: {
+    setUserRoles: {
         parameters: {
             query?: never;
             header?: never;
@@ -27367,7 +27367,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TransferOwnershipRequest"];
+                "application/json": components["schemas"]["RoleAssignmentRequest"][];
             };
         };
         responses: {
@@ -27382,7 +27382,7 @@ export interface operations {
             };
         };
     };
-    setUserRoles: {
+    transferOwnership: {
         parameters: {
             query?: never;
             header?: never;
@@ -27393,7 +27393,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RoleAssignmentRequest"][];
+                "application/json": components["schemas"]["TransferOwnershipRequest"];
             };
         };
         responses: {
