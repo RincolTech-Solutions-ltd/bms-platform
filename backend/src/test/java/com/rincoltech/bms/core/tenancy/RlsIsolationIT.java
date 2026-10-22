@@ -712,6 +712,13 @@ class RlsIsolationIT {
                         """)
                 .params(UUID.randomUUID(), t.tenantId(), repayment, repayment, item)
                 .update();
+        owner.sql("""
+                        INSERT INTO lending_charge_cancels (id, tenant_id, loan_id, charge_id, amount_minor, business_date,
+                                                            reason, cause_txn_id)
+                        VALUES (?, ?, ?, ?, 100, DATE '2026-02-17', 'paid_before_charged', ?)
+                        """)
+                .params(UUID.randomUUID(), t.tenantId(), loan, charge, repayment)
+                .update();
         // Savings (increment 9, #151): a product, an account, a deposit on the fixture journal, an
         // end-of-day balance and an interest posting.
         UUID savingsProduct = UUID.randomUUID();

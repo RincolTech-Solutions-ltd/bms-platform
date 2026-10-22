@@ -374,7 +374,13 @@ that a payment never pays a penalty charged after its value date; `LoanLedgerTes
 penalty is credited on its own day and kept on an earlier receipt; and `LoanServicingIT` a back-dated
 repayment that pays an item up and cancels the five later penalties, a first run that charges only
 its own day, and a run held by another worker's lease, taken over when the lease lapses and not run
-again once finished.
+again once finished. The second review added: `PenaltiesTest` recomputes the 100,000
+instalment at 5% a week after a back-dated 80,000 (week 1 stands at 1,000, 4,000 cancelled);
+`LoanServicingIT` charges the cancelled penalties again when the back-dated payment is reversed, and
+when reversing payment A means payment B no longer pays the instalment up; catches up a missed run
+around a payment posted in between; stamps a repayment racing the run after the charge it pays; checks
+that a rerun moves no version or time; and runs the job for its own business only; `ArrearsRunIT`
+refuses a stale attempt at finish and runs a business in another time zone for its own date.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

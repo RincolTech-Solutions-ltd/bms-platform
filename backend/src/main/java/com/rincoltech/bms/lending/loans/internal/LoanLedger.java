@@ -50,15 +50,17 @@ final class LoanLedger {
     record Deduction(String name, long amountMinor) {}
 
     /**
-     * A penalty charged (R-PEN) or cancelled on schedule item {@code itemNo}: the business date it is
-     * for, and when it was recorded, which places it among the transactions for a receipt. A charge is
-     * cancelled when a repayment dated before it turns out to have paid the item up (the review of #270).
+     * A penalty charged (R-PEN), charged again after a reversal, or cancelled on schedule item {@code itemNo}: the
+     * business date it is for, and when it was recorded, which places it among the transactions for a receipt. A
+     * charge is cancelled, in whole or in part, when a back-dated repayment shows it was not owed or owed less, and
+     * charged again when a reversal shows it was owed after all (the review of #270).
      */
     record PenaltyEvent(int itemNo, LocalDate date, Instant recordedAt, long amountMinor, Kind kind) {
 
         enum Kind {
             CHARGED("Penalties charged"),
-            CANCELLED("Penalties cancelled, paid before they were charged");
+            RECHARGED("Penalties charged again after a reversal"),
+            CANCELLED("Penalties cancelled after a back-dated payment");
 
             final String text;
 
@@ -68,7 +70,7 @@ final class LoanLedger {
         }
 
         boolean credit() {
-            return kind != Kind.CHARGED;
+            return kind != Kind.CHARGED && kind != Kind.RECHARGED;
         }
     }
 

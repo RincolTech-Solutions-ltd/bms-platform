@@ -86,8 +86,9 @@ class ServicingRepository {
         Map<UUID, Item> byId = new LinkedHashMap<>();
         items.forEach(i -> byId.put(i.id, i));
         jdbc.sql("""
-                        SELECT schedule_item_id, business_date, amount_minor FROM lending_loan_charges
-                         WHERE loan_id = ? AND charge_type = 'penalty' AND cancelled_on IS NULL
+                        SELECT schedule_item_id, business_date,
+                               sum(amount_minor - cancelled_minor - waived_minor) FROM lending_loan_charges
+                         WHERE loan_id = ? GROUP BY 1, 2
                         """)
                 .param(loanId)
                 .query((rs, n) -> {
@@ -101,33 +102,110 @@ class ServicingRepository {
         return items;
     }
 
-    /**
-     * Cancels the penalty charges of {@code item} dated after {@code after} that nothing waived, when a repayment of
-     * that value date paid the item up (the review of #270), and takes them off the item's penalties due, the
-     * dated charges and the item in memory. Returns the amounts cancelled by business date. The cancel is timed with
-     * the repayment's own transaction ({@code now()}, as the repayment's row is), so that repayment's receipt already
-     * counts it.
-     */
-    Map<LocalDate, Long> cancelPenaltiesAfter(Item item, LocalDate after, LocalDate today) {
-        Map<LocalDate, Long> cancelled = new LinkedHashMap<>();
-        jdbc.sql("""
-                        UPDATE lending_loan_charges SET cancelled_on = ?, cancelled_at = now()
-                         WHERE schedule_item_id = ? AND charge_type = 'penalty' AND business_date > ?
-                           AND cancelled_on IS NULL AND waived_minor = 0
-                        RETURNING business_date, amount_minor
-                        """)
-                .params(today, item.id, after)
-                .query((rs, n) -> cancelled.merge(rs.getObject(1, LocalDate.class), rs.getLong(2), Long::sum))
-                .list();
-        long sum = cancelled.values().stream().mapToLong(Long::longValue).sum();
-        if (sum > 0) {
-            jdbc.sql("UPDATE lending_schedule_items SET penalties_due_minor = penalties_due_minor - ?,"
-                            + " updated_at = now() WHERE id = ?")
-                    .params(sum, item.id)
-                    .update();
-            item.cancelled(cancelled);
+    /** One row of a charged period: a first charge or a charge again, with what stands of it. */
+    record PeriodRow(
+            UUID id,
+            UUID itemId,
+            int periodNo,
+            LocalDate date,
+            boolean recharge,
+            long amountMinor,
+            long cancelledMinor,
+            long waivedMinor) {
+
+        long cancellable() {
+            return amountMinor - cancelledMinor - waivedMinor;
         }
-        return cancelled;
+    }
+
+    /** The loan's penalty rows, each charged period's first charge before its charges again, the newest last. */
+    List<PeriodRow> penaltyRows(UUID loanId) {
+        return jdbc.sql("""
+                        SELECT id, schedule_item_id, period_no, business_date, charge_type = 'penalty_recharge',
+                               amount_minor, cancelled_minor, waived_minor
+                          FROM lending_loan_charges WHERE loan_id = ?
+                         ORDER BY schedule_item_id, period_no, charge_type = 'penalty_recharge', created_at, id
+                        """)
+                .param(loanId)
+                .query((rs, n) -> new PeriodRow(
+                        rs.getObject(1, UUID.class),
+                        rs.getObject(2, UUID.class),
+                        rs.getInt(3),
+                        rs.getObject(4, LocalDate.class),
+                        rs.getBoolean(5),
+                        rs.getLong(6),
+                        rs.getLong(7),
+                        rs.getLong(8)))
+                .list();
+    }
+
+    /**
+     * What each item's standing payments paid of its principal and interest ({@code [0]}, the early settlement rebate
+     * counted) and of its fees ({@code [1]}), by the value date of the payment the rows apply to: a reversed payment
+     * nets to nothing, a re-allocated one counts as re-allocated.
+     */
+    Map<UUID, java.util.NavigableMap<LocalDate, long[]>> contractPaidByValueDate(UUID loanId) {
+        Map<UUID, java.util.NavigableMap<LocalDate, long[]>> out = new LinkedHashMap<>();
+        jdbc.sql("""
+                        SELECT a.schedule_item_id, t.value_date,
+                               coalesce(sum(a.amount_minor) FILTER (WHERE a.component IN
+                                   ('principal', 'interest', 'interest_rebate')), 0),
+                               coalesce(sum(a.amount_minor) FILTER (WHERE a.component = 'fee'), 0)
+                          FROM lending_repayment_allocations a
+                          JOIN lending_loan_transactions t ON t.id = a.applies_to_txn_id
+                         WHERE t.loan_id = ? AND a.schedule_item_id IS NOT NULL
+                         GROUP BY 1, 2
+                        """)
+                .param(loanId)
+                .query((rs, n) -> out.computeIfAbsent(rs.getObject(1, UUID.class), k -> new java.util.TreeMap<>())
+                        .put(rs.getObject(2, LocalDate.class), new long[] {rs.getLong(3), rs.getLong(4)}))
+                .list();
+        return out;
+    }
+
+    /** Cancels part of one charge row, dated today, caused by a repayment or a reversal, timed with that transaction. */
+    void cancelCharge(PeriodRow row, UUID loanId, long amountMinor, LocalDate today, String reason, UUID causeTxnId) {
+        jdbc.sql("""
+                        INSERT INTO lending_charge_cancels (id, tenant_id, created_at, loan_id, charge_id, amount_minor,
+                            business_date, reason, cause_txn_id)
+                        VALUES (?, current_setting('app.tenant_id')::uuid,
+                                (SELECT created_at FROM lending_loan_transactions WHERE id = ?), ?, ?, ?, ?, ?, ?)
+                        """)
+                .params(UUID.randomUUID(), causeTxnId, loanId, row.id(), amountMinor, today, reason, causeTxnId)
+                .update();
+        jdbc.sql("UPDATE lending_loan_charges SET cancelled_minor = cancelled_minor + ? WHERE id = ?")
+                .params(amountMinor, row.id())
+                .update();
+        penaltiesDueChanged(row.itemId(), -amountMinor);
+    }
+
+    /** Charges a period again, as a new row dated the period's date and timed with the reversal that caused it. */
+    void rechargePeriod(PeriodRow first, UUID loanId, long amountMinor, UUID causeTxnId) {
+        jdbc.sql("""
+                        INSERT INTO lending_loan_charges (id, tenant_id, created_at, loan_id, schedule_item_id, charge_type,
+                            period_no, recharge_of, business_date, amount_minor)
+                        VALUES (?, current_setting('app.tenant_id')::uuid,
+                                (SELECT created_at FROM lending_loan_transactions WHERE id = ?), ?, ?, 'penalty_recharge',
+                                ?, ?, ?, ?)
+                        """)
+                .params(
+                        UUID.randomUUID(),
+                        causeTxnId,
+                        loanId,
+                        first.itemId(),
+                        first.periodNo(),
+                        first.id(),
+                        first.date(),
+                        amountMinor)
+                .update();
+        penaltiesDueChanged(first.itemId(), amountMinor);
+    }
+
+    private void penaltiesDueChanged(UUID itemId, long delta) {
+        jdbc.sql("UPDATE lending_schedule_items SET penalties_due_minor = penalties_due_minor + ?,"
+                        + " updated_at = now() WHERE id = ?")
+                .params(delta, itemId)
+                .update();
     }
 
     /** Writes each item's paid, waived and status columns as they stand on {@code today}. */
@@ -244,10 +322,11 @@ class ServicingRepository {
 
     void insertTxn(Txn t) {
         jdbc.sql("""
-                        INSERT INTO lending_loan_transactions (id, tenant_id, branch_id, loan_id, txn_type, amount_minor,
-                            currency, value_date, payment_method_key, external_reference, receipt_no, reason,
+                        INSERT INTO lending_loan_transactions (id, tenant_id, created_at, branch_id, loan_id, txn_type,
+                            amount_minor, currency, value_date, payment_method_key, external_reference, receipt_no, reason,
                             reverses_txn_id, journal_entry_id, approval_request_id, idempotency_key, source, recorded_by)
-                        VALUES (:id, current_setting('app.tenant_id')::uuid, :branchId, :loanId, :txnType, :amountMinor,
+                        VALUES (:id, current_setting('app.tenant_id')::uuid, clock_timestamp(), :branchId, :loanId,
+                            :txnType, :amountMinor,
                             :currency, :valueDate, :paymentMethodKey, :externalReference, :receiptNo, :reason,
                             :reversesTxnId, :journalEntryId, :approvalRequestId, :idempotencyKey, :source, :recordedBy)
                         """).paramSource(t).update();
@@ -331,15 +410,17 @@ class ServicingRepository {
      */
     List<LoanLedger.PenaltyEvent> penaltyEvents(UUID loanId) {
         return jdbc.sql("""
-                        SELECT s.item_no, c.business_date, c.created_at, c.amount_minor, 'CHARGED'
+                        SELECT s.item_no, c.business_date, c.created_at, c.amount_minor,
+                               CASE c.charge_type WHEN 'penalty' THEN 'CHARGED' ELSE 'RECHARGED' END
                           FROM lending_loan_charges c
                           JOIN lending_schedule_items s ON s.id = c.schedule_item_id
-                         WHERE c.loan_id = ? AND c.charge_type = 'penalty'
+                         WHERE c.loan_id = ?
                         UNION ALL
-                        SELECT s.item_no, c.cancelled_on, c.cancelled_at, c.amount_minor, 'CANCELLED'
-                          FROM lending_loan_charges c
+                        SELECT s.item_no, x.business_date, x.created_at, x.amount_minor, 'CANCELLED'
+                          FROM lending_charge_cancels x
+                          JOIN lending_loan_charges c ON c.id = x.charge_id
                           JOIN lending_schedule_items s ON s.id = c.schedule_item_id
-                         WHERE c.loan_id = ? AND c.charge_type = 'penalty' AND c.cancelled_on IS NOT NULL
+                         WHERE x.loan_id = ?
                          ORDER BY 2, 3, 1
                         """)
                 .params(loanId, loanId)
@@ -411,9 +492,8 @@ class ServicingRepository {
 
     Optional<LoanBalances> balances(UUID loanId) {
         return jdbc.sql("""
-                        SELECT l.*, (SELECT coalesce(sum(c.amount_minor), 0) FROM lending_loan_charges c
-                                      WHERE c.loan_id = l.id AND c.charge_type = 'penalty'
-                                        AND c.cancelled_on IS NULL) AS penalties_assessed
+                        SELECT l.*, (SELECT coalesce(sum(c.amount_minor - c.cancelled_minor), 0) FROM lending_loan_charges c
+                                      WHERE c.loan_id = l.id) AS penalties_assessed
                           FROM lending_loans l WHERE l.id = ?
                         """)
                 .param(loanId)

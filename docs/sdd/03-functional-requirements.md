@@ -672,11 +672,18 @@ on does not charge a long overdue loan every period since its due date in one ni
 night is caught up with each period on its own date; the percent base is the overdue principal and
 interest unpaid at the run, and an item no longer overdue is charged nothing, even for a missed
 period (the borrower's side of the doubt). A repayment reaches only the penalties charged on or
-before its value date (R-ALLOC with dated penalties, also on a reversal's replay), and when a
-repayment dated before a penalty pays the item's principal, interest and fees, the penalties
-charged after that date that nothing paid or waived are cancelled (`cancelled_on`), never charged
-to a loan that was, by value date, paid up. The loan's `balances` add `par_bucket` (`current`,
-`1_30`, `31_60`, `61_90`, `over_90`) and `penalties_assessed_minor` (cancelled charges left out).
+before its value date (R-ALLOC with dated penalties, also on a reversal's replay). After every
+repayment and reversal each charged period is recomputed from the payments by value date: owed only
+when the item was overdue at the start of its date, a percent penalty on the principal and interest
+unpaid then, never more than first charged; a back-dated repayment cancels the excess (in whole or in
+part, never what was waived or paid, `lending_charge_cancels`), and a reversal that shows a cancelled
+amount was owed after all charges it again as a new row (`penalty_recharge`), so a bounced payment
+loses no penalty and a paid-up loan is never penalised. Penalties start at the later of the business's
+first run and the loan's own start in the system, and a loan that fails the run two nights running is
+pushed to its branch's managers and the administrators (`lending.arrears_loan_failing`). A
+repayment is stamped with the clock when it is recorded, under the loan's lock, so a receipt places
+the penalties it paid exactly. The loan's `balances` add `par_bucket` (`current`,
+`1_30`, `31_60`, `61_90`, `over_90`) and `penalties_assessed_minor` (cancelled amounts left out).
 The statement charges each penalty on its own business date and credits a cancel on the day it was
 made, and a receipt counts only the penalties recorded before its payment (ADR-034 addenda). The
 insights snapshot (FR-ARR-02, 00:45) computes each date's positions itself and does not wait for

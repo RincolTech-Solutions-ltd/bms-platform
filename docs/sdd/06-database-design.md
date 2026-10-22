@@ -1330,21 +1330,21 @@ written-off, penalty and status columns move.
 `waived_minor bigint NOT NULL DEFAULT 0`.
 Partial unique `(tenant_id, schedule_item_id, period_no) WHERE charge_type = 'penalty'`
 (R-PEN idempotency).
-Built in V80 (#264): `charge_type` is `penalty` only for now (fee charges and their `fee_id` come
-with the fee work), `period_no` is required, `waived_minor` never exceeds `amount_minor`,
-`created_at` is the clock time of the insert, and a guard trigger refuses every delete and every
-update except raising `waived_minor` and cancelling (`cancelled_on`, `cancelled_at`, once) a charge
-nothing was waived on, for the owner too. `business_date` is the date the penalty is charged for, which
-the statement and receipts use (ADR-034).
+Built in V80 (#264): `charge_type` is `penalty` (one row per period, the unique key) or
+`penalty_recharge` (`recharge_of` the period's first charge: a reversal showed a cancelled amount was
+owed after all; fee charges and their `fee_id` come with the fee work), `period_no` is required,
+`waived_minor` and `cancelled_minor` together never exceed `amount_minor`, `created_at` is the clock
+time of the insert (or of the transaction that caused it), and a guard trigger refuses every delete and
+every update except raising `waived_minor` or `cancelled_minor`, for the owner too. `business_date` is
+the date the penalty is charged for, which the statement and receipts use (ADR-034).
 
-### `lending_charge_waivers` (append-only)
+### `lending_charge_cancels` (append-only)
 
-`id`, `tenant_id`, `created_at`, `loan_id uuid NOT NULL`, `charge_id uuid NOT NULL`,
-`amount_minor bigint NOT NULL` (`> 0`), `business_date date NOT NULL` (when the waiver took
-effect), `reason text NOT NULL`, `approval_request_id uuid`, `requested_by uuid NOT NULL`,
-`approved_by uuid`. One row per approved waiver of all or part of a charge (FR-ARR-04); the
-charge's `waived_minor` is the sum of its rows. The statement dates a waiver by its row (ADR-034)
-and a reversal's replay keeps it (ADR-026). Nothing is posted. Built in V81 (#265), with the maker and checker as composite foreign keys to `users`.
+`id`, `tenant_id`, `created_at`, `loan_id`, `charge_id`, `amount_minor` (`> 0`), `business_date`
+(the day of the cancel), `reason` (`paid_before_charged` or `base_reduced`), `cause_txn_id` (the
+repayment or reversal that caused it). Built in V80 (#264): one row per amount cancelled off a charge
+when a back-dated repayment shows a period was not owed, or owed less on a smaller base; the charge's
+`cancelled_minor` is the sum of its rows; the statement credits it on its day (ADR-034).
 
 ### `lending_loan_transactions` (append-only)
 
@@ -1419,9 +1419,6 @@ entry_date)`.
 [`call`, `visit`, `sms`, `letter`, `promise_to_pay`, `other`], `note text`,
 `promised_date date`, `promised_amount_minor bigint`, `promise_status text` [`pending`,
 `kept`, `broken`], `performed_by uuid NOT NULL`, `performed_at timestamptz NOT NULL`.
-Built in V82 (#266): a promise to pay carries its date, amount and status and no
-other action does; a guard trigger (in place of `reject_mutation()`) refuses deletes and allows
-only a `pending` promise to become `kept` or `broken`.
 
 ### `lending_savings_products`
 
@@ -2094,7 +2091,7 @@ Built: optional purchasing (issue #198, migration V47). Eleven tables, all with 
 
 Built: landed cost and supplier credit notes (issue #199, migration V48, FR-RET-39). Eight tables, all with `tenant_id`, forced RLS, composite foreign keys and money as integer minor units, and one column. `retail_landed_costs` (`landed_no` `LC`, the branch code, a dash and six digits, unique per tenant; `branch_seq` from the tenant sequence `retail_landed_cost_no:<branch>`; `branch_id` of its first received line; `supplier_id` the payee; `bill_id` its invoice, a `retail_supplier_bills` row of kind `landed_cost` and unique per document; `goods_bill_id` optional; `method` `value`, `quantity`, `weight` or `manual`; `cost_date`; `total_minor`; `status` `posted` or `voided` with the void columns; a guard trigger lets only the void change a row, once, and a constraint trigger deferred to the commit refuses a document whose charges or allocated lines do not each add to `total_minor`). `retail_landed_cost_charges` (`kind` `freight`, `duty`, `clearing`, `insurance` or `other`, `description`, `amount_minor`; append-only). `retail_landed_cost_lines` (one row per received line: `receipt_line_id`, `branch_id`, `product_id`, the `basis` and `weight` the spread used, `allocated_minor`, `line_qty`, `on_hand_qty` (the units still on hand in every branch together by first in, first out when the charge was recorded), `to_inventory_minor` (debited to the inventory of the branches that hold the product, in proportion) and `to_cogs_minor` (to cost of goods sold in the receiving branch) which add to `allocated_minor`, `cost_before_minor`, `cost_after_minor`, `cost_applied` and `cost_note`; append-only; the landed unit cost of a receipt line is the sum of its standing rows). `retail_landed_cost_entries` (the entry per branch, so a void can reverse each; append-only). `retail_receipt_holds` (one row per receipt held as received and not costed: `held_by`, and the release columns `released_at`, `released_by`, `release_kind` `landed_cost` or `waived`, `release_reason`, `landed_cost_id`; a guard trigger allows only the release, once, and the undoing of a release by a landed cost when that landed cost is voided). `retail_supplier_credits` (`credit_no` `SC` + branch code + six digits from `retail_supplier_credit_no:<branch>`; `bill_id` the invoice credited; `supplier_ref` the supplier's credit note number, unique per supplier among those that stand; `credit_date`; `kind` `goods` or `price`; `total_minor`; `reason`; the same void columns and guard as a bill), `retail_supplier_credit_lines` (`bill_line_id`, `receipt_line_id`, `branch_id`, `product_id`; for goods `qty` in base units, `unit_qty` and `unit_credit_minor`; `line_total_minor` equal to `to_inventory_minor` plus `to_cogs_minor` plus `variance_minor`; for a price credit `on_hand_qty` and the cost before and after; append-only) and `retail_supplier_credit_entries`. `retail_purchasing_settings` gains `require_costing_before_sale` (boolean, default false). The stock movement kind `return_to_supplier` (negative) is admitted by replacing the two checks of `retail_stock_movements` with looser ones added `NOT VALID` (no scan; the file sets `lock_timeout` to five seconds and runs the statement last); validating them later cannot fail. No permission and no chart account is added. The landed unit cost of a receipt line is never stored on `retail_goods_receipt_lines`, which stay append-only: it is the sum of the line's standing allocation rows.
 
-Built: lending arrears (issue #264, migration V80, increment 6). `lending_loan_charges` as section 6.7 describes it, and `lending_arrears_runs` (one row per tenant and business date: `started_at`, the lease `lease_until`, `attempts`, `finished_at` and the finished run's counts; its first date is where the business's penalties start), both with `tenant_id`, forced RLS and composite foreign keys; no permission and no chart account is added. The waivers (`lending_charge_waivers`, V81, #265) and collection actions (`lending_collection_actions`, V82, #266) follow in their own migrations.
+Built: lending arrears (issue #264, migration V80, increment 6). `lending_loan_charges` and `lending_charge_cancels` as section 6.7 describes them, and `lending_arrears_runs` (one row per tenant and business date: `started_at`, the lease `lease_until`, `attempts`, `finished_at`, the finished run's counts and `failed_loan_ids`; its first date is where the business's penalties start, or a loan's own start in the system when later), both with `tenant_id`, forced RLS and composite foreign keys; no permission and no chart account is added. The waivers (`lending_charge_waivers`, V81, #265) and collection actions (`lending_collection_actions`, V82, #266) follow in their own migrations.
 
 Optional tables and columns for the trade capabilities (FR-RET-33 to FR-RET-40): `retail_branch_roles`,
 `retail_product_units`, `retail_price_lists`, `retail_price_list_items`, `retail_customer_groups`,

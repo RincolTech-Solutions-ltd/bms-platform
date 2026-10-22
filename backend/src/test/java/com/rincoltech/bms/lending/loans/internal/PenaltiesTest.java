@@ -115,4 +115,35 @@ class PenaltiesTest {
         assertThat(Penalties.due(small, rule, LocalDate.of(2026, 4, 30), EARLY, Set.of(), 0))
                 .isEmpty();
     }
+
+    /**
+     * The review of #270, finding 1 (critical): an instalment of 100,000 at 5% a week; week 1 charged 5,000 on its
+     * date; two days later 80,000 is recorded with a value date before week 1. The base on week 1's date was 20,000,
+     * so week 1 should stand at 1,000 and the 4,000 is cancelled.
+     */
+    @Test
+    void aBackDatedPartialPaymentRecomputesAPercentPenaltyOnTheSmallerBase() {
+        Item item = new Item(UUID.randomUUID(), 1, DUE, 80_000, 20_000, 0, 5_000);
+        PenaltyRule rule = new PenaltyRule("percent_of_overdue_per_period", 0, "week", null, 500, null);
+        LocalDate week1 = DUE.plusDays(1);
+        java.util.NavigableMap<LocalDate, long[]> paid = new java.util.TreeMap<>();
+        assertThat(Penalties.targets(item, rule, List.of(new Penalties.Period(1, week1, 5_000, 5_000, 0)), paid))
+                .containsEntry(1, 5_000L);
+        paid.put(DUE, new long[] {80_000, 0});
+        assertThat(Penalties.targets(item, rule, List.of(new Penalties.Period(1, week1, 5_000, 5_000, 0)), paid))
+                .as("1,000 owed, 4,000 to cancel")
+                .containsEntry(1, 1_000L);
+        paid.put(DUE, new long[] {100_000, 0});
+        assertThat(Penalties.targets(item, rule, List.of(new Penalties.Period(1, week1, 5_000, 5_000, 0)), paid))
+                .as("paid up before the period: nothing owed")
+                .containsEntry(1, 0L);
+        assertThat(Penalties.targets(item, rule, List.of(new Penalties.Period(1, week1, 5_000, 5_000, 500)), paid))
+                .as("never below what was waived")
+                .containsEntry(1, 500L);
+        paid.clear();
+        paid.put(week1, new long[] {100_000, 0});
+        assertThat(Penalties.targets(item, rule, List.of(new Penalties.Period(1, week1, 5_000, 0, 0)), paid))
+                .as("paid on the period's own date, after the run charged it: it stands, and a reversal brings it back")
+                .containsEntry(1, 5_000L);
+    }
 }

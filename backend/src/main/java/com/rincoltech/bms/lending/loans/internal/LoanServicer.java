@@ -61,6 +61,7 @@ class LoanServicer implements LoanServicing {
     private final AuditLog audit;
     private final CollateralLookup collateral;
     private final LoanNotices notices;
+    private final PenaltyReconciler penalties;
 
     LoanServicer(
             LoanRepository loans,
@@ -73,7 +74,8 @@ class LoanServicer implements LoanServicing {
             BusinessClock clock,
             AuditLog audit,
             CollateralLookup collateral,
-            LoanNotices notices) {
+            LoanNotices notices,
+            PenaltyReconciler penalties) {
         this.loans = loans;
         this.repo = repo;
         this.products = products;
@@ -85,6 +87,7 @@ class LoanServicer implements LoanServicing {
         this.audit = audit;
         this.collateral = collateral;
         this.notices = notices;
+        this.penalties = penalties;
     }
 
     LocalDate today() {
@@ -415,16 +418,10 @@ class LoanServicer implements LoanServicing {
         }
         if (!recovery) {
             repo.insertAllocations(txnId, txnId, applied.allocations());
-            long cancelled = 0;
-            for (Item i : items) {
-                if (i.hasPenaltiesToCancelAfter(valueDate)) {
-                    cancelled += repo.cancelPenaltiesAfter(i, valueDate, today).values().stream()
-                            .mapToLong(Long::longValue)
-                            .sum();
-                }
-            }
-            if (cancelled > 0) {
-                after.put("penalties_cancelled_minor", cancelled);
+            PenaltyReconciler.Moved moved =
+                    penalties.reconcile(loan.id(), terms(loan).penalty(), items, txnId, today);
+            if (moved.cancelledMinor() > 0) {
+                after.put("penalties_cancelled_minor", moved.cancelledMinor());
             }
             repo.saveItems(items, today);
             credit += applied.excessMinor();
@@ -708,6 +705,9 @@ class LoanServicer implements LoanServicing {
                 makerId,
                 null));
         deltas.forEach((appliesTo, rows) -> repo.insertAllocations(reversalId, appliesTo, rows));
+        PenaltyReconciler.Moved moved = replay == null
+                ? new PenaltyReconciler.Moved(0, 0)
+                : penalties.reconcile(loan.id(), terms(loan).penalty(), replay.items(), reversalId, today);
         long credit = repo.creditBalance(loan.id());
         if (replay != null) {
             credit = replay.allocations().values().stream()
@@ -727,6 +727,10 @@ class LoanServicer implements LoanServicing {
         after.put("amount_minor", txn.amountMinor());
         after.put("reason", reason);
         after.put("re_allocated_repayments", Math.max(0, deltas.size() - 1));
+        if (moved.rechargedMinor() > 0 || moved.cancelledMinor() > 0) {
+            after.put("penalties_charged_again_minor", moved.rechargedMinor());
+            after.put("penalties_cancelled_minor", moved.cancelledMinor());
+        }
         after.put("approval_request_id", approvalId);
         audit.record(
                 AuditLog.Entry.created("lending.loan.repayment_reversed", SUBJECT, loan.id(), loan.branchId(), after));

@@ -50,9 +50,10 @@ final class Servicing {
         LocalDate paidOn;
 
         /**
-         * The item's standing penalty charges (R-PEN) by the business date they were charged for, summed per
-         * date, when they were loaded; null means undated (a fabricated item in a test). A payment only ever
-         * reaches the penalties charged on or before its value date (ADR-034, the review of #270).
+         * The item's penalty charges (R-PEN) by the business date they were charged for, each net of what was
+         * cancelled and waived on it, summed per date, when they were loaded; null means undated (a fabricated item
+         * in a test). A payment only ever reaches the penalties charged on or before its value date (ADR-034, the
+         * review of #270).
          */
         NavigableMap<LocalDate, Long> penaltyCharges;
 
@@ -81,53 +82,31 @@ final class Servicing {
             penaltyCharges.merge(date, amountMinor, Long::sum);
         }
 
-        /** The penalties charged on or before {@code date}; every penalty when the item's charges are undated. */
-        long penaltiesDueOn(LocalDate date) {
-            if (penaltyCharges == null) {
-                return penaltiesDue;
+        /**
+         * What a payment of value date {@code date} may pay on a component: as {@link #unpaid}, except that a
+         * penalty charged after that date is out of its reach, so a back-dated payment never pays a penalty
+         * that did not exist on its value date (the review of #270, finding 1). The dated charges are each net of
+         * what was cancelled and waived on that charge, so a waiver of a later penalty never blocks the payment of
+         * an earlier one (the review of #271).
+         */
+        long unpaidOn(String component, LocalDate date) {
+            if (!component.equals("penalty") || penaltyCharges == null) {
+                return unpaid(component);
             }
             long sum = 0;
             for (long amount : penaltyCharges.headMap(date, true).values()) {
                 sum = Math.addExact(sum, amount);
             }
-            return Math.min(sum, penaltiesDue);
+            return Math.max(0, Math.min(sum - penaltiesPaid, unpaid("penalty")));
         }
 
-        /**
-         * What a payment of value date {@code date} may pay on a component: as {@link #unpaid}, except that a
-         * penalty charged after that date is out of its reach, so a back-dated payment never pays a penalty
-         * that did not exist on its value date (the review of #270, finding 1).
-         */
-        long unpaidOn(String component, LocalDate date) {
-            if (!component.equals("penalty")) {
-                return unpaid(component);
+        /** A penalty charged ({@code delta} above 0) or cancelled (below 0) on {@code date}, on this item in memory. */
+        void penaltyAdjusted(LocalDate date, long delta) {
+            penaltiesDue += delta;
+            if (penaltyCharges != null) {
+                penaltyCharges.merge(date, delta, Long::sum);
+                penaltyCharges.remove(date, 0L);
             }
-            return Math.max(0, penaltiesDueOn(date) - penaltiesPaid - penaltiesWaived);
-        }
-
-        /**
-         * The dates after {@code date} with penalties charged on them, when the item's principal, interest and fees
-         * are fully paid by payments of value date {@code date} or earlier and nothing paid reaches those
-         * penalties: they were charged while the item was, by value date, already paid up, so they are to be
-         * cancelled (a paid-up loan is never penalised). Empty when the item is still owed or undated.
-         */
-        boolean hasPenaltiesToCancelAfter(LocalDate date) {
-            if (penaltyCharges == null || unpaidContract() > 0) {
-                return false;
-            }
-            long later = penaltiesDue - penaltiesDueOn(date);
-            return later > 0 && unpaid("penalty") >= later;
-        }
-
-        /** Takes cancelled charges, by business date, off this item. */
-        void cancelled(Map<LocalDate, Long> byDate) {
-            byDate.forEach((d, amount) -> {
-                penaltiesDue -= amount;
-                if (penaltyCharges != null) {
-                    penaltyCharges.merge(d, -amount, Long::sum);
-                    penaltyCharges.remove(d, 0L);
-                }
-            });
         }
 
         long unpaid(String component) {

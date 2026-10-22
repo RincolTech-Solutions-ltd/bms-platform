@@ -3,6 +3,7 @@ package com.rincoltech.bms.lending.loans.internal;
 import com.rincoltech.bms.core.audit.AuditLog;
 import com.rincoltech.bms.core.tenancy.CurrentTenant;
 import com.rincoltech.bms.kernel.BusinessClock;
+import com.rincoltech.bms.kernel.PushNotice;
 import com.rincoltech.bms.lending.loans.internal.LoanRepository.Loan;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Item;
 import com.rincoltech.bms.lending.products.ProductCatalog;
@@ -19,6 +20,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -63,6 +65,10 @@ class ArrearsRun {
     private final BusinessClock clock;
     private final AuditLog audit;
     private final TransactionTemplate tx;
+    private final ApplicationEventPublisher events;
+
+    /** The push sent when a loan fails the nightly run two nights running. */
+    static final String FAILING_TWICE = "lending.arrears_loan_failing";
 
     ArrearsRun(
             JdbcClient jdbc,
@@ -73,7 +79,8 @@ class ArrearsRun {
             CurrentTenant currentTenant,
             BusinessClock clock,
             AuditLog audit,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            ApplicationEventPublisher events) {
         this.jdbc = jdbc;
         this.loans = loans;
         this.repo = repo;
@@ -83,6 +90,7 @@ class ArrearsRun {
         this.clock = clock;
         this.audit = audit;
         this.tx = new TransactionTemplate(transactionManager);
+        this.events = events;
     }
 
     record Result(LocalDate businessDate, int loans, int charges, long chargedMinor, int failedLoans) {}
@@ -111,6 +119,7 @@ class ArrearsRun {
         int charges = 0;
         long charged = 0;
         int failed = 0;
+        List<UUID> failedIds = new java.util.ArrayList<>();
         int done = 0;
         for (UUID id : active) {
             if (done > 0 && done % RENEW_EVERY == 0 && !Boolean.TRUE.equals(tx.execute(s -> renew(today, attempt)))) {
@@ -129,6 +138,7 @@ class ArrearsRun {
                 }
             } catch (RuntimeException e) {
                 failed++;
+                failedIds.add(id);
                 log.error(
                         "arrears run for {} failed on loan {} error={}",
                         today,
@@ -138,7 +148,9 @@ class ArrearsRun {
             }
         }
         Result result = new Result(today, active.size(), charges, charged, failed);
-        return Boolean.TRUE.equals(tx.execute(s -> finish(result, attempt))) ? Optional.of(result) : Optional.empty();
+        return Boolean.TRUE.equals(tx.execute(s -> finish(result, attempt, failedIds)))
+                ? Optional.of(result)
+                : Optional.empty();
     }
 
     /** One loan in its own transaction: its charges, then its position. */
@@ -149,14 +161,22 @@ class ArrearsRun {
         }
         PenaltyRule rule = rules.computeIfAbsent(
                 loan.productVersionId(), v -> products.version(v).orElseThrow().penalty());
+        // Penalties start at the later of the business's first run and the loan's own start in the system, so a long
+        // overdue loan imported today is not charged every period since the first run in one night.
+        LocalDate start = jdbc.sql("SELECT (created_at AT TIME ZONE ?)::date FROM lending_loans WHERE id = ?")
+                .params(currentTenant.profile().timezone().getId(), id)
+                .query((rs, n) -> rs.getObject(1, LocalDate.class))
+                .single();
+        LocalDate penaltiesFrom = start.isAfter(from) ? start : from;
         List<Item> items = repo.items(id);
         int charges = 0;
         long charged = 0;
         if (rule.charges()) {
             Map<UUID, Set<Integer>> periods = new HashMap<>();
             Map<UUID, Long> sums = new HashMap<>();
-            jdbc.sql("SELECT schedule_item_id, period_no, amount_minor FROM lending_loan_charges"
-                            + " WHERE loan_id = ? AND charge_type = 'penalty'")
+            // The cap counts what stands: amounts cancelled by a back-dated payment are left out of it.
+            jdbc.sql("SELECT schedule_item_id, period_no, amount_minor - cancelled_minor FROM lending_loan_charges"
+                            + " WHERE loan_id = ?")
                     .param(id)
                     .query((rs, n) -> {
                         UUID item = rs.getObject(1, UUID.class);
@@ -170,7 +190,7 @@ class ArrearsRun {
                         item,
                         rule,
                         today,
-                        from,
+                        penaltiesFrom,
                         periods.getOrDefault(item.id, Set.of()),
                         sums.getOrDefault(item.id, 0L))) {
                     int inserted = jdbc.sql("""
@@ -226,11 +246,15 @@ class ArrearsRun {
                         """).params(LEASE.toSeconds(), today, attempt).update() == 1;
     }
 
-    /** Marks the date finished, with the run's audit row, unless another run took the lease over. */
-    private boolean finish(Result result, int attempt) {
+    /**
+     * Marks the date finished, with the run's audit row, unless another run took the lease over (a stale attempt is
+     * refused). A loan that failed last night too is alerted to the branch's managers and the administrators by push,
+     * not only logged (the review of #270).
+     */
+    boolean finish(Result result, int attempt, List<UUID> failedIds) {
         int marked = jdbc.sql("""
                         UPDATE lending_arrears_runs SET finished_at = clock_timestamp(), loans = ?, charges = ?,
-                            charged_minor = ?, failed_loans = ?
+                            charged_minor = ?, failed_loans = ?, failed_loan_ids = ?::uuid[]
                          WHERE business_date = ? AND attempts = ? AND finished_at IS NULL
                         """)
                 .params(
@@ -238,11 +262,40 @@ class ArrearsRun {
                         result.charges(),
                         result.chargedMinor(),
                         result.failedLoans(),
+                        failedIds.stream()
+                                .map(UUID::toString)
+                                .collect(java.util.stream.Collectors.joining(",", "{", "}")),
                         result.businessDate(),
                         attempt)
                 .update();
         if (marked != 1) {
             return false;
+        }
+        if (!failedIds.isEmpty()) {
+            jdbc.sql("""
+                            SELECT l.id, l.loan_no, l.branch_id FROM lending_loans l
+                             WHERE l.id = ANY (?::uuid[])
+                               AND l.id = ANY ((SELECT failed_loan_ids FROM lending_arrears_runs
+                                                 WHERE business_date = ? AND finished_at IS NOT NULL))
+                            """)
+                    .params(
+                            failedIds.stream()
+                                    .map(UUID::toString)
+                                    .collect(java.util.stream.Collectors.joining(",", "{", "}")),
+                            result.businessDate().minusDays(1))
+                    .query((rs, n) -> {
+                        events.publishEvent(new PushNotice(
+                                FAILING_TWICE,
+                                rs.getObject(1, UUID.class) + ":" + result.businessDate(),
+                                new PushNotice.Holders("lending.collections.assign", rs.getObject(3, UUID.class), null),
+                                Map.of(
+                                        "loan_no",
+                                        rs.getString(2),
+                                        "path",
+                                        "/staff/lending/loans/" + rs.getObject(1, UUID.class))));
+                        return null;
+                    })
+                    .list();
         }
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("business_date", result.businessDate().toString());

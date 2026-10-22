@@ -72,3 +72,7 @@ overnight and refuse it at its decision (FR-APR-08). This is safe because each r
 checks its own facts again when it executes, under the loan's row lock; the version guards against
 a person's change that the checker has not seen, and the night's recompute is not one. A money event
 (repayment, reversal, write-off, waiver) still raises the version.
+
+A consequence the checker should know: a pending write-off (or waiver) executes on the loan's balance at
+execution time, which the overnight recompute may have moved since the request; the decision screen
+shows the balance at decision time, and that is what is written off.

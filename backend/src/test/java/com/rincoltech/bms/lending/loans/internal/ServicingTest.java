@@ -291,7 +291,9 @@ class ServicingTest {
         Servicing.Applied a = Servicing.apply(java.util.List.of(back), 520_000, due, "flat", false, null);
         assertThat(a.allocations()).noneMatch(r -> r.component().equals("penalty"));
         assertThat(back.unpaidContract()).isZero();
-        assertThat(back.hasPenaltiesToCancelAfter(due)).isTrue();
+        assertThat(back.unpaidOn("penalty", due))
+                .as("none of the three existed on its value date")
+                .isZero();
 
         Servicing.Item later = datedItem(due);
         Servicing.Applied b = Servicing.apply(java.util.List.of(later), 6_000, due.plusDays(3), "flat", false, null);
@@ -299,7 +301,7 @@ class ServicingTest {
             assertThat(r.component()).isEqualTo("penalty");
             assertThat(r.amountMinor()).isEqualTo(6_000);
         });
-        assertThat(later.hasPenaltiesToCancelAfter(due.plusDays(3))).isFalse();
+        assertThat(later.unpaid("penalty")).isZero();
     }
 
     private static Servicing.Item datedItem(LocalDate due) {
