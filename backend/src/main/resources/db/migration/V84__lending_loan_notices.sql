@@ -1,5 +1,5 @@
--- V83: the arrears notices the nightly run queued (#227, pull request #290) and the cancelled_settled label of a
--- withdrawn reminder, directly after V82 (the collection actions of #266). Additive, except that the outbox failures
+-- V84: the arrears notices the nightly run queued (#227, pull request #290) and the cancelled_settled label of a
+-- withdrawn reminder, directly after V83 (the collection actions of #266). Additive, except that the outbox failures
 -- listing is replaced to leave the new label out, as it leaves out cancelled_reversed.
 
 -- ---------------------------------------------------------------------------------------------
