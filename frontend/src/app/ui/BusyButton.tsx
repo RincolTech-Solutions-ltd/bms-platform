@@ -1,10 +1,37 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type MouseEvent } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type ButtonHTMLAttributes, type MouseEvent } from 'react';
 
 // The one busy button (#456): every button that writes (a sale, a payment, an invitation, a sign-in)
-// shows a small spinner beside its label while its request runs and cannot be pressed twice. The label
-// stays and the spinner sits over the end padding, so the width never jumps; the button is disabled and
-// aria-busy, and a visually hidden status says "Working". Pass the mutation's isPending (or the screen's
-// own submitting state) as `busy`; every other prop is a normal <button> prop.
+// shows a small spinner in its end padding while its request runs and cannot be pressed twice. The label
+// never changes, so the width never jumps; the button is aria-busy and aria-disabled (not disabled, so it
+// keeps keyboard focus) and its own press guard drops every press. Pass the mutation's isPending (or the
+// screen's own submitting state) as `busy`; every other prop is a normal <button> prop.
+
+// One announcer for the whole app: a list of twenty rows sharing one busy flag says "Working" once, not
+// twenty times. Each busy button counts itself in while busy; the shell's BusyAnnouncer says Working while
+// the count is above zero and clears when the last one is done.
+let busyCount = 0;
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+const working = () => busyCount > 0;
+
+function countBusy(delta: number) {
+  const before = working();
+  busyCount += delta;
+  if (working() !== before) listeners.forEach((listener) => listener());
+}
+
+/** The single polite live region the busy buttons speak through; the app shell mounts it once. */
+export function BusyAnnouncer() {
+  const now = useSyncExternalStore(subscribe, working, working);
+  return (
+    <span className="visually-hidden" role="status" data-busy-announcer="">
+      {now ? 'Working' : ''}
+    </span>
+  );
+}
 
 export type BusyButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { busy: boolean };
 
@@ -13,12 +40,17 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
   const busyNow = useRef(busy);
   busyNow.current = busy;
   // A second press can land before the pending state renders (a double click is two events in one
-  // task), so a press holds the button until busy shows, or for one more task if the press started
-  // nothing (a form that refused its input).
+  // task), so a press holds the button until busy shows, or until the press's own work is over (an
+  // onClick that awaits or throws) and one more task has passed (a form that refused its input).
   const held = useRef(false);
 
   useEffect(() => {
-    if (!busy) held.current = false;
+    if (!busy) {
+      held.current = false;
+      return;
+    }
+    countBusy(1);
+    return () => countBusy(-1);
   }, [busy]);
 
   // Enter in a field presses the form's first submit button, which the press guard covers; a form with
@@ -43,29 +75,31 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
       return;
     }
     held.current = true;
-    onClick?.(e);
     // Two tasks later the query library and React have rendered any pending state the press started.
-    setTimeout(() => setTimeout(() => {
+    const release = () => setTimeout(() => setTimeout(() => {
       if (!busyNow.current) held.current = false;
     }));
+    let result: unknown;
+    try {
+      result = onClick?.(e);
+    } finally {
+      if (result instanceof Promise) void result.finally(release);
+      else release();
+    }
   }
 
   return (
-    <>
-      <button
-        ref={button}
-        {...rest}
-        className={className ? `${className} busy-button` : 'busy-button'}
-        disabled={disabled || busy}
-        aria-busy={busy || undefined}
-        onClick={press}
-      >
-        {children}
-        {busy && <span className="busy-spinner" aria-hidden="true" />}
-      </button>
-      <span className="visually-hidden" role="status">
-        {busy ? 'Working' : ''}
-      </span>
-    </>
+    <button
+      ref={button}
+      {...rest}
+      className={className ? `${className} busy-button` : 'busy-button'}
+      disabled={busy ? undefined : disabled}
+      aria-disabled={busy || rest['aria-disabled'] || undefined}
+      aria-busy={busy || undefined}
+      onClick={press}
+    >
+      {children}
+      {busy && <span className="busy-spinner" aria-hidden="true" />}
+    </button>
   );
 }

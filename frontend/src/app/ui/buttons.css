@@ -136,21 +136,31 @@ button[aria-disabled='true'],
 
 /*
  * Busy (#456, BusyButton in src/app/ui): while its request runs a button that writes keeps its label,
- * is disabled and aria-busy, and shows a small spinner beside the label. The spinner's margins cancel its
- * own width and the gap, so it sits in the end padding and the button never changes width. Under reduced
- * motion it is a dot that pulses instead of turning.
+ * is aria-busy and aria-disabled (so it keeps focus and reads as off, hover and press included), and
+ * shows a small spinner placed absolutely in its end padding, so the button never changes width and the
+ * spinner does not depend on the gap. Under reduced motion it is a dot that pulses instead of turning.
  */
-.busy-button[aria-busy='true'] {
+.busy-button {
+  position: relative;
+}
+
+.busy-button[aria-busy='true'],
+.busy-button[aria-busy='true']:is(:hover, :active) {
   cursor: progress;
+  background: var(--color-neutral-tint);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  box-shadow: none;
+  transform: none;
 }
 
 .busy-spinner {
-  display: inline-block;
-  flex: none;
-  width: 0.7em;
-  height: 0.7em;
-  margin-inline-start: calc(0.15em - var(--space-2));
-  margin-inline-end: -0.85em;
+  position: absolute;
+  inset-inline-end: 0.25em;
+  top: 50%;
+  width: 0.6em;
+  height: 0.6em;
+  margin-top: -0.3em;
   border: 2px solid var(--color-border-strong);
   border-top-color: var(--color-focus);
   border-radius: 50%;
