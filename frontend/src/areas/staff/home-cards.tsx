@@ -40,7 +40,7 @@ export function homeParts(me: Me, branch: string | null = null) {
   const lendingOn = !me.modules || me.modules.includes('lending');
   return {
     sales,
-    lowStock: sales && holds(me, 'retail.stock.read'),
+    lowStock: sales && (one ? holdsAt(me, 'retail.stock.read', one) : holds(me, 'retail.stock.read')),
     orders: retail && canUse(me, 'orders'),
     loans: showLending(me),
     approvals: lendingOn && permissions.includes('core.approvals.read'),

@@ -29,7 +29,8 @@ nightly snapshot, and the loan list would have to be paged in full.
 2. **The Shop card reuses what exists.** Today's sales and the low-stock count come from the retail dashboard, so they need
    `retail.sale.read` with `retail.sale.all_sellers` (ADR-055: the total is everybody's) and, for the stock count,
    `retail.stock.read`; a seller who sees only their own sales does not get the shop total here, nor does a supervisor in a branch
-   where they lack `retail.sale.all_sellers` (checked per branch, so a partial holder never gets a 403 card). Home asks with
+   where they lack `retail.sale.all_sellers`, and the stock count shows only in a branch where they hold `retail.stock.read`
+   (both checked per branch, so a partial holder never gets a 403 card or another branch's count). Home asks with
    `period=today` under the dashboard screen's own query key, so the two share one answer. The dashboard has no today-only form:
    every call reads the last 30 days of sales (the 7 and 30 day figures and the shops), a cost Home accepts rather than add a
    second endpoint; if it shows in the database benchmarks, a `today` short path in `DashboardService` is the fix. The open orders

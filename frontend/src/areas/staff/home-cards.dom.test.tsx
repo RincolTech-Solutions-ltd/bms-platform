@@ -213,6 +213,23 @@ describe('the Home cards (issue #471)', () => {
     expect(calls.dashboard).toHaveBeenCalledWith(expect.objectContaining({ branchId: a }));
   });
 
+  it('shows the stock count only in a branch where the session reads stock', async () => {
+    const [a, b] = (admin.branches ?? []).map((x) => x.id as string);
+    const scope = (ids: string[]) => ({ all_branches: false, branch_ids: ids });
+    const partial = {
+      ...admin,
+      permissions: ['retail.sale.read', 'retail.sale.all_sellers', 'retail.stock.read'],
+      permission_scopes: { 'retail.sale.read': scope([a as string, b as string]), 'retail.sale.all_sellers': scope([a as string, b as string]), 'retail.stock.read': scope([a as string]) },
+    } as unknown as Me;
+    show(partial, b as string);
+    const shop = await screen.findByRole('article', { name: 'Shop' });
+    expect(await within(shop).findByText(/7 sales/)).toBeTruthy();
+    expect(within(shop).queryByText('Low on stock')).toBeNull();
+    cleanup();
+    show(partial, a as string);
+    expect(await within(await screen.findByRole('article', { name: 'Shop' })).findByText('Low on stock')).toBeTruthy();
+  });
+
   it('stacks the cards in one column on a 360px phone: two need at least 576px', () => {
     const css = readFileSync(join(process.cwd(), 'src/app/ui/surfaces.css'), 'utf8');
     const rule = /\.home-cards \{[^}]*grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, (\d+)px\), 1fr\)\)/.exec(css);
