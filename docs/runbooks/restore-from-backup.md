@@ -145,7 +145,7 @@ bucket and lock the objects, so neither the host nor anyone holding its token ca
 retention window (ADR-058). They need a Cloudflare account administrator. For production built with `infra/production/`
 (ADR-063), Terraform creates the lock and lifecycle rules and the narrow host token and `host_env` sets
 `BACKUP_RETENTION_ON_HOST=false`, so steps 1 to 4 are done there (tick them in the table); run step 5, the lock test, from
-`terraform-production.md` step 9, and step 6 as written. For staging they stay manual. Do them on the
+`terraform-production.md` step 10, and step 6 as written. For staging they stay manual. Do them on the
 staging bucket first, then production. Cloudflare's dashboard labels change from time to time: if a step does not match, follow
 the R2 documentation pages "Bucket locks" and "Object lifecycles" and note the difference here.
 

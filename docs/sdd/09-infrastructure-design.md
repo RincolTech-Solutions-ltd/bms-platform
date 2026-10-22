@@ -64,7 +64,7 @@ an encrypted gp3 disk, an Elastic IP, a security group). Both use two shared mod
 | Module | Creates |
 |---|---|
 | `modules/cloud-init` | The first-boot configuration: the `ops` user for people (SSH keys only, sudo), sshd with no passwords and no root, Docker from Docker's apt repository, unattended upgrades, fail2ban, the `bms` service user in the docker group, `/opt/bms`, and the units in `deploy/systemd` (`bms-pull`, `bms-monitor`, `bms-restore-drill`), installed but not enabled until the host has its `.env` |
-| `modules/cloudflare` | In the existing Cloudflare account: A (and on Hetzner AAAA) records for `bms`, `bms-callbacks` and each `<slug>-bms`, DNS only; the R2 backup bucket with the lock rules (`production/daily/` 30 days, `production/monthly/` 365 days) and lifecycle rules (a day later) of ADR-058; the R2 documents bucket; and three account tokens for the host, each usable only from the VM's addresses: object read and write on the backup bucket, the same on the documents bucket, and DNS edit plus zone read on the one zone for Caddy's DNS-01 challenge |
+| `modules/cloudflare` | In the existing Cloudflare account: A (and on Hetzner AAAA) records for `bms`, `bms-callbacks` and each `<slug>-bms`, DNS only; the R2 backup bucket with the lock rules (`production/daily/` 30 days, `production/monthly/` 365 days) and lifecycle rules (a day later) of ADR-058; the R2 documents bucket; and three account tokens for the host, each limited to the VM's addresses if Cloudflare enforces the IP condition: object read and write on the backup bucket, the same on the documents bucket, and DNS edit plus zone read on the whole zone for Caddy's DNS-01 challenge (an accepted risk: a host compromise could change mail records; ADR-063 decision 4) |
 
 Firewall on both: inbound 22 from the admin address list only (the whole internet is refused by
 validation), 80 and 443 TCP and 443 UDP from anywhere, nothing else; outbound open. The provider
@@ -320,8 +320,9 @@ deletion 90 days after closing), all Africa/Kampala (ADR-024).
    restore onto a fresh VM stays a human drill recorded in `docs/meetings/<date>/`.
 
 The R2 token is scoped to the backup bucket; on a host built by `infra/production/` it is an account token
-with object read and write on that bucket only, usable only from the VM's addresses, and the lock and
-lifecycle rules are created by the same Terraform (section 9.3.1), so the host's token cannot remove them. The encryption key has an offline copy held by
+with object read and write on that bucket only, limited to the VM's addresses if Cloudflare enforces the IP condition, and the lock and
+lifecycle rules are created by the same Terraform (section 9.3.1), so the host's token cannot remove them; an account
+administrator or the Terraform token still can, and both are guarded as root credentials. The encryption key has an offline copy held by
 the dev lead (chapter 8 section 8.7). The restore procedure and the quarterly drill
 (NFR-BAK-04) are `docs/runbooks/restore-from-backup.md`.
 

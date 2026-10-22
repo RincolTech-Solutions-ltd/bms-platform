@@ -31,5 +31,5 @@ output "host_env" {
 
 output "next_steps" {
   description = "What is still done by hand after the server exists."
-  value       = "Follow docs/runbooks/terraform-production.md from step 6: .env, cosign.pub, the read:packages login, the first files and timers, the first backup, the lock test and the first restore drill."
+  value       = "Follow docs/runbooks/terraform-production.md from step 7: .env, cosign.pub, the read:packages login, the first files and timers, the first backup, the lock test and the first restore drill."
 }

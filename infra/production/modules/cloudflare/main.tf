@@ -1,6 +1,6 @@
 # Everything production keeps in the existing Cloudflare account, whatever provider runs the VM (ADR-063):
 # the DNS records of the BMS hosts, the R2 backup bucket with the lock and lifecycle rules of ADR-058, the R2
-# documents bucket, and the three narrow tokens the host uses. Nothing here is applied until production day.
+# documents bucket, and the three tokens the host uses. Nothing here is applied until production day.
 #
 # The backup token is the point of this file. ADR-058 decision 5 and the launch audit (#416, item M12): a host
 # token that can delete every backup is the costliest single risk. R2 has no put-only permission, so the
@@ -10,7 +10,8 @@
 #   2. lifecycle rules: the bucket, not the host, removes objects a day after their lock ends, so backup.sh runs
 #      with BACKUP_RETENTION_ON_HOST=false and deletes nothing;
 #   3. the host token: object read and write on this one bucket only (it cannot change the lock or lifecycle
-#      rules, touch other buckets, or anything else in the account), usable only from the VM's own addresses.
+#      rules, touch other buckets, or anything else in the account), limited to the VM's own addresses if Cloudflare
+#      enforces the IP condition on R2's S3 requests (runbook step 10 checks; the lock holds either way).
 # The host's token cannot change the rules. A Cloudflare account administrator can, and so can the token Terraform runs
 # with (it may create tokens, so it is as strong as an administrator): both stay few, on the maintainer's side, behind
 # two-step sign-in, never on the host (ADR-058 decision 5).
@@ -24,7 +25,7 @@ locals {
   backup_bucket_resource    = "com.cloudflare.edge.r2.bucket.${var.account_id}_default_${cloudflare_r2_bucket.backups.name}"
   documents_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.account_id}_default_${cloudflare_r2_bucket.documents.name}"
 
-  # A token is usable only from the VM when restrict_tokens_to_host is on.
+  # With restrict_tokens_to_host, each token carries the VM's addresses as an IP condition.
   host_cidrs = compact([
     "${var.host_ipv4}/32",
     var.host_ipv6_network,
@@ -186,8 +187,10 @@ resource "cloudflare_account_token" "host_documents" {
   condition = var.restrict_tokens_to_host ? { request_ip = { in = local.host_cidrs } } : null
 }
 
-# Caddy's DNS-01 challenge for the wildcard certificate: DNS records of this one zone, plus reading the zone
-# itself, which the Cloudflare DNS module of Caddy needs to find the zone.
+# Caddy's DNS-01 challenge for the wildcard certificate: DNS records of the whole company zone, plus reading the zone
+# itself, which the Cloudflare DNS module of Caddy needs to find the zone. NOT narrow: a host compromise could change MX
+# or the mail signing records. Accepted for launch (ADR-063 decision 4); the fix is a separate validation domain with
+# Caddy's override_domain (runbook, "Decide first").
 resource "cloudflare_account_token" "host_dns" {
   account_id = var.account_id
   name       = "${var.name}-host-dns01"

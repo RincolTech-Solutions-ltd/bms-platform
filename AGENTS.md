@@ -766,7 +766,7 @@ Accepted (this list is the ADR index):
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
 - ADR-063 Production is created by Terraform on production day (`infra/production/`, a Hetzner root and an AWS root over shared
   cloud-init and Cloudflare modules, nothing applied before): the VM, its firewall, DNS, the R2 buckets with the ADR-058 lock and
-  lifecycle rules and narrow host tokens that cannot delete a locked backup; later updated by a signed pointer the owner moves with
+  lifecycle rules and host tokens (the backup one cannot delete a locked backup; the DNS-01 one reaches the whole zone, an accepted risk); later updated by a signed pointer the owner moves with
   a local promote command, no deploy SSH key and no hosted job (proposed, #300, #301; provider, region and the promote command pending)
 
 Pending (cite only as "pending ADR-NNN"):

@@ -392,7 +392,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
                     storage = containerInstance bms.storage
                 }
                 dns = infrastructureNode "DNS" "A records (and AAAA on Hetzner) for bms, bms-callbacks and each <slug>-bms under rincoltech.com, DNS only, created by Terraform; TXT records created by Caddy for the DNS-01 wildcard challenge" "Cloudflare DNS"
-                hostTokens = infrastructureNode "Host tokens" "Three account tokens created by Terraform, each usable only from the VM's addresses: object read and write on the backup bucket (cannot change the lock or lifecycle rules), the same on the documents bucket, DNS edit and zone read on the one zone" "Cloudflare account API tokens"
+                hostTokens = infrastructureNode "Host tokens" "Three account tokens created by Terraform, each limited to the VM's addresses if Cloudflare enforces the IP condition: object read and write on the backup bucket (cannot change the lock or lifecycle rules), the same on the documents bucket, DNS edit and zone read on the whole rincoltech.com zone (an accepted risk, ADR-063 decision 4)" "Cloudflare account API tokens"
             }
             github = deploymentNode "GitHub" "Today: tag vX.Y.Z retags the sha-<short> images, no rebuild (ADR-006). Proposed: the host pulls a signed production pointer the owner moves (ADR-063)" "GitHub Actions" {
                 registry = infrastructureNode "Container registry" "The images proven on staging, tagged vX.Y.Z" "GHCR"
@@ -425,7 +425,7 @@ workspace "BMS Platform" "Multi-tenant business management platform: core plus v
             production.maintainerMac.terraform -> production.cloud.firewall "Creates" "Provider API"
             production.maintainerMac.terraform -> production.cloudflare.dns "Creates the host records" "Cloudflare API"
             production.maintainerMac.terraform -> production.cloudflare.r2 "Creates the buckets, lock and lifecycle rules" "Cloudflare API"
-            production.maintainerMac.terraform -> production.cloudflare.hostTokens "Creates the narrow host tokens" "Cloudflare API"
+            production.maintainerMac.terraform -> production.cloudflare.hostTokens "Creates the host tokens" "Cloudflare API"
             production.cloud.firewall -> production.cloud.vm.compose.proxy "Lets in 80 and 443 only" "TCP, UDP"
             production.cloud.vm.compose.proxy -> production.cloudflare.dns "Creates DNS-01 challenge records for *.rincoltech.com with the DNS host token" "Cloudflare API"
             production.cloud.vm.backupJob -> production.cloudflare.r2.storage "Uploads the encrypted dump with the backup host token; deletes refused by the lock" "S3 API"

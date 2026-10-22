@@ -46,14 +46,19 @@ person to remember.
    `bms-callbacks`, `<slug>-bms`, DNS only), the R2 backup and documents buckets, and the backup protection of ADR-058 as code:
    lock rules (`production/daily/` 30 days, `production/monthly/` 365 days), lifecycle rules a day after each lock, and
    `prevent_destroy` on both buckets and the lock.
-4. **The host's tokens are narrow and made by Terraform.** Three account-owned tokens, each usable only from the VM's
-   addresses: object read and write on the backup bucket only, the same on the documents bucket only, and DNS edit plus zone
-   read on the one zone for Caddy's DNS-01 challenge. The backup token cannot change the lock or lifecycle rules, and the lock
+4. **The host's tokens are made by Terraform.** Three account-owned tokens, each meant to be usable only from the VM's
+   addresses if Cloudflare enforces the IP condition (the runbook checks whether it does on R2's S3 requests; if not, the lock
+   below still holds): object read and write on the backup bucket only, the same on the documents bucket only, and DNS edit
+   plus zone read on the whole `rincoltech.com` zone for Caddy's DNS-01 challenge. That last token is not narrow: whoever takes
+   over the host could also change MX or the Resend DKIM records and send mail as Rincol Tech. The owner accepts this risk for
+   launch and does not build the fix now; the fix is a separate validation domain that `_acme-challenge` names point to by
+   CNAME, with Caddy's `override_domain` and a token for that domain only (runbook, "Decide first"). The backup token cannot change the lock or lifecycle rules, and the lock
    refuses its deletes and overwrites under `daily/` and `monthly/`; with `BACKUP_RETENTION_ON_HOST=false` the host deletes
    nothing. R2 has no put-only permission, so "the host can write but not delete a backup" is this combination, proven on the
-   day with a throwaway object. The host's token cannot change the rules; a Cloudflare account administrator can, and so can the
-   Terraform token (it may create tokens, so it is as strong as an administrator). Both stay few, on the maintainer's side and
-   behind two-step sign-in, never on the host.
+   day with a throwaway object. The lock stops the host's token, not everyone: R2 bucket locks have no mode an account
+   administrator cannot lift, and the Terraform token can mint tokens, so it is administrator-equivalent. Both are guarded as
+   root credentials: few people, two-step sign-in, kept on the maintainer's side, never on the host. `prevent_destroy` does not
+   stop an in-place edit of the lock rules, so the retention variables refuse windows under 30 and 365 days.
 5. **State.** The token values are in Terraform state, so state never goes in git. Before the first apply it moves to a private
    R2 state bucket in the existing account with its own access key; the host receives its values once, through
    `terraform output -raw host_env`.
@@ -81,10 +86,12 @@ the backup bucket; the provider choice is one directory, not a rewrite.
 Worse: two provider roots to keep in step (the modules hold everything they share); host token values live in Terraform state,
 so the state bucket's key is as sensitive as the tokens; a production release needs the owner's Mac (the same dependency the
 signer already has); first-day secrets (`.env`, `cosign.pub`, the registry login) are manual steps; a locked backup cannot be
-removed early even on purpose (ADR-058).
+removed early by the host or anyone holding its token, and only an account administrator or the Terraform token can lift the
+lock, so an erasure request that must reach backups waits up to a year (ADR-058; an owner decision in the runbook); the DNS-01
+token reaches the whole company zone (accepted risk, decision 4).
 
 To watch: the Hetzner backups switch, which has no default because those images hold the whole disk unencrypted outside the
-locked backups; whether Cloudflare applies the token address condition to R2's S3 requests (the runbook checks it; the lock holds
-either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
+locked backups; whether Cloudflare enforces the token address condition on R2's S3 requests (the runbook checks it and records the answer
+here; the lock holds either way); the IPv6 address a Hetzner host uses for outgoing requests, which must fall in the token's allowed network; the
 puller's downgrade guard against a deliberate rollback; the cutover rehearsal (apply, deploy a release, back up, run the restore
 drill, test the lock) before any tenant's real data moves.
