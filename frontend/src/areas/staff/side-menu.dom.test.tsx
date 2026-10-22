@@ -473,7 +473,7 @@ describe('the staff sidebar from 720px', () => {
     await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
   });
 
-  it('folds by what it shows during a tour: unfolded for a step, a press folds it', async () => {
+  it('folds by what it shows during a tour: unfolded for a step, a press folds and unfolds it', async () => {
     const tour: Tour = {
       id: 'test-sidebar-toggle-tour',
       version: 1,
@@ -494,7 +494,16 @@ describe('the staff sidebar from 720px', () => {
     await screen.findByRole('heading', { name: 'Feedback here' });
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().getAttribute('title')).toBe('Show menu labels');
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
     expect(window.localStorage.getItem('bms.sidebar')).toBe('folded');
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
+    expect(window.localStorage.getItem('bms.sidebar')).toBe('open');
+    fireEvent.click(toggle());
+    expect(sidebar().classList.contains('side-nav-folded')).toBe(true);
     act(() => {
       fireEvent.keyDown(screen.getByRole('heading', { name: 'Feedback here' }), { key: 'Escape' });
     });
