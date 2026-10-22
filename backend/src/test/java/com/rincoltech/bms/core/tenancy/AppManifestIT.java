@@ -44,7 +44,7 @@ import org.springframework.util.MultiValueMap;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The installed app's manifest and icons of a business (ADR-064, issue #446, FR-TEN-08): the name,
+ * The installed app's manifest and icons of a business (ADR-066, issue #446, FR-TEN-08): the name,
  * colour and logo of the host's business, the icon sizes and the safe zone, the cache headers, and
  * the BMS look for a business with no logo and for a host that is no business. Every image is
  * built in code; no real logo or name.

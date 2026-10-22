@@ -11,7 +11,7 @@ chapter 6 section 6.5 (`push_subscriptions`) and the threat model in chapter 8 s
 Extended by ADR-057 (issue #412): five everyday notices with per-business switches, a one-tap turn-on card, and two new audiences
 (`BranchStaff`, `AnyOf`). No decision here changes.
 
-Amended by ADR-064 (issue #446): the manifest and the iPhone icon of decision 1 now come from the API per host, with the business's
+Amended by ADR-066 (issue #446): the manifest and the iPhone icon of decision 1 now come from the API per host, with the business's
 name, colour and logo, and the BMS icons as the fallback. The rest of decision 1 and every other decision stand.
 
 ## Context

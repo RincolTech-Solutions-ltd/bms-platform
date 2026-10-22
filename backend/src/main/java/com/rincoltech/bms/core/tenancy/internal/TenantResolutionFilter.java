@@ -32,7 +32,7 @@ class TenantResolutionFilter extends OncePerRequestFilter {
     static final String STATUS_ATTRIBUTE = "bms.tenant.status";
 
     /**
-     * The installed app's manifest and icons (ADR-064) answer on any host: the business's own where the
+     * The installed app's manifest and icons (ADR-066) answer on any host: the business's own where the
      * host resolves one, the platform's otherwise. Exactly these paths, compared with the raw request
      * path, so no encoding, dot segment or path parameter widens it; nothing else runs without a tenant.
      */

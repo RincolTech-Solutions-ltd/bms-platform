@@ -66,7 +66,7 @@ export function Shell({ brand = PLATFORM_BRAND, actions, children }: { brand?: S
       if (value) root.style.setProperty(name, value);
       else root.style.removeProperty(name);
     });
-    // iOS takes the home screen name from this tag when the page is added, not from the manifest (ADR-064).
+    // iOS takes the home screen name from this tag when the page is added, not from the manifest (ADR-066).
     document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', appTitle(brand));
   }, [brand]);
 

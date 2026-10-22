@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { PLATFORM_BRAND, appTitle, brandOf, shortAppName } from './branding';
 
-// The iPhone's home screen name (ADR-064): the same cut as the manifest's short_name, from the cases the backend's
+// The iPhone's home screen name (ADR-066): the same cut as the manifest's short_name, from the cases the backend's
 // AppManifestShortNameTest reads too, so the two cannot drift. Fabricated names only.
 
 const cases = (JSON.parse(readFileSync('../fixtures/app-short-names.json', 'utf8')) as { cases: { name: string; short: string }[] }).cases;

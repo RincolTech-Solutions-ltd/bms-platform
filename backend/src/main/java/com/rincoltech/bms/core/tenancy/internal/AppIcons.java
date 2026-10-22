@@ -20,7 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The installed app's icons drawn from the tenant logo (ADR-064, issue #446): a square of the theme
+ * The installed app's icons drawn from the tenant logo (ADR-066, issue #446): a square of the theme
  * colour with the logo centred inside it, PNG, with Java2D alone. The plain icons and the iPhone's
  * keep the logo inside 80 percent of the side; the maskable ones keep it inside the safe zone, the
  * circle of 40 percent radius that every launcher mask leaves visible. The rendered icons are kept

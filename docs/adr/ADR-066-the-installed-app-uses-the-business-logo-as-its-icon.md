@@ -1,11 +1,11 @@
-# ADR-064: The installed app uses the business's own logo and name as its icon
+# ADR-066: The installed app uses the business's own logo and name as its icon
 
 ## Status
 
 Proposed (owner request of 22 Oct 2026, issue #446, FR-TEN-08). Builds on ADR-050 (BMS installs as an app) and on the tenant branding
 of FR-TEN-08 (the logo as a core document, the theme colour rule). Amends ADR-050 decision 1 only in where the manifest and the iPhone
-icon come from; every other decision of ADR-050 stands. The next number after ADR-063 on main;
-renumbered at merge if needed.
+icon come from; every other decision of ADR-050 stands. Numbered ADR-066 because ADR-064 (collection lists) and ADR-065
+(in-app feedback) are taken by open pull requests.
 
 ## Context
 
@@ -43,6 +43,9 @@ resolves the business from the host on every request and already serves the logo
    nothing under `/api/` is precached or cached at run time (ADR-009), and the navigation fallback refuses `/api/`. iOS takes the home
    screen name from `apple-mobile-web-app-title`, not from the manifest, so `index.html` keeps that tag (`BMS`) and the shell sets it at
    run time to the business's short name, the same cut as the manifest's (`fixtures/app-short-names.json` holds the cases both test).
+   The browser tab and address bar icon is the same logo: `index.html` links `/api/v1/branding/app/icon-192.png` as its only
+   `rel="icon"` (owner request of 22 Oct 2026), so a business with a logo sees it in the tab too, and every other host gets the BMS icon
+   through the same 302 fallback.
 5. **Under `/api/v1/branding/`.** The routes sit with the other public branding routes, so the edge proxy already sends them to the
    API (`/api/*`) and neither Caddyfile changes.
 6. **When a change reaches a phone.** Android Chrome checks the manifest of an installed app from time to time and updates its icon

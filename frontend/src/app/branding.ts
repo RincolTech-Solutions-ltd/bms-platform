@@ -43,7 +43,7 @@ export function themeVars(brand: ShellBrand): Record<string, string> {
 
 export const THEME_PROPERTIES = ['--brand', '--brand-contrast'] as const;
 
-/** The home screen label's length, as the API's manifest cuts its short_name (ADR-064). */
+/** The home screen label's length, as the API's manifest cuts its short_name (ADR-066). */
 export const SHORT_NAME_MAX = 12;
 /** A cut at a word boundary is preferred when it keeps at least this many characters. */
 export const SHORT_NAME_WORD_MIN = 6;

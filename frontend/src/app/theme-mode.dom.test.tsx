@@ -193,7 +193,7 @@ describe('the installed app theme colour', () => {
   it('has a manifest theme_color equal to the light colour, and a dark colour that is the dark surface', () => {
     const config = readFileSync(join(process.cwd(), 'vite.config.ts'), 'utf8');
     expect(config).toContain("'theme-init.js'");
-    // The manifest is the API's (ADR-064); a business without a readable colour gets the contract's default.
+    // The manifest is the API's (ADR-066); a business without a readable colour gets the contract's default.
     const contract = JSON.parse(readFileSync(join(process.cwd(), '../docs/api/openapi.json'), 'utf8')) as {
       components: { schemas: { AppManifest: { properties: { theme_color: { default?: string } } } } };
     };

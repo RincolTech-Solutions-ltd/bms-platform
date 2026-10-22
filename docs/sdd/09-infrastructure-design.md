@@ -153,7 +153,7 @@ The web image serves the bundle in three classes, which `frontend/Caddyfile` kee
 | everything else (`/`, every route, `sw.js`, `push-sw.js`, the BMS icons) | `no-cache` | `/index.html`, so the router takes over |
 
 The installed app's manifest and its icons are not files of the web image: the API serves them per host
-under `/api/v1/branding/app/` (ADR-064), so the edge proxy sends them to the API with the rest of `/api/*`,
+under `/api/v1/branding/app/` (ADR-066), so the edge proxy sends them to the API with the rest of `/api/*`,
 the manifest `no-cache` with an ETag and the icons drawn from the business's logo for an hour. The BMS icons
 above are their fallback.
 

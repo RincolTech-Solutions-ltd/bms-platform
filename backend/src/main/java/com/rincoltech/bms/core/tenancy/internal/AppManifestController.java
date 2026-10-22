@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * {@code /api/v1/branding/app} (ADR-064, issue #446, chapter 7 section 7.11.4): the installed app's
+ * {@code /api/v1/branding/app} (ADR-066, issue #446, chapter 7 section 7.11.4): the installed app's
  * web app manifest and icons for the business the host resolves, so its home screen icon is the
  * business's own logo. Public like the rest of branding. A host that resolves no business, and a
  * business with no logo, get the BMS icons the web container serves under {@code /icons/}.

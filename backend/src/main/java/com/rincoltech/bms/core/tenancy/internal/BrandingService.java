@@ -82,7 +82,7 @@ class BrandingService implements Letterheads {
                 modules.enabledKeys());
     }
 
-    /** What the installed app's manifest and icons are drawn from (ADR-064): the name, a readable colour or none, the logo. */
+    /** What the installed app's manifest and icons are drawn from (ADR-066): the name, a readable colour or none, the logo. */
     record AppBrand(String displayName, Optional<String> themeColour, Optional<Logo> logo) {}
 
     @Transactional(readOnly = true)

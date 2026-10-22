@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** The manifest's short name (ADR-064); the frontend's branding.test.ts holds the same cases for the iPhone's title. */
+/** The manifest's short name (ADR-066); the frontend's branding.test.ts holds the same cases for the iPhone's title. */
 class AppManifestShortNameTest {
 
     /** The cases shared with the frontend test: one file, so the two cuts cannot drift. */
