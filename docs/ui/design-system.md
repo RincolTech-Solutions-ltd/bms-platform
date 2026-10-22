@@ -262,10 +262,13 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    `busy`; never a plain `<button disabled={save.isPending}>`. Its label stays the same while busy: no
    `{save.isPending ? 'Saving' : 'Save'}` and no busy label prop. Read-only buttons (refresh, filters, tabs, navigation,
    opening a dialog) stay plain, and so does a Cancel that only waits, with `/* busy-exempt: <reason> */` in its tag. A
-   mutation no button sends (a save as you type, a mark as read) has `// busy-exempt: <reason>` above it.
-   `src/app/ui/busy-guard.test.ts` fails a mutation that a press (onClick, onSubmit or a component callback, directly
-   or through a local function) sends unless its pending flag reaches a `busy={...}` attribute in that file, or the
-   guard's `ALLOWED` list names it with a reason.
+   mutation that needs no busy button of its own (a save as you type, a switch that says Working itself, cards that
+   show their own busy state) has `// busy-exempt: <reason>` in the `//` comment lines directly above its
+   `const ... = useMutation(` line. `src/app/ui/busy-guard.test.ts` fails a mutation that a press (onClick, onSubmit or
+   a component callback, directly or through a local function) sends unless its pending flag reaches a `busy={...}`
+   attribute in that file, that comment exempts it (a comment with no reason does not), or the guard's `ALLOWED` list
+   names it with a reason. It is a text heuristic: it checks that the flag reaches some `busy=` in the file, not that
+   it is the busy of the button that sends.
 7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 

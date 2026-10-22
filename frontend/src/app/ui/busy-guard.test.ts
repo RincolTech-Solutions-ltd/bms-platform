@@ -15,7 +15,9 @@ import { describe, expect, it } from 'vitest';
 //    callback such as onSave), directly or through a function of the same file, its pending flag must
 //    reach a `busy={...}` attribute in that file: a BusyButton's, or a busy prop of a component that
 //    hands it to one (SaveBar, a View). A local alias (`const busy = save.isPending || ...`) counts.
-//    Anything else is an entry in ALLOWED below with its reason.
+//    A mutation that needs no busy button carries `// busy-exempt: <reason>` in the run of `//` comment
+//    lines directly above its `const ... = useMutation(` line (a comment with no reason does not count);
+//    anything else is an entry in ALLOWED below with its reason.
 // 2. No plain <button> is disabled by a pending or busy state: that button is a BusyButton, so it also
 //    shows the spinner. A button that only waits for the request (Cancel, Close) stays plain with
 //    `/* busy-exempt: <reason> */` in its tag.
@@ -75,7 +77,20 @@ function mutationHooks(text: string): string[] {
   return hooks;
 }
 
-type Mutation = { name: string; line: number; sends: string[]; pending: string | null };
+type Mutation = { name: string; line: number; sends: string[]; pending: string | null; exempt: boolean };
+
+const EXEMPT = /^\/\/\s*busy-exempt:\s*\S/;
+
+/** True when the `//` comment lines directly above the line at `index` hold a `busy-exempt:` with a reason. */
+function exempted(text: string, index: number): boolean {
+  const above = text.slice(0, index).split('\n').slice(0, -1).reverse();
+  for (const line of above) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('//')) return false;
+    if (EXEMPT.test(trimmed)) return true;
+  }
+  return false;
+}
 
 /** Every mutation a file holds, with the expressions that send it and the one that reads its pending flag. */
 function mutations(text: string, hooks: string[]): Mutation[] {
@@ -84,7 +99,7 @@ function mutations(text: string, hooks: string[]): Mutation[] {
   const at = (index: number) => text.slice(0, index).split('\n').length;
   for (const m of text.matchAll(new RegExp(`const\\s+(\\w+)\\s*=\\s*(?:${callee})\\s*[<(]`, 'g'))) {
     const name = m[1] ?? '';
-    found.push({ name, line: at(m.index), sends: [`${name}.mutate`, `${name}.mutateAsync`], pending: `${name}.isPending` });
+    found.push({ name, line: at(m.index), sends: [`${name}.mutate`, `${name}.mutateAsync`], pending: `${name}.isPending`, exempt: exempted(text, m.index) });
   }
   for (const m of text.matchAll(new RegExp(`const\\s*\\{([^}]*)\\}\\s*=\\s*(?:${callee})\\s*[<(]`, 'g'))) {
     const fields = new Map<string, string>();
@@ -93,7 +108,7 @@ function mutations(text: string, hooks: string[]): Mutation[] {
       if (key) fields.set(key, alias || key);
     }
     const sends = ['mutate', 'mutateAsync'].flatMap((k) => (fields.has(k) ? [fields.get(k) ?? k] : []));
-    found.push({ name: sends[0] ?? 'mutation', line: at(m.index), sends, pending: fields.get('isPending') ?? null });
+    found.push({ name: sends[0] ?? 'mutation', line: at(m.index), sends, pending: fields.get('isPending') ?? null, exempt: exempted(text, m.index) });
   }
   return found;
 }
@@ -146,7 +161,7 @@ function pressed(text: string, hooks: string[] = mutationHooks(text)): Mutation[
 function unguarded(text: string, hooks: string[] = mutationHooks(text)): string[] {
   const busy = busyCode(text);
   return pressed(text, hooks)
-    .filter((m) => !m.pending || !has(busy, m.pending))
+    .filter((m) => !m.exempt && (!m.pending || !has(busy, m.pending)))
     .map((m) => `${m.line} ${m.name}`);
 }
 
@@ -224,6 +239,15 @@ describe('busy guard on fixtures', () => {
     const caller = `const save = useSave();\n<form onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>`;
     expect(unguarded(caller, ['useSave'])).toEqual(['1 save']);
     expect(unguarded(`${caller}\n<SaveBar busy={save.isPending} />`, ['useSave'])).toEqual([]);
+  });
+
+  it('honours a busy-exempt comment with a reason directly above the mutation, and nothing else', () => {
+    const press = `\n<button onClick={() => save.mutate()}>Save</button>`;
+    expect(unguarded(`// busy-exempt: the card shows its own busy state\n${save}${press}`)).toEqual([]);
+    expect(unguarded(`  // Saved as the person types.\n  // busy-exempt: the switch says Working itself\n  ${save}${press}`)).toEqual([]);
+    expect(unguarded(`// busy-exempt:\n${save}${press}`)).toEqual(['2 save']);
+    expect(unguarded(`// busy-exempt: too far up\nconst other = 1;\n${save}${press}`)).toEqual(['3 save']);
+    expect(unguarded(`/* busy-exempt: a tag comment */\n${save}${press}`)).toEqual(['2 save']);
   });
 
   it('leaves a mutation no press sends alone', () => {
