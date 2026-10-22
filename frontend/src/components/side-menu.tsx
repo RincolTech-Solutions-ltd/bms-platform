@@ -127,13 +127,17 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
   const root = useRef<HTMLDivElement>(null);
   const { target } = useTour();
   const anchors = [tour, ...links.map((l) => l.tour), ...tours].filter(Boolean);
-  // Unfolded while a tour step points into it, so the step can show the label it talks about.
-  const shownFolded = folded && !(target !== undefined && anchors.includes(target));
+  const forTour = target !== undefined && anchors.includes(target);
+  // The step a press came during: from then on the press wins for that step, and the next step unfolds it again.
+  const [pressedFor, setPressedFor] = useState<string>();
+  // Unfolded while a tour step points into it, so the step can show the label it talks about, unless the person pressed.
+  const shownFolded = folded && !(forTour && pressedFor !== target);
 
-  // From what the person sees: unfolded for a tour step, a press folds it.
+  // From what the person sees: unfolded for a tour step, a press folds it, and the choice is kept.
   function toggle() {
     keepFolded(!shownFolded);
     setChoice(!shownFolded);
+    if (forTour) setPressedFor(target);
   }
 
   // Narrowed to a phone while the focus is in the sidebar: it goes to the menu button that now holds the list. A layout effect, so
