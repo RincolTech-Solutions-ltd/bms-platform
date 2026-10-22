@@ -785,7 +785,7 @@ As built in slice #213 (migration `V54__payment_gateway_core.sql`; the status se
 `paid_amount_minor bigint`, `confirmation_code text`, `reported_method text`, `last_checked_at timestamptz`,
 `final_status text` [`booked`, `booked_unallocated`, `needs_attention`, `failed`, `expired`], `refusal_code text`,
 `creation_lease_until timestamptz`, `technical_failures integer`. `payment_callbacks` stores identifiers only and its `outcome` also takes `unknown_reference` and
-`throttled`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
+`throttled`. Migration `V84` replaces the guard function `payment_intents_guard()` (V54) with two moves added, `reversed_pending_review` to `booked` and to `booked_unallocated` (a payment reported reversed and then completed again goes back to what it was), and one narrowed: `needs_attention` to `reversed` is refused for an order that carries a booked transaction (an allocated receipt stores it too), so that only the approved reversal takes money out of a loan or account. A reversal handed to a person is not a status: the order stays `reversed_pending_review` and carries `refusal_code` `reversal_unresolved`, `reversal_rejected` or `completed_after_reversal`, with no `next_check_at`. The definer function `app_resolve_payment_intent(provider, provider_reference, merchant_reference)` returns the
 tenant and intent id or nothing (ADR-016).
 
 ### `payment_gateway_accounts` (RLS, built in slice #233, migration `V56`)
@@ -840,8 +840,27 @@ allocation slice adds the update and its guard): `id`, `tenant_id`, `created_at`
 and a foreign key to `payment_intents`), `purpose`, `subject_type`, `subject_id` (what the payer meant to pay), `amount_minor bigint NOT NULL`, `currency`, `value_date date NOT NULL`,
 `confirmation_code varchar(100)`, `refusal_code varchar(60) NOT NULL` (why the purpose handler refused: a closed vocabulary of lower case words), `status text NOT NULL DEFAULT 'open'`
 [`open`, `allocated`, `refunded`], `journal_entry_id uuid NOT NULL` (debit `gateway_clearing`, credit `unallocated_receipts`, posted in the same transaction that ends the intent
-`booked_unallocated`). The payer's phone is not copied (it stays on the intent). The columns of allocation (`allocated_subject_*`, `allocated_by`, `allocated_at`,
-`allocation_journal_entry_id`) arrive with the slice that allocates a receipt (FR-PAY-04). The same migration lets `lending_loan_transactions.payment_method_key` take `gateway`
+`booked_unallocated`). The payer's phone is not copied (it stays on the intent). The columns of allocation arrive in `V84` (slice #224, below).
+
+As built in slice #224 (migration `V84__unallocated_receipts_queue.sql`): the table stops being append-only. A receipt that is `open` ends exactly once as `allocated`, `refunded` or `reversed`.
+New columns: `version integer` (rises by one with the one change a receipt ever gets), `updated_at`, `requested_by` and `decided_by` (the maker and the checker; the two never equal), `approval_id` (the
+`approval_requests` row that decided it, foreign key), `decided_at`, `note` (the maker's reason, 300 characters), `allocated_purpose`, `allocated_subject_type`, `allocated_subject_id`,
+`allocated_txn_id` (the repayment or deposit the allocation created; unique per tenant where set), `cleared_entry_id` (the journal entry that cleared the liability: the reversal of the receipt's own
+entry for an allocation, a provider refund or a provider reversal, or the entry debiting `unallocated_receipts` and crediting the refund method's account), `refund_method_key`
+(`gateway`, `cash`, `bank`, `mtn_momo`, `airtel_money`) and `refund_reference` (the lender's own reference, printable, 100 characters). Check constraints bind each status to its fields: an open receipt has none of them,
+an allocated one has the allocation and no refund, a refunded one the refund and no allocation, a reversed one neither. The trigger `unallocated_receipts_guard` refuses a change to a receipt that is not open, any
+status but the three endings, a version that does not rise by exactly one, and any change to what the payment was (amount, currency, order, journal entry, refusal). The application role has `UPDATE` on the settlement
+columns only and no `DELETE`.
+
+Reconciliation (slice #224 part 2, migration `V85__payment_reconciliation.sql`), five tenant tables with forced row-level security and two expression indexes on `payment_intents` (`(tenant_id, lower(provider_reference))`, `(tenant_id, upper(confirmation_code))`):
+`payment_statements` (`id`, `uploaded_by`, `file_name` without a path, `content_sha256` unique per tenant, `row_count` 1 to 5,000, `period_from`, `period_to`, `covered_from`, `covered_to` (the days the export is complete for; both null when none), `currency`, `matched_count`, `different_count`, `unmatched_count`, `fees_posted_minor`; select and insert only),
+`payment_statement_rows` (`statement_id`, `row_no`, `order_tracking_id`, `confirmation_code`, `amount_minor`, `fee_minor`, `settled_minor`, `currency`, `paid_on`, `payment_method`, `match_status` [`matched`, `amount_mismatch`, `currency_mismatch`, `not_paid_here`, `ambiguous`, `unmatched`] as at upload,
+`intent_id`, `fee_entry_id`, `fee_approval_id` (the `statement_fee` request that holds a fee above the automatic rate); the application may update only `fee_entry_id`, once, from empty, on a line whose fee was held for approval (column grant and the trigger `payment_statement_rows_guard`); a partial unique index over (`tenant_id`, `intent_id`) where a fee entry exists makes the fee once per order; select and insert only; never a payer's number),
+`payment_statement_reviews` (`row_id` unique per tenant, `reviewed_by` the person who marked the line, `confirmed_by` the second person who confirmed it through the `statement_line_outside` approval, never the same (a check), `note`: two people's agreement that a statement line is money outside this system; select and insert only), `payment_reconciliation_runs` (`ran_on`, `trigger` [`job`, `manual`], `started_by`, `window_from`, `intents_examined`, `statements_used`, `finding_count`, `truncated`; select, insert and delete, kept 90 days; a partial unique index over (`tenant_id`, `ran_on`) where `trigger` is `job` allows one nightly run per business and day) and
+`payment_reconciliation_findings` (`run_id` with delete cascade, `kind`, `intent_id`, `statement_row_id`, `other_txn_id`, `order_tracking_id`, `confirmation_code`, `bms_amount_minor`, `provider_amount_minor`, `currency`, `branch_id`; select and insert only). The permission `core.payments.manage` (tenant admin, accountant) is seeded in the same migration.
+
+`users.kind` accepts `system` (V84): the tenant's payments system user, one per tenant (unique index on the lower-cased email where the kind is `system`), created on first use, with no credentials, role or session. Every staff
+query filters on kind `staff`, so it is listed and usable nowhere; it is the maker of `gateway_payment_reversal` requests (ADR-035 decision 16). The same migration lets `lending_loan_transactions.payment_method_key` take `gateway`
 (the check is replaced by a superset, added `NOT VALID` and validated) and adds the partial unique index `lending_loan_transactions_gateway_reference` over
 (`tenant_id`, `payment_method_key`, `external_reference`) where the method is `gateway`, the reference is not null and the type is `repayment` or `recovery`, so one order tracking id books
 one repayment (spec 3.4.1).

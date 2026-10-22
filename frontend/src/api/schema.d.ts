@@ -2173,6 +2173,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/intents/{intent_id}/reversal-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Put the reversal of a payment the provider reversed to a checker again (a person asking; 202 with the request) */
+        post: operations["requestPaymentReversalAgain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/merchant-account": {
         parameters: {
             query?: never;
@@ -2209,6 +2226,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest reconciliation run and its differences */
+        get: operations["getPaymentReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/reconciliation/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run the reconciliation now and return its report */
+        post: operations["runPaymentReconciliation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments/settings": {
         parameters: {
             query?: never;
@@ -2221,6 +2272,126 @@ export interface paths {
         /** Change the tenant's payments settings, audited with before and after (ADR-035) */
         put: operations["updatePaymentsSettings"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The statements uploaded, newest first */
+        get: operations["listPaymentStatements"];
+        put?: never;
+        /** Upload the merchant statement (CSV, up to 1 MB and 5,000 lines): match its lines to our orders and post each clean line's fee once (FR-PAY-11) */
+        post: operations["uploadPaymentStatement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements/{statement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One statement with how each line matched */
+        get: operations["getPaymentStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/statements/{statement_id}/rows/{row_no}/outside-system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a statement line no order of ours has as money for something outside this system, so it is no longer reported (audited) */
+        post: operations["markStatementLineOutsideSystem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/unallocated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The queue of unallocated receipts, oldest first (open by default; status open, allocated, refunded, reversed or all) */
+        get: operations["listUnallocatedReceipts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/unallocated/{receipt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One unallocated receipt with its requests */
+        get: operations["getUnallocatedReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/unallocated/{receipt_id}/allocate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask to put a receipt's money on a loan or a savings account (maker-checker, 202) */
+        post: operations["allocateUnallocatedReceipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/unallocated/{receipt_id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask to record that a receipt's money was sent back to the payer (maker-checker, 202) */
+        post: operations["refundUnallocatedReceipt"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6479,6 +6650,20 @@ export interface components {
             /** Format: int32 */
             version?: number;
         };
+        AllocateReceiptRequest: {
+            /**
+             * @description What the money is put on: lending.loan_repayment or lending.savings_deposit
+             * @example lending.loan_repayment
+             */
+            purpose: string;
+            /** @description Why this loan or account, for the checker */
+            reason: string;
+            /**
+             * Format: uuid
+             * @description The loan or the savings account
+             */
+            subject_id: string;
+        };
         ApplicantLinkRequest: {
             token: string;
         };
@@ -6567,6 +6752,8 @@ export interface components {
             branch_id?: string;
             can_cancel?: boolean;
             can_decide?: boolean;
+            /** @description A sentence the checker must read before deciding, when the request carries one (for example the credit balance an allocation creates); in the list and the detail */
+            checker_notice?: string;
             currency?: string;
             /** Format: date-time */
             decided_at?: string;
@@ -8672,6 +8859,148 @@ export interface components {
         PaymentMethodMappingList: {
             items?: components["schemas"]["PaymentMethodMapping"][];
         };
+        PaymentReconciliation: {
+            counts_by_kind?: {
+                [key: string]: number;
+            };
+            findings?: components["schemas"]["PaymentReconciliationFinding"][];
+            findings_truncated?: boolean;
+            run?: components["schemas"]["PaymentReconciliationRun"];
+        };
+        PaymentReconciliationFinding: {
+            /** Format: int64 */
+            bms_amount_minor?: number;
+            /** Format: uuid */
+            branch_id?: string;
+            confirmation_code?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            intent_id?: string;
+            /** @description What differs. completed_not_booked, pending_over_24h, paid_differs, reversed_awaiting_review, reversal_blocked, reversed_after_refund, manual_receipt_duplicate, in_provider_not_in_bms, in_bms_not_in_provider, amount_mismatch, currency_mismatch, ambiguous_statement_row */
+            kind?: string;
+            order_tracking_id?: string;
+            /**
+             * Format: uuid
+             * @description A receipt keyed by hand (manual_receipt_duplicate): its transaction
+             */
+            other_transaction_id?: string;
+            /** Format: int64 */
+            provider_amount_minor?: number;
+            /** Format: uuid */
+            statement_row_id?: string;
+        };
+        /** @description The latest run, or absent before the first */
+        PaymentReconciliationRun: {
+            /** Format: date-time */
+            created_at?: string;
+            /**
+             * Format: int32
+             * @description Differences; for a reader of some branches, those in their branches
+             */
+            finding_count?: number;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description Orders looked at; absent for a reader of some branches only
+             */
+            intents_examined?: number;
+            /** Format: date */
+            ran_on?: string;
+            /**
+             * Format: int32
+             * @description Statements looked at; absent for a reader of some branches only
+             */
+            statements_used?: number;
+            /** @enum {string} */
+            trigger?: "job" | "manual";
+            /** @description The run could not read everything: what it lists is partial, and it lists nothing that needs the whole */
+            truncated?: boolean;
+            /** Format: date */
+            window_from?: string;
+        };
+        PaymentStatement: {
+            /**
+             * Format: date
+             * @description The days the export is complete for, where a booked payment missing from it is reported; absent when it covers none
+             */
+            covered_from?: string;
+            /** Format: date */
+            covered_to?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            /**
+             * Format: int32
+             * @description Lines whose order is ours but whose amount, currency or paid state differs, or whose code names several orders
+             */
+            different_count?: number;
+            /**
+             * Format: int64
+             * @description The fees posted to the gateway charges account by this upload
+             */
+            fees_posted_minor?: number;
+            file_name?: string;
+            /** Format: uuid */
+            id?: string;
+            /**
+             * Format: int32
+             * @description Lines whose order is ours, paid, with the same amount and currency
+             */
+            matched_count?: number;
+            /** Format: date */
+            period_from?: string;
+            /** Format: date */
+            period_to?: string;
+            /** Format: int32 */
+            row_count?: number;
+            /**
+             * Format: int32
+             * @description Lines no order of ours has
+             */
+            unmatched_count?: number;
+            /** Format: uuid */
+            uploaded_by?: string;
+        };
+        PaymentStatementDetail: {
+            rows?: components["schemas"]["PaymentStatementRow"][];
+            /** @description True when more lines exist than are listed here (the first 1,000 are) */
+            rows_truncated?: boolean;
+            statement?: components["schemas"]["PaymentStatement"];
+        };
+        PaymentStatementList: {
+            items?: components["schemas"]["PaymentStatement"][];
+        };
+        PaymentStatementRow: {
+            /** Format: int64 */
+            amount_minor?: number;
+            confirmation_code?: string;
+            /** Format: int64 */
+            fee_minor?: number;
+            /**
+             * @description posted: this upload posted the fee; already_posted: an earlier statement did; none: no fee on the line; held: the line did not match cleanly, so no fee was posted
+             * @enum {string}
+             */
+            fee_status?: "posted" | "already_posted" | "none" | "held" | "awaiting_approval" | "not_approved";
+            /** Format: uuid */
+            intent_id?: string;
+            /** @enum {string} */
+            match_status?: "matched" | "amount_mismatch" | "currency_mismatch" | "not_paid_here" | "ambiguous" | "unmatched";
+            order_tracking_id?: string;
+            /** Format: date */
+            paid_on?: string;
+            payment_method?: string;
+            /** @description A person marked the line as money for something outside this system */
+            /** @description Marked as outside this system and waiting for a second person to confirm; still a finding */
+            outside_awaiting_confirmation?: boolean;
+            reviewed_outside?: boolean;
+            /** Format: int32 */
+            row_no?: number;
+            /** Format: int64 */
+            settled_minor?: number;
+        };
         PaymentsSettings: {
             collections_enabled?: boolean;
             /** Format: int64 */
@@ -8892,6 +9221,38 @@ export interface components {
         PushUnsubscribeRequest: {
             endpoint: string;
         };
+        /** @description The request waits for a checker as approval_request_id */
+        ReceiptActionOutcome: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: uuid */
+            receipt_id?: string;
+        };
+        ReceiptAllocation: {
+            purpose?: string;
+            /** Format: uuid */
+            subject_id?: string;
+            subject_type?: string;
+            /** Format: uuid */
+            transaction_id?: string;
+        };
+        /** @description What the payer meant to pay, as the order recorded it */
+        ReceiptIntendedSubject: {
+            purpose?: string;
+            /** Format: uuid */
+            subject_id?: string;
+            subject_type?: string;
+        };
+        /** @description Requests waiting for a checker (an open receipt) */
+        ReceiptPendingRequest: {
+            action_type?: string;
+            /** Format: uuid */
+            approval_request_id?: string;
+        };
+        ReceiptRefund: {
+            method_key?: string;
+            reference?: string;
+        };
         RecoveryCodes: {
             /** @description Shown once; each works once */
             recovery_codes?: string[];
@@ -8899,6 +9260,17 @@ export interface components {
         RecoveryCodesRequest: {
             /** @description A current TOTP code */
             code: string;
+        };
+        RefundReceiptRequest: {
+            /**
+             * @description How the money went or goes back: gateway (through the provider), cash, bank, mtn_momo or airtel_money
+             * @example bank
+             */
+            method_key: string;
+            /** @description Why it is returned, for the checker */
+            reason: string;
+            /** @description The lender's own reference for the refund (a bank or wallet reference), printable characters */
+            reference: string;
         };
         RelatedMember: {
             full_name?: string;
@@ -14993,6 +15365,12 @@ export interface components {
             /** @description Why the debt is written off; at least 5 characters, kept with the write-off and in the audit */
             reason: string;
         };
+        ReversalRequestOutcome: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: uuid */
+            intent_id?: string;
+        };
         Role: {
             key?: string;
             mfa_required?: boolean;
@@ -15684,6 +16062,9 @@ export interface components {
             /** @description The text as it was (or would be) sent, with the TEST prefix */
             text?: string;
         };
+        StatementLineOutsideRequest: {
+            note?: string;
+        };
         StoredDocument: {
             /** Format: uuid */
             branch_id?: string;
@@ -15956,6 +16337,53 @@ export interface components {
         UnlockSignInRequest: {
             /** @description Why; kept in the tenant's audit log */
             reason: string;
+        };
+        UnallocatedReceipt: {
+            allocation?: components["schemas"]["ReceiptAllocation"];
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description The provider's payment code, as shown on the provider's statement */
+            confirmation_code?: string;
+            /** Format: date-time */
+            created_at?: string;
+            currency?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** Format: uuid */
+            decided_by?: string;
+            /** Format: uuid */
+            id?: string;
+            intended_subject?: components["schemas"]["ReceiptIntendedSubject"];
+            /** @description Why it was allocated or refunded, as the maker wrote it */
+            note?: string;
+            /** @description Our reference for the order (BMS-...) */
+            order_reference?: string;
+            /** @description The provider's order tracking id */
+            order_tracking_id?: string;
+            /** Format: date-time */
+            paid_at?: string;
+            /** @description Requests waiting for a checker (an open receipt) */
+            pending_requests?: components["schemas"]["ReceiptPendingRequest"][];
+            refund?: components["schemas"]["ReceiptRefund"];
+            /** @description Why the loan or account did not take it, a closed word such as invalid_status_transition */
+            refusal_code?: string;
+            reported_method?: string;
+            /** Format: uuid */
+            requested_by?: string;
+            /** @enum {string} */
+            status?: "open" | "allocated" | "refunded" | "reversed";
+            /** Format: date */
+            value_date?: string;
+            /** Format: int32 */
+            version?: number;
+        };
+        UnallocatedReceiptPage: {
+            items?: components["schemas"]["UnallocatedReceipt"][];
+            next_cursor?: string;
         };
         /** @description Omitted fields are unchanged */
         UpdateAdvisorSettingsRequest: {
@@ -20090,6 +20518,28 @@ export interface operations {
             };
         };
     };
+    requestPaymentReversalAgain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                intent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReversalRequestOutcome"];
+                };
+            };
+        };
+    };
     getMerchantAccount: {
         parameters: {
             query?: never;
@@ -20178,6 +20628,46 @@ export interface operations {
             };
         };
     };
+    getPaymentReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliation"];
+                };
+            };
+        };
+    };
+    runPaymentReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliation"];
+                };
+            };
+        };
+    };
     getPaymentsSettings: {
         parameters: {
             query?: never;
@@ -20220,6 +20710,208 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentsSettings"];
+                };
+            };
+        };
+    };
+    listPaymentStatements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementList"];
+                };
+            };
+        };
+    };
+    uploadPaymentStatement: {
+        parameters: {
+            query?: {
+                covered_from?: string;
+                covered_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementDetail"];
+                };
+            };
+        };
+    };
+    getPaymentStatement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                statement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementDetail"];
+                };
+            };
+        };
+    };
+    markStatementLineOutsideSystem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                statement_id: string;
+                row_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatementLineOutsideRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentStatementRow"];
+                };
+            };
+        };
+    };
+    listUnallocatedReceipts: {
+        parameters: {
+            query?: {
+                status?: string;
+                branch_id?: string[];
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnallocatedReceiptPage"];
+                };
+            };
+        };
+    };
+    getUnallocatedReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                receipt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnallocatedReceipt"];
+                };
+            };
+        };
+    };
+    allocateUnallocatedReceipt: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                receipt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocateReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptActionOutcome"];
+                };
+            };
+        };
+    };
+    refundUnallocatedReceipt: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                receipt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefundReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptActionOutcome"];
                 };
             };
         };
