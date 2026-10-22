@@ -500,7 +500,8 @@ Partial unique `(tenant_id, lower(email)) WHERE email IS NOT NULL AND kind = 'st
 partial unique `(tenant_id, phone_e164) WHERE kind = 'member'`.
 `CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)`.
 `is_owner boolean NOT NULL DEFAULT false` (`V79`, ADR-062, FR-IAM-18): the Owner of the business. `contact_changed_at
-timestamptz` (`V79`): when the email or phone last changed; the Owner's own transfer waits 24 hours after it (or after
+timestamptz` (`V79`): when the email or phone last changed; `second_factor_changed_at timestamptz` (`V79`): when two-step
+sign-in was last set up or reset; the Owner's own transfer waits 24 hours after either (or after
 `user_credentials.password_changed_at`). Partial unique
 `users_one_owner (tenant_id) WHERE is_owner` (one Owner per business); `CHECK users_owner_is_staff (NOT is_owner OR (kind =
 'staff' AND status <> 'deactivated'))`; the trigger `users_owner_is_admin` refuses a user made the Owner without an active

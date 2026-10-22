@@ -152,22 +152,28 @@ class Owners {
 
     /**
      * The cooling period of the Owner's own transfer: refused with 422 {@code owner_recently_changed} while the Owner's email or
-     * phone ({@code users.contact_changed_at}) or password ({@code user_credentials.password_changed_at}) changed less than 24
-     * hours ago, so a stolen session that changes the Owner's email and resets the password cannot hand the business over at once.
+     * phone ({@code users.contact_changed_at}), two-step sign-in ({@code users.second_factor_changed_at}, set up or reset) or
+     * password ({@code user_credentials.password_changed_at}) changed less than 24 hours ago, so someone who took the Owner's
+     * session, or knows the password and had the second factor reset, cannot hand the business over at once.
      */
     void requireNoRecentChange(UUID ownerId) {
-        // The database clock on both sides: contact_changed_at and password_changed_at are written with now().
+        // Compared with the database clock. contact_changed_at and second_factor_changed_at are written with now();
+        // password_changed_at is written with the application clock (BusinessClock), which on a server is the same host
+        // time,
+        // so a day of difference is never in doubt.
         Timestamp allowedFrom =
                 jdbc.sql("""
-                        SELECT greatest(u.contact_changed_at, c.password_changed_at) + interval '24 hours'
+                        SELECT greatest(u.contact_changed_at, u.second_factor_changed_at, c.password_changed_at) + interval '24 hours'
                           FROM users u LEFT JOIN user_credentials c ON c.user_id = u.id
-                         WHERE u.id = ? AND greatest(u.contact_changed_at, c.password_changed_at) > now() - interval '24 hours'
+                         WHERE u.id = ?
+                           AND greatest(u.contact_changed_at, u.second_factor_changed_at, c.password_changed_at)
+                               > now() - interval '24 hours'
                         """).param(ownerId).query(Timestamp.class).optional().orElse(null);
         if (allowedFrom != null) {
             throw ApiException.rule(
                     "owner_recently_changed",
-                    "Your email, phone or password changed in the last 24 hours, so ownership can be handed over from "
-                            + allowedFrom.toInstant() + " on.");
+                    "Your email, phone, password or two-step sign-in changed in the last 24 hours, so ownership can be handed"
+                            + " over from " + allowedFrom.toInstant() + " on.");
         }
     }
 

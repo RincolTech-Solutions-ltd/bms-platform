@@ -295,6 +295,16 @@ class TenantOwnerIT extends IntegrationTest {
         UUID next = Api.staff(f, Api.email("next"), new Role("tenant_admin", null));
         makeOwner(f.tenantId(), first);
         Session s = on.signIn(first, email, Api.PASSWORD, null);
+        // Review round 2: setting up two-step sign-in starts the 24 hour wait, as a password change does.
+        Api.allowTotpReuse(first);
+        assertRefused(
+                on.post(
+                        "/api/v1/users/" + next + "/transfer-ownership",
+                        Map.of("totp_code", Api.totp(s.totpSecret(), Instant.now())),
+                        s.accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "owner_recently_changed");
+        backdate("users", "second_factor_changed_at", first, "25 hours");
         ResponseEntity<JsonNode> noCode = on.post(
                 "/api/v1/users/" + next + "/transfer-ownership", Map.of("password", Api.PASSWORD), s.accessToken());
         assertRefused(noCode, HttpStatus.UNPROCESSABLE_CONTENT, "totp_required");
@@ -800,5 +810,141 @@ class TenantOwnerIT extends IntegrationTest {
                         .param(owner)
                         .update())
                 .hasStackTraceContaining("user_role_assignments_owner_keeps_admin");
+    }
+
+    // ---- Review round 2 of #443
+    // -------------------------------------------------------------------------------------------
+
+    /** The operator's reset of the Owner's two-step sign-in starts the 24 hour wait too. */
+    @Test
+    void anOperatorResetOfTheOwnersTwoStepSignInCoolsTheTransfer() {
+        Api platform = Api.platform(http);
+        String operatorEmail = Api.email("operator");
+        UUID operatorId = Api.platformUser(operatorEmail);
+        Session operator = platform.signIn(operatorId, operatorEmail, Api.PASSWORD, null);
+        Api.allowTotpReuse(operatorId);
+        assertThat(platform.post(
+                                "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + owner + "/mfa/reset",
+                                Map.of(
+                                        "totp_code",
+                                        Api.totp(operator.totpSecret(), Instant.now()),
+                                        "reason",
+                                        "Test: the owner lost the phone"),
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NO_CONTENT);
+        // The reset ends the Owner's sessions; signing in again with the password alone is enough here.
+        String ownerEmail = TestDatabase.owner()
+                .sql("SELECT email FROM users WHERE id = ?")
+                .param(owner)
+                .query(String.class)
+                .single();
+        Session again = api.signIn(owner, ownerEmail, Api.PASSWORD, null);
+        assertRefused(
+                transfer(adminA, again, Api.PASSWORD), HttpStatus.UNPROCESSABLE_CONTENT, "owner_recently_changed");
+        backdate("users", "second_factor_changed_at", owner, "25 hours");
+        assertThat(transfer(adminA, again, Api.PASSWORD).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    /** An Owner with no email is told of a contact change by SMS on the old phone, where the business's SMS is on. */
+    @Test
+    void anOwnerWithNoEmailIsToldOnTheOldPhone() {
+        TestDatabase.Fixture f = TestDatabase.tenant("owner-sms", true);
+        Api on = Api.tenant(http, f.slug());
+        String email = Api.email("phone-owner");
+        UUID phoneOwner = Api.staff(f, email, new Role("tenant_admin", null));
+        makeOwner(f.tenantId(), phoneOwner);
+        Session s = on.signIn(phoneOwner, email, Api.PASSWORD, null);
+        TestDatabase.owner()
+                .sql("UPDATE users SET email = NULL, phone_e164 = '+256700000091' WHERE id = ?")
+                .param(phoneOwner)
+                .update();
+        com.rincoltech.bms.testsupport.SmsTenants.operator(f.tenantId(), true, 100);
+        com.rincoltech.bms.testsupport.SmsTenants.enable(f.tenantId());
+        String etag = on.get("/api/v1/users/" + phoneOwner, s.accessToken())
+                .getHeaders()
+                .getETag();
+        ResponseEntity<JsonNode> changed = on.call(
+                HttpMethod.PATCH,
+                "/api/v1/users/" + phoneOwner,
+                Map.of("phone", "0700000092", "password", Api.PASSWORD),
+                s.accessToken(),
+                Map.of("If-Match", etag));
+        assertThat(changed.getStatusCode()).as("%s", changed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                                SELECT count(*) FROM notification_outbox
+                                 WHERE template_key = 'identity.contact_changed' AND channel = 'sms' AND recipient = ?
+                                """)
+                        .param("+256700000091")
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+    }
+
+    /** The shared lock: the Owner's deactivation of an administrator racing the operator making that administrator the Owner. */
+    @Test
+    void theOwnersDeactivationRacingTheOperatorsRescueNeverLeavesADeactivatedOwner() throws Exception {
+        Api platform = Api.platform(http);
+        String operatorEmail = Api.email("operator");
+        UUID operatorId = Api.platformUser(operatorEmail);
+        Session operator = platform.signIn(operatorId, operatorEmail, Api.PASSWORD, null);
+        Api.allowTotpReuse(operatorId);
+        Map<String, String> body = Map.of(
+                "totp_code",
+                Api.totp(operator.totpSecret(), Instant.now()),
+                "reason",
+                "Test: the owner turned hostile");
+        List<ResponseEntity<JsonNode>> r = together(
+                () -> api.post("/api/v1/users/" + adminB + "/deactivate", null, ownerSession.accessToken()),
+                () -> platform.post(
+                        "/api/v1/platform/tenants/" + t.tenantId() + "/users/" + adminB + "/make-owner",
+                        body,
+                        operator.accessToken()));
+        assertThat(List.of(code(r.get(0)), code(r.get(1))))
+                .isIn(List.of("ok", "owner_must_be_active_admin"), List.of("owner_protected", "ok"));
+        assertOneActiveAdminOwner(t.tenantId());
+    }
+
+    /** The original finding: two invited administrators join a business with no Owner at once; one Owner, no 500. */
+    @Test
+    void twoAdministratorsJoiningABusinessWithNoOwnerAtOnceMakeOneOwner() throws Exception {
+        TestDatabase.Fixture f = TestDatabase.tenant("owner-join", true);
+        Api on = Api.tenant(http, f.slug());
+        String email = Api.email("leaving");
+        UUID leaving = Api.staff(f, email, new Role("tenant_admin", null));
+        Session s = on.signIn(leaving, email, Api.PASSWORD, null);
+        List<String> tokens = new java.util.ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            ResponseEntity<JsonNode> invited = on.post(
+                    "/api/v1/users",
+                    Map.of(
+                            "full_name",
+                            "Test Joiner " + i,
+                            "email",
+                            Api.email("joiner"),
+                            "roles",
+                            List.of(role("tenant_admin", null))),
+                    s.accessToken());
+            assertThat(invited.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            String url = invited.getBody().get("invitation").get("url").asString();
+            tokens.add(url.substring(url.indexOf("#token=") + 7));
+        }
+        TestDatabase.owner()
+                .sql("UPDATE users SET status = 'deactivated' WHERE id = ?")
+                .param(leaving)
+                .update();
+        List<ResponseEntity<JsonNode>> r = together(
+                () -> on.post(
+                        "/api/v1/auth/staff/invitations/accept",
+                        Map.of("token", tokens.get(0), "password", Api.PASSWORD),
+                        null),
+                () -> on.post(
+                        "/api/v1/auth/staff/invitations/accept",
+                        Map.of("token", tokens.get(1), "password", Api.PASSWORD),
+                        null));
+        // Both join (the second simply joins as an administrator); never a 500.
+        assertThat(r).allSatisfy(x -> assertThat(x.getStatusCode()).isEqualTo(HttpStatus.OK));
+        assertOneActiveAdminOwner(f.tenantId());
     }
 }

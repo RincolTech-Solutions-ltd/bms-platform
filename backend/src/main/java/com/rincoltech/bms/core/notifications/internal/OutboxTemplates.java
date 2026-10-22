@@ -436,6 +436,13 @@ class OutboxTemplates {
      * carry a balance; the channel drops the balance parameter again when the setting is off.
      */
     private static final Map<String, Template> SMS = Map.ofEntries(
+            // To the Owner's old phone when an Owner with no email changes their email or phone (ADR-062). No link.
+            Map.entry(
+                    "identity.contact_changed",
+                    new Template(
+                            null,
+                            "{tenant_name}: the phone or email of the BMS owner sign-in was changed. Not you? Call Rincol Tech"
+                                    + " support at once.")),
             Map.entry(
                     "savings.deposit",
                     new Template(

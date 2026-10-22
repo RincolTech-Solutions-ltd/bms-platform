@@ -39,7 +39,8 @@ day to day.
    `owner_must_transfer_first`) or deactivate themselves (`cannot_deactivate_self`, as before). Lifting a sign-in lock stays open to
    every administrator: it gives nobody a credential (ADR-059). The Owner's own email or phone change needs the same step-up as
    the transfer (the authenticator code, else the Owner's password; 422 `password_required`, `totp_required`), and the old email
-   address is told of it (`identity.contact_changed`), because the Owner's mailbox is where a reset link goes.
+   address is told of it (`identity.contact_changed`), because the Owner's mailbox is where a reset link goes; an Owner with no
+   email is told by SMS on the old phone, which is sent only where the business's SMS is switched on (ADR-036).
 4. **The Owner hands ownership on.** `POST /users/{user_id}/transfer-ownership` makes another **active administrator** of the same
    business the Owner; the old Owner stays an administrator. The target is checked first, read-only (403 `owner_only`, 409
    `no_owner`, 422 `already_owner`, 422 `owner_must_be_active_admin`, 404 for a user of another business), then the Owner proves it
@@ -47,7 +48,8 @@ day to day.
    (counted on the sign-in lock). The transfer then runs under a per-business advisory lock, checks everything again, clears the
    old flag and sets the new one, and is audited as `core.user.ownership_transferred` with an optional reason.
    **Cooling period:** the Owner's own transfer is refused for 24 hours after the Owner's email, phone
-   (`users.contact_changed_at`, V79) or password (`user_credentials.password_changed_at`) last changed (422
+   (`users.contact_changed_at`, V79), two-step sign-in (set up or reset, by anyone, `users.second_factor_changed_at`, V79) or
+   password (`user_credentials.password_changed_at`) last changed (422
    `owner_recently_changed`, with the time it is allowed again). Someone who finds the Owner signed in on a shared phone could
    otherwise change the email, use Forgot password and hand the business to themselves in one sitting; the day gives the real
    Owner, told at the old address, time to call the operator. The operator's rescue (decision 5) has no cooling period.
@@ -73,7 +75,7 @@ day to day.
 8. **A business with no Owner keeps the rules of before.** Until an Owner is assigned, the owner-only rules are skipped with a warning
    in the server log, so nothing that worked yesterday stops working for such a business; the transfer answers 409 `no_owner`.
 9. **Locking.** One advisory lock per business: making or moving the Owner (a transfer, the first Owner at creation, an
-   invitation acceptance that may make the joiner the first Owner) takes it exclusively, and every staff change that applies an
+   invitation acceptance that may make the joiner the first Owner, after its token was checked without the lock) takes it exclusively, and every staff change that applies an
    owner rule takes it shared, first in its transaction before any row lock. So two transfers, a transfer and the operator's
    rescue, or two first administrators joining at once end with exactly one Owner, and an act an Owner started cannot commit
    after that person stopped being the Owner. A unique-index violation that still reaches the code is a 409 `owner_changed`, not

@@ -431,8 +431,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   rules. Only the Owner invites or promotes an administrator and changes, deactivates, resets the second factor of or re-invites
   another administrator (403 `owner_only`); nobody inside the business does any of it to the Owner (403 `owner_protected`), and the
   Owner cannot drop their own administrator role (422 `owner_must_transfer_first`). `POST /users/{user_id}/transfer-ownership`
-  (the Owner's code, else password, an optional reason; refused for 24 hours after the Owner's email, phone or password changed,
-  `users.contact_changed_at`) and `POST /platform/tenants/{tenant_id}/users/{user_id}/make-owner` (the operator's code and a
+  (the Owner's code, else password, an optional reason; refused for 24 hours after the Owner's email, phone, password or two-step sign-in changed,
+  `users.contact_changed_at`, `users.second_factor_changed_at`) and `POST /platform/tenants/{tenant_id}/users/{user_id}/make-owner` (the operator's code and a
   reason) hand ownership to an active administrator only, audited on both sides for the operator; the Owner's own email or phone
   change needs the same step-up and tells the old address (`identity.contact_changed`); `POST
   /platform/tenants/{tenant_id}/users/{user_id}/invitation` (code and reason) sends a new link to an invited Owner who never joined.

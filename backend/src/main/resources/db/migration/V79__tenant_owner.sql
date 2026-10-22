@@ -27,9 +27,10 @@
 -- of before this change) until a platform operator assigns an Owner. Each assignment writes a system audit row in the
 -- tenant's log and a row in the platform log.
 --
--- users.contact_changed_at: when the user's email or phone last changed, set by the application. The Owner's own transfer is
--- refused for 24 hours after the Owner's contact or password changed (ADR-062 decision 4), so a stolen session that changes the
--- Owner's email and resets the password cannot hand the business over at once.
+-- users.contact_changed_at: when the user's email or phone last changed; users.second_factor_changed_at: when two-step sign-in
+-- was last set up or reset. Both set by the application. The Owner's own transfer is refused for 24 hours after the Owner's
+-- contact, password or second factor changed (ADR-062 decision 4), so a stolen session, or a password with a second factor reset
+-- or enrolled by someone else, cannot hand the business over at once.
 --
 -- Locking: ADD COLUMN takes ACCESS EXCLUSIVE on users and holds it until the migration commits; with a constant default (or
 -- none) it rewrites nothing, and the check, its validation and the index then run on the small table under that same lock.
@@ -40,6 +41,7 @@ SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE users ADD COLUMN is_owner boolean NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN contact_changed_at timestamptz;
+ALTER TABLE users ADD COLUMN second_factor_changed_at timestamptz;
 ALTER TABLE users ADD CONSTRAINT users_owner_is_staff
     CHECK (NOT is_owner OR (kind = 'staff' AND status <> 'deactivated'));
 CREATE UNIQUE INDEX users_one_owner ON users (tenant_id) WHERE is_owner;

@@ -178,7 +178,10 @@ class UserService implements TenantAdmins {
      */
     @Transactional(noRollbackFor = ApiException.class)
     UUID acceptInvitation(String token, String password, String passwordHash) {
-        // Before any row lock: the acceptance may make the joining administrator the first Owner (ADR-062).
+        // The token is checked without a lock first, so a stranger's wrong tokens never queue the business's staff
+        // changes;
+        // then, before any row lock, the owner lock: the acceptance may make the joining administrator the first Owner.
+        pendingInvitation(token, false);
         owners.lockExclusive();
         Instant now = clock.now();
         PendingInvitation invitation = pendingInvitation(token, true);
@@ -425,6 +428,19 @@ class UserService implements TenantAdmins {
                                          contact_changed_at = CASE WHEN ? THEN now() ELSE contact_changed_at END
                          WHERE id = ?
                         """).params(fullName, email, phone, contactChanged, userId).update();
+        if (contactChanged && before.isOwner() && before.email() == null && before.phoneE164() != null) {
+            // An Owner with no email hears of it by SMS on the old phone, where the business's SMS is on (ADR-036,
+            // ADR-062).
+            Instant now = clock.now();
+            outbox.enqueue(new Outbox.Message(
+                    Outbox.SMS,
+                    before.phoneE164(),
+                    CONTACT_CHANGED_TEMPLATE,
+                    Map.of("tenant_name", tenant.profile().name()),
+                    CONTACT_CHANGED_TEMPLATE + ":sms:" + userId + ":" + before.version(),
+                    "contact-changed:" + userId,
+                    now.plus(Duration.ofHours(1))));
+        }
         if (contactChanged && before.isOwner() && before.email() != null) {
             // The old mailbox hears of it, so an Owner whose session was used by someone else finds out (ADR-062).
             Instant now = clock.now();
