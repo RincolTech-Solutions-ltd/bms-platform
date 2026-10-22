@@ -115,8 +115,14 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
 12. **A suspended or cancelled business is named so, and a suspended or cancelled referrer's lines are flagged.** The status of
     a referred business shown to its referrer's owner and administrators and to the operator is also `suspended` or
     `cancelled`, from the referred business's subscription (or `suspended` for a suspended business). A referrer business that
-    is suspended or cancelled still has its lines worked out, but each such line carries `referrer_inactive`, so the operator
-    decides before paying it.
+    is suspended or cancelled still has its lines worked out, and the line keeps that fact (`inactive_when_worked_out`). The
+    referrer's status is also worked out at every read (`bms_referrer_status`, from the business and its latest subscription):
+    the operator's list carries `referrer_status`, and every line, including one earned while the referrer was active and a
+    typed `manual` line, carries the referrer's status now and `referrer_inactive` from it. Marking a line paid while the
+    referrer is suspended or cancelled is refused with 409 `referrer_inactive` unless the request confirms it
+    (`confirm_referrer_inactive`), and a confirmed payment is audited with `confirmed_referrer_inactive`. (The review of
+    22 Oct 2026, FAIL, replaced a flag set only when a payment line was worked out, which left the common case, a referrer
+    that stops while commission is still due, paid with no warning.)
 13. **A returning applicant's code goes on the open application.** When someone with an open application signs up again (the
     same mailbox) and brings a code, the code is attached to that application if it has no referrer yet and is still
     `submitted`; a code never replaces an earlier one, and an application already in review keeps what it has

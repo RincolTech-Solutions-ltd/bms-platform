@@ -392,6 +392,21 @@ LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION bms_referral_status(timestamptz, uuid) FROM PUBLIC;
 
+-- The referrer business as it is now (ADR-069 decision 12): suspended (the business, or its latest subscription), cancelled
+-- (its latest subscription), or active. Worked out at every read, so a line earned while the referrer was active is flagged as
+-- soon as the referrer stops.
+CREATE FUNCTION bms_referrer_status(p_referrer uuid) RETURNS text
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+    SELECT CASE WHEN t.status = 'suspended' THEN 'suspended'
+                WHEN s.status IN ('suspended', 'cancelled') THEN s.status
+                ELSE 'active' END
+      FROM tenants t
+      LEFT JOIN LATERAL (SELECT x.status FROM subscriptions x WHERE x.tenant_id = t.id
+                          ORDER BY x.created_at DESC LIMIT 1) s ON true
+     WHERE t.id = p_referrer
+$$;
+REVOKE ALL ON FUNCTION bms_referrer_status(uuid) FROM PUBLIC;
+
 CREATE FUNCTION bms_referral_totals(p_referral_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
     SELECT coalesce(jsonb_agg(jsonb_build_object(
@@ -410,8 +425,8 @@ CREATE FUNCTION platform_referrals_list(
     p_referrer uuid, p_referred uuid, p_status text, p_commission text, p_referral_id uuid, p_limit integer,
     p_offset integer)
 RETURNS TABLE (
-    referral_id uuid, application_id uuid, referrer_tenant_id uuid, referrer_slug text, referrer_name text, code text,
-    referred_tenant_id uuid, referred_slug text, referred_name text, status text, source text, joined_at timestamptz,
+    referral_id uuid, application_id uuid, referrer_tenant_id uuid, referrer_slug text, referrer_name text,
+    referrer_status text, code text, referred_tenant_id uuid, referred_slug text, referred_name text, status text, source text, joined_at timestamptz,
     started_at timestamptz, ended_at timestamptz, rule_id uuid, totals jsonb)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
@@ -422,7 +437,7 @@ BEGIN
     RETURN QUERY
     WITH refs AS (
         SELECT r.id AS referral_id, r.application_id, r.tenant_id AS referrer_tenant_id, rt.slug::text AS referrer_slug,
-               rt.name AS referrer_name, r.code::text AS code, r.referred_tenant_id, dt.slug::text AS referred_slug,
+               rt.name AS referrer_name, bms_referrer_status(r.tenant_id) AS referrer_status, r.code::text AS code, r.referred_tenant_id, dt.slug::text AS referred_slug,
                dt.name AS referred_name,
                bms_referral_status(r.ended_at, r.referred_tenant_id) AS status,
                r.source, dt.created_at AS joined_at, r.started_at, r.ended_at, r.rule_id,
@@ -432,7 +447,8 @@ BEGIN
           JOIN tenants dt ON dt.id = r.referred_tenant_id
          WHERE (p_referral_id IS NULL OR r.id = p_referral_id) AND (p_referred IS NULL OR r.referred_tenant_id = p_referred)
         UNION ALL
-        SELECT NULL, a.id, a.referrer_tenant_id, rt.slug::text, rt.name, a.referral_code::text, NULL, NULL,
+        SELECT NULL, a.id, a.referrer_tenant_id, rt.slug::text, rt.name, bms_referrer_status(a.referrer_tenant_id),
+               a.referral_code::text, NULL, NULL,
                a.business_name::text, 'applied', 'sign_up', a.created_at, a.created_at, NULL, NULL, '[]'::jsonb
           FROM onboarding_applications a
           JOIN tenants rt ON rt.id = a.referrer_tenant_id
@@ -472,11 +488,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
      ORDER BY x.sort_at DESC, x.referral_id
 $$;
 
--- The lines of one referral, oldest first, for the operator. The payment's amount is added to the snapshot here: the row the
+-- The lines of one referral, oldest first, for the operator, each with the referrer's status now and referrer_inactive from
+-- it (ADR-069 decision 12); inactive_when_worked_out is the flag kept on the line. The payment's amount is added to the snapshot here: the row the
 -- referrer can read never carries the referred business's payment.
 CREATE FUNCTION platform_referral_lines(p_referral_id uuid) RETURNS TABLE (
     id uuid, kind text, payment_id uuid, reverses_line_id uuid, reversed_by_line_id uuid, amount_minor bigint,
-    currency text, months_counted integer, rule_snapshot jsonb, referrer_inactive boolean, note text, paid_on date,
+    currency text, months_counted integer, rule_snapshot jsonb, referrer_status text, referrer_inactive boolean,
+    inactive_when_worked_out boolean, note text, paid_on date,
     paid_method text, paid_reference text, paid_note text, paid_at timestamptz, paid_by_name text, created_by_name text,
     created_at timestamptz)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -491,9 +509,10 @@ BEGIN
            l.amount_minor, l.currency::text, l.months_counted,
            CASE WHEN sp.id IS NULL THEN l.rule_snapshot
                 ELSE l.rule_snapshot || jsonb_build_object('payment_amount_minor', sp.amount_minor) END,
-           l.referrer_inactive, l.note::text, l.paid_on, l.paid_method, l.paid_reference::text, l.paid_note::text, l.paid_at,
+           rs.status, rs.status <> 'active', l.referrer_inactive, l.note::text, l.paid_on, l.paid_method, l.paid_reference::text, l.paid_note::text, l.paid_at,
            pu.full_name, cu.full_name, l.created_at
       FROM referral_commission_lines l
+      CROSS JOIN LATERAL (SELECT bms_referrer_status(l.tenant_id) AS status) rs
       LEFT JOIN subscription_payments sp ON sp.id = l.payment_id
       LEFT JOIN platform_users pu ON pu.id = l.paid_by_platform_user_id
       LEFT JOIN platform_users cu ON cu.id = l.created_by_platform_user_id
@@ -658,7 +677,8 @@ $$;
 --    whose outcome was currency_differs and the payments recorded as refunded are left out (each outcome is kept in
 --    referral_payment_outcomes). Recording a payment locks the business's subscription first (V75), so two payments recorded
 --    at once are counted one after the other and never both as the first. Amounts are whole minor units, rounded half up. A line
---    worked out while the referrer business is suspended or cancelled is flagged referrer_inactive. Outcomes: added,
+--    worked out while the referrer business is suspended or cancelled keeps referrer_inactive; the reads and marking paid look
+--    at the referrer's status now (bms_referrer_status). Outcomes: added,
 --    no_referral, no_rule, not_first_payment, months_used, currency_differs, cap_reached, zero.
 -- ---------------------------------------------------------------------------------------------
 
@@ -759,9 +779,7 @@ BEGIN
         RETURN NEXT;
         RETURN;
     END IF;
-    v_inactive := EXISTS (SELECT 1 FROM tenants t WHERE t.id = v_ref.tenant_id AND t.status = 'suspended')
-               OR EXISTS (SELECT 1 FROM subscriptions s
-                           WHERE s.tenant_id = v_ref.tenant_id AND s.status IN ('suspended', 'cancelled'));
+    v_inactive := bms_referrer_status(v_ref.tenant_id) <> 'active';
     line_id := gen_random_uuid();
     -- The snapshot is on a row the referrer reads: it names the rule, never the referred business's payment amount.
     INSERT INTO referral_commission_lines (id, tenant_id, referral_id, kind, payment_id, amount_minor, currency,
@@ -846,10 +864,11 @@ END
 $$;
 
 -- Marks one line paid (the app records it; the money moves outside it). Returns 'not_found', 'already_paid', 'reversed' (an
--- unpaid line that was reversed is never paid, ADR-069 decision 11), or the referral id as text.
+-- unpaid line that was reversed is never paid, ADR-069 decision 11), 'referrer_inactive' (the referrer is suspended or
+-- cancelled now and p_confirm_inactive is false, decision 12), or the referral id as text.
 CREATE FUNCTION platform_referral_mark_paid(
-    p_line_id uuid, p_paid_on date, p_method text, p_reference text, p_note text, p_platform_user_id uuid,
-    p_now timestamptz)
+    p_line_id uuid, p_paid_on date, p_method text, p_reference text, p_note text, p_confirm_inactive boolean,
+    p_platform_user_id uuid, p_now timestamptz)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -867,6 +886,9 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM referral_commission_lines WHERE reverses_line_id = p_line_id) THEN
         RETURN 'reversed';
+    END IF;
+    IF NOT p_confirm_inactive AND bms_referrer_status(v_line.tenant_id) <> 'active' THEN
+        RETURN 'referrer_inactive';
     END IF;
     UPDATE referral_commission_lines
        SET paid_on = p_paid_on, paid_method = p_method, paid_reference = p_reference, paid_note = p_note, paid_at = p_now,
@@ -898,7 +920,7 @@ REVOKE ALL ON FUNCTION platform_referral_set_rule(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_commission_for_payment(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, text, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, uuid, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, boolean, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_of_line(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION referral_code_tenant(text) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_set_referrer(uuid, uuid, text) TO bms_app;
@@ -916,7 +938,7 @@ GRANT EXECUTE ON FUNCTION platform_referral_set_rule(uuid, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_commission_for_payment(uuid, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, text, text, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) TO bms_app;
-GRANT EXECUTE ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, uuid, timestamptz) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, boolean, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_of_line(uuid) TO bms_app;
 
 -- ---------------------------------------------------------------------------------------------

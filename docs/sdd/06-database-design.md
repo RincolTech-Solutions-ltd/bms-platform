@@ -653,7 +653,9 @@ index), `reverses_line_id uuid UNIQUE` (FK `(tenant_id, reverses_line_id)`; a li
 zero, at most 1,000,000,000 either way; negative only for a reversal), `currency char(3)`, `months_counted integer`, `rule_snapshot
 jsonb` (the rule, the payment's months and the months already used; required for `payment`; never the payment's amount, which the
 referrer could read: `platform_referral_lines` adds it for the operator only), `referrer_inactive boolean NOT NULL DEFAULT false`
-(the referrer business was suspended or cancelled when the line was worked out, ADR-069 decision 12), `note varchar(500)` (the reason of a `manual` or
+(the referrer business was suspended or cancelled when the line was worked out, ADR-069 decision 12; the reads return it as
+`inactive_when_worked_out` and work out `referrer_status` and `referrer_inactive` now with `bms_referrer_status`, and
+`platform_referral_mark_paid` refuses an unconfirmed paid mark while the referrer is suspended or cancelled), `note varchar(500)` (the reason of a `manual` or
 `reversal` line), `paid_on date`, `paid_method text` [`mtn_momo`, `airtel_money`, `bank_transfer`, `cash`, `other`],
 `paid_reference varchar(100)`, `paid_note varchar(500)`, `paid_at`, `paid_by_platform_user_id`, `created_by_platform_user_id`,
 `created_at`. `UNIQUE (tenant_id, id)`. A trigger refuses a delete and any update except setting the paid columns once. Written only by

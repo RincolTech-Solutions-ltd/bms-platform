@@ -6632,6 +6632,10 @@
           "referrer_slug" : {
             "type" : "string"
           },
+          "referrer_status" : {
+            "description" : "The referrer business now: active, suspended or cancelled",
+            "type" : "string"
+          },
           "referrer_tenant_id" : {
             "format" : "uuid",
             "type" : "string"
@@ -7038,6 +7042,10 @@
             "format" : "uuid",
             "type" : "string"
           },
+          "inactive_when_worked_out" : {
+            "description" : "The referrer business was suspended or cancelled when the line was worked out",
+            "type" : "boolean"
+          },
           "kind" : {
             "description" : "payment (worked out from a rule), manual (typed) or reversal",
             "type" : "string"
@@ -7074,8 +7082,12 @@
             "type" : "string"
           },
           "referrer_inactive" : {
-            "description" : "The referrer business was suspended or cancelled when the line was worked out: decide before paying it",
+            "description" : "The referrer business is suspended or cancelled now: marking the line paid needs confirm_referrer_inactive",
             "type" : "boolean"
+          },
+          "referrer_status" : {
+            "description" : "The referrer business now: active, suspended or cancelled",
+            "type" : "string"
           },
           "reversed_by_line_id" : {
             "format" : "uuid",
@@ -7148,6 +7160,10 @@
       "ReferralLinePaidRequest" : {
         "description" : "The commission was paid outside the app; this records it",
         "properties" : {
+          "confirm_referrer_inactive" : {
+            "description" : "True to pay a line although the referrer business is suspended or cancelled now; without it that is 409 referrer_inactive",
+            "type" : "boolean"
+          },
           "method" : {
             "minLength" : 1,
             "pattern" : "mtn_momo|airtel_money|bank_transfer|cash|other",
@@ -29411,7 +29427,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed",
+        "summary" : "Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive unless confirm_referrer_inactive",
         "tags" : [ "platform" ]
       }
     },

@@ -2904,7 +2904,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed */
+        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive unless confirm_referrer_inactive */
         post: operations["platformMarkReferralCommissionPaid"];
         delete?: never;
         options?: never;
@@ -9626,6 +9626,8 @@ export interface components {
             referred_tenant_id?: string;
             referrer_name?: string;
             referrer_slug?: string;
+            /** @description The referrer business now: active, suspended or cancelled */
+            referrer_status?: string;
             /** Format: uuid */
             referrer_tenant_id?: string;
             /** @description True when the operator set a rule for this referral */
@@ -9800,6 +9802,8 @@ export interface components {
             currency?: string;
             /** Format: uuid */
             id?: string;
+            /** @description The referrer business was suspended or cancelled when the line was worked out */
+            inactive_when_worked_out?: boolean;
             /** @description payment (worked out from a rule), manual (typed) or reversal */
             kind?: string;
             /** Format: int32 */
@@ -9815,8 +9819,10 @@ export interface components {
             paid_reference?: string;
             /** Format: uuid */
             payment_id?: string;
-            /** @description The referrer business was suspended or cancelled when the line was worked out: decide before paying it */
+            /** @description The referrer business is suspended or cancelled now: marking the line paid needs confirm_referrer_inactive */
             referrer_inactive?: boolean;
+            /** @description The referrer business now: active, suspended or cancelled */
+            referrer_status?: string;
             /** Format: uuid */
             reversed_by_line_id?: string;
             /** Format: uuid */
@@ -9862,6 +9868,8 @@ export interface components {
         };
         /** @description The commission was paid outside the app; this records it */
         ReferralLinePaidRequest: {
+            /** @description True to pay a line although the referrer business is suspended or cancelled now; without it that is 409 referrer_inactive */
+            confirm_referrer_inactive?: boolean;
             method: string;
             note?: string;
             /** Format: date */

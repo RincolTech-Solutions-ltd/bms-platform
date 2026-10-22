@@ -1373,7 +1373,9 @@ class ReferralsIT extends IntegrationTest {
 
     /**
      * A referred business whose subscription is suspended or cancelled shows so to the owner and the operator; a line worked out
-     * while the referrer business is suspended or cancelled is still added, flagged referrer_inactive (decision 12).
+     * while the referrer business is suspended or cancelled is still added and keeps that flag; and every line of a referrer
+     * that is suspended or cancelled now, including one earned while it was active, shows flagged at read time and is not
+     * marked paid unless the operator confirms it (decision 12).
      */
     @Test
     void suspendedAndCancelledBusinessesAreShownAndFlagged() {
@@ -1387,8 +1389,41 @@ class ReferralsIT extends IntegrationTest {
         pay(x.id(), 10000, 1);
         JsonNode lines = detail(rx).get("lines");
         assertThat(amounts(detail(rx))).containsExactly(1000L, 1000L);
-        assertThat(lines.get(0).get("referrer_inactive").asBoolean()).isFalse();
-        assertThat(lines.get(1).get("referrer_inactive").asBoolean()).isTrue();
+        assertThat(lines.get(0).get("inactive_when_worked_out").asBoolean()).isFalse();
+        assertThat(lines.get(1).get("inactive_when_worked_out").asBoolean()).isTrue();
+        assertThat(lines.get(0).get("referrer_inactive").asBoolean()).isTrue();
+        assertThat(lines.get(0).get("referrer_status").asString()).isEqualTo("cancelled");
+        assertThat(detail(rx).get("referral").get("referrer_status").asString()).isEqualTo("cancelled");
+
+        UUID earnedWhileActive = UUID.fromString(lines.get(0).get("id").asString());
+        Map<String, Object> paid = new LinkedHashMap<>();
+        paid.put("paid_on", LocalDate.now(KAMPALA).toString());
+        paid.put("method", "cash");
+        paid.put("reason", "Test: handed over");
+        long paidBefore = audits("platform.referral.commission_paid");
+        ResponseEntity<JsonNode> refused = platform.post(
+                "/api/v1/platform/referrals/commissions/" + earnedWhileActive + "/paid", paid, operator.accessToken());
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("referrer_inactive");
+        assertThat(detail(rx).get("lines").get(0).get("paid_on").isNull()).isTrue();
+        assertThat(audits("platform.referral.commission_paid")).isEqualTo(paidBefore);
+        paid.put("confirm_referrer_inactive", true);
+        ResponseEntity<JsonNode> confirmed = platform.post(
+                "/api/v1/platform/referrals/commissions/" + earnedWhileActive + "/paid", paid, operator.accessToken());
+        assertThat(confirmed.getStatusCode()).as("%s", confirmed.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(confirmed.getBody().get("lines").get(0).get("paid_on").isNull())
+                .isFalse();
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM platform_audit_log WHERE action = 'platform.referral.commission_paid'"
+                                        + " AND data ->> 'line_id' = ? AND (data ->> 'confirmed_referrer_inactive')::boolean")
+                        .param(earnedWhileActive.toString())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        subscription(referrer.id(), "active");
+        assertThat(detail(rx).get("lines").get(1).get("referrer_inactive").asBoolean())
+                .isFalse();
 
         TestDatabase.Fixture a = TestDatabase.tenant("refstatus", false);
         Business y = business("ref-status-y");

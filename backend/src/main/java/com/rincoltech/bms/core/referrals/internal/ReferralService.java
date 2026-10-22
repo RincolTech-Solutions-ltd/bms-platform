@@ -506,13 +506,14 @@ class ReferralService implements Referrals {
             throw ApiException.validation(List.of(new FieldProblem(
                     "paid_on", "out_of_range", "Give the day it was paid: from 1 Jan 2026 to today.")));
         }
-        String result = jdbc.sql("SELECT platform_referral_mark_paid(?, ?, ?, ?, ?, ?, ?)")
+        String result = jdbc.sql("SELECT platform_referral_mark_paid(?, ?, ?, ?, ?, ?, ?, ?)")
                 .params(
                         lineId,
                         payout.paidOn(),
                         payout.method(),
                         blankToNull(payout.reference()),
                         blankToNull(payout.note()),
+                        payout.confirmReferrerInactive(),
                         operatorId,
                         Timestamp.from(clock.now()))
                 .query(String.class)
@@ -534,6 +535,15 @@ class ReferralService implements Referrals {
                     "Reversed",
                     "This line was reversed, so nothing is owed on it. It cannot be marked paid.");
         }
+        if ("referrer_inactive".equals(result)) {
+            // ADR-069 decision 12: the referrer stopped, so the operator decides and says so before paying.
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "referrer_inactive",
+                    "Referrer suspended or cancelled",
+                    "The business that earned this line is suspended or cancelled now. Confirm that it is still to be"
+                            + " paid, or leave it unpaid.");
+        }
         UUID referralId = UUID.fromString(result);
         ReferralDetail detail = detail(referralId);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -542,6 +552,9 @@ class ReferralService implements Referrals {
         data.put("paid_on", payout.paidOn().toString());
         data.put("method", payout.method());
         data.put("reason", payout.reason().trim());
+        if (payout.confirmReferrerInactive()) {
+            data.put("confirmed_referrer_inactive", true);
+        }
         audit.record(
                 "platform.referral.commission_paid",
                 operatorId,
@@ -735,6 +748,7 @@ class ReferralService implements Referrals {
                 rs.getObject("referrer_tenant_id", UUID.class),
                 rs.getString("referrer_slug"),
                 rs.getString("referrer_name"),
+                rs.getString("referrer_status"),
                 rs.getString("code"),
                 rs.getObject("referred_tenant_id", UUID.class),
                 rs.getString("referred_slug"),
@@ -760,7 +774,9 @@ class ReferralService implements Referrals {
                 rs.getString("currency"),
                 rs.getObject("months_counted", Integer.class),
                 snapshot == null ? null : JSON.readValue(snapshot, OBJECT),
+                rs.getString("referrer_status"),
                 rs.getBoolean("referrer_inactive"),
+                rs.getBoolean("inactive_when_worked_out"),
                 rs.getString("note"),
                 rs.getObject("paid_on", LocalDate.class),
                 rs.getString("paid_method"),

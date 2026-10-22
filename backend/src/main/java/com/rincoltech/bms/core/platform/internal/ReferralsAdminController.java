@@ -151,7 +151,13 @@ class ReferralsAdminController {
 
             @Size(max = 100) String reference,
             @Size(max = 500) String note,
-            @NotBlank @Size(min = 5, max = 300) String reason) {}
+            @NotBlank @Size(min = 5, max = 300) String reason,
+
+            @Schema(
+                    description =
+                            "True to pay a line although the referrer business is suspended or cancelled now; without"
+                                    + " it that is 409 referrer_inactive")
+            Boolean confirmReferrerInactive) {}
 
     @GetMapping("/referrals")
     @RequiresPermission("platform.tenants.read")
@@ -308,12 +314,19 @@ class ReferralsAdminController {
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary = "Record that one commission line was paid (date, method, reference, note), with a reason; the app"
-                    + " never pays; 409 commission_already_paid, 409 commission_line_reversed",
+                    + " never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive"
+                    + " unless confirm_referrer_inactive",
             operationId = "platformMarkReferralCommissionPaid")
     ReferralDetail paid(@PathVariable("line_id") UUID lineId, @Valid @RequestBody PaidRequest request) {
         return referrals.markPaid(
                 lineId,
-                new Payout(request.paidOn(), request.method(), request.reference(), request.note(), request.reason()),
+                new Payout(
+                        request.paidOn(),
+                        request.method(),
+                        request.reference(),
+                        request.note(),
+                        request.reason(),
+                        Boolean.TRUE.equals(request.confirmReferrerInactive())),
                 CurrentPrincipal.require().userId());
     }
 

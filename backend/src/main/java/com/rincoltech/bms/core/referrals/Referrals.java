@@ -96,7 +96,8 @@ public interface Referrals {
 
     /**
      * Marks one line paid; 409 {@code commission_already_paid} for a line already marked, 409 {@code commission_line_reversed}
-     * for an unpaid line that was reversed.
+     * for an unpaid line that was reversed, 409 {@code referrer_inactive} when the referrer is suspended or cancelled now and
+     * the payout does not confirm it.
      */
     ReferralDetail markPaid(UUID lineId, Payout payout, UUID operatorId);
 
@@ -133,6 +134,10 @@ public interface Referrals {
             UUID referrerTenantId,
             String referrerSlug,
             String referrerName,
+
+            @Schema(description = "The referrer business now: active, suspended or cancelled")
+            String referrerStatus,
+
             String code,
 
             @Schema(description = "Null while the referred business is an application")
@@ -207,11 +212,16 @@ public interface Referrals {
             @Schema(description = "The rule as it was when the line was worked out, and the payment it was applied to")
             Map<String, Object> ruleSnapshot,
 
+            @Schema(description = "The referrer business now: active, suspended or cancelled")
+            String referrerStatus,
+
             @Schema(
-                    description =
-                            "The referrer business was suspended or cancelled when the line was worked out: decide"
-                                    + " before paying it")
+                    description = "The referrer business is suspended or cancelled now: marking the line paid needs"
+                            + " confirm_referrer_inactive")
             boolean referrerInactive,
+
+            @Schema(description = "The referrer business was suspended or cancelled when the line was worked out")
+            boolean inactiveWhenWorkedOut,
 
             String note,
             LocalDate paidOn,
@@ -235,7 +245,13 @@ public interface Referrals {
 
             @Schema(description = "Oldest first") List<Line> lines) {}
 
-    record Payout(LocalDate paidOn, String method, String reference, String note, String reason) {}
+    record Payout(
+            LocalDate paidOn,
+            String method,
+            String reference,
+            String note,
+            String reason,
+            boolean confirmReferrerInactive) {}
 
     record LineAdded(UUID lineId, boolean replayed) {}
 }
