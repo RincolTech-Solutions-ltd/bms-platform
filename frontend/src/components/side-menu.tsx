@@ -130,9 +130,10 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
   // Unfolded while a tour step points into it, so the step can show the label it talks about.
   const shownFolded = folded && !(target !== undefined && anchors.includes(target));
 
+  // From what the person sees: unfolded for a tour step, a press folds it.
   function toggle() {
-    keepFolded(!folded);
-    setChoice(!folded);
+    keepFolded(!shownFolded);
+    setChoice(!shownFolded);
   }
 
   // Narrowed to a phone while the focus is in the sidebar: it goes to the menu button that now holds the list. A layout effect, so
@@ -255,11 +256,14 @@ export function SideMenu({ label, tour, links, name, onSignOut, busy = false, to
         ref={panel}
         className="side-menu-panel"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
         aria-labelledby={heading}
         onKeyDown={onKeyDown}
         onClick={(event) => {
-          if (open && event.target instanceof Element && event.target.closest('a')) close();
+          if (!open || !(event.target instanceof Element) || !event.target.closest('a')) return;
+          // A chosen link opens a new page, which keeps its own scroll, not the old page's position.
+          restoreScroll.current = false;
+          close();
         }}
         onTouchStart={(event) => {
           const touch = event.touches[0];

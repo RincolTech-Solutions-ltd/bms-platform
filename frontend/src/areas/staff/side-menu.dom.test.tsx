@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { type ReactNode, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../api/client';
+import { retail } from '../../api/retail';
 import { mockMe } from '../../api/retail-mock';
 import { router as appRouter } from '../../app/router';
 import { TourProvider, useTour } from '../../tour/host';
@@ -217,6 +218,16 @@ describe('the staff side menu on a phone (issue #455)', () => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
   });
 
+  it('does not give the old page its scroll position back when a link is tapped', async () => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 300 });
+    const { router } = show(officer);
+    fireEvent.click(within(openMenu()).getByRole('link', { name: 'Feedback' }));
+    expect(drawer()).toBeNull();
+    await waitFor(() => expect(router.history.location.pathname).toBe('/staff/feedback'));
+    expect(window.scrollTo).not.toHaveBeenCalledWith(0, 300);
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
   it('leaves no drawer, backdrop or scroll lock behind when the window widens while it is open', async () => {
     show(officer);
     openMenu();
@@ -250,6 +261,25 @@ describe('the staff side menu on a phone (issue #455)', () => {
     cleanup();
     show({ ...admin, permissions: (admin.permissions ?? []).filter((p) => p !== 'retail.sale.create') } as Me);
     expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+  });
+
+  it('shows Sell only once the branch roles are read, and never when every branch is a store', async () => {
+    const withRoles = { ...admin, module_capabilities: { ...admin.module_capabilities, retail: [...(admin.module_capabilities?.retail ?? []), 'branch_roles'] } } as Me;
+    const roles = (role: 'store' | 'shop') =>
+      (withRoles.branches ?? []).map((b) => ({ branch_id: b.id, code: b.code, name: b.name, role, can_sell: role !== 'store' }));
+    let answer: (value: ReturnType<typeof roles>) => void = () => undefined;
+    const read = vi.spyOn(retail, 'branchRoles').mockImplementation(() => new Promise((resolve) => (answer = resolve as typeof answer)));
+    show(withRoles);
+    await waitFor(() => expect(read).toHaveBeenCalled());
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+    await act(async () => answer(roles('store')));
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+    cleanup();
+    read.mockResolvedValue(roles('shop') as never);
+    show(withRoles);
+    expect(screen.queryByRole('link', { name: 'Sell' })).toBeNull();
+    expect(await screen.findByRole('link', { name: 'Sell' })).toBeTruthy();
+    read.mockRestore();
   });
 
   it('keeps the tour anchors in the page while closed, so optional tour steps are not skipped', () => {
@@ -286,6 +316,8 @@ describe('the staff side menu on a phone (issue #455)', () => {
     const panel = document.querySelector('.side-menu') as HTMLElement;
     expect(panel.hidden).toBe(false);
     expect(panel.classList.contains('side-menu-instant')).toBe(true);
+    // Shown for a tour, the page behind stays reachable: the drawer is not modal (aria-modal only when the person opened it).
+    expect(panel.querySelector('[role="dialog"]')?.hasAttribute('aria-modal')).toBe(false);
     expect(document.activeElement?.textContent).toBe('Feedback here');
     act(() => {
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
@@ -437,6 +469,34 @@ describe('the staff sidebar from 720px', () => {
     expect(sidebar().classList.contains('side-nav-folded')).toBe(false);
     act(() => {
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
+    });
+    await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
+  });
+
+  it('folds by what it shows during a tour: unfolded for a step, a press folds it', async () => {
+    const tour: Tour = {
+      id: 'test-sidebar-toggle-tour',
+      version: 1,
+      title: 'Test tour',
+      audience: () => true,
+      autoStart: false,
+      steps: [{ id: 'feedback', target: 'nav-feedback', title: 'Feedback here', body: 'Choose Feedback to write to us.' }],
+    };
+    function Starter() {
+      const { start } = useTour();
+      useEffect(() => start(tour), [start]);
+      return null;
+    }
+    vi.stubGlobal('CSS', { escape: (value: string) => value });
+    Element.prototype.scrollIntoView = vi.fn();
+    window.localStorage.setItem('bms.sidebar', 'folded');
+    show(officer, { children: <Starter /> });
+    await screen.findByRole('heading', { name: 'Feedback here' });
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(toggle());
+    expect(window.localStorage.getItem('bms.sidebar')).toBe('folded');
+    act(() => {
+      fireEvent.keyDown(screen.getByRole('heading', { name: 'Feedback here' }), { key: 'Escape' });
     });
     await waitFor(() => expect(sidebar().classList.contains('side-nav-folded')).toBe(true));
   });

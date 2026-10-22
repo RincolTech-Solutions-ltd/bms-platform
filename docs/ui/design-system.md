@@ -144,7 +144,8 @@ query, so the number is the token.
   `visually-hidden` span) and as its `title` tooltip, the retail group too. Once the person folds or unfolds it, the choice is
   kept per device in `localStorage` under `bms.sidebar` (`folded` or `open`; nothing kept means the width decides), read and
   written inside `try`/`catch`, so a browser that blocks storage still folds until the page is reloaded. The width changes
-  over `--motion`, and not at all under reduced motion.
+  over `--motion`, and not at all under reduced motion. The button acts on what the person sees: a sidebar unfolded for a tour
+  step folds when pressed.
 - **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
   left of the staff bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
   (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`
@@ -152,11 +153,13 @@ query, so the number is the token.
   closes on the backdrop, Escape, a left swipe on the drawer (50px, more sideways than down), a chosen link, or any change of
   page (the back button, a tour, a redirect).
 - **One-tap Sell on a phone:** beside the menu button, a primary Sell button (`.staff-sell`, a link to the sale screen) for
-  anyone who can sell (`useSells`), so a sale is one tap as it was on the bottom bar. From 720px Sale is in the sidebar instead.
-- **Drawer accessibility:** the drawer is `role="dialog"` with `aria-modal="true"` and the heading Menu; focus moves to its
+  anyone who can sell (`useSells`), so a sale is one tap as it was on the bottom bar. With branch roles on, it waits until the
+  roles are read, so it never flashes up for a session whose every branch is a store. From 720px Sale is in the sidebar instead.
+- **Drawer accessibility:** the drawer is `role="dialog"` with the heading Menu, and `aria-modal="true"` only while the person
+  opened it (a tour step that opens it leaves the page reachable); focus moves to its
   first control, Tab and Shift+Tab stay inside, and focus returns to the menu button on close. The menu button carries
   `aria-expanded`. The page behind does not scroll: `body.side-menu-open` fixes the body at the scroll position (iOS Safari
-  ignores `overflow` on the body), and closing gives the position back, except after a change of page. If the window widens
+  ignores `overflow` on the body), and closing gives the position back, except after a change of page or a tapped link. If the window widens
   past the phone width while the drawer is open, the drawer, its backdrop and the lock go, and focus moves to the sidebar's
   first link; narrowing with focus in the sidebar moves it to the menu button.
 - **Phone edges, motion and theme:** the drawer pads itself with `env(safe-area-inset-top)`, `-bottom` and `-left` and slides
