@@ -16,7 +16,7 @@ import { BusyButton } from '../../../app/ui/BusyButton';
 /** The variance written at commit once committed, otherwise the draft's (counted less expected). */
 const variance = (l: StocktakeLine): string => l.committed_variance_qty ?? l.variance_qty ?? '0';
 
-export function StocktakeReview({ stocktake, onCommit, committing }: { stocktake: Stocktake; onCommit?: () => void; committing?: boolean }) {
+export function StocktakeReview({ stocktake, onCommit, busy }: { stocktake: Stocktake; onCommit?: () => void; busy?: boolean }) {
   const changed = (stocktake.lines ?? []).filter((l) => milliOf(variance(l)) !== 0);
   return (
     <section aria-label="Stock-take review">
@@ -51,7 +51,7 @@ export function StocktakeReview({ stocktake, onCommit, committing }: { stocktake
         </table></div>
       )}
       {stocktake.status === 'draft' && onCommit && (
-        <BusyButton type="button" className="rt-primary" busy={committing === true} onClick={onCommit}>
+        <BusyButton type="button" className="rt-primary" busy={busy === true} onClick={onCommit}>
           Commit the count
         </BusyButton>
       )}
@@ -93,7 +93,7 @@ function CountSheet({ branchId }: { branchId: string }) {
   if (draft) {
     return (
       <>
-        <StocktakeReview stocktake={draft} onCommit={() => commit.mutate()} committing={commit.isPending} />
+        <StocktakeReview stocktake={draft} onCommit={() => commit.mutate()} busy={commit.isPending} />
         <Problem error={commit.error} />
         {draft.status === 'draft' && <button type="button" onClick={() => setDraft(null)}>Back to the count</button>}
         {draft.status === 'committed' && <button type="button" onClick={() => { setDraft(null); setCounts({}); }}>Start another count</button>}

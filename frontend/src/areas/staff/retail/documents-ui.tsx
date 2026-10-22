@@ -141,7 +141,7 @@ export function DocumentCards({ items, branchOf, term }: { items: RetailDocument
 const NUMBERED: DocumentType[] = ['quotation', 'invoice', 'delivery_note'];
 
 /** One series: its prefix (changed by whoever may change settings) and, per branch, how many were issued and the next number. */
-export function SeriesRow({ series, canEdit, saving, onSave }: { series: DocumentSeries; canEdit: boolean; saving?: boolean; onSave: (type: DocumentType, prefix: string) => void }) {
+export function SeriesRow({ series, canEdit, busy, onSave }: { series: DocumentSeries; canEdit: boolean; busy?: boolean; onSave: (type: DocumentType, prefix: string) => void }) {
   const type = (series.type ?? 'invoice') as DocumentType;
   const [typed, setTyped] = useState(series.prefix ?? '');
   const problem = prefixProblem(typed);
@@ -155,7 +155,7 @@ export function SeriesRow({ series, canEdit, saving, onSave }: { series: Documen
             <label htmlFor={`prefix-${type}`}>Prefix</label>
             <input id={`prefix-${type}`} value={typed} maxLength={8} aria-invalid={problem !== null} onChange={(e) => setTyped(tidyPrefix(e.target.value))} />
           </div>
-          <BusyButton busy={saving ?? false} type="button" disabled={!changed || problem !== null} aria-label={`Save the ${typeLabel(type)} prefix`} onClick={() => onSave(type, typed)}>
+          <BusyButton busy={busy ?? false} type="button" disabled={!changed || problem !== null} aria-label={`Save the ${typeLabel(type)} prefix`} onClick={() => onSave(type, typed)}>
             Save
           </BusyButton>
         </div>
@@ -175,14 +175,14 @@ export function SeriesRow({ series, canEdit, saving, onSave }: { series: Documen
   );
 }
 
-export function SeriesPanel({ series, canEdit, saving, onSave }: { series: DocumentSeries[]; canEdit: boolean; saving?: boolean; onSave: (type: DocumentType, prefix: string) => void }) {
+export function SeriesPanel({ series, canEdit, busy, onSave }: { series: DocumentSeries[]; canEdit: boolean; busy?: boolean; onSave: (type: DocumentType, prefix: string) => void }) {
   const shown = series.filter((s) => NUMBERED.includes((s.type ?? '') as DocumentType));
   return (
     <section aria-label="Document numbers" data-tour="document-numbers">
       <h2>Document numbers</h2>
       <p className="hint">Each document is numbered in its branch: the prefix, the branch code and a counter that never skips and never repeats. Changing a prefix changes later numbers only.</p>
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {shown.map((s) => <SeriesRow key={s.type} series={s} canEdit={canEdit} saving={saving} onSave={onSave} />)}
+        {shown.map((s) => <SeriesRow key={s.type} series={s} canEdit={canEdit} busy={busy} onSave={onSave} />)}
       </ul>
     </section>
   );
