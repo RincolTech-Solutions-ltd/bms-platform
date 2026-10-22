@@ -203,8 +203,8 @@ reversal each charged period is recomputed from the payments by value date. What
 shows was not owed (the item was paid up before the period, or a percent penalty's base was smaller)
 is cancelled as a dated `lending_charge_cancels` row and credited on the statement on the day of the
 cancel ("Penalties cancelled after a back-dated payment"); what a reversal shows was owed after all is
-charged again as a new `penalty_recharge` row on the period's own date ("Penalties charged again after a
-reversal"). Both are timed with the transaction that caused them, and repayments are stamped with the
+charged again as a new `penalty_recharge` row, kept on the period's own date for the penalty logic and
+printed on the day it was recorded ("Penalties charged again after a reversal"), as its cancel was. Both are timed with the transaction that caused them, and repayments are stamped with the
 clock when recorded under the loan's lock, so a receipt counts exactly the penalties recorded up to its
 payment and never changes after it is first opened. `PenaltyDatingGuardTest` allows the reconcile as
 the one other writer of the items' penalties due.

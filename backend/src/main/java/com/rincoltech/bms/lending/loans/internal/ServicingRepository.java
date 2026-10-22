@@ -410,7 +410,13 @@ class ServicingRepository {
      */
     List<LoanLedger.PenaltyEvent> penaltyEvents(UUID loanId) {
         return jdbc.sql("""
-                        SELECT s.item_no, c.business_date, c.created_at, c.amount_minor,
+                        SELECT s.item_no,
+                               -- A charge again is printed on the day it was recorded, as its cancel was; its period
+                               -- date serves the penalty logic only (the delta review of #270).
+                               CASE c.charge_type WHEN 'penalty' THEN c.business_date
+                                    ELSE (c.created_at AT TIME ZONE (SELECT t.timezone FROM tenants t
+                                                                      WHERE t.id = c.tenant_id))::date END,
+                               c.created_at, c.amount_minor,
                                CASE c.charge_type WHEN 'penalty' THEN 'CHARGED' ELSE 'RECHARGED' END
                           FROM lending_loan_charges c
                           JOIN lending_schedule_items s ON s.id = c.schedule_item_id

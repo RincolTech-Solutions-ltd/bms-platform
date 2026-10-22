@@ -677,7 +677,8 @@ repayment and reversal each charged period is recomputed from the payments by va
 when the item was overdue at the start of its date, a percent penalty on the principal and interest
 unpaid then, never more than first charged; a back-dated repayment cancels the excess (in whole or in
 part, never what was waived or paid, `lending_charge_cancels`), and a reversal that shows a cancelled
-amount was owed after all charges it again as a new row (`penalty_recharge`), so a bounced payment
+amount was owed after all charges it again as a new row (`penalty_recharge`), set before the
+surviving repayments are re-allocated so a penalty-first order meets them, so a bounced payment
 loses no penalty and a paid-up loan is never penalised. Penalties start at the later of the business's
 first run and the loan's own start in the system, and a loan that fails the run two nights running is
 pushed to its branch's managers and the administrators (`lending.arrears_loan_failing`). A

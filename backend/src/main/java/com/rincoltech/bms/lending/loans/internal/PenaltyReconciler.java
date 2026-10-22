@@ -36,6 +36,27 @@ class PenaltyReconciler {
         if (rule == null || !rule.charges()) {
             return new Moved(0, 0);
         }
+        return reconcile(loanId, rule, items, causeTxnId, today, repo.contractPaidByValueDate(loanId), true, true);
+    }
+
+    /**
+     * As above, with the payments by value date given. A reversal first plans with {@code write} false, on a fresh copy
+     * of the items, from the replay it is about to write, so the penalties are set right BEFORE the surviving
+     * repayments are allocated (the delta review of #270); it then writes with {@code adjust} false, its replayed items
+     * already carrying the planned penalties.
+     */
+    Moved reconcile(
+            UUID loanId,
+            PenaltyRule rule,
+            List<Item> items,
+            UUID causeTxnId,
+            LocalDate today,
+            Map<UUID, NavigableMap<LocalDate, long[]>> paid,
+            boolean write,
+            boolean adjust) {
+        if (rule == null || !rule.charges()) {
+            return new Moved(0, 0);
+        }
         Map<UUID, Map<Integer, List<ServicingRepository.PeriodRow>>> rows = new LinkedHashMap<>();
         for (ServicingRepository.PeriodRow r : repo.penaltyRows(loanId)) {
             rows.computeIfAbsent(r.itemId(), k -> new TreeMap<>())
@@ -45,7 +66,6 @@ class PenaltyReconciler {
         if (rows.isEmpty()) {
             return new Moved(0, 0);
         }
-        Map<UUID, NavigableMap<LocalDate, long[]>> paid = repo.contractPaidByValueDate(loanId);
         long cancelled = 0;
         long recharged = 0;
         for (Item item : items) {
@@ -78,19 +98,50 @@ class PenaltyReconciler {
                         ServicingRepository.PeriodRow r = list.get(i);
                         long take = Math.min(left, r.cancellable());
                         if (take > 0) {
-                            repo.cancelCharge(r, loanId, take, today, reason, causeTxnId);
-                            item.penaltyAdjusted(r.date(), -take);
+                            if (write) {
+                                repo.cancelCharge(r, loanId, take, today, reason, causeTxnId);
+                            }
+                            if (adjust) {
+                                item.penaltyAdjusted(r.date(), -take);
+                            }
                             left -= take;
                             cancelled += take;
                         }
                     }
                 } else if (delta > 0) {
-                    repo.rechargePeriod(list.getFirst(), loanId, delta, causeTxnId);
-                    item.penaltyAdjusted(p.date(), delta);
+                    if (write) {
+                        repo.rechargePeriod(list.getFirst(), loanId, delta, causeTxnId);
+                    }
+                    if (adjust) {
+                        item.penaltyAdjusted(p.date(), delta);
+                    }
                     recharged += delta;
                 }
             }
         }
         return new Moved(cancelled, recharged);
+    }
+
+    /** What a replay pays of each item's principal and interest ({@code [0]}) and fees ({@code [1]}) by value date. */
+    static Map<UUID, NavigableMap<LocalDate, long[]>> paidBy(Servicing.Replay replay, Map<UUID, LocalDate> valueDates) {
+        Map<UUID, NavigableMap<LocalDate, long[]>> out = new LinkedHashMap<>();
+        replay.allocations().forEach((txnId, rows) -> {
+            LocalDate on = valueDates.get(txnId);
+            for (Servicing.Allocation a : rows) {
+                if (a.itemId() == null) {
+                    continue;
+                }
+                int slot = switch (a.component()) {
+                    case "principal", "interest", Servicing.REBATE -> 0;
+                    case "fee" -> 1;
+                    default -> -1;
+                };
+                if (slot >= 0) {
+                    out.computeIfAbsent(a.itemId(), k -> new TreeMap<>()).computeIfAbsent(on, k -> new long[2])[slot] +=
+                            a.amountMinor();
+                }
+            }
+        });
+        return out;
     }
 }

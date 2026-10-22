@@ -22,6 +22,7 @@ import com.rincoltech.bms.lending.loans.internal.Servicing.Replay;
 import com.rincoltech.bms.lending.loans.internal.ServicingRepository.Txn;
 import com.rincoltech.bms.lending.products.ProductCatalog;
 import com.rincoltech.bms.lending.products.ProductCatalog.FeeCharge;
+import com.rincoltech.bms.lending.products.ProductCatalog.PenaltyRule;
 import com.rincoltech.bms.lending.products.ProductCatalog.ProductTerms;
 import com.rincoltech.bms.lending.products.ScheduleCalculator;
 import java.time.LocalDate;
@@ -599,10 +600,47 @@ class LoanServicer implements LoanServicing {
     }
 
     /** The schedule replayed without this repayment: what the loan would owe once it is reversed. */
+    /** At most this many replays settle where the surviving repayments go once the penalties are set right. */
+    static final int MAX_REPLAYS = 4;
+
+    /**
+     * The delta review of #270: a reversal can show that cancelled penalties were owed after all, and the surviving
+     * repayments must meet them as they are when allocated (a penalty-first order pays them first). So the replay is
+     * planned, the penalties it implies are set on a fresh copy of the items, and the replay is done again on that
+     * copy, until the penalties no longer move (a bounded number of passes; each pass only raises penalties back
+     * toward what was first charged). The penalties are written afterwards, with the reversal.
+     */
+    private Replay replayWithPenaltiesSetFirst(Loan loan, Txn txn, List<Txn> survivors, LocalDate today) {
+        PenaltyRule rule = terms(loan).penalty();
+        Map<UUID, LocalDate> valueDates = new LinkedHashMap<>();
+        survivors.forEach(t -> valueDates.put(t.id(), t.valueDate()));
+        List<Item> contracted = repo.items(loan.id());
+        Replay replay = replayWithout(loan, txn, survivors, contracted);
+        for (int pass = 0; pass < MAX_REPLAYS; pass++) {
+            List<Item> planned = repo.items(loan.id());
+            PenaltyReconciler.Moved moved = penalties.reconcile(
+                    loan.id(), rule, planned, null, today, PenaltyReconciler.paidBy(replay, valueDates), false, true);
+            if (moved.cancelledMinor() == 0 && moved.rechargedMinor() == 0) {
+                break;
+            }
+            Replay next = replayWithout(loan, txn, survivors, planned);
+            if (next.allocations().equals(replay.allocations())) {
+                replay = next;
+                break;
+            }
+            replay = next;
+        }
+        return replay;
+    }
+
     private Replay replayWithout(Loan loan, Txn txn, List<Txn> survivors) {
+        return replayWithout(loan, txn, survivors, repo.items(loan.id()));
+    }
+
+    private Replay replayWithout(Loan loan, Txn txn, List<Txn> survivors, List<Item> contracted) {
         ProductTerms product = terms(loan);
         return Servicing.replay(
-                repo.items(loan.id()),
+                contracted,
                 survivors.stream()
                         .map(t -> new Payment(t.id(), t.amountMinor(), t.valueDate()))
                         .toList(),
@@ -654,7 +692,7 @@ class LoanServicer implements LoanServicing {
             entry = books.reverse(txn.journalEntryId(), today, txn.receiptNo(), key);
         } else {
             List<Txn> survivors = survivorsOf(loan, txn);
-            replay = replayWithout(loan, txn, survivors);
+            replay = replayWithPenaltiesSetFirst(loan, txn, survivors, today);
             Map<UUID, List<Allocation>> before = repo.allocationsByRepayment(loan.id());
             deltas.put(txn.id(), Servicing.difference(before.getOrDefault(txn.id(), List.of()), List.of()));
             boolean othersMoved = false;
@@ -707,7 +745,15 @@ class LoanServicer implements LoanServicing {
         deltas.forEach((appliesTo, rows) -> repo.insertAllocations(reversalId, appliesTo, rows));
         PenaltyReconciler.Moved moved = replay == null
                 ? new PenaltyReconciler.Moved(0, 0)
-                : penalties.reconcile(loan.id(), terms(loan).penalty(), replay.items(), reversalId, today);
+                : penalties.reconcile(
+                        loan.id(),
+                        terms(loan).penalty(),
+                        replay.items(),
+                        reversalId,
+                        today,
+                        repo.contractPaidByValueDate(loan.id()),
+                        true,
+                        false);
         long credit = repo.creditBalance(loan.id());
         if (replay != null) {
             credit = replay.allocations().values().stream()

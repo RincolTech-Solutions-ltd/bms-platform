@@ -380,7 +380,11 @@ instalment at 5% a week after a back-dated 80,000 (week 1 stands at 1,000, 4,000
 when reversing payment A means payment B no longer pays the instalment up; catches up a missed run
 around a payment posted in between; stamps a repayment racing the run after the charge it pays; checks
 that a rerun moves no version or time; and runs the job for its own business only; `ArrearsRunIT`
-refuses a stale attempt at finish and runs a business in another time zone for its own date.
+refuses a stale attempt at finish and runs a business in another time zone for its own date. The delta review added: a reversal that sets the penalties before
+it re-allocates the surviving payment (penalty first), the charges again and cancels printed on the
+day they were recorded, a back-dated partial payment through the reconcile with percent penalties and
+the cap freed by the cancelled amount, an imported loan not back-charged, and the push sent for a loan
+failing two nights running; the time-zone case runs on a pinned clock.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.
