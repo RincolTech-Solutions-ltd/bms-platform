@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { type KeyboardEvent, type ReactNode, type TouchEvent, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
 
@@ -113,60 +114,65 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
     if (dx < -SWIPE && Math.abs(dx) > Math.abs(touch.clientY - from.y)) close();
   }
 
+  const drawer = (
+    <div className={shownForTour && !open ? 'side-menu side-menu-instant' : 'side-menu'} hidden={!shown}>
+      <div className="side-menu-backdrop" onClick={open ? close : undefined} />
+      <div
+        ref={panel}
+        className="side-menu-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={heading}
+        onKeyDown={onKeyDown}
+        onClick={(event) => {
+          if (open && event.target instanceof Element && event.target.closest('a')) close();
+        }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          swipe.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+        }}
+        onTouchEnd={onTouchEnd}
+      >
+        <div className="side-menu-head">
+          <h2 id={heading} className="side-menu-title">Menu</h2>
+          <button type="button" className="btn-ghost menu-button" aria-label="Close menu" onClick={close}>
+            {icons.close}
+          </button>
+        </div>
+        <nav className="side-menu-links" aria-label={label} data-tour={tour}>
+          <ul>
+            {links.map((l) => (
+              <li key={l.to}>
+                <Link to={l.to as never} activeOptions={l.exact || l.group ? { exact: true } : undefined} data-tour={l.tour}>
+                  {l.icon}
+                  <span>{l.label}</span>
+                </Link>
+                {l.group}
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="side-menu-foot">
+          <span className="staff-user">
+            <span className="avatar">{icons.user}</span>
+            <span className="staff-user-name">{name}</span>
+          </span>
+          <button type="button" className="btn-ghost" onClick={onSignOut}>
+            {icons.signOut}
+            <span>Sign out</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       <button ref={button} type="button" className="btn-ghost menu-button" aria-label="Menu" aria-haspopup="dialog" aria-expanded={shown} onClick={() => setOpen(true)}>
         {icons.menu}
       </button>
-      <div className={shownForTour && !open ? 'side-menu side-menu-instant' : 'side-menu'} hidden={!shown}>
-        <div className="side-menu-backdrop" onClick={open ? close : undefined} />
-        <div
-          ref={panel}
-          className="side-menu-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={heading}
-          onKeyDown={onKeyDown}
-          onClick={(event) => {
-            if (open && event.target instanceof Element && event.target.closest('a')) close();
-          }}
-          onTouchStart={(event) => {
-            const touch = event.touches[0];
-            swipe.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
-          }}
-          onTouchEnd={onTouchEnd}
-        >
-          <div className="side-menu-head">
-            <h2 id={heading} className="side-menu-title">Menu</h2>
-            <button type="button" className="btn-ghost menu-button" aria-label="Close menu" onClick={close}>
-              {icons.close}
-            </button>
-          </div>
-          <nav className="side-menu-links" aria-label={label} data-tour={tour}>
-            <ul>
-              {links.map((l) => (
-                <li key={l.to}>
-                  <Link to={l.to as never} activeOptions={l.exact || l.group ? { exact: true } : undefined} data-tour={l.tour}>
-                    {l.icon}
-                    <span>{l.label}</span>
-                  </Link>
-                  {l.group}
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="side-menu-foot">
-            <span className="staff-user">
-              <span className="avatar">{icons.user}</span>
-              <span className="staff-user-name">{name}</span>
-            </span>
-            <button type="button" className="btn-ghost" onClick={onSignOut}>
-              {icons.signOut}
-              <span>Sign out</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* In the body, because the staff bar clips what is drawn inside it (its full-bleed band is a clip-path). */}
+      {createPortal(drawer, document.body)}
     </>
   );
 }
