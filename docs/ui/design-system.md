@@ -144,8 +144,10 @@ query, so the number is the token.
   `visually-hidden` span) and as its `title` tooltip, the retail group too. Once the person folds or unfolds it, the choice is
   kept per device in `localStorage` under `bms.sidebar` (`folded` or `open`; nothing kept means the width decides), read and
   written inside `try`/`catch`, so a browser that blocks storage still folds until the page is reloaded. The width changes
-  over `--motion`, and not at all under reduced motion. The button acts on what the person sees: a sidebar unfolded for a tour
-  step folds when pressed.
+  over `--motion`, and not at all under reduced motion. A tour step that points into a folded sidebar unfolds it while the step
+  shows. The button acts on what the person sees and the press wins for the rest of that step: pressed during the step, the
+  sidebar folds (or unfolds again on a second press) at once, with `aria-expanded`, the `side-nav-folded` class and the
+  `title` following, and the choice is kept in `bms.sidebar`. The next step that points into the sidebar unfolds it again.
 - **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
   left of the staff bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
   (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`
