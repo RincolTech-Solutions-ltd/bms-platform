@@ -307,7 +307,9 @@ final class LoanLedger {
         if (e.date().isAfter(t.valueDate())) {
             return false;
         }
-        return !e.credit() || e.recordedAt().isBefore(t.createdAt());
+        // The nightly charges come first on their day; a cancel or a charge again comes by when it was recorded, after
+        // the transaction that caused it (they carry its time).
+        return e.kind() == PenaltyEvent.Kind.CHARGED || e.recordedAt().isBefore(t.createdAt());
     }
 
     /** The sum of a transaction's own allocation rows that move the balance; with {@code rebate} the rebate rows too. */

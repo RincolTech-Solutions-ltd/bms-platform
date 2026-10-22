@@ -2542,17 +2542,20 @@ class LoanServicingIT extends LoanFixtures {
                 lock.executeQuery();
             }
             Future<JsonNode> payment = pool.submit(() -> repaid(loan, 2_000, today));
-            // Wait until the payment's transaction is waiting on the loan's row lock.
-            for (int i = 0;
-                    i < 200
-                            && TestDatabase.owner()
-                                            .sql("SELECT count(*) FROM pg_locks WHERE NOT granted")
-                                            .query(Long.class)
-                                            .single()
-                                    == 0;
-                    i++) {
+            // Wait until the payment's transaction is waiting on the loan's row lock: a session that holds a lock on
+            // lending_loans (its SELECT ... FOR UPDATE) and waits for one not granted. Fail if it never comes.
+            String waiting = """
+                    SELECT count(*) FROM pg_locks w
+                     WHERE NOT w.granted
+                       AND EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid = w.pid
+                                      AND l.relation = 'lending_loans'::regclass)
+                    """;
+            long waiters = 0;
+            for (int i = 0; i < 200 && waiters == 0; i++) {
                 Thread.sleep(50);
+                waiters = TestDatabase.owner().sql(waiting).query(Long.class).single();
             }
+            assertThat(waiters).as("the payment waits on the loan's lock").isPositive();
             try (java.sql.PreparedStatement charge = c.prepareStatement("""
                     INSERT INTO lending_loan_charges (id, tenant_id, loan_id, schedule_item_id, charge_type, period_no,
                                                       business_date, amount_minor)

@@ -144,4 +144,45 @@ class PenaltyReconciler {
         });
         return out;
     }
+
+    /**
+     * Replays until the penalties a replay implies are the ones it was allocated against (the final review of #270):
+     * {@code replayOf} allocates the surviving payments against planned items, {@code planFor} works out the items'
+     * penalties from a replay's own payments. Converged when a pass plans the same penalties as the pass before; then
+     * the last replay was allocated against exactly the penalties its payments imply. Not converged within
+     * {@code maxPasses}: a 409 {@code reversal_not_settled}, thrown before the caller writes anything, so the whole
+     * reversal rolls back.
+     */
+    static Servicing.Replay settleReplay(
+            List<Item> start,
+            java.util.function.Function<List<Item>, Servicing.Replay> replayOf,
+            java.util.function.Function<Servicing.Replay, List<Item>> planFor,
+            int maxPasses) {
+        List<Item> planned = start;
+        Servicing.Replay replay = replayOf.apply(planned);
+        for (int pass = 0; pass < maxPasses; pass++) {
+            List<Item> next = planFor.apply(replay);
+            if (penaltiesOf(next).equals(penaltiesOf(planned))) {
+                return replay;
+            }
+            planned = next;
+            replay = replayOf.apply(planned);
+        }
+        throw new com.rincoltech.bms.kernel.ApiException(
+                org.springframework.http.HttpStatus.CONFLICT,
+                "reversal_not_settled",
+                "Reversal could not be settled",
+                "The penalties and the repayments that remain did not settle; nothing was reversed. Tell support.");
+    }
+
+    /** Each item's penalties due and dated charges: what a plan is compared on. */
+    static Map<UUID, List<Object>> penaltiesOf(List<Item> items) {
+        Map<UUID, List<Object>> out = new LinkedHashMap<>();
+        for (Item i : items) {
+            out.put(
+                    i.id,
+                    List.of(i.penaltiesDue, i.penaltyCharges == null ? Map.of() : new TreeMap<>(i.penaltyCharges)));
+        }
+        return out;
+    }
 }

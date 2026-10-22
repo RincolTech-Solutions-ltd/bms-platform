@@ -599,7 +599,6 @@ class LoanServicer implements LoanServicing {
         return gone;
     }
 
-    /** The schedule replayed without this repayment: what the loan would owe once it is reversed. */
     /** At most this many replays settle where the surviving repayments go once the penalties are set right. */
     static final int MAX_REPLAYS = 4;
 
@@ -607,32 +606,35 @@ class LoanServicer implements LoanServicing {
      * The delta review of #270: a reversal can show that cancelled penalties were owed after all, and the surviving
      * repayments must meet them as they are when allocated (a penalty-first order pays them first). So the replay is
      * planned, the penalties it implies are set on a fresh copy of the items, and the replay is done again on that
-     * copy, until the penalties no longer move (a bounded number of passes; each pass only raises penalties back
-     * toward what was first charged). The penalties are written afterwards, with the reversal.
+     * copy, until the planned penalties are the same as the pass before (a pass may raise one period and, under a
+     * cap, lower another). When they have not settled within {@link #MAX_REPLAYS} passes the reversal is refused
+     * (409 {@code reversal_not_settled}) before anything is written. The penalties are written afterwards, with the
+     * reversal.
      */
     private Replay replayWithPenaltiesSetFirst(Loan loan, Txn txn, List<Txn> survivors, LocalDate today) {
         PenaltyRule rule = terms(loan).penalty();
         Map<UUID, LocalDate> valueDates = new LinkedHashMap<>();
         survivors.forEach(t -> valueDates.put(t.id(), t.valueDate()));
-        List<Item> contracted = repo.items(loan.id());
-        Replay replay = replayWithout(loan, txn, survivors, contracted);
-        for (int pass = 0; pass < MAX_REPLAYS; pass++) {
-            List<Item> planned = repo.items(loan.id());
-            PenaltyReconciler.Moved moved = penalties.reconcile(
-                    loan.id(), rule, planned, null, today, PenaltyReconciler.paidBy(replay, valueDates), false, true);
-            if (moved.cancelledMinor() == 0 && moved.rechargedMinor() == 0) {
-                break;
-            }
-            Replay next = replayWithout(loan, txn, survivors, planned);
-            if (next.allocations().equals(replay.allocations())) {
-                replay = next;
-                break;
-            }
-            replay = next;
-        }
-        return replay;
+        return PenaltyReconciler.settleReplay(
+                repo.items(loan.id()),
+                planned -> replayWithout(loan, txn, survivors, planned),
+                replay -> {
+                    List<Item> next = repo.items(loan.id());
+                    penalties.reconcile(
+                            loan.id(),
+                            rule,
+                            next,
+                            null,
+                            today,
+                            PenaltyReconciler.paidBy(replay, valueDates),
+                            false,
+                            true);
+                    return next;
+                },
+                MAX_REPLAYS);
     }
 
+    /** The schedule replayed without this repayment: what the loan would owe once it is reversed. */
     private Replay replayWithout(Loan loan, Txn txn, List<Txn> survivors) {
         return replayWithout(loan, txn, survivors, repo.items(loan.id()));
     }
@@ -660,8 +662,12 @@ class LoanServicer implements LoanServicing {
         if (!txn.txnType().equals("repayment")) {
             return false;
         }
+        // The replay with its penalties set right, as the reversal will write it, so the checker sees a reopening
+        // (and collateral that cannot be restored) that only the charged-again penalties cause.
         return !Servicing.position(
-                        replayWithout(loan, txn, survivorsOf(loan, txn)).items(), today())
+                        replayWithPenaltiesSetFirst(loan, txn, survivorsOf(loan, txn), today())
+                                .items(),
+                        today())
                 .settled();
     }
 
