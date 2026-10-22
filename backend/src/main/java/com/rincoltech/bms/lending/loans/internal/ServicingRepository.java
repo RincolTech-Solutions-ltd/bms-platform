@@ -104,12 +104,14 @@ class ServicingRepository {
     /**
      * Cancels the penalty charges of {@code item} dated after {@code after} that nothing waived, when a repayment of
      * that value date paid the item up (the review of #270), and takes them off the item's penalties due, the
-     * dated charges and the item in memory. Returns the amounts cancelled by business date.
+     * dated charges and the item in memory. Returns the amounts cancelled by business date. The cancel is timed with
+     * the repayment's own transaction ({@code now()}, as the repayment's row is), so that repayment's receipt already
+     * counts it.
      */
     Map<LocalDate, Long> cancelPenaltiesAfter(Item item, LocalDate after, LocalDate today) {
         Map<LocalDate, Long> cancelled = new LinkedHashMap<>();
         jdbc.sql("""
-                        UPDATE lending_loan_charges SET cancelled_on = ?, cancelled_at = clock_timestamp()
+                        UPDATE lending_loan_charges SET cancelled_on = ?, cancelled_at = now()
                          WHERE schedule_item_id = ? AND charge_type = 'penalty' AND business_date > ?
                            AND cancelled_on IS NULL AND waived_minor = 0
                         RETURNING business_date, amount_minor
