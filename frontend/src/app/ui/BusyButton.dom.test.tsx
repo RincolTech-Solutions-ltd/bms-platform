@@ -67,7 +67,7 @@ describe('the busy button (#456)', () => {
     render(<BusyButton type="button" busy={false} onClick={onClick}>Save</BusyButton>);
     const button = screen.getByRole('button', { name: 'Save' });
     fireEvent.click(button);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
     fireEvent.click(button);
     expect(onClick).toHaveBeenCalledTimes(2);
   });

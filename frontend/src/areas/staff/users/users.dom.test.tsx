@@ -196,6 +196,26 @@ describe('the invite form', () => {
     await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
   });
 
+  // JUSTIFICATION-A3: the busy-button test case issue #456 asks for.
+  it('shows the Invite button as busy while the invitation is sent, and a double click invites once', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    api.invite.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    shell(<InviteScreen />);
+    await fillInvite();
+    const button = screen.getByRole('button', { name: 'Invite' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    const busy = await screen.findByRole('button', { name: 'Inviting' });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect(busy.querySelector('.busy-spinner')).not.toBeNull();
+    fireEvent.click(busy);
+    expect(api.invite).toHaveBeenCalledTimes(1);
+    finish({ user: { full_name: 'Test Cashier 05' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
+    await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
+    expect(api.invite).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the plan\'s refusal in plain words', async () => {
     api.invite.mockRejectedValue(new UsersError('Your plan allows at most 3 staff users, and that number is used up.', 422, 'plan_limit_reached'));
     shell(<InviteScreen />);
@@ -519,6 +539,7 @@ describe('taking the administrator role off yourself', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Save the roles' }));
     expect(within(card).getByText(/taking the administrator role off/)).toBeTruthy();
     expect(api.setRoles).not.toHaveBeenCalled();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
     fireEvent.click(within(card).getByRole('button', { name: 'Yes, remove my administrator role' }));
     await waitFor(() => expect(api.setRoles).toHaveBeenCalledWith('u-self', [{ role_key: 'cashier' }]));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['me'] }));
