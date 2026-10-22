@@ -8,6 +8,7 @@ import { milliOf, parseCount, showQty } from './maths';
 import { SkeletonList } from '../../../components/states';
 import { BranchRequired, CategoryLabel, Gate, Note, Problem, useStockingBranch } from './ui';
 import { needsOf } from './permissions';
+import { BusyButton } from '../../../app/ui/BusyButton';
 
 // Stock-take (FR-RET-08): count the products of a branch, review the variance the server works
 // out, then commit to write the adjustments. Only counted rows are sent.
@@ -50,9 +51,9 @@ export function StocktakeReview({ stocktake, onCommit, committing }: { stocktake
         </table></div>
       )}
       {stocktake.status === 'draft' && onCommit && (
-        <button type="button" className="rt-primary" disabled={committing} onClick={onCommit}>
+        <BusyButton type="button" className="rt-primary" busy={committing === true} onClick={onCommit}>
           {committing ? 'Saving' : 'Commit the count'}
-        </button>
+        </BusyButton>
       )}
     </section>
   );
@@ -124,9 +125,10 @@ function CountSheet({ branchId }: { branchId: string }) {
       })}
       {bad && <p role="alert" className="rt-flag">Some counts are not valid quantities.</p>}
       <Problem error={review.error} />
-      <button type="button" className="rt-primary" disabled={entered.length === 0 || bad || review.isPending} onClick={() => review.mutate()} data-tour="count-review">
+      <BusyButton type="button" className="rt-primary" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={() => review.mutate()} data-tour="count-review">
         {review.isPending ? 'Working out' : `Review variance (${entered.length} counted)`}
-      </button>
+      </BusyButton>
+
     </>
   );
 }
