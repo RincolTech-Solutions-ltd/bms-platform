@@ -147,7 +147,8 @@ query, so the number is the token.
   over `--motion`, and not at all under reduced motion.
 - **Below 720px, the drawer** (`SideMenu`): a menu button (`.menu-button`, the `menu` icon, `aria-label="Menu"`) at the top
   left of the staff bar opens the list in a side drawer from the left: 85% of the width, at most 320px, over a dimmed backdrop
-  (`--color-scrim`). The person's name and Sign out sit at the bottom (one button in `SideMenu`, with an `onSignOut` prop). It
+  (`--color-scrim`). The person's name and Sign out sit at the bottom (one `BusyButton` in `SideMenu`, with an `onSignOut` prop and a `busy`
+  prop held true while signing out runs, like Sign out in the bar). It
   closes on the backdrop, Escape, a left swipe on the drawer (50px, more sideways than down), a chosen link, or any change of
   page (the back button, a tour, a redirect).
 - **One-tap Sell on a phone:** beside the menu button, a primary Sell button (`.staff-sell`, a link to the sale screen) for

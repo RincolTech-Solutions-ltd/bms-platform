@@ -476,13 +476,13 @@ describe('the same areas for the same permissions on every size', () => {
 });
 
 describe('the operator portal side menu (issue #455)', () => {
-  function portal(at = '/platform') {
+  function portal(at = '/platform', busy = false) {
     const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: [at] }) });
     const signOut = vi.fn();
     render(
       <RouterContextProvider router={router}>
         <TourProvider me={officer} saveProgress={false}>
-          <PortalFrame name="Test Operator 01" onSignOut={signOut}>
+          <PortalFrame name="Test Operator 01" busy={busy} onSignOut={signOut}>
             <p>Page</p>
           </PortalFrame>
         </TourProvider>
@@ -514,5 +514,20 @@ describe('the operator portal side menu (issue #455)', () => {
     expect(signOut).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(drawer()).toBeNull();
+  });
+
+  it('holds Sign out in the drawer and in the bar while signing out runs (issue #456)', () => {
+    const { signOut } = portal('/platform', true);
+    const inDrawer = within(openMenu()).getByRole('button', { name: 'Sign out' });
+    expect(inDrawer.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(inDrawer);
+    expect(signOut).not.toHaveBeenCalled();
+    cleanup();
+    widthIs(1280);
+    const wide = portal('/platform', true);
+    const inBar = screen.getByRole('button', { name: 'Sign out' });
+    expect(inBar.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(inBar);
+    expect(wide.signOut).not.toHaveBeenCalled();
   });
 });

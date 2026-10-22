@@ -96,7 +96,7 @@ export function PortalFrame({
       <div className="nav-layout-main">
         <header className="staff-bar">
           <div className="staff-bar-top">
-            {phone && <SideMenu label="Operator portal" links={AREAS} name={name} onSignOut={onSignOut} />}
+            {phone && <SideMenu label="Operator portal" links={AREAS} name={name} busy={busy} onSignOut={onSignOut} />}
             <span className="staff-user">
               <span className="staff-user-name">{name}</span>
             </span>

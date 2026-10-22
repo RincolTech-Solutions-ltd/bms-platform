@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { type KeyboardEvent, type ReactNode, type TouchEvent, createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { BusyButton } from '../app/ui/BusyButton';
 import { useTour } from '../tour/host';
 import { icons } from './icons';
 
@@ -160,8 +161,11 @@ export function SideNav({ label, tour, links, tours = [] }: { label: string; tou
   );
 }
 
-/** The menu button and its drawer. `label` names the list of links, `tour` is its data-tour id, `tours` the ids inside the groups. */
-export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { label: string; tour?: string; links: MenuLink[]; name?: string; onSignOut: () => void; tours?: string[] }) {
+/**
+ * The menu button and its drawer. `label` names the list of links, `tour` is its data-tour id, `tours` the ids inside the groups,
+ * `busy` holds Sign out while signing out runs.
+ */
+export function SideMenu({ label, tour, links, name, onSignOut, busy = false, tours = [] }: { label: string; tour?: string; links: MenuLink[]; name?: string; onSignOut: () => void; busy?: boolean; tours?: string[] }) {
   const [open, setOpen] = useState(false);
   const heading = useId();
   const button = useRef<HTMLButtonElement>(null);
@@ -275,10 +279,10 @@ export function SideMenu({ label, tour, links, name, onSignOut, tours = [] }: { 
             <span className="avatar">{icons.user}</span>
             <span className="staff-user-name">{name}</span>
           </span>
-          <button type="button" className="btn-ghost" onClick={onSignOut}>
+          <BusyButton type="button" className="btn-ghost" busy={busy} onClick={onSignOut}>
             {icons.signOut}
             <span>Sign out</span>
-          </button>
+          </BusyButton>
         </div>
       </div>
     </div>
