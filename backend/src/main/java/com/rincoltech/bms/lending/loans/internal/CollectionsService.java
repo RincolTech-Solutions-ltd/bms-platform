@@ -231,7 +231,7 @@ class CollectionsService {
             if (status == null) {
                 continue;
             }
-            repo.settlePromise(p.id(), status);
+            repo.settlePromise(p.id(), status, today);
             if (status.equals("kept")) {
                 kept++;
             } else {

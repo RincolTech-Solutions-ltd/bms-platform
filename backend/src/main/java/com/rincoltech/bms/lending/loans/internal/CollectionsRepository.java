@@ -253,9 +253,12 @@ class CollectionsRepository {
                 .list();
     }
 
-    void settlePromise(UUID id, String status) {
-        jdbc.sql("UPDATE lending_collection_actions SET promise_status = ? WHERE id = ? AND promise_status = 'pending'")
-                .params(status, id)
+    void settlePromise(UUID id, String status, LocalDate on) {
+        jdbc.sql("""
+                        UPDATE lending_collection_actions SET promise_status = ?, promise_settled_on = ?
+                         WHERE id = ? AND promise_status = 'pending'
+                        """)
+                .params(status, on, id)
                 .update();
     }
 
