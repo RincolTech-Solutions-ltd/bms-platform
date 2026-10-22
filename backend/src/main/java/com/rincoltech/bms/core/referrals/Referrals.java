@@ -87,8 +87,12 @@ public interface Referrals {
             String reason,
             UUID operatorId);
 
-    /** The exact opposite of one line, with a reason; a line is reversed once and a reversal never. */
-    ReferralDetail reverseLine(UUID lineId, String reason, UUID operatorId);
+    /**
+     * The exact opposite of one line, with a reason; a line is reversed once and a reversal never. With {@code refunded}, the
+     * line's payment was refunded, so it no longer uses up the rule's months; 422 {@code commission_line_not_payment} for a
+     * line that has no payment.
+     */
+    ReferralDetail reverseLine(UUID lineId, String reason, boolean refunded, UUID operatorId);
 
     /**
      * Marks one line paid; 409 {@code commission_already_paid} for a line already marked, 409 {@code commission_line_reversed}

@@ -459,10 +459,10 @@ class ReferralService implements Referrals {
 
     @Override
     @Transactional
-    public ReferralDetail reverseLine(UUID lineId, String reason, UUID operatorId) {
+    public ReferralDetail reverseLine(UUID lineId, String reason, boolean refunded, UUID operatorId) {
         UUID id = UUID.randomUUID();
-        String result = jdbc.sql("SELECT platform_referral_reverse_line(?, ?, ?, ?)")
-                .params(id, lineId, reason.trim(), operatorId)
+        String result = jdbc.sql("SELECT platform_referral_reverse_line(?, ?, ?, ?, ?, ?)")
+                .params(id, lineId, reason.trim(), refunded, operatorId, Timestamp.from(clock.now()))
                 .query(String.class)
                 .single();
         switch (result) {
@@ -476,6 +476,10 @@ class ReferralService implements Referrals {
                         "commission_line_already_reversed",
                         "Already reversed",
                         "This line was already reversed.");
+            case "not_payment" ->
+                throw ApiException.rule(
+                        "commission_line_not_payment",
+                        "Only a line worked out from a payment has a payment to refund. Reverse it without refunded.");
             default -> {}
         }
         UUID referralId = UUID.fromString(result);
@@ -484,6 +488,11 @@ class ReferralService implements Referrals {
         data.put("line_id", id);
         data.put("reverses_line_id", lineId);
         data.put("referral_id", referralId);
+        detail.lines().stream().filter(l -> l.id().equals(id)).findFirst().ifPresent(l -> {
+            data.put("amount_minor", l.amountMinor());
+            data.put("currency", l.currency());
+        });
+        data.put("refunded", refunded);
         data.put("reason", reason.trim());
         audit.record(
                 "platform.referral.commission_reversed",

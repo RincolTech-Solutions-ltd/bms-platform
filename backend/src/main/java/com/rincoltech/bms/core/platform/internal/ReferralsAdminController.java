@@ -134,7 +134,13 @@ class ReferralsAdminController {
 
     @Schema(name = "ReferralLineReverseRequest")
     record ReverseRequest(
-            @NotBlank @Size(min = 5, max = 300) String reason) {}
+            @NotBlank @Size(min = 5, max = 300) String reason,
+
+            @Schema(
+                    description =
+                            "True when the line's subscription payment was refunded: the payment then no longer uses up"
+                                    + " the rule's months. Only for a line worked out from a payment")
+            Boolean refunded) {}
 
     @Schema(name = "ReferralLinePaidRequest", description = "The commission was paid outside the app; this records it")
     record PaidRequest(
@@ -286,12 +292,16 @@ class ReferralsAdminController {
     @PostMapping("/referrals/commissions/{line_id}/reverse")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
-            summary = "Reverse one commission line with a reason (lines are never deleted); 409"
-                    + " commission_line_already_reversed, 422 commission_line_is_reversal",
+            summary = "Reverse one commission line with a reason (lines are never deleted); refunded true records that"
+                    + " its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal"
+                    + " and commission_line_not_payment",
             operationId = "platformReverseReferralCommission")
     ReferralDetail reverse(@PathVariable("line_id") UUID lineId, @Valid @RequestBody ReverseRequest request) {
         return referrals.reverseLine(
-                lineId, request.reason(), CurrentPrincipal.require().userId());
+                lineId,
+                request.reason(),
+                Boolean.TRUE.equals(request.refunded()),
+                CurrentPrincipal.require().userId());
     }
 
     @PostMapping("/referrals/commissions/{line_id}/paid")

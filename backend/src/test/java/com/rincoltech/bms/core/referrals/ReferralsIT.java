@@ -1084,6 +1084,66 @@ class ReferralsIT extends IntegrationTest {
         assertThat(outcomes(rx)).containsExactly("added", "months_used");
     }
 
+    ResponseEntity<JsonNode> reverse(UUID lineId, String reason, Boolean refunded) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("reason", reason);
+        if (refunded != null) {
+            body.put("refunded", refunded);
+        }
+        return platform.post(
+                "/api/v1/platform/referrals/commissions/" + lineId + "/reverse", body, operator.accessToken());
+    }
+
+    /**
+     * A year paid upfront and then refunded: the operator reverses its line saying the payment was refunded, so the payment no
+     * longer uses up the 12 months and the next monthly payment earns. A reversal without refunded leaves the months used.
+     */
+    @Test
+    void aRefundedPaymentDoesNotUseUpTheMonths() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refrefund", false);
+        Business x = business("ref-refund");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        pay(x.id(), 720000, 12);
+        UUID year = UUID.fromString(detail(rx).get("lines").get(0).get("id").asString());
+        ResponseEntity<JsonNode> reversed = reverse(year, "Test: the year was refunded", true);
+        assertThat(reversed.getStatusCode()).as("%s", reversed.getBody()).isEqualTo(HttpStatus.OK);
+        pay(x.id(), 60000, 1);
+        assertThat(amounts(detail(rx))).containsExactly(72000L, -72000L, 6000L);
+        assertThat(outcomes(rx)).containsExactly("added", "added");
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT data ->> 'refunded' FROM platform_audit_log"
+                                        + " WHERE action = 'platform.referral.commission_reversed' AND data ->> 'reverses_line_id' = ?")
+                        .param(year.toString())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("true");
+
+        // A typed line has no payment to refund; a reversal without refunded keeps the payment's months used.
+        UUID typed = UUID.fromString(addLine(rx, 500, "Test: worked out by hand", "ref-line-" + UUID.randomUUID())
+                .getBody()
+                .get("lines")
+                .get(3)
+                .get("id")
+                .asString());
+        ResponseEntity<JsonNode> notPayment = reverse(typed, "Test: typed twice", true);
+        assertThat(notPayment.getStatusCode().value()).isEqualTo(422);
+        assertThat(notPayment.getBody().get("code").asString()).isEqualTo("commission_line_not_payment");
+
+        Business y = business("ref-refund-y");
+        setReferrer(y.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID ry = currentReferral(y.id());
+        pay(y.id(), 720000, 12);
+        UUID kept = UUID.fromString(detail(ry).get("lines").get(0).get("id").asString());
+        assertThat(reverse(kept, "Test: commission withdrawn", null).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        pay(y.id(), 60000, 1);
+        assertThat(amounts(detail(ry))).containsExactly(72000L, -72000L);
+        assertThat(outcomes(ry)).containsExactly("added", "months_used");
+    }
+
     /** Two businesses referred by the same shop each have their own 12 months. */
     @Test
     void eachReferredBusinessHasItsOwnTwelveMonths() {

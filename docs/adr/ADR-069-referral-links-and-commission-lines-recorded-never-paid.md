@@ -88,7 +88,11 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     referral started (`tenant_referrals.started_at`); payments recorded before the referral existed, under an earlier referrer
     or none, do not use N up, and neither does a payment that earned nothing because its currency differed from the rule's
     (outcome `currency_differs`, kept per payment in `referral_payment_outcomes`, so a later rule in that currency still starts
-    at its first month). The
+    at its first month). A refunded payment does not use N up either: a subscription payment stays `confirmed` and append-only,
+    so when the operator reverses a `payment` line with `refunded: true` the refund is recorded on that payment's outcome
+    (`refunded_at`, `refunded_by_line_id`, set once) and the payment is left out of the count from then on, so the client's
+    next payment earns. A reversal without `refunded` (the commission was withdrawn, the money was kept) leaves the months
+    used. The
     count does not compare creation times: recording a payment locks the business's subscription row first (`V75`), so two
     payments recorded at the same moment are counted one after the other and never both as the first. The cap stays per
     referral row.

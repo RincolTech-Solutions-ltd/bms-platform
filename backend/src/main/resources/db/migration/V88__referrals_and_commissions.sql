@@ -333,20 +333,41 @@ CREATE TRIGGER commission_line_guard BEFORE UPDATE OR DELETE ON referral_commiss
     FOR EACH ROW EXECUTE FUNCTION bms_commission_line_guard();
 
 -- What each payment of a referred business gave under its referral (ADR-069 decision 9): kept so that a payment that earned
--- nothing because its currency differed from the rule's never uses up the rule's months later, whatever the rule is then.
--- Platform table, closed to bms_app, append-only.
+-- nothing because its currency differed from the rule's, or a payment that was refunded (the operator said so when reversing
+-- its line), never uses up the rule's months later, whatever the rule is then. Platform table, closed to bms_app; nothing is
+-- deleted, and an update only records the refund, once.
 CREATE TABLE referral_payment_outcomes (
-    payment_id  uuid        NOT NULL PRIMARY KEY REFERENCES subscription_payments (id),
-    referral_id uuid        NOT NULL REFERENCES tenant_referrals (id),
-    outcome     text        NOT NULL CHECK (outcome IN ('added', 'no_rule', 'not_first_payment', 'months_used',
-                                                        'currency_differs', 'cap_reached', 'zero')),
-    created_at  timestamptz NOT NULL DEFAULT now()
+    payment_id          uuid        NOT NULL PRIMARY KEY REFERENCES subscription_payments (id),
+    referral_id         uuid        NOT NULL REFERENCES tenant_referrals (id),
+    outcome             text        NOT NULL CHECK (outcome IN ('added', 'no_rule', 'not_first_payment', 'months_used',
+                                                                'currency_differs', 'cap_reached', 'zero')),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    refunded_at         timestamptz,
+    refunded_by_line_id uuid        REFERENCES referral_commission_lines (id),
+    CHECK ((refunded_at IS NULL) = (refunded_by_line_id IS NULL))
 );
 CREATE INDEX referral_payment_outcomes_by_referral ON referral_payment_outcomes (referral_id);
 ALTER TABLE referral_payment_outcomes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE referral_payment_outcomes FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON referral_payment_outcomes FROM PUBLIC;
-SELECT bms_make_append_only('referral_payment_outcomes');
+
+CREATE FUNCTION bms_payment_outcome_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_refund constant text[] := ARRAY['refunded_at', 'refunded_by_line_id'];
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'a payment outcome is never deleted' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF OLD.refunded_at IS NOT NULL OR NEW.refunded_at IS NULL
+       OR (to_jsonb(NEW) - v_refund) IS DISTINCT FROM (to_jsonb(OLD) - v_refund) THEN
+        RAISE EXCEPTION 'a payment outcome only records a refund, once' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER payment_outcome_guard BEFORE UPDATE OR DELETE ON referral_payment_outcomes
+    FOR EACH ROW EXECUTE FUNCTION bms_payment_outcome_guard();
 
 -- ---------------------------------------------------------------------------------------------
 -- 6. Referral reads. Each returns the totals per currency as a JSON array of {currency, earned_minor, paid_minor, due_minor}:
@@ -633,7 +654,8 @@ $$;
 -- 8. The commission of one payment (ADR-069 decision 5). Runs in the transaction that records the payment, bound to the paying
 --    business; the payment must be that business's own. Paid months are counted over every other confirmed payment of the
 --    referred business recorded since this referral started (ADR-069 decision 9), leaving out the payments whose outcome was
---    currency_differs (each outcome is kept in referral_payment_outcomes); recording a payment locks the business's subscription first (V75), so two payments recorded at once
+--    currency_differs and the payments recorded as refunded (each outcome is kept in referral_payment_outcomes); recording a
+--    payment locks the business's subscription first (V75), so two payments recorded at once
 --    are counted one after the other and never both as the first. Amounts are whole minor units, rounded half up. A line
 --    worked out while the referrer business is suspended or cancelled is flagged referrer_inactive. Outcomes: added,
 --    no_referral, no_rule, not_first_payment, months_used, currency_differs, cap_reached, zero.
@@ -683,7 +705,7 @@ BEGIN
     SELECT coalesce(sum(sp.months), 0) INTO v_before FROM subscription_payments sp
      WHERE sp.tenant_id = v_tenant AND sp.status = 'confirmed' AND sp.id <> v_pay.id AND sp.created_at >= v_ref.started_at
        AND NOT EXISTS (SELECT 1 FROM referral_payment_outcomes o
-                        WHERE o.payment_id = sp.id AND o.outcome = 'currency_differs');
+                        WHERE o.payment_id = sp.id AND (o.outcome = 'currency_differs' OR o.refunded_at IS NOT NULL));
     IF v_rule.kind <> 'percent_of_payment' AND v_rule.currency <> v_pay.currency THEN
         outcome := 'currency_differs';
         INSERT INTO referral_payment_outcomes (payment_id, referral_id, outcome) VALUES (v_pay.id, v_ref.id, outcome);
@@ -782,8 +804,11 @@ BEGIN
 END
 $$;
 
--- The exact opposite of one line. Returns 'not_found', 'is_reversal', 'already_reversed', or the referral id as text.
-CREATE FUNCTION platform_referral_reverse_line(p_id uuid, p_line_id uuid, p_note text, p_platform_user_id uuid)
+-- The exact opposite of one line. With p_refunded, the line's payment was refunded: that is recorded on its outcome, so the
+-- payment no longer uses up the rule's months (ADR-069 decision 9). Returns 'not_found', 'is_reversal', 'already_reversed',
+-- 'not_payment' (p_refunded on a line that has no payment), or the referral id as text.
+CREATE FUNCTION platform_referral_reverse_line(
+    p_id uuid, p_line_id uuid, p_note text, p_refunded boolean, p_platform_user_id uuid, p_now timestamptz)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -802,10 +827,17 @@ BEGIN
     IF EXISTS (SELECT 1 FROM referral_commission_lines WHERE reverses_line_id = p_line_id) THEN
         RETURN 'already_reversed';
     END IF;
+    IF p_refunded AND v_line.kind <> 'payment' THEN
+        RETURN 'not_payment';
+    END IF;
     INSERT INTO referral_commission_lines (id, tenant_id, referral_id, kind, reverses_line_id, amount_minor, currency,
                                            note, created_by_platform_user_id)
     VALUES (p_id, v_line.tenant_id, v_line.referral_id, 'reversal', v_line.id, -v_line.amount_minor, v_line.currency,
             p_note, p_platform_user_id);
+    IF p_refunded THEN
+        UPDATE referral_payment_outcomes SET refunded_at = p_now, refunded_by_line_id = p_id
+         WHERE payment_id = v_line.payment_id;
+    END IF;
     RETURN v_line.referral_id::text;
 END
 $$;
@@ -862,7 +894,7 @@ REVOKE ALL ON FUNCTION platform_referral_set_default_rule(uuid, uuid, timestampt
 REVOKE ALL ON FUNCTION platform_referral_set_rule(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_commission_for_payment(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, text, text, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_of_line(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION referral_code_tenant(text) TO bms_app;
@@ -880,7 +912,7 @@ GRANT EXECUTE ON FUNCTION platform_referral_set_default_rule(uuid, uuid, timesta
 GRANT EXECUTE ON FUNCTION platform_referral_set_rule(uuid, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_commission_for_payment(uuid, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, text, text, uuid) TO bms_app;
-GRANT EXECUTE ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_of_line(uuid) TO bms_app;
 
