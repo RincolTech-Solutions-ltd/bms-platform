@@ -2921,7 +2921,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reverse one commission line with a reason (lines are never deleted); 409 commission_line_already_reversed, 422 commission_line_is_reversal */
+        /** Reverse one commission line with a reason (lines are never deleted); refunded true records that its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal and commission_line_not_payment */
         post: operations["platformReverseReferralCommission"];
         delete?: never;
         options?: never;
@@ -9879,6 +9879,8 @@ export interface components {
         };
         ReferralLineReverseRequest: {
             reason: string;
+            /** @description True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment */
+            refunded?: boolean;
         };
         /** @description The rule; null clears it (the default: nothing is worked out; a referral: the default) */
         ReferralRuleBody: {

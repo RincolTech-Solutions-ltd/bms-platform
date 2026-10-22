@@ -7204,6 +7204,10 @@
             "maxLength" : 300,
             "minLength" : 5,
             "type" : "string"
+          },
+          "refunded" : {
+            "description" : "True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment",
+            "type" : "boolean"
           }
         },
         "required" : [ "reason" ]
@@ -29445,7 +29449,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Reverse one commission line with a reason (lines are never deleted); 409 commission_line_already_reversed, 422 commission_line_is_reversal",
+        "summary" : "Reverse one commission line with a reason (lines are never deleted); refunded true records that its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal and commission_line_not_payment",
         "tags" : [ "platform" ]
       }
     },
