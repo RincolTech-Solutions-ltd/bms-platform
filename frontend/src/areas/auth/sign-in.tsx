@@ -3,7 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { normaliseSecondFactor, plainProblem } from '../../auth/codes';
-import { setAccessToken } from '../../auth/session';
+import { endPendingLogout, logoutPending, setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { ErrorLine, RecoveryCodes, StepHeader, TwoStepSetup } from './steps';
@@ -28,6 +28,20 @@ export function SignIn() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState(false);
+  // ADR-067 decision 9: a sign-out whose server session could not be ended yet. The installed app has no address bar, so
+  // the page itself offers the retry.
+  const [pendingLogout, setPendingLogout] = useState(logoutPending);
+  const [ending, setEnding] = useState(false);
+
+  async function retryLogout() {
+    if (ending) return;
+    setEnding(true);
+    try {
+      setPendingLogout(!(await endPendingLogout()));
+    } finally {
+      setEnding(false);
+    }
+  }
 
   async function afterSignIn(body: SignInResponse) {
     if (body.status === 'signed_in' && body.access_token) {
@@ -107,6 +121,12 @@ export function SignIn() {
         <>
           <span className="auth-art">{illustrations.secure}</span>
           <StepHeader title="Staff sign-in" lead="Sign in with your email or phone and your password. First time here? Open the link you were sent to choose a password." />
+          {pendingLogout && (
+            <div role="status" className="alert alert-warning stack">
+              <p>Could not finish signing out. Connect to the internet and try again.</p>
+              <BusyButton type="button" busy={ending} onClick={() => void retryLogout()}>Try again</BusyButton>
+            </div>
+          )}
           <ErrorLine message={message} />
           <form onSubmit={submitPassword} className="form-stack">
             <div>
