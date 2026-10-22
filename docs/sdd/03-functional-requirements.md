@@ -867,7 +867,7 @@ default, 500 at most) with `truncated` when more matched (the arrears bucket tot
 loan), and a member's phone is shown whole only to a caller holding `lending.members.contact` in the
 loan's branch (administrators, branch managers and loan officers), masked (`+256*****0001`) otherwise;
 without `lending.collections.all_officers` (the loan officer) every list covers only the caller's own
-portfolio (ADR-064, migration V82). The nightly arrears run settles promises
+portfolio (ADR-064, migration V83). The nightly arrears run settles promises
 last, in a transaction of its own: kept when repayments and recoveries not reversed, valued from the
 day the promise was made to its date and recorded after the promise was made, reach its amount;
 broken the day after its date otherwise; each payment counts toward one promise only (a loan's

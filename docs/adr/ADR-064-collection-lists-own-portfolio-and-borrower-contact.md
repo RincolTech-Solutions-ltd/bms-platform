@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (owner decision delegated to the Dev Lead, 22 Oct 2026, the second review of pull request #272, issue #266,
-FR-CLN-01 to FR-CLN-05). Migration `V82`. Builds on ADR-017 (per-permission branch scope) and ADR-062 (the Owner).
+FR-CLN-01 to FR-CLN-05). Migration `V83`. Builds on ADR-017 (per-permission branch scope) and ADR-062 (the Owner).
 
 ## Context
 

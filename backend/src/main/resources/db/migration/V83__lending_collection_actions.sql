@@ -1,5 +1,5 @@
--- V82: lending increment 6 T3 (#266, part of #109): collection actions and promises to pay, directly
--- after V81 (the waivers of T2, #265). Additive only.
+-- V83: lending increment 6 T3 (#266, part of #109): collection actions and promises to pay, directly
+-- after V82 (the waivers of T2, #265). Additive only.
 
 -- ---------------------------------------------------------------------------------------------
 -- lending_collection_actions (chapter 6 section 6.7; FR-CLN-04, FR-CLN-05). Append-only except a

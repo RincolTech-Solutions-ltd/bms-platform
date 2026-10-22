@@ -796,7 +796,7 @@ Accepted (this list is the ADR index):
   (proposed, #442; FR-IAM-18; migration `V79`; renumbered at merge if needed)
 - ADR-064 Collection lists: a loan officer sees their own portfolio (`lending.collections.all_officers` for the rest),
   only the people who call borrowers see phone numbers (`lending.members.contact`), and a reassignment needs a reason
-  (#272, migration `V82`).
+  (#272, migration `V83`).
 - ADR-065 Feedback from inside the app: any member of staff sends an idea, a problem or a question with an optional screenshot, sees
   only their own; the operator reads every business's through definer functions, moves it forward (new, seen, done) with a reply,
   and is emailed through the outbox, never in the way of the send; ten an hour per person (accepted, #447; FR-FBK-01 to FR-FBK-05;

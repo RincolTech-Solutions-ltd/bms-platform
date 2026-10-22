@@ -1430,7 +1430,7 @@ entry_date)`.
 [`call`, `visit`, `sms`, `letter`, `promise_to_pay`, `other`], `note text`,
 `promised_date date`, `promised_amount_minor bigint`, `promise_status text` [`pending`,
 `kept`, `broken`], `performed_by uuid NOT NULL`, `performed_at timestamptz NOT NULL`.
-Built in V82 (#266): a promise to pay carries its date, amount and status and no
+Built in V83 (#266): a promise to pay carries its date, amount and status and no
 other action does; `promise_settled_on` is the business date of its latest settlement (null while
 pending); `performed_by` is a composite foreign key to `users`; a guard trigger (in place of
 `reject_mutation()`) refuses deletes and allows only a promise's status and settled date to change,
