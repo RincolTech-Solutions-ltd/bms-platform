@@ -5,7 +5,7 @@
  * the operator's reply. Each new item queues an email to every active platform operator through the outbox, in a
  * savepoint, so a failure there never stops the send. At most ten items per person per hour. Public API:
  * {@link com.rincoltech.bms.core.feedback.FeedbackInbox}, the operator's list, status change and screenshot read, which
- * {@code core.platform} serves on the platform host through the SECURITY DEFINER functions of migration V86 (ADR-016).
+ * {@code core.platform} serves on the platform host through the SECURITY DEFINER functions of migration V80 (ADR-016).
  */
 @ApplicationModule(
         id = "core.feedback",

@@ -2490,9 +2490,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Feedback from every business, newest first, optionally one status (new, seen, done) */
+        /** Feedback from every business, newest first, optionally one status (new, seen, done) and only what was sent after since */
         get: operations["platformListFeedback"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/feedback/{feedback_id}/linked-issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set or clear the number of the issue opened for one feedback item */
+        put: operations["platformSetFeedbackLinkedIssue"];
         post?: never;
         delete?: never;
         options?: never;
@@ -8890,6 +8907,8 @@ export interface components {
             /** Format: uuid */
             id?: string;
             kind?: string;
+            /** Format: int32 */
+            linked_issue_number?: number;
             message?: string;
             page_path?: string;
             reply_note?: string;
@@ -8902,6 +8921,13 @@ export interface components {
             tenant_name?: string;
             tenant_slug?: string;
             user_agent?: string;
+        };
+        PlatformFeedbackLinkedIssueRequest: {
+            /**
+             * Format: int32
+             * @description The number of the issue opened for this feedback; null clears it
+             */
+            linked_issue_number?: number;
         };
         PlatformFeedbackList: {
             items?: components["schemas"]["PlatformFeedbackItem"][];
@@ -20743,6 +20769,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string;
+                since?: string;
                 limit?: number;
                 offset?: number;
             };
@@ -20759,6 +20786,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformFeedbackList"];
+                };
+            };
+        };
+    };
+    platformSetFeedbackLinkedIssue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feedback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformFeedbackLinkedIssueRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformFeedbackItem"];
                 };
             };
         };

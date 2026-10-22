@@ -2,10 +2,10 @@
 
 ## Status
 
-Proposed (issue #447, FR-FBK-01 to FR-FBK-05). Builds on ADR-003 (row-level security), ADR-016 (the platform reads and changes
+Accepted (issue #447, FR-FBK-01 to FR-FBK-05). Builds on ADR-003 (row-level security), ADR-016 (the platform reads and changes
 tenants through SECURITY DEFINER functions), ADR-024 (the platform outbox and its operator alert), ADR-049 (every route has a page
-tour) and ADR-053 (an image a module shows is a `core.documents` upload served from the same origin). Migration `V86` (`V80` to
-`V85` are claimed by open pull requests; renumbered at merge if needed). ADR-063 is on main and the number before this one,
+tour) and ADR-053 (an image a module shows is a `core.documents` upload served from the same origin). Migration `V80`, the next
+number after `V79` on main (the open pull requests that had claimed `V80` to `V85` take the numbers after it). ADR-063 is on main and the number before this one,
 pending ADR-064, is claimed by an open pull request.
 
 ## Context
@@ -18,7 +18,7 @@ not become a way to flood the operator.
 
 ## Decision
 
-1. **A new core module, `core.feedback`, and one tenant table.** `feedback_items` (V86) holds the kind (`idea`, `problem`,
+1. **A new core module, `core.feedback`, and one tenant table.** `feedback_items` (V80) holds the kind (`idea`, `problem`,
    `question`), the message (1 to 2000 characters), the page path the sender came from (path only: the PWA remembers the last staff
    page and the server drops any query or fragment, which can carry a search or a token), the running version (version and git
    SHA, taken by the server from its own build, as `/version` reports it, so a client cannot misreport it), the browser's user agent

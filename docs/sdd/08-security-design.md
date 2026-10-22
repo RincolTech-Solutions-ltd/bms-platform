@@ -651,9 +651,9 @@ body, and compared digest to digest in constant time after the indexed lookup.
 
 In-app feedback (issue #447, ADR-065) adds no permission, so the matrix is unchanged: sending feedback and reading one's own (`/feedback`) is
 open to every signed-in member of staff, like `/me`, and an administrator does not read a colleague's; the operator's list and screenshot
-read need `platform.tenants.read` and a status change `platform.tenants.manage`, on the platform host only. A screenshot's
+read need `platform.tenants.read` and a status change or a linked issue `platform.tenants.manage`, on the platform host only. A screenshot's
 `DocumentAccess` lets only its sender and an operator read it (a refusal is a 404). The operator reads across businesses only through
-the definer functions of `V86`, which refuse a tenant-bound transaction.
+the definer functions of `V80`, which refuse a tenant-bound transaction.
 
 ### 8.3.3 Enforcement
 

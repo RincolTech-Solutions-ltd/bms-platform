@@ -13,10 +13,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -30,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code /api/v1/platform/feedback} (chapter 7 section 7.11.3, issue #447, ADR-065): the feedback every business sent, for
- * platform operators only. The list and the status change read across businesses through the definer functions of V86 with
+ * platform operators only. The list and the status change read across businesses through the definer functions of V80 with
  * no tenant bound; a screenshot is read with its business bound through {@link TenantContext#callAs}, as every other act of
  * the console inside one tenant.
  */
@@ -56,17 +59,27 @@ class FeedbackInboxController {
             @Schema(description = "A reply the sender sees; null keeps the one there, an empty string clears it")
             String replyNote) {}
 
+    @Schema(name = "PlatformFeedbackLinkedIssueRequest")
+    record LinkedIssueRequest(
+            @Positive @Schema(description = "The number of the issue opened for this feedback; null clears it")
+            Integer linkedIssueNumber) {}
+
     @GetMapping
     @RequiresPermission("platform.tenants.read")
     @Operation(
-            summary = "Feedback from every business, newest first, optionally one status (new, seen, done)",
+            summary =
+                    "Feedback from every business, newest first, optionally one status (new, seen, done) and only what"
+                            + " was sent after since",
             operationId = "platformListFeedback")
     FeedbackList list(
             @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "since", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+                    Instant since,
             @RequestParam(name = "limit", required = false) Integer limit,
             @RequestParam(name = "offset", required = false) Integer offset) {
         return new FeedbackList(inbox.list(
                 status == null || status.isBlank() ? null : status,
+                since,
                 limit == null ? 50 : Math.clamp(limit, 1, 200),
                 offset == null ? 0 : Math.max(offset, 0)));
     }
@@ -83,6 +96,16 @@ class FeedbackInboxController {
                 request.status(),
                 request.replyNote(),
                 CurrentPrincipal.require().userId());
+    }
+
+    @PutMapping("/{feedback_id}/linked-issue")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary = "Set or clear the number of the issue opened for one feedback item",
+            operationId = "platformSetFeedbackLinkedIssue")
+    Item setLinkedIssue(@PathVariable("feedback_id") UUID id, @Valid @RequestBody LinkedIssueRequest request) {
+        return inbox.setLinkedIssue(
+                id, request.linkedIssueNumber(), CurrentPrincipal.require().userId());
     }
 
     @GetMapping(path = "/{feedback_id}/screenshot", produces = MediaType.ALL_VALUE)

@@ -42,7 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * In-app feedback (issue #447, ADR-065): the sender's send and own list inside their tenant, and the operator's inbox
- * across businesses through the definer functions of V86. Nothing here takes a tenant: the sender's is the one the request
+ * across businesses through the definer functions of V80. Nothing here takes a tenant: the sender's is the one the request
  * host resolved, and the operator's screenshot read is bound by {@code core.platform}.
  */
 @Service
@@ -114,9 +114,15 @@ class FeedbackService implements FeedbackInbox {
 
     record Send(String kind, String message, String pagePath, String userAgent, byte[] screenshot) {}
 
-    /** The screenshot is checked and re-encoded before the transaction opens, so no connection waits on it. */
+    /**
+     * The screenshot is checked and re-encoded before the transaction opens, so no connection waits on it. A sender over the
+     * hourly limit is refused first, by a plain count, so a burst of sends never costs an image decode each; the locked
+     * count in the transaction is the one that holds.
+     */
     FeedbackItem send(Send request) {
         validate(request);
+        UUID sender = CurrentPrincipal.require().userId();
+        transactions.executeWithoutResult(tx -> limit(sender, clock.now(), false));
         Prepared screenshot = request.screenshot() == null || request.screenshot().length == 0
                 ? null
                 : documents.prepareImage(screenshotBytes(request.screenshot()), SCREENSHOT);
@@ -126,7 +132,7 @@ class FeedbackService implements FeedbackInbox {
     private FeedbackItem store(Send request, Prepared screenshot) {
         UUID sender = CurrentPrincipal.require().userId();
         Instant now = clock.now();
-        limit(sender, now);
+        limit(sender, now, true);
         UUID id = UUID.randomUUID();
         UUID documentId = screenshot == null
                 ? null
@@ -211,13 +217,16 @@ class FeedbackService implements FeedbackInbox {
 
     /**
      * Ten items per person in any hour, counted in the database under a per-person lock, so two sends at once cannot both
-     * take the tenth place. The 429 names the wait until the oldest of the ten leaves the hour.
+     * take the tenth place. The 429 names the wait until the oldest of the ten leaves the hour. Without the lock it is the
+     * cheap early check before the screenshot is decoded.
      */
-    private void limit(UUID sender, Instant now) {
-        jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('core.feedback:' || ?, 0))")
-                .param(sender.toString())
-                .query((rs, n) -> 1)
-                .single();
+    private void limit(UUID sender, Instant now, boolean locked) {
+        if (locked) {
+            jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('core.feedback:' || ?, 0))")
+                    .param(sender.toString())
+                    .query((rs, n) -> 1)
+                    .single();
+        }
         List<Instant> recent = jdbc.sql("""
                         SELECT created_at FROM feedback_items
                          WHERE sender_user_id = ? AND created_at > ?
@@ -347,13 +356,13 @@ class FeedbackService implements FeedbackInbox {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Item> list(String status, int limit, int offset) {
+    public List<Item> list(String status, Instant since, int limit, int offset) {
         if (status != null && !STATUSES.contains(status)) {
             throw ApiException.validation(
                     List.of(new FieldProblem("status", "invalid", "status is new, seen or done.")));
         }
-        return jdbc.sql("SELECT * FROM platform_feedback_list(?, NULL, ?, ?)")
-                .params(status, limit, offset)
+        return jdbc.sql("SELECT * FROM platform_feedback_list(?, NULL, ?, ?, ?)")
+                .params(status, since == null ? null : Timestamp.from(since), limit, offset)
                 .query(FeedbackService::operatorItem)
                 .list();
     }
@@ -392,6 +401,29 @@ class FeedbackService implements FeedbackInbox {
     }
 
     @Override
+    @Transactional
+    public Item setLinkedIssue(UUID id, Integer issueNumber, UUID operatorId) {
+        if (issueNumber != null && issueNumber < 1) {
+            throw ApiException.validation(List.of(new FieldProblem(
+                    "linked_issue_number", "invalid", "The issue number is a whole number above zero.")));
+        }
+        Item before = byId(id).orElseThrow(ApiException::notFound);
+        String result = jdbc.sql("SELECT platform_feedback_set_linked_issue(?, ?)")
+                .params(id, issueNumber)
+                .query(String.class)
+                .single();
+        if ("not_found".equals(result)) {
+            throw ApiException.notFound();
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("feedback_id", id);
+        data.put("before", before.linkedIssueNumber());
+        data.put("after", issueNumber);
+        platformAudit.record("platform.feedback.issue_linked", operatorId, before.tenantId(), data);
+        return byId(id).orElseThrow();
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<UUID> tenantOf(UUID id) {
         return Optional.ofNullable(jdbc.sql("SELECT platform_feedback_tenant(?)")
@@ -412,7 +444,7 @@ class FeedbackService implements FeedbackInbox {
 
     /** One item through the list function, the operator's only read. */
     private Optional<Item> byId(UUID id) {
-        return jdbc.sql("SELECT * FROM platform_feedback_list(NULL, ?, 1, 0)")
+        return jdbc.sql("SELECT * FROM platform_feedback_list(NULL, ?, NULL, 1, 0)")
                 .param(id)
                 .query(FeedbackService::operatorItem)
                 .optional();
@@ -434,6 +466,7 @@ class FeedbackService implements FeedbackInbox {
                 rs.getString("status"),
                 rs.getString("reply_note"),
                 instant(rs.getTimestamp("status_changed_at")),
+                rs.getObject("linked_issue_number", Integer.class),
                 rs.getTimestamp("created_at").toInstant());
     }
 }

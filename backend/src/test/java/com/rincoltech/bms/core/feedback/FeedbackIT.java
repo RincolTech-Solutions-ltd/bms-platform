@@ -1,9 +1,12 @@
 package com.rincoltech.bms.core.feedback;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
+import com.rincoltech.bms.core.notifications.Outbox;
 import com.rincoltech.bms.testsupport.Api;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -13,7 +16,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,6 +32,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import tools.jackson.databind.JsonNode;
@@ -41,6 +48,10 @@ class FeedbackIT extends IntegrationTest {
 
     @Autowired
     TestRestTemplate http;
+
+    /** Calls the real outbox until a test arms it to fail. */
+    @MockitoSpyBean
+    Outbox outbox;
 
     TestDatabase.Fixture a;
     TestDatabase.Fixture b;
@@ -180,8 +191,154 @@ class FeedbackIT extends IntegrationTest {
         assertThat(asTenant(
                         b.tenantId(), "SELECT count(*) FROM feedback_items WHERE tenant_id = '" + a.tenantId() + "'"))
                 .isEqualTo("0");
-        assertThat(asTenant(b.tenantId(), "SELECT count(*) FROM platform_feedback_list(NULL, NULL, 10, 0)"))
+        assertThat(asTenant(b.tenantId(), "SELECT count(*) FROM platform_feedback_list(NULL, NULL, NULL, 10, 0)"))
                 .isEqualTo("refused");
+        assertThat(asTenant(b.tenantId(), "SELECT platform_feedback_tenant('" + id + "')"))
+                .isEqualTo("refused");
+        assertThat(asTenant(
+                        b.tenantId(),
+                        "SELECT platform_feedback_set_status('" + id + "', 'done', NULL, '" + operatorId + "', now())"))
+                .isEqualTo("refused");
+        assertThat(asTenant(b.tenantId(), "SELECT platform_feedback_set_linked_issue('" + id + "', 7)"))
+                .isEqualTo("refused");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM feedback_items WHERE id = ?::uuid")
+                        .param(id)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("new");
+    }
+
+    @Test
+    void aPlatformTokenCannotSendOrList() {
+        assertThat(send(apiA, operator, "idea", "Test message from an operator", null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(apiA.get("/api/v1/feedback", operator).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM feedback_items WHERE tenant_id = ?")
+                        .param(a.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
+    }
+
+    @Test
+    void anOutboxFailureNeverBlocksTheSend() {
+        // The spy sits behind the transactional proxy; arm the spy itself.
+        Outbox spy = AopTestUtils.getUltimateTargetObject(outbox);
+        doThrow(new IllegalStateException("test outbox down")).when(spy).enqueue(any());
+        ResponseEntity<JsonNode> sent = send(apiA, senderA, "problem", "Test problem while the outbox is down", null);
+        assertThat(sent.getStatusCode()).as("%s", sent.getBody()).isEqualTo(HttpStatus.CREATED);
+        String id = sent.getBody().get("id").asString();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM feedback_items WHERE id = ?::uuid")
+                        .param(id)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM notification_outbox WHERE idempotency_key LIKE 'feedback.new:' || ? || ':%'")
+                        .param(id)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+        assertThat(ids(apiA.get("/api/v1/feedback", senderA))).contains(id);
+    }
+
+    @Test
+    void aReplyAloneKeepsTheStatusDateAndBlankRepliesClear() {
+        String id = send(apiA, senderA, "question", "Test question about the reply", null)
+                .getBody()
+                .get("id")
+                .asString();
+        String url = "/api/v1/platform/feedback/" + id + "/status";
+        assertThat(platform.call(HttpMethod.PUT, url, Map.of("status", "seen"), operator)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        Instant changed = statusChangedAt(id);
+        assertThat(changed).isNotNull();
+
+        ResponseEntity<JsonNode> replied =
+                platform.call(HttpMethod.PUT, url, Map.of("status", "seen", "reply_note", "Test reply"), operator);
+        assertThat(replied.getBody().get("reply_note").asString()).isEqualTo("Test reply");
+        assertThat(statusChangedAt(id)).isEqualTo(changed);
+
+        // Only white space (tabs and line breaks too) clears the reply.
+        ResponseEntity<JsonNode> cleared =
+                platform.call(HttpMethod.PUT, url, Map.of("status", "seen", "reply_note", " \t\r\n "), operator);
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cleared.getBody().get("reply_note").isNull()).isTrue();
+        assertThat(statusChangedAt(id)).isEqualTo(changed);
+    }
+
+    static Instant statusChangedAt(String id) {
+        return TestDatabase.owner()
+                .sql("SELECT status_changed_at FROM feedback_items WHERE id = ?::uuid")
+                .param(id)
+                .query((rs, n) ->
+                        rs.getTimestamp(1) == null ? null : rs.getTimestamp(1).toInstant())
+                .single();
+    }
+
+    @Test
+    void theOperatorLinksAnIssueAndListsOnlyWhatIsNew() {
+        String first = send(apiA, senderA, "problem", "Test problem to link", null)
+                .getBody()
+                .get("id")
+                .asString();
+        Instant firstAt = Instant.parse(find(platform.get("/api/v1/platform/feedback?limit=200", operator), first)
+                .get("created_at")
+                .asString());
+        String second = send(apiA, colleagueA, "idea", "Test idea after the first", null)
+                .getBody()
+                .get("id")
+                .asString();
+
+        // since: only what was sent after it.
+        assertThat(ids(platform.get("/api/v1/platform/feedback?limit=200&since=" + firstAt, operator)))
+                .contains(second)
+                .doesNotContain(first);
+
+        String url = "/api/v1/platform/feedback/" + first + "/linked-issue";
+        ResponseEntity<JsonNode> linked =
+                platform.call(HttpMethod.PUT, url, Map.of("linked_issue_number", 4521), operator);
+        assertThat(linked.getStatusCode()).as("%s", linked.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(linked.getBody().get("linked_issue_number").asInt()).isEqualTo(4521);
+        assertThat(find(platform.get("/api/v1/platform/feedback?limit=200", operator), first)
+                        .get("linked_issue_number")
+                        .asInt())
+                .isEqualTo(4521);
+        assertThat(platform.call(HttpMethod.PUT, url, Map.of("linked_issue_number", 0), operator)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(platform.call(HttpMethod.PUT, url, Map.of("linked_issue_number", 7), senderA)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        Map<String, Object> clear = new HashMap<>();
+        clear.put("linked_issue_number", null);
+        ResponseEntity<JsonNode> cleared = platform.call(HttpMethod.PUT, url, clear, operator);
+        assertThat(cleared.getStatusCode()).as("%s", cleared.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(cleared.getBody().get("linked_issue_number").isNull()).isTrue();
+        assertThat(platform.call(
+                                HttpMethod.PUT,
+                                "/api/v1/platform/feedback/" + UUID.randomUUID() + "/linked-issue",
+                                Map.of("linked_issue_number", 7),
+                                operator)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        // Audited like the status change: set, then cleared.
+        assertThat(TestDatabase.owner()
+                        .sql("""
+                                SELECT count(*) FROM platform_audit_log
+                                 WHERE action = 'platform.feedback.issue_linked' AND platform_user_id = ? AND tenant_id = ?
+                                """)
+                        .params(operatorId, a.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(2);
     }
 
     /** One query as bms_app with the tenant bound as the transaction manager binds it; "refused" when the database says no. */

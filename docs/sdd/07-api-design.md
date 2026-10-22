@@ -433,8 +433,9 @@ Feedback from every business (issue #447, ADR-065, FR-FBK-03), served by `core.p
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/platform/feedback` | `platform.tenants.read` | `?status=` (new, seen or done), `limit` (1 to 200, default 50) and `offset`. `{items: [PlatformFeedbackItem]}` newest first across every business: the business's id, slug and name, the sender's name, kind, message, page path, app version, user agent, `has_screenshot`, status, reply and dates. Read through `platform_feedback_list` (V86) |
-| PUT | `/platform/feedback/{feedback_id}/status` | `platform.tenants.manage` | `{status, reply_note?}`: forward only (new, seen, done); 422 `feedback_status_backwards`; the same status keeps it and may change the reply (null keeps it, empty clears it); audited `platform.feedback.status_changed` with before and after |
+| GET | `/platform/feedback` | `platform.tenants.read` | `?status=` (new, seen or done), `since` (an ISO 8601 instant: only what was sent after it), `limit` (1 to 200, default 50) and `offset`. `{items: [PlatformFeedbackItem]}` newest first across every business: the business's id, slug and name, the sender's name, kind, message, page path, app version, user agent, `has_screenshot`, status, reply, `linked_issue_number` and dates. Read through `platform_feedback_list` (V80) |
+| PUT | `/platform/feedback/{feedback_id}/status` | `platform.tenants.manage` | `{status, reply_note?}`: forward only (new, seen, done); 422 `feedback_status_backwards`; the same status keeps it and its date and may change the reply (null keeps it, empty or white space only clears it); audited `platform.feedback.status_changed` with before and after |
+| PUT | `/platform/feedback/{feedback_id}/linked-issue` | `platform.tenants.manage` | `{linked_issue_number}`: the number of the issue opened for the item (a whole number above zero, else 422), or null to clear it; 404 when there is no such item; audited `platform.feedback.issue_linked` with before and after. Through `platform_feedback_set_linked_issue` (V80) |
 | GET | `/platform/feedback/{feedback_id}/screenshot` | `platform.tenants.read` | The picture (PNG or JPEG), read with the item's business bound (`TenantContext.callAs`); 404 when there is none |
 
 The sign-up endpoints sit under `/platform` so they are served only on the platform host and

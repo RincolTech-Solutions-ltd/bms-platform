@@ -5923,6 +5923,10 @@
           "kind" : {
             "type" : "string"
           },
+          "linked_issue_number" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
           "message" : {
             "type" : "string"
           },
@@ -5954,6 +5958,16 @@
           },
           "user_agent" : {
             "type" : "string"
+          }
+        }
+      },
+      "PlatformFeedbackLinkedIssueRequest" : {
+        "properties" : {
+          "linked_issue_number" : {
+            "description" : "The number of the issue opened for this feedback; null clears it",
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
           }
         }
       },
@@ -27207,6 +27221,14 @@
           }
         }, {
           "in" : "query",
+          "name" : "since",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
           "name" : "limit",
           "required" : false,
           "schema" : {
@@ -27234,7 +27256,45 @@
             "description" : "OK"
           }
         },
-        "summary" : "Feedback from every business, newest first, optionally one status (new, seen, done)",
+        "summary" : "Feedback from every business, newest first, optionally one status (new, seen, done) and only what was sent after since",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/feedback/{feedback_id}/linked-issue" : {
+      "put" : {
+        "operationId" : "platformSetFeedbackLinkedIssue",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "feedback_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformFeedbackLinkedIssueRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformFeedbackItem"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set or clear the number of the issue opened for one feedback item",
         "tags" : [ "platform" ]
       }
     },

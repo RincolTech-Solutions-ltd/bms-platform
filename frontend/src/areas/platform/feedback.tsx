@@ -6,13 +6,14 @@ import {
   type PlatformFeedbackItem,
   operatorFeedback,
   operatorScreenshot,
+  setFeedbackLinkedIssue,
   setFeedbackStatus,
 } from '../../api/feedback';
 import { TourButton } from './operator-parts';
 
 // Feedback from every business (issue #447, ADR-065), newest first, on the platform host for operators only. Filter by status;
-// move an item forward (new, seen, done) and write a reply the sender then sees on their own Feedback page. The sender's words
-// are shown as text, never as markup.
+// move an item forward (new, seen, done) and write a reply the sender then sees on their own Feedback page; note the number of
+// the issue opened for it, or clear it. The sender's words are shown as text, never as markup.
 
 const FILTERS: { value: FeedbackStatus | null; label: string }[] = [
   { value: null, label: 'All' },
@@ -29,6 +30,14 @@ export function nextStatuses(status: string | undefined): FeedbackStatus[] {
   if (status === 'new') return ['seen', 'done'];
   if (status === 'seen') return ['done'];
   return [];
+}
+
+/** The issue number typed in, or null when the box is empty; undefined when it is not a whole number above zero. */
+export function issueNumberOf(text: string): number | null | undefined {
+  const t = text.trim();
+  if (t === '') return null;
+  const n = Number(t.replace(/^#/, ''));
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : 'The change was not saved. Try again.');
@@ -60,12 +69,16 @@ function Screenshot({ id, load }: { id: string; load: (id: string) => Promise<Bl
   return url ? <img src={url} alt="Screenshot sent with this feedback" style={{ maxWidth: '100%', borderRadius: 6 }} /> : <p className="hint">Loading</p>;
 }
 
-function FeedbackCard({ item, save, loadScreenshot }: {
+function FeedbackCard({ item, save, link, loadScreenshot }: {
   item: PlatformFeedbackItem;
   save: (id: string, status: FeedbackStatus, reply: string | null) => Promise<unknown>;
+  link: (id: string, issueNumber: number | null) => Promise<unknown>;
   loadScreenshot: (id: string) => Promise<Blob>;
 }) {
   const [reply, setReply] = useState(item.reply_note ?? '');
+  const [issue, setIssue] = useState(item.linked_issue_number == null ? '' : String(item.linked_issue_number));
+  const issueNumber = issueNumberOf(issue);
+  const issueChanged = issueNumber !== undefined && issueNumber !== (item.linked_issue_number ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const id = item.id ?? '';
@@ -84,6 +97,19 @@ function FeedbackCard({ item, save, loadScreenshot }: {
     }
   }
 
+  async function saveIssue() {
+    if (issueNumber === undefined) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await link(id, issueNumber);
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <li className="rt-card stack" data-tour="feedback-item">
       <span>
@@ -95,6 +121,23 @@ function FeedbackCard({ item, save, loadScreenshot }: {
         Page: {item.page_path ?? 'not known'}. Version: {item.app_version}. Browser: {item.user_agent ?? 'not known'}.
       </span>
       {item.has_screenshot && <Screenshot id={id} load={loadScreenshot} />}
+      {item.linked_issue_number != null && <span className="hint">Issue: #{item.linked_issue_number}.</span>}
+      <label htmlFor={`issue-${id}`}>Issue number</label>
+      <div className="cluster">
+        <input
+          id={`issue-${id}`}
+          inputMode="numeric"
+          value={issue}
+          disabled={busy}
+          aria-invalid={issueNumber === undefined}
+          onChange={(e) => setIssue(e.target.value)}
+          style={{ maxWidth: '10rem' }}
+        />
+        <button type="button" className="btn-sm" disabled={busy || !issueChanged} onClick={() => void saveIssue()}>
+          {issueNumber === null ? 'Clear the issue' : 'Save the issue'}
+        </button>
+      </div>
+      {issueNumber === undefined && <p className="hint">The issue number is a whole number above zero.</p>}
       <label htmlFor={`reply-${id}`}>Reply the sender sees</label>
       <textarea id={`reply-${id}`} rows={3} value={reply} maxLength={2000} disabled={busy} onChange={(e) => setReply(e.target.value)} data-tour="feedback-reply" />
       {error && (
@@ -119,10 +162,12 @@ function FeedbackCard({ item, save, loadScreenshot }: {
 export function FeedbackInbox({
   load = operatorFeedback,
   save = setFeedbackStatus,
+  link = setFeedbackLinkedIssue,
   loadScreenshot = operatorScreenshot,
 }: {
   load?: (status: FeedbackStatus | null) => Promise<PlatformFeedbackItem[]>;
   save?: (id: string, status: FeedbackStatus, reply: string | null) => Promise<unknown>;
+  link?: (id: string, issueNumber: number | null) => Promise<unknown>;
   loadScreenshot?: (id: string) => Promise<Blob>;
 }) {
   const client = useQueryClient();
@@ -130,6 +175,10 @@ export function FeedbackInbox({
   const list = useQuery({ queryKey: ['platform-feedback', filter], queryFn: () => load(filter) });
   const change = useMutation({
     mutationFn: ({ id, status, reply }: { id: string; status: FeedbackStatus; reply: string | null }) => save(id, status, reply),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['platform-feedback'] }),
+  });
+  const linkIssue = useMutation({
+    mutationFn: ({ id, issueNumber }: { id: string; issueNumber: number | null }) => link(id, issueNumber),
     onSuccess: () => client.invalidateQueries({ queryKey: ['platform-feedback'] }),
   });
   const items = list.data ?? [];
@@ -161,10 +210,11 @@ export function FeedbackInbox({
       <ul className="stack" data-tour="feedback-list">
         {items.map((item) => (
           <FeedbackCard
-            key={`${item.id}-${item.status}-${item.reply_note ?? ''}`}
+            key={`${item.id}-${item.status}-${item.reply_note ?? ''}-${item.linked_issue_number ?? ''}`}
             item={item}
             loadScreenshot={loadScreenshot}
             save={(id, status, reply) => change.mutateAsync({ id, status, reply })}
+            link={(id, issueNumber) => linkIssue.mutateAsync({ id, issueNumber })}
           />
         ))}
       </ul>

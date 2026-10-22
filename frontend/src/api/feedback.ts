@@ -90,6 +90,16 @@ export async function setFeedbackStatus(id: string, status: FeedbackStatus, repl
   return result.data;
 }
 
+export async function setFeedbackLinkedIssue(id: string, issueNumber: number | null): Promise<PlatformFeedbackItem> {
+  const result = await api.PUT('/api/v1/platform/feedback/{feedback_id}/linked-issue', {
+    params: { path: { feedback_id: id } },
+    // An absent number is a null on the server, which clears the link.
+    body: { linked_issue_number: issueNumber ?? undefined },
+  });
+  if (!result.data) fail(result.error, result.response.status, 'The issue number was not saved. Try again.');
+  return result.data;
+}
+
 export async function operatorScreenshot(id: string): Promise<Blob> {
   const result = await api.GET('/api/v1/platform/feedback/{feedback_id}/screenshot', {
     params: { path: { feedback_id: id } },
