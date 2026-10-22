@@ -146,15 +146,14 @@ class ApplicationService {
         }
         // ADR-069: a code typed wrong is refused in plain words before anything is created; it says nothing about the
         // email, so the same-answer rule below still holds. A code of a business the applicant runs (their email or
-        // phone
-        // is its Owner's or an administrator's) is refused too (decision 10).
+        // phone is its Owner's or an administrator's) is dropped quietly and the answer is the usual one, so the form
+        // never tells whose email or phone this is; Activate checks again and audits the refusal (decision 10).
         Referrals.Code referral =
                 request.referralCode() == null || request.referralCode().isBlank()
                         ? null
                         : transactions.execute(status -> {
                             Referrals.Code code = referrals.resolve(request.referralCode());
-                            referrals.refuseSelf(code, email, phone);
-                            return code;
+                            return referrals.isSelf(code, email, phone) ? null : code;
                         });
         String token = token();
         String hash = sha256(token);

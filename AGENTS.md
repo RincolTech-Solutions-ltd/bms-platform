@@ -219,8 +219,8 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   with status and money; tour `page-referrals`), and Referred by on the sign-up, filled from `?ref=`. The operator portal has no
   referrals screen yet (the API is complete). After the review (ADR-069 decisions 9 to 13): the months used count only payments
   since the referral started, one at a time under the subscription lock, leaving out `currency_differs` ones (kept in the closed
-  `referral_payment_outcomes`); a percent is rounded half up; 422 `referral_self` also when the applicant is an Owner or
-  administrator of the referrer (checked again at Activate, audited `platform.referral.refused_self`); a typed line needs an
+  `referral_payment_outcomes`); a percent is rounded half up; a sign-up whose applicant is an Owner or administrator of the
+  referrer drops the code quietly with the usual 202 (checked again at Activate, audited `platform.referral.refused_self`); a typed line needs an
   Idempotency-Key; the referrer and rule PUTs need the operator's `totp_code`; a reversed unpaid line is not paid (409
   `commission_line_reversed`); statuses `suspended` and `cancelled`, and `referrer_inactive` on lines; a returning applicant's code
   goes on the open, still submitted application without a referrer. Tests: `ReferralsIT`, `ReferralServiceTest`,

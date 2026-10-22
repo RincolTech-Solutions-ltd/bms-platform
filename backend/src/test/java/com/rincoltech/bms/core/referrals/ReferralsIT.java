@@ -402,9 +402,10 @@ class ReferralsIT extends IntegrationTest {
     }
 
     /**
-     * The Owner or an administrator of a business cannot bring its code: their email (compared as the sign-up compares it) or
-     * phone is refused at the sign-up with 422 referral_self and nothing is created; it is checked again at Activate, where no
-     * referral is stored and the refusal is audited (decision 10).
+     * The Owner or an administrator of a business cannot bring its code: when their email (compared as the sign-up compares
+     * it) or phone matches, the sign-up drops the code quietly and answers exactly as for anyone else, so the public form
+     * never tells whose email or phone this is (FR-ONB-03); it is checked again at Activate, where no referral is stored and
+     * the refusal is audited (decision 10).
      */
     @Test
     void theBusinesssOwnPeopleCannotUseItsCode() {
@@ -413,28 +414,39 @@ class ReferralsIT extends IntegrationTest {
         String adminEmail = Api.email("ref-self-admin");
         UUID admin = Api.staff(referrer, adminEmail, new Api.Role("tenant_admin", null));
 
+        ResponseEntity<JsonNode> stranger = apply(signUpForm(Api.email("ref-self-stranger"), "Test Other Shop", code));
+        assertThat(stranger.getStatusCode()).as("%s", stranger.getBody()).isEqualTo(HttpStatus.ACCEPTED);
         ResponseEntity<JsonNode> byEmail =
                 apply(signUpForm(adminEmail.toUpperCase(Locale.ROOT), "Test Own Shop", code));
-        assertThat(byEmail.getStatusCode().value()).as("%s", byEmail.getBody()).isEqualTo(422);
-        assertThat(byEmail.getBody().get("code").asString()).isEqualTo("referral_self");
-        assertThat(byEmail.getBody().toString()).contains("referral_code");
+        assertThat(byEmail.getStatusCode()).isEqualTo(stranger.getStatusCode());
+        assertThat(byEmail.getBody()).isEqualTo(stranger.getBody());
         assertThat(TestDatabase.owner()
-                        .sql("SELECT count(*) FROM onboarding_applications WHERE lower(contact_email) = lower(?)")
+                        .sql("SELECT count(*) FROM onboarding_applications"
+                                + " WHERE lower(contact_email) = lower(?) AND referrer_tenant_id IS NULL"
+                                + " AND referral_code IS NULL")
                         .param(adminEmail)
                         .query(Long.class)
                         .single())
-                .isZero();
+                .isEqualTo(1);
 
         String phone = "+256700000299";
         TestDatabase.owner()
                 .sql("UPDATE users SET phone_e164 = ? WHERE id = ?")
                 .params(phone, admin)
                 .update();
-        Map<String, Object> byPhone = signUpForm(Api.email("ref-self-phone"), "Test Own Phone Shop", code);
+        String phoneEmail = Api.email("ref-self-phone");
+        Map<String, Object> byPhone = signUpForm(phoneEmail, "Test Own Phone Shop", code);
         byPhone.put("contact_phone", phone);
-        ResponseEntity<JsonNode> refused = apply(byPhone);
-        assertThat(refused.getStatusCode().value()).as("%s", refused.getBody()).isEqualTo(422);
-        assertThat(refused.getBody().get("code").asString()).isEqualTo("referral_self");
+        ResponseEntity<JsonNode> quiet = apply(byPhone);
+        assertThat(quiet.getStatusCode()).isEqualTo(stranger.getStatusCode());
+        assertThat(quiet.getBody()).isEqualTo(stranger.getBody());
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM onboarding_applications"
+                                + " WHERE contact_email = ? AND referrer_tenant_id IS NULL")
+                        .param(phoneEmail)
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
 
         // Accepted at the sign-up, then the applicant becomes an administrator of the referrer before Activate.
         String later = Api.email("ref-self-later");

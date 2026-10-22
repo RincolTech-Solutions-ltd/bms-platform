@@ -20,10 +20,10 @@ public interface Referrals {
     Code resolve(String code);
 
     /**
-     * 422 {@code referral_self} when the applicant's email or phone (E.164) is that of the Owner or an administrator of the
-     * business the code belongs to: a business is not referred by its own people.
+     * Whether the applicant's email or phone (E.164) is that of the Owner or an administrator of the business the code
+     * belongs to: a business is not referred by its own people.
      */
-    void refuseSelf(Code code, String email, String phoneE164);
+    boolean isSelf(Code code, String email, String phoneE164);
 
     /**
      * Records the referrer on an application just created, or on the open one a returning applicant brings a code to; only

@@ -102,9 +102,13 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     own start, which let a correction or a clear-and-reset pay a second N months.)
 10. **A business is not referred by its own people.** At the sign-up, after the code resolves, the applicant's email (compared as
     the sign-up compares addresses, `onboarding_email_key`) and phone (E.164) are compared with the Owner and the administrators
-    (not deactivated) of the business the code belongs to (`referral_is_self`); a match is 422 `referral_self` on the
-    `referral_code` field and nothing is created. Activate compares them again, since the referrer's people may have changed:
-    on a match no referral is stored and the refusal is audited `platform.referral.refused_self` with the referrer.
+    (not deactivated) of the business the code belongs to (`referral_is_self`). On a match the sign-up drops the code
+    quietly: the application is created (or relinked) with no referrer and the answer is the usual 202, so the public form
+    never tells whose email or phone this is and the same-answer rule of FR-ONB-03 holds. Activate compares them again, since
+    the referrer's people may have changed: on a match no referral is stored and the refusal is audited
+    `platform.referral.refused_self` with the referrer. (The review of 22 Oct 2026, FAIL, replaced an earlier 422
+    `referral_self` at the sign-up, which let anyone holding a public code test whether an email or phone was one of that
+    business's administrators.)
 11. **A reversed line is not paid.** An unpaid line that was reversed nets to nothing with its reversal, so marking it paid is
     refused with 409 `commission_line_reversed`; a line paid before it was reversed stays paid, and the reversal records what
     the referrer owes back.

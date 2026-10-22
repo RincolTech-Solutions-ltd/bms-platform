@@ -131,21 +131,11 @@ class ReferralService implements Referrals {
     }
 
     @Override
-    public void refuseSelf(Code code, String email, String phoneE164) {
-        boolean self = Boolean.TRUE.equals(jdbc.sql("SELECT referral_is_self(?, ?, ?)")
+    public boolean isSelf(Code code, String email, String phoneE164) {
+        return Boolean.TRUE.equals(jdbc.sql("SELECT referral_is_self(?, ?, ?)")
                 .params(code.tenantId(), email, phoneE164)
                 .query(Boolean.class)
                 .single());
-        if (self) {
-            throw new ApiException(
-                    HttpStatus.UNPROCESSABLE_CONTENT,
-                    "referral_self",
-                    "Your own referral code",
-                    "This code belongs to a business you run. A business is not referred by its own people; leave the"
-                            + " code empty.",
-                    List.of(new FieldProblem(
-                            "referral_code", "self", "This code belongs to a business you run. Leave it empty.")));
-        }
     }
 
     @Override
