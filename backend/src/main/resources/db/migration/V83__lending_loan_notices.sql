@@ -43,7 +43,7 @@ BEGIN
     IF v_tenant IS NULL THEN
         RAISE EXCEPTION 'cancelling an SMS row needs a bound tenant' USING ERRCODE = 'check_violation';
     END IF;
-    IF p_reason NOT IN ('cancelled_reversed', 'cancelled_settled') THEN
+    IF p_reason IS NULL OR p_reason NOT IN ('cancelled_reversed', 'cancelled_settled') THEN
         RAISE EXCEPTION 'not a cancel reason: %', p_reason USING ERRCODE = 'check_violation';
     END IF;
     WITH c AS (
