@@ -119,7 +119,7 @@ final class SmsTemplateEvents {
                     Set.of("account_no", "maturity_date")),
             event("investment.paid_out", "Investment paid out", INVESTMENT_PAID_OUT, Set.of("account_no", "amount")),
             event("loan.due_in_3_days", "Loan instalment due in 3 days", LOAN_DUE, Set.of("loan_no", "amount")),
-            event("loan.due_today", "Loan instalment due today", LOAN_DUE, Set.of("loan_no", "amount")),
+            event("loan.due_today", "Loan instalment due today", LOAN_DUE, Set.of("loan_no", "amount", "due_date")),
             event("loan.overdue_1", "Loan overdue (1 day)", LOAN_ARREARS, Set.of("loan_no", "arrears")),
             event("loan.overdue_7", "Loan overdue (7 days)", LOAN_ARREARS, Set.of("loan_no", "arrears")),
             event("loan.overdue_30", "Loan overdue (30 days)", LOAN_ARREARS, Set.of("loan_no", "arrears")));

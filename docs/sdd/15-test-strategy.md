@@ -425,7 +425,11 @@ channel with its exact default text in one segment; `SmsTemplateLanguageTest` an
 placeholders.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
-of the quality bar before a template change is merged.
+of the quality bar before a template change is merged. After the review of #290: `LoanRemindersTest` checks that a step goes
+only on its night or the next and that a loan 400 days late gets nothing; `LoanEventSmsIT` runs at the job's real time
+(just after midnight), withdraws an overdue notice when the member pays at 07:30, expires a due-today text with its day,
+sends no backlog on the first run and texts each loan once when a crashed run is resumed; `SmsEventsIT` refuses an
+arrears notice to an opted-out member (`blocked_optout`).
 
 Updating a golden file is allowed only in a pull request that explains why the expected
 output changed.

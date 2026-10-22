@@ -7,7 +7,9 @@ import com.rincoltech.bms.lending.loans.internal.Servicing.Item;
 import com.rincoltech.bms.lending.loans.internal.Servicing.Position;
 import com.rincoltech.bms.lending.members.MemberLookup;
 import com.rincoltech.bms.lending.products.ScheduleCalculator;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 /**
@@ -68,10 +71,12 @@ class LoanNotices {
 
     private final SmsEvents sms;
     private final MemberLookup members;
+    private final JdbcClient jdbc;
 
-    LoanNotices(SmsEvents sms, MemberLookup members) {
+    LoanNotices(SmsEvents sms, MemberLookup members, JdbcClient jdbc) {
         this.sms = sms;
         this.members = members;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -124,9 +129,27 @@ class LoanNotices {
         queue(CLOSED, loan, closingTxnId, valueDate, () -> Map.of("loan_no", loan.loanNo()));
     }
 
+    /** An arrears step is sent on the night the loan reaches it, or the night after when that night was missed. */
+    static final int STEP_CATCH_UP_DAYS = 1;
+
+    /** At most one arrears notice a loan in this many days, across its instalments (an always-late borrower). */
+    static final int ARREARS_GAP_DAYS = 7;
+
+    /** The arrears step reached on {@code dpd}, or null: steps 1, 7 and 30, each on its night or the night after. */
+    static String arrearsStep(int dpd) {
+        for (int step : new int[] {30, 7, 1}) {
+            if (dpd >= step && dpd <= step + STEP_CATCH_UP_DAYS) {
+                return step == 30 ? OVERDUE_30 : step == 7 ? OVERDUE_7 : OVERDUE_1;
+            }
+        }
+        return null;
+    }
+
     /**
      * The reminders the loan's position calls for on {@code today}, oldest first; pure. An instalment with nothing
-     * left to pay (paid, waived) is never reminded.
+     * left to pay (paid, waived) is never reminded. An arrears notice goes only on the night the loan reaches a step
+     * (DPD 1, 7 or 30) or the night after, never as a backlog: a loan already 400 days late when the run or SMS is
+     * switched on is not texted (the second review of #290).
      */
     static List<Reminder> reminders(List<Item> items, Position position, LocalDate today) {
         List<Item> byDue = items.stream()
@@ -142,34 +165,38 @@ class LoanNotices {
             out.add(new Reminder(days == 0 ? DUE_TODAY : DUE_IN_3_DAYS, Outbox.REMINDER, i.id, unpaid, i.dueDate, 0));
         }
         int dpd = position.daysPastDue();
-        if (dpd >= 1) {
+        String step = arrearsStep(dpd);
+        if (step != null) {
             byDue.stream()
                     .filter(i -> i.dueDate.isBefore(today) && i.unpaidContract() > 0)
                     .findFirst()
                     .ifPresent(oldest -> out.add(new Reminder(
-                            dpd >= 30 ? OVERDUE_30 : dpd >= 7 ? OVERDUE_7 : OVERDUE_1,
-                            Outbox.ARREARS,
-                            oldest.id,
-                            position.arrearsMinor(),
-                            oldest.dueDate,
-                            dpd)));
+                            step, Outbox.ARREARS, oldest.id, position.arrearsMinor(), oldest.dueDate, dpd)));
         }
         return out;
     }
 
     /**
-     * Queues what {@link #reminders} calls for; each is a no-op when it was queued before or SMS is off. Returns how
-     * many new rows were written.
+     * Queues what {@link #reminders} calls for; each is a no-op when it was queued before or SMS is off. A due reminder
+     * expires at the end of its due date and an arrears notice at the end of today, in {@code zone}, so neither reaches
+     * the member a day late. An arrears notice is skipped when the loan had one about another instalment in the last
+     * {@link #ARREARS_GAP_DAYS} days; the steps of one instalment (1, 7, 30) always go. Returns how many were queued.
      */
-    int remind(Loan loan, List<Item> items, Position position, LocalDate today) {
+    int remind(Loan loan, List<Item> items, Position position, LocalDate today, ZoneId zone) {
         int queued = 0;
         for (Reminder r : reminders(items, position, today)) {
+            if (r.arrears() && recentArrearsNotice(loan.id(), r.itemId(), today)) {
+                continue;
+            }
+            LocalDate lastDay = r.arrears() ? today : r.dueDate();
+            Instant expiresAt = lastDay.plusDays(1).atStartOfDay(zone).toInstant();
             SmsEvents.Result result = sms.queueWhenActive(
                     r.templateKey(),
                     loan.memberId(),
                     r.itemId().toString(),
                     r.category(),
                     null,
+                    expiresAt,
                     () -> members.smsPhone(loan.memberId()).orElse(null),
                     () -> r.arrears()
                             ? Map.of(
@@ -184,9 +211,39 @@ class LoanNotices {
                                     "due_date", sms.date(r.dueDate())));
             if (result == SmsEvents.Result.QUEUED) {
                 queued++;
+                if (r.arrears()) {
+                    jdbc.sql("""
+                                    INSERT INTO lending_loan_notices (id, tenant_id, loan_id, schedule_item_id, template_key,
+                                        business_date)
+                                    VALUES (?, current_setting('app.tenant_id')::uuid, ?, ?, ?, ?)
+                                    """)
+                            .params(UUID.randomUUID(), loan.id(), r.itemId(), r.templateKey(), today)
+                            .update();
+                }
             }
         }
         return queued;
+    }
+
+    private boolean recentArrearsNotice(UUID loanId, UUID itemId, LocalDate today) {
+        return Boolean.TRUE.equals(jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM lending_loan_notices
+                                        WHERE loan_id = ? AND schedule_item_id <> ? AND business_date > ?)
+                        """)
+                .params(loanId, itemId, today.minusDays(ARREARS_GAP_DAYS))
+                .query(Boolean.class)
+                .single());
+    }
+
+    /**
+     * Withdraws the not-yet-sent reminders and arrears notices of these schedule items (the event reference is the
+     * item): a member who paid at 07:30 is not told at 08:00 that the instalment is due or overdue, nor one whose loan
+     * was closed or written off (the second review of #290). What has gone stays gone.
+     */
+    void withdrawReminders(java.util.Collection<UUID> itemIds) {
+        for (UUID itemId : itemIds) {
+            sms.cancel(itemId.toString());
+        }
     }
 
     /**

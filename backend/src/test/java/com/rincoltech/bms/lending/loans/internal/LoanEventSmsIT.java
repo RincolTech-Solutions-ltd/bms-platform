@@ -938,16 +938,16 @@ class LoanEventSmsIT extends LoanFixtures {
 
     /**
      * FR-NTF-02, FR-NTF-04 and FR-NTF-06: an instalment two days away gets one reminder, about that instalment, held
-     * for the tenant's window: run at 21:00 Kampala time it waits for 08:00 the next morning. Rerunning the job queues
-     * nothing new.
+     * for the tenant's window: run just after midnight, as the job is, it waits for 08:00 that morning. Rerunning the
+     * job queues nothing new.
      */
     @Test
     void frNtf06_aReminderIsQueuedOncePerInstalmentAndWaitsForTheWindow() {
         smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT); // 00:01 in Kampala, when the job runs
         String loan = approved(instalmentProduct("REMIND"), 1_200_000, 3, 41);
         disburse(loan, today().minusMonths(1).plusDays(2), null);
         rows(t).forEach(r -> assertThat(r.get("template_key")).isNotEqualTo(LoanNotices.DUE_IN_3_DAYS));
-        movable.set(Instant.parse("2026-10-15T18:00:00Z")); // 21:00 in Kampala
         LocalDate due = today().plusDays(2);
 
         nightly();
@@ -998,5 +998,73 @@ class LoanEventSmsIT extends LoanFixtures {
         nightly();
         assertThat(rows(t)).isEmpty();
         assertThat(get(loan, "").get("balances").get("days_past_due").asInt()).isEqualTo(1);
+    }
+
+    String status(String template) {
+        return (String) only(template).get("status");
+    }
+
+    /**
+     * The second review of #290: a reminder queued just after midnight waits for 08:00; the member pays at 07:30 and the
+     * notice is withdrawn before it is sent. A "due today" text names its date and expires at the end of that day.
+     */
+    @Test
+    void frNtf02_aPaymentBeforeTheWindowWithdrawsTheNoticeAndDueTodayExpiresWithItsDay() {
+        smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
+        String late = approved(instalmentProduct("PAIDEARLY"), 1_200_000, 3, 44);
+        disburse(late, today().minusMonths(1).minusDays(1), null);
+        String dueToday = approved(instalmentProduct("DUETODAY"), 1_200_000, 3, 45);
+        disburse(dueToday, today().minusMonths(1), null);
+        nightly();
+        assertThat(status(LoanNotices.OVERDUE_1)).isEqualTo("pending");
+        Map<String, Object> dueRow = only(LoanNotices.DUE_TODAY);
+        assertThat(params(dueRow).get("due_date").asString()).isEqualTo(dmy(today()));
+        Object expires = dueRow.get("expires_at");
+        assertThat(expires instanceof Timestamp ts ? ts.toInstant() : ((java.time.OffsetDateTime) expires).toInstant())
+                .as("never sent after the due date")
+                .isBeforeOrEqualTo(today().plusDays(1)
+                        .atStartOfDay(java.time.ZoneId.of("Africa/Kampala"))
+                        .toInstant());
+
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT.plus(
+                java.time.Duration.ofHours(7).plusMinutes(29)));
+        repaid(late, 520_000, today(), null);
+        assertThat(status(LoanNotices.OVERDUE_1)).as("withdrawn, never sent").isEqualTo("failed");
+    }
+
+    /** The second review of #290: the first run after SMS is switched on never texts a loan already 400 days late. */
+    @Test
+    void frNtf02_theFirstRunTextsNoBacklog() {
+        smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
+        String loan = approved(instalmentProduct("BACKLOG"), 1_200_000, 3, 46);
+        disburse(loan, today().minusDays(400 + 31), null);
+        nightly();
+        assertThat(templates()).doesNotContain(LoanNotices.OVERDUE_1, LoanNotices.OVERDUE_7, LoanNotices.OVERDUE_30);
+        assertThat(get(loan, "").get("balances").get("days_past_due").asInt()).isGreaterThan(300);
+    }
+
+    /**
+     * The second review of #290: a run that crashed after some loans is taken over once its lease lapses; the loans it
+     * had done are not texted twice and the rest get their notice.
+     */
+    @Test
+    void frNtf06_aRunResumedAfterACrashTextsEachLoanOnce() {
+        smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
+        String first = approved(instalmentProduct("CRASHA"), 1_200_000, 3, 47);
+        disburse(first, today().minusMonths(1).minusDays(1), null);
+        nightly();
+        String second = approved(instalmentProduct("CRASHB"), 1_200_000, 3, 48);
+        disburse(second, today().minusMonths(1).minusDays(1), null);
+        // As if the run had died before it finished: unfinished, its lease lapsed.
+        TestDatabase.owner()
+                .sql("UPDATE lending_arrears_runs SET finished_at = NULL, lease_until = now() - interval '1 minute'"
+                        + " WHERE tenant_id = ? AND business_date = ?")
+                .params(t.tenantId(), today())
+                .update();
+        nightly();
+        assertThat(templates()).filteredOn(LoanNotices.OVERDUE_1::equals).hasSize(2);
     }
 }

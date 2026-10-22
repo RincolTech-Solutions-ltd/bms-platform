@@ -537,7 +537,8 @@ class OutboxTemplates {
                             "{tenant_name}: Reminder, {currency} {amount} for loan {loan_no} is due on {due_date}.")),
             Map.entry(
                     "loan.due_today",
-                    new Template(null, "{tenant_name}: {currency} {amount} for loan {loan_no} is due today.")),
+                    new Template(
+                            null, "{tenant_name}: {currency} {amount} for loan {loan_no} is due today, {due_date}.")),
             Map.entry(
                     "loan.overdue_1",
                     new Template(

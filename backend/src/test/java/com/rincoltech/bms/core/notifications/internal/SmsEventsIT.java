@@ -493,7 +493,7 @@ class SmsEventsIT extends IntegrationTest {
                 "Test Lender: Paid UGX 2,240,000 on investment IV000007 on 15/10/2027. Voucher VC-HQ-000044."));
         expected.put(
                 "loan.due_in_3_days", "Test Lender: Reminder, UGX 520,000 for loan LN-HQ-000123 is due on 15/11/2026.");
-        expected.put("loan.due_today", "Test Lender: UGX 520,000 for loan LN-HQ-000123 is due today.");
+        expected.put("loan.due_today", "Test Lender: UGX 520,000 for loan LN-HQ-000123 is due today, 15/11/2026.");
         expected.put(
                 "loan.overdue_1",
                 "Test Lender: Loan LN-HQ-000123 is overdue. Amount in arrears UGX 520,000. Please pay or contact us.");
@@ -733,6 +733,32 @@ class SmsEventsIT extends IntegrationTest {
     }
 
     // ---- Opt-out, other tenants, backlog --------------------------------------------------------------------
+
+    /** The second review of #290: an arrears notice to an opted-out member is refused at the channel. */
+    @Test
+    void frNtf14_anArrearsNoticeToAnOptedOutMemberIsRefused() {
+        Rig rig = new Rig(BASE);
+        TestDatabase.Fixture a = tenant(1000);
+        UUID member = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO sms_opt_outs (id, tenant_id, member_id, recipient_hash, scope, source)"
+                        + " VALUES (?, ?, ?, ?, 'all', 'staff')")
+                .params(UUID.randomUUID(), a.tenantId(), member, hasher.of("+256700000141"))
+                .update();
+        assertThat(queue(
+                        rig,
+                        a,
+                        member,
+                        "0700000141",
+                        "loan.overdue_1",
+                        Map.of("loan_no", "LN-HQ-000123", "currency", "UGX", "arrears", "520,000", "dpd", "1"),
+                        "item-1",
+                        Outbox.ARREARS))
+                .isEqualTo(Result.QUEUED);
+        rig.dispatch();
+        assertThat(rig.provider.sent()).isEmpty();
+        assertThat(delivery(a).get("status")).isEqualTo("blocked_optout");
+    }
 
     @Test
     void frNtf14_anOptedOutMemberIsNotTextedAndAnotherTenantsOptOutOrRowsAreNeverMixedIn() {

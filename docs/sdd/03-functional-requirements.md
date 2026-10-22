@@ -420,7 +420,13 @@ instalment's due date and `loan.due_today` on it (category `reminder`); `loan.ov
 `loan.overdue_30` once the loan's DPD reaches the step, on its oldest unpaid instalment with the loan's arrears and DPD
 (category `arrears`). The event reference is the schedule item, so the outbox key holds (schedule item, reminder type) and a
 rerun queues nothing new (FR-NTF-06). The window, the expiry at the end of the window day, the opt-out and the caps are the
-channel's (FR-NTF-04, FR-NTF-14, FR-NTF-17, FR-NTF-18). Texts in chapter 11 section 11.3.1.
+channel's (FR-NTF-04, FR-NTF-14, FR-NTF-17, FR-NTF-18). Texts in chapter 11 section 11.3.1. After the review of
+#290: an arrears step goes only on the night the loan reaches it (DPD 1, 7 or 30) or the night after, never as a backlog,
+so switching the run or SMS on texts nobody already far in arrears; a loan gets at most one arrears notice about another
+instalment in seven days (`lending_loan_notices`, migration V83; the steps of one instalment always go); a due reminder
+expires at the end of its due date and an arrears notice at the end of the day it was queued, so neither arrives late;
+`loan.due_today` names its date; and a repayment withdraws the not-yet-sent reminders of the instalments it reached, as
+closing or writing off a loan withdraws all of them.
 
 ## 3.12 Document generation (DOC)
 

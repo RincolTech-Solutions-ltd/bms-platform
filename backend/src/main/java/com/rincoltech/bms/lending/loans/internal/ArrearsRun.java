@@ -250,7 +250,8 @@ class ArrearsRun {
         Servicing.Position position = servicer.refreshPosition(id, items, today);
         // The due reminders and arrears notices (issue #227) in the loan's own transaction, through the outbox with
         // the tenant's SMS settings, window and opt-outs; keyed by (item, notice), so a rerun queues nothing new.
-        int reminded = notices.remind(loan, items, position, today);
+        int reminded = notices.remind(
+                loan, items, position, today, currentTenant.profile().timezone());
         return new Outcome(charges, charged, reminded);
     }
 
