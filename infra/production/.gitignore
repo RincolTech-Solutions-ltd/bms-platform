@@ -1,0 +1,7 @@
+# Terraform state can hold secrets and addresses: it never goes in git (docs/runbooks/terraform-production.md).
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!terraform.tfvars.example

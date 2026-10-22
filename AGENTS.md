@@ -764,6 +764,9 @@ Accepted (this list is the ADR index):
   (proposed, #442; FR-IAM-18; migration `V79`; renumbered at merge if needed)
 - ADR-046 Two-step sign-in is optional by default (migration `V67`) and a tenant policy can require it for everyone or for chosen roles after a grace
   period; one deadline, enforced-now versus due-by, the forgotten-password rules unchanged (proposed, #348; FR-IAM-06, FR-IAM-16)
+- ADR-063 Production is created by Terraform on production day (`infra/production/`, nothing applied before) and updated
+  by a signed pointer the owner moves with a local promote command; the host pulls and verifies, no deploy SSH key and
+  no hosted job (proposed)
 
 Pending (cite only as "pending ADR-NNN"):
 

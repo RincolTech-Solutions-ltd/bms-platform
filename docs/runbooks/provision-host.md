@@ -8,7 +8,11 @@ production VM. Nothing is shared between the two environments.
 
 ## 1. Create the VM
 
-- 2 vCPU, 4 GB RAM, 40 GB disk, Ubuntu LTS (for example Hetzner Cloud CX22), in the region
+The server, its firewall and the DNS records are created by Terraform (`infra/production/`, ADR-063, runbook
+`docs/runbooks/terraform-production.md`) on production day; the SSH-key and GitHub Environment steps below (2 and 5)
+are superseded by the pull model. The sections that follow still say what the host needs.
+
+- 2 vCPU, 4 GB RAM, 40 GB disk, Ubuntu LTS (for example Hetzner Cloud CX23), in the region
   confirmed for NFR-DP-07.
 - Firewall: inbound 22 from the team's addresses only; 80 and 443 (TCP) and 443 (UDP) from
   anywhere. Nothing else.

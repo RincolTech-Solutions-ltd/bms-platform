@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (git-ignored) on the day. Tokens are NOT set here: export HCLOUD_TOKEN and
+# CLOUDFLARE_API_TOKEN in the shell.
+location        = "REPLACE_AFTER_THE_REGION_ADR" # NFR-DP-07
+server_type     = "cx23"                         # 2 vCPU / 4 GB / 40 GB, about 6.49 USD a month plus 0.60 for IPv4
+ssh_public_keys = ["ssh-ed25519 AAAA... name"]
+admin_cidrs     = ["203.0.113.7/32"]
+tenant_slugs    = ["yasad", "hats"]
