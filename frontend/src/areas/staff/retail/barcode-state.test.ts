@@ -46,15 +46,15 @@ describe('a keyboard-wedge scanner', () => {
   it('is a fast burst closed by Enter', () => {
     const wedge = createWedge();
     [...'4006381333931'].forEach((ch, i) => wedge.key(ch, 1000 + i * 8));
-    expect(wedge.enter(1000 + 13 * 8)).toBe('4006381333931');
+    expect(wedge.enter(1000 + 13 * 8).code).toBe('4006381333931');
   });
 
   it('is not a person typing, nor a burst too short to be a code', () => {
     const wedge = createWedge();
     [...'1234'].forEach((ch, i) => wedge.key(ch, 1000 + i * 150));
-    expect(wedge.enter(1700)).toBeNull();
+    expect(wedge.enter(1700).code).toBeNull();
     [...'12'].forEach((ch, i) => wedge.key(ch, 2000 + i * 5));
-    expect(wedge.enter(2010)).toBeNull();
+    expect(wedge.enter(2010).code).toBeNull();
   });
 });
 

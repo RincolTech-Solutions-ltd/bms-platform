@@ -181,6 +181,26 @@ describe('FR-RET-68 scanning on the sale form', () => {
     expect(submitted).not.toHaveBeenCalled();
   });
 
+  it.each([1, 2, 3])('looks up the whole code and keeps the quantity it had when a scan stalls after key %i', async (split) => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    wedge(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    const qty = document.getElementById('qty-0') as HTMLInputElement;
+    const submitted = vi.fn((e: Event) => e.preventDefault());
+    qty.form?.addEventListener('submit', submitted);
+    fireEvent.change(qty, { target: { value: '12' } });
+    qty.focus();
+    qty.setSelectionRange(2, 2);
+    // A stall of 120 ms (under WEDGE_IDLE_MS) within the first three keys, before the run reached WEDGE_MIN.
+    expect(stalled(EAN, split, 120).defaultPrevented).toBe(true);
+    expect(qtyOf(0)).toBe('12');
+    expect(qty.selectionStart).toBe(2);
+    await waitFor(() => expect(qtyOf(0)).toBe('13'));
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
   it('keeps a quantity typed just before a scan, even within the idle time', async () => {
     await retail.addBarcode(LAMP, { code: EAN });
     await retail.addBarcode(BULB15, { code: 'TEST-BULB15' });

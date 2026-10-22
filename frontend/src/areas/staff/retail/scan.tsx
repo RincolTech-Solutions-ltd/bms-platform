@@ -86,12 +86,16 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
     if (!enabled) return undefined;
     const wedge = createWedge(wedgeGap());
     let before: FieldSnapshot | null = null;
+    // The snapshot of the run before this one, for a scanner that stalled after its first key (see createWedge).
+    let prior: FieldSnapshot | null = null;
     const down = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'Enter') {
         const at = e.timeStamp || performance.now();
         const scanner = wedge.scanner(at);
-        const code = wedge.enter(at);
+        const { code, earlier } = wedge.enter(at);
+        if (earlier && prior) before = prior;
+        prior = null;
         if (code === null && !scanner) return;
         // The scan box handles its own Enter.
         if (e.target instanceof HTMLElement && e.target.dataset.scanBox !== undefined) return;
@@ -104,10 +108,11 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
         if (code !== null) handler.current(code);
       } else if (e.key.length === 1) {
         const t = e.target;
-        // The snapshot is taken when a new run of keys starts outside a burst (a scan right after typing keeps what was
-        // typed), never inside one, so a mid-code pause cannot replace it with half a code; a key in another field (after
+        // The snapshot is taken when a new run of keys starts (a scan right after typing keeps what was typed), never
+        // inside a possible scan, so a mid-code pause cannot replace it with part of a code; a key in another field (after
         // a Tab) snapshots that field, so the field the scan lands in is the one put back.
         const fresh = wedge.key(e.key, e.timeStamp || performance.now());
+        if (fresh) prior = before?.field === t ? before : null;
         if (fresh || t !== before?.field) before = editable(t) ? { field: t, value: t.value, start: t.selectionStart, end: t.selectionEnd } : null;
       }
     };

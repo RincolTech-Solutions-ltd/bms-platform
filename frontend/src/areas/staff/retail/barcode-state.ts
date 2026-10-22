@@ -127,26 +127,49 @@ export const WEDGE_MIN = 4;
  */
 export const WEDGE_IDLE_MS = 500;
 
+/** A whole code with a check digit (EAN-13, EAN-8, UPC-A) that comes out right. */
+function checked(code: string): boolean {
+  const c = checkBarcode(code);
+  return c.ok && c.format !== 'code128';
+}
+
 /**
- * Collects the keys of one scanner burst: `key` with a printable character and its time, `enter` at the end. Returns
- * the code when Enter closes a burst of at least WEDGE_MIN characters that each came within WEDGE_GAP_MS of the last, or
- * after a stall shorter than WEDGE_IDLE_MS once those characters made a burst.
+ * Collects the keys of one scanner burst: `key` with a printable character and its time, `enter` at the end. Enter
+ * gives the code when it closes a run of at least WEDGE_MIN characters that came within WEDGE_GAP_MS of each other.
+ * Two keys within the gap make a run a possible scan; from then on, while the run is younger than WEDGE_IDLE_MS, a
+ * stall longer than the gap is the same scanner pausing and its keys join the run. A scanner that stalls after its
+ * first key leaves that key as a run of its own: `earlier` is true when Enter takes the code from that key on, which
+ * happens only when that key and the run after it make a code with a right check digit and the run alone does not
+ * (a person who types one key just before a scan keeps it).
  */
 export function createWedge(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
   let buffer = '';
   let last = 0;
+  let run = 0;
   let started = false;
+  let pair = false;
   let burst = false;
+  let lone = '';
   return {
     /**
-     * True when this key starts a new run of keys while no burst is going: the first key, one after the field was idle
-     * for WEDGE_IDLE_MS, or one slower than the gap after a person's keys. A key in a burst, even after a stall, is not.
+     * True when this key starts a new run of keys: the first key, one after the field was idle for WEDGE_IDLE_MS, or
+     * one slower than the gap after keys that are not a possible scan (a person's keys). A key in a possible scan
+     * younger than WEDGE_IDLE_MS, or in a burst, is not, even after a stall.
      */
     key(ch: string, at: number): boolean {
-      if (!started || at - last >= WEDGE_IDLE_MS) burst = false;
-      // A stall longer than the gap inside a burst is the same scanner pausing: its keys join the code, not replace it.
-      const fresh = buffer === '' || (at - last > gap && !burst);
-      buffer = fresh ? ch : buffer + ch;
+      const idle = !started || at - last >= WEDGE_IDLE_MS;
+      if (idle) burst = false;
+      const held = burst || (pair && at - run < WEDGE_IDLE_MS);
+      const fresh = buffer === '' || idle || (at - last > gap && !held);
+      if (fresh) {
+        lone = !idle && buffer.length === 1 ? buffer : '';
+        buffer = ch;
+        run = at;
+        pair = false;
+      } else {
+        if (at - last <= gap) pair = true;
+        buffer += ch;
+      }
       if (buffer.length >= min) burst = true;
       started = true;
       last = at;
@@ -159,12 +182,16 @@ export function createWedge(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
     scanner(at: number): boolean {
       return burst && at - last <= gap * 3;
     },
-    enter(at: number): string | null {
-      const code = at - last <= gap * 3 && buffer.length >= min ? buffer : null;
+    enter(at: number): { code: string | null; earlier: boolean } {
+      const quick = at - last <= gap * 3;
+      const earlier = quick && pair && lone !== '' && checked(lone + buffer) && !checked(buffer);
+      const code = earlier ? lone + buffer : quick && buffer.length >= min ? buffer : null;
       buffer = '';
+      lone = '';
       started = false;
+      pair = false;
       burst = false;
-      return code;
+      return { code, earlier };
     },
     reset() {
       buffer = '';
