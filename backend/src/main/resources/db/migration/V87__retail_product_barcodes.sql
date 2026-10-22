@@ -1,4 +1,4 @@
--- V90: barcodes on retail products (ADR-070, issue #345; FR-RET-68).
+-- V87: barcodes on retail products (ADR-070, issue #345; FR-RET-68).
 --
 -- Expand only, safe on a populated database: one new table, nothing altered, dropped or renamed.
 -- A product carries any number of barcodes, each for the product's base unit or for one of its

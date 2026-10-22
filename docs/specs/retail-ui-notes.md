@@ -1265,7 +1265,7 @@ changes, so after a payment on the same screen the next share sends the new rece
 
 ## Barcodes, scanning and labels (issue #345)
 
-ADR-070, FR-RET-68, migration `V90`. Generic for every business; no capability switch.
+ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability switch.
 
 - **Scan bar** (`scan.tsx`, data-tour `scan-bar`) under the item search of the sale, restock, goods received without an order (purchasing), move stock and stock count forms:
   "Scan or type a barcode, then press Enter", and a **Scan** button (data-tour `scan-camera`) shown only where the browser can open a

@@ -153,7 +153,7 @@ final class Barcodes {
     }
 
     /**
-     * The key a code is unique under; the database computes the same (V90 lookup_key). Only a UPC-A is folded into the
+     * The key a code is unique under; the database computes the same (V87 lookup_key). Only a UPC-A is folded into the
      * thirteen digit EAN-13 a scanner may report for it; twelve digits taken as Code 128 are a different code.
      */
     static String key(Checked c) {

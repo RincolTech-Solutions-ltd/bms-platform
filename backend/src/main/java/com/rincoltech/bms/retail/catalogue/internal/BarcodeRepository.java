@@ -13,7 +13,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** SQL for the barcodes of products (V90, ADR-070). Row-level security supplies the tenant predicate (ADR-003). */
+/** SQL for the barcodes of products (V87, ADR-070). Row-level security supplies the tenant predicate (ADR-003). */
 @Repository
 class BarcodeRepository {
 

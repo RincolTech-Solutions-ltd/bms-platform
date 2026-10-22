@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (approved by the dev lead on 22 Oct 2026; issue #345, FR-RET-68; migration `V90`). Builds on ADR-020 (the retail
+Accepted (approved by the dev lead on 22 Oct 2026; issue #345, FR-RET-68; migration `V87`). Builds on ADR-020 (the retail
 vertical), ADR-033 (pack sizes, the `units` capability) and ADR-009 (the PWA). Numbered ADR-070 because pending ADR-067, pending ADR-068
 and pending ADR-069 are claimed by open pull requests; renumbered at merge if needed.
 
@@ -16,7 +16,7 @@ or Bluetooth scanner at the till, many have only phones.
 
 ## Decision
 
-1. **Barcodes are a part of the product, several per product.** A new table `retail_product_barcodes` (V90) holds each code with its
+1. **Barcodes are a part of the product, several per product.** A new table `retail_product_barcodes` (V87) holds each code with its
    format, the product and, optionally, one of the product's pack sizes (V39), so a carton's barcode adds a carton. Changing barcodes
    does not move the product's version, like its packs.
 2. **Four formats, checked.** EAN-13, EAN-8 and UPC-A, whose last digit is checked by the GS1 rule, and Code 128 for any other
@@ -78,4 +78,4 @@ the lockfile, and `--omit=optional` would also drop the native binaries Rollup a
 
 **Watch for:** a scanner configured to send Tab instead of Enter (the scan box and the wedge both need Enter); scanners that type
 faster than the browser fires key events still fit the 35 ms window; a slow Bluetooth scanner needs the device's Scanner speed in Notifications and app raised (up to 80 ms, kept in this browser only), and on the sale screen the cursor waits in the scan box (on a device with a mouse or trackpad, unless turned off there) so a scan too slow to be told from typing still lands in the box and its Enter never submits the sale; label printers with other
-sheet sizes (the CSS sheet is A4, 3 by 8); the V90 number against the open claims V81 to V89.
+sheet sizes (the CSS sheet is A4, 3 by 8); the V87 number, taken in the agreed merge order after V85 (#465) and V86 (#463), renumbered at merge if that order changes.

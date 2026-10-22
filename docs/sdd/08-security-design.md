@@ -579,7 +579,7 @@ Notes:
   `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
-- Barcodes (issue #345, ADR-070, FR-RET-68, migration V90) add no permission, so the matrix is unchanged. Scanning and the lookup
+- Barcodes (issue #345, ADR-070, FR-RET-68, migration V87) add no permission, so the matrix is unchanged. Scanning and the lookup
   `GET /retail/products/by-barcode/{code}` need `retail.stock.read` (sellers, storekeepers, administrators, in their branch scope for
   `branch_id`). Adding and removing a barcode, making label codes and the Barcode labels page need `retail.catalogue.manage`
   (administrators): a barcode decides which item a scan sells, so it is a catalogue change like a code or a pack. A seller who scans an

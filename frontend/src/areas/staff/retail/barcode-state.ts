@@ -57,7 +57,7 @@ export function formatName(format: string | undefined): string {
   return NAMES[(format ?? 'code128') as BarcodeFormat] ?? format ?? '';
 }
 
-/** The key a stored code is unique under (V90 lookup_key): only a UPC-A is the thirteen digit EAN-13 a scanner may report. */
+/** The key a stored code is unique under (V87 lookup_key): only a UPC-A is the thirteen digit EAN-13 a scanner may report. */
 export function barcodeKey(code: string, format: string | undefined): string {
   const c = code.trim();
   return format === 'upca' && /^\d{12}$/.test(c) ? `0${c}` : c;
