@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
 import { BusyButton } from '../../app/ui/BusyButton';
-import { getAccessToken, refreshFailedOffline, refreshSession, setAccessToken, subscribe } from '../../auth/session';
+import { endPendingLogout, getAccessToken, logoutPending, markLogoutPending, refreshFailedOffline, refreshSession, setAccessToken, subscribe } from '../../auth/session';
 import { OfflineProvider, lastProfile, useOfflineSupport, waitingNow } from '../../offline/offline-context';
 import { SignOutWarning } from '../../offline/sign-out-warning';
 import { OthersWaitingNote, SyncStatus } from '../../offline/sync-status';
@@ -60,9 +60,15 @@ function StaffLayout() {
   const [offlineMe, setOfflineMe] = useState<Me | null>(null);
   const [askSignOut, setAskSignOut] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   useEffect(() => {
     if (token !== null || mock) return;
+    if (logoutPending()) {
+      // ADR-067 decision 9: an offline sign-out ends its server session first; the app stays on sign-in until it has.
+      void endPendingLogout().then(() => navigate({ to: '/sign-in' }));
+      return;
+    }
     void refreshSession().then(async (ok) => {
       const saved = !ok && refreshFailedOffline() ? await lastProfile() : null;
       setOfflineMe(saved);
@@ -118,13 +124,21 @@ function StaffLayout() {
       return;
     }
     setSigningOut(true);
+    setSignOutError(null);
     try {
       // This device stops hearing this person's notifications before the session ends (it needs the session to say so).
+      let ended: boolean;
       try {
         if (!mock) await push.forget();
-        await api.POST('/api/v1/auth/logout');
+        ended = (await api.POST('/api/v1/auth/logout')).response.ok;
       } catch {
-        // No network: the session ends on this device; the server's ends when it expires.
+        ended = false;
+      }
+      // No answer: the server session (its HttpOnly cookie) is still alive. It is ended on the next start before anything
+      // restores it; without a place to note that, this person stays signed in (ADR-067 decision 9).
+      if (!ended && !mock && !markLogoutPending()) {
+        setSignOutError('Connect to the internet to sign out.');
+        return;
       }
       await offline?.forget();
       offline?.engine.stop();
@@ -155,6 +169,11 @@ function StaffLayout() {
               {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
                 <p role="status" className="alert alert-warning">
                   You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
+                </p>
+              )}
+              {signOutError && (
+                <p role="alert" className="alert alert-danger">
+                  {signOutError}
                 </p>
               )}
               <TwoStepNotices me={profile} pathname={pathname} />

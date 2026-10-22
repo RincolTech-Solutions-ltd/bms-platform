@@ -124,7 +124,12 @@ left, the branch, the period, the person's roles.
    /retail/offline-waiting`, `retail.offline.resolve`, branch scoped) until the sale is recorded or its refusal reported,
    which removes the summary. Nothing is posted from a summary. Reopening the app with no network after a sign-in shows the last profile of the last person
    signed in on this device, read from IndexedDB, with only the sale screen and the outbox working; anything needing the
-   server says it is offline. The refresh cookie is never read or kept by the app.
+   server says it is offline. The refresh cookie is never read or kept by the app. Since only the logout call ends the
+   server session behind that HttpOnly cookie, a sign-out that gets no answer notes a pending logout on the device
+   (`localStorage`); the next start ends that session (it rotates the cookie for that one call and never shows the
+   session) before anything restores one, and no refresh runs and the app stays on sign-in until it has. A new sign-in
+   on the device clears the note. Where the note cannot be kept, sign-out with no network is refused: "Connect to the
+   internet to sign out."
 10. **Status in the header.** A dot in the staff bar on every staff screen: green online, grey offline, amber while syncing,
     with the state in words beside it (Online, Offline, Syncing; never colour alone) and "3 waiting to sync" ("3 waiting" on a
     narrow screen) when the outbox is not empty and "1 failed" when one is failed. Tapping it opens a sheet
