@@ -282,7 +282,10 @@ is dismissed (`setup_dismissed`, tenant wide).
   darker until it is readable; the admin can change it with a live preview.
 - **Shown where.** The logo (alt text: the display name) is in the app header and on the sign-in
   and accept-invitation pages of the tenant host; the colour drives the accent through CSS custom
-  properties (chapter 11 section 11.2.5). Everything else keeps the platform look. The platform
+  properties (chapter 11 section 11.2.5). The installed app (ADR-050) takes the business's name, colour and
+  logo as its name and home screen icon from a manifest the API serves per host (ADR-064, issue #446): Android
+  updates an installed app by itself, an iPhone only when the app is added to the home screen again.
+  Everything else keeps the platform look. The platform
   host shows the Rincoltech brand.
 - **Footer.** "Powered by" and the Rincoltech logo, linked to the Rincoltech site, with an
   accessible link name, on every screen of every host (sign-in, accept-invitation, staff, member

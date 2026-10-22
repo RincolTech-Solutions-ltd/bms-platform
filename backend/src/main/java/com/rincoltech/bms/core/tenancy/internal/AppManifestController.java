@@ -83,6 +83,7 @@ class AppManifestController {
     @GetMapping(path = "/manifest.webmanifest", produces = MANIFEST_TYPE)
     @PublicEndpoint
     @Operation(summary = "The installed app's manifest for this business (public)", operationId = "getAppManifest")
+    @ApiResponse(responseCode = "200", description = "The manifest of the host's business, or the BMS one")
     @ApiResponse(responseCode = "304", description = "The ETag still matches")
     ResponseEntity<AppManifest> manifest(
             @RequestHeader(name = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
@@ -107,6 +108,7 @@ class AppManifestController {
     @Operation(
             summary = "An installed app icon drawn from the business's logo (public, cacheable)",
             operationId = "getAppIcon")
+    @ApiResponse(responseCode = "200", description = "The PNG icon drawn from the logo")
     @ApiResponse(responseCode = "302", description = "No logo here: the BMS icon of the same name")
     @ApiResponse(responseCode = "304", description = "The ETag still matches")
     @ApiResponse(responseCode = "404", description = "Not one of the icon file names")
