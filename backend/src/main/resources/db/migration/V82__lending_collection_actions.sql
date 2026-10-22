@@ -56,3 +56,28 @@ END
 $$;
 CREATE TRIGGER lending_collection_actions_guard BEFORE UPDATE OR DELETE ON lending_collection_actions
     FOR EACH ROW EXECUTE FUNCTION lending_collection_actions_guard();
+
+-- ---------------------------------------------------------------------------------------------
+-- Permissions (chapter 8 section 8.3.2, ADR-064, the review of #272). Both are reads, not money
+-- moving, scoped by branch; PermissionMatrixIT compares the seeded rows with the matrix.
+-- lending.members.contact: see a borrower's whole phone number on the collection lists; the people
+-- who call borrowers hold it (administrators, branch managers, loan officers), not the cashier, the
+-- accountant or the auditor, who see it masked.
+-- lending.collections.all_officers: see every officer's loans on the collection lists; without it
+-- (the loan officer) a list covers only the caller's own portfolio.
+-- ---------------------------------------------------------------------------------------------
+
+INSERT INTO permissions (key, module, description, is_money_moving) VALUES
+    ('lending.members.contact', 'lending', 'Members: see a borrower''s phone number on the collection lists', false),
+    ('lending.collections.all_officers', 'lending', 'Collections: every officer''s loans in scope, not only one''s own', false);
+
+INSERT INTO role_permissions (role_key, permission_key) VALUES
+    ('tenant_admin', 'lending.members.contact'),
+    ('branch_manager', 'lending.members.contact'),
+    ('loan_officer', 'lending.members.contact'),
+    ('tenant_admin', 'lending.collections.all_officers'),
+    ('branch_manager', 'lending.collections.all_officers'),
+    ('cashier', 'lending.collections.all_officers'),
+    ('accountant', 'lending.collections.all_officers'),
+    ('auditor', 'lending.collections.all_officers')
+ON CONFLICT DO NOTHING;

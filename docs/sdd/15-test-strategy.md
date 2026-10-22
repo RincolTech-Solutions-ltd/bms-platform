@@ -410,7 +410,11 @@ logs actions with each refusal, and lets the nightly run keep one promise, break
 open, with the action guard refusing a change of note. A pending approval stays current across the
 nightly run (`frArr01_theNightlyRunLeavesPendingApprovalsCurrent`). After the review of #272: a list capped at its limit says it
 was cut and keeps the bucket totals, a caller without members read sees masked phones, one payment
-keeps one promise only, and a reversal reopens a kept promise the next night.
+keeps one promise only, and a reversal reopens a kept promise the next night. After the second
+review: the real cashier and auditor roles see masked phones and the loan officer whole ones, a loan
+officer sees only their own portfolio, a reassignment needs a reason and refuses a deactivated officer,
+the Owner moves loans of two branches in one call, and a payment recorded before a promise never keeps
+it while one entered after and dated back into its window does.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

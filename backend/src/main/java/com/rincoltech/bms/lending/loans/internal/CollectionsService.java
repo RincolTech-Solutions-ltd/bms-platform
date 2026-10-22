@@ -84,8 +84,12 @@ class CollectionsService {
      * must be an active staff user who can originate loans in each loan's branch.
      */
     @Transactional
-    ReassignResult reassign(List<UUID> loanIds, UUID officerId) {
+    ReassignResult reassign(List<UUID> loanIds, UUID officerId, String reason) {
         Principal principal = CurrentPrincipal.require();
+        String why = reason == null ? "" : reason.trim();
+        if (why.length() < 5 || why.length() > 300) {
+            throw ApiException.rule("reason_required", "Say why, in 5 to 300 characters.");
+        }
         int moved = 0;
         Map<UUID, Boolean> eligible = new java.util.HashMap<>();
         // Locked in id order, so two bulk moves never wait on each other in a cycle.
@@ -110,7 +114,7 @@ class CollectionsService {
                     loan.id(),
                     loan.branchId(),
                     Map.of("officer_user_id", loan.officerUserId().toString()),
-                    Map.of("officer_user_id", officerId.toString())));
+                    Map.of("officer_user_id", officerId.toString(), "reason", why)));
             moved++;
         }
         return new ReassignResult(officerId, moved);
@@ -136,6 +140,10 @@ class CollectionsService {
             }
             if (r.promisedDate().isBefore(today())) {
                 throw ApiException.rule("promised_date_in_past", "The promised date is today or later.");
+            }
+            if (r.promisedDate().isAfter(today().plusDays(MAX_PROMISE_DAYS))) {
+                throw ApiException.rule(
+                        "promised_date_too_far", "The promised date is at most " + MAX_PROMISE_DAYS + " days ahead.");
             }
         } else {
             if (r.promisedDate() != null || r.promisedAmountMinor() != null) {
@@ -175,6 +183,21 @@ class CollectionsService {
     /** Lines a list returns by default, and at most (the review of #272: never the whole contact book at once). */
     static final int DEFAULT_LIMIT = 200;
 
+    /** A promise is for a date at most this many days ahead. */
+    static final int MAX_PROMISE_DAYS = 60;
+
+    static final String CONTACT = "lending.members.contact";
+
+    static final String ALL_OFFICERS = "lending.collections.all_officers";
+
+    /**
+     * ADR-064: without {@code lending.collections.all_officers} (the loan officer) a list covers only the caller's own
+     * portfolio, whatever officer was asked for; branch managers, administrators and the back office see the branch.
+     */
+    static UUID officerFor(Principal principal, UUID requested) {
+        return principal.hasPermission(ALL_OFFICERS) ? requested : principal.userId();
+    }
+
     static final int MAX_LIMIT = 500;
 
     static int limit(Integer requested) {
@@ -182,12 +205,13 @@ class CollectionsService {
     }
 
     /**
-     * A member's phone as the caller may see it: whole only with {@code lending.members.read} in the loan's branch,
-     * else masked as {@code +256*****0001} (the review of #272: a cashier or an auditor with collections read does not
-     * take the branch's contact book).
+     * A member's phone as the caller may see it: whole only with {@code lending.members.contact} in the loan's branch
+     * (the people who call borrowers: administrators, branch managers, loan officers; ADR-064), else masked as
+     * {@code +256*****0001}, so a cashier, an accountant or an auditor with collections read never takes the branch's
+     * contact book.
      */
     static String phone(Principal principal, UUID branchId, String e164) {
-        if (e164 == null || principal.may("lending.members.read", branchId)) {
+        if (e164 == null || principal.may(CONTACT, branchId)) {
             return e164;
         }
         return e164.length() <= 8
@@ -207,7 +231,7 @@ class CollectionsService {
         }
         Principal principal = CurrentPrincipal.require();
         int size = limit(limit);
-        List<DueLine> lines = repo.dueList(scope(branchIds), officerId, start, end, size + 1);
+        List<DueLine> lines = repo.dueList(scope(branchIds), officerFor(principal, officerId), start, end, size + 1);
         return new DueList(
                 start,
                 end,
@@ -226,8 +250,9 @@ class CollectionsService {
         Principal principal = CurrentPrincipal.require();
         List<UUID> scope = scope(branchIds);
         int size = limit(limit);
-        List<ArrearsLine> lines = repo.arrears(scope, officerId, bucket, size + 1);
-        Map<String, long[]> totals = repo.arrearsTotals(scope, officerId);
+        UUID officer = officerFor(principal, officerId);
+        List<ArrearsLine> lines = repo.arrears(scope, officer, bucket, size + 1);
+        Map<String, long[]> totals = repo.arrearsTotals(scope, officer);
         List<ArrearsBucket> buckets = new ArrayList<>();
         for (String b : BUCKETS) {
             if (bucket != null && !bucket.equals(b)) {
@@ -254,7 +279,8 @@ class CollectionsService {
             throw ApiException.rule("invalid_promise_status", "The status is pending, kept or broken.");
         }
         int size = limit(limit);
-        List<CollectionsApi.PromiseLine> lines = repo.promises(scope(branchIds), officerId, s, size + 1);
+        List<CollectionsApi.PromiseLine> lines =
+                repo.promises(scope(branchIds), officerFor(CurrentPrincipal.require(), officerId), s, size + 1);
         return new PromiseList(lines.stream().limit(size).toList(), lines.size() > size);
     }
 

@@ -17,12 +17,19 @@ final class CollectionsApi {
     private CollectionsApi() {}
 
     @Schema(name = "LoanOfficerRequest")
-    record OfficerRequest(@NotNull UUID officerUserId) {}
+    record OfficerRequest(
+            @NotNull UUID officerUserId,
+
+            @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why; kept in the loan's audit row")
+            String reason) {}
 
     @Schema(name = "LoanReassignRequest", description = "FR-CLN-01: all or none of the loans move")
     record ReassignRequest(
             @NotEmpty @Size(max = 500) List<@NotNull UUID> loanIds,
-            @NotNull UUID officerUserId) {}
+            @NotNull UUID officerUserId,
+
+            @NotBlank @Size(min = 5, max = 300) @Schema(description = "Why; kept in each loan's audit row")
+            String reason) {}
 
     @Schema(name = "LoanReassignResult")
     record ReassignResult(UUID officerUserId, int reassigned) {}
@@ -63,7 +70,9 @@ final class CollectionsApi {
             String memberNo,
             String memberName,
 
-            @Schema(description = "Masked (+256*****0001) unless the caller may read members in the loan's branch")
+            @Schema(
+                    description =
+                            "Masked (+256*****0001) unless the caller holds lending.members.contact in the loan's branch")
             String phone,
 
             int itemNo,
@@ -114,7 +123,9 @@ final class CollectionsApi {
             String memberNo,
             String memberName,
 
-            @Schema(description = "Masked (+256*****0001) unless the caller may read members in the loan's branch")
+            @Schema(
+                    description =
+                            "Masked (+256*****0001) unless the caller holds lending.members.contact in the loan's branch")
             String phone,
 
             UUID officerUserId,

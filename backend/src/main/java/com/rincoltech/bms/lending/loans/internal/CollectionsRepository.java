@@ -270,18 +270,17 @@ class CollectionsRepository {
     record StoredPromise(Promises.Promise promise, String status, LocalDate promisedDate) {}
 
     /**
-     * FR-CLN-05: every promise on a loan that has one still open or promised in the last {@code days} days, so a
-     * back-dated payment or a reversal can settle it again; the day each was made is read in the tenant's zone.
+     * FR-CLN-05: every promise still open or promised on or after {@code since}, so a back-dated payment or a
+     * reversal can settle it again; older ones stay as they were. The day each was made is read in the tenant's zone.
      */
     List<StoredPromise> promisesToSettle(String zone, LocalDate since) {
         return jdbc.sql("""
-                        SELECT a.id, a.loan_id, (a.performed_at AT TIME ZONE ?)::date AS made_on, a.promised_date,
+                        SELECT a.id, a.loan_id, (a.performed_at AT TIME ZONE ?)::date AS made_on, a.performed_at,
+                               a.promised_date,
                                a.promised_amount_minor, a.promise_status
                           FROM lending_collection_actions a
                          WHERE a.action_type = 'promise_to_pay'
-                           AND a.loan_id IN (SELECT o.loan_id FROM lending_collection_actions o
-                                              WHERE o.action_type = 'promise_to_pay'
-                                                AND (o.promise_status = 'pending' OR o.promised_date >= ?))
+                           AND (a.promise_status = 'pending' OR a.promised_date >= ?)
                         """)
                 .params(zone, since)
                 .query((rs, n) -> new StoredPromise(
@@ -289,6 +288,7 @@ class CollectionsRepository {
                                 rs.getObject("id", UUID.class),
                                 rs.getObject("loan_id", UUID.class),
                                 rs.getObject("made_on", LocalDate.class),
+                                rs.getTimestamp("performed_at").toInstant(),
                                 rs.getObject("promised_date", LocalDate.class),
                                 rs.getLong("promised_amount_minor")),
                         rs.getString("promise_status"),
@@ -302,14 +302,17 @@ class CollectionsRepository {
             return List.of();
         }
         return jdbc.sql("""
-                        SELECT t.loan_id, t.value_date, t.amount_minor FROM lending_loan_transactions t
+                        SELECT t.loan_id, t.value_date, t.created_at, t.amount_minor FROM lending_loan_transactions t
                          WHERE t.loan_id IN (:loans) AND t.txn_type IN ('repayment', 'recovery') AND t.value_date >= :from
                            AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)
                         """)
                 .param("loans", loanIds)
                 .param("from", from)
                 .query((rs, n) -> new Promises.Payment(
-                        rs.getObject(1, UUID.class), rs.getObject(2, LocalDate.class), rs.getLong(3)))
+                        rs.getObject(1, UUID.class),
+                        rs.getObject(2, LocalDate.class),
+                        rs.getTimestamp(3).toInstant(),
+                        rs.getLong(4)))
                 .list();
     }
 

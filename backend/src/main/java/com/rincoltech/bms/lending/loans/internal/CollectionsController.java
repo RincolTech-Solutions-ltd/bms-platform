@@ -44,14 +44,14 @@ class CollectionsController {
     @RequiresPermission("lending.collections.assign")
     @Operation(summary = "Reassign a loan's responsible officer (FR-CLN-01)", operationId = "setLoanOfficer")
     ReassignResult setOfficer(@PathVariable("loan_id") UUID id, @Valid @RequestBody OfficerRequest request) {
-        return service.reassign(List.of(id), request.officerUserId());
+        return service.reassign(List.of(id), request.officerUserId(), request.reason());
     }
 
     @PostMapping("/collections/reassign")
     @RequiresPermission("lending.collections.assign")
     @Operation(summary = "Reassign many loans to one officer, all or none (FR-CLN-01)", operationId = "reassignLoans")
     ReassignResult reassign(@Valid @RequestBody ReassignRequest request) {
-        return service.reassign(request.loanIds(), request.officerUserId());
+        return service.reassign(request.loanIds(), request.officerUserId(), request.reason());
     }
 
     @GetMapping("/loans/{loan_id}/collection-actions")
