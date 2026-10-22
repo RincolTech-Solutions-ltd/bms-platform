@@ -1175,6 +1175,43 @@ class RetailOfflineSalesIT extends IntegrationTest {
                         .query(Long.class)
                         .single())
                 .isZero();
+        ResponseEntity<JsonNode> waiting =
+                api.post("/offline-waiting", Map.of("items", List.of(waitingAt(client))), SALES);
+        assertThat(waiting.getStatusCode()).as("%s", waiting.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(waiting.getBody().get("code").asString()).isEqualTo("branch_role_forbids_sales");
+        assertThat(waitingRows()).isZero();
+    }
+
+    /** A summary of a sale waiting on a phone is taken only for a branch the reporter sells at, as a report is. */
+    @Test
+    void aWaitingSummaryIsOnlyForABranchTheReporterSellsAt() {
+        ResponseEntity<JsonNode> elsewhere = api.call(
+                HttpMethod.POST,
+                "/offline-waiting",
+                Map.of("items", List.of(waitingAt(UUID.randomUUID()))),
+                SALES,
+                UUID.randomUUID().toString(),
+                Map.of());
+        assertThat(elsewhere.getStatusCode()).as("%s", elsewhere.getBody()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(waitingRows()).isZero();
+    }
+
+    /** A summary of a sale waiting on a phone at the head office, made by the seller. */
+    Map<String, Object> waitingAt(UUID client) {
+        return Map.of(
+                "client_sale_id", client,
+                "branch_id", t.headOffice(),
+                "made_by", api.userId(),
+                "occurred_at", Instant.now().minus(Duration.ofHours(1)).toString(),
+                "total_minor", 2_000);
+    }
+
+    long waitingRows() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM retail_offline_waiting WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .query(Long.class)
+                .single();
     }
 
     /** How many backends wait for the transaction with this id, polled for up to 30 seconds until one does. */

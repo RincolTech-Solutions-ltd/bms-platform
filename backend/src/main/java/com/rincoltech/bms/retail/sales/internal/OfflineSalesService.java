@@ -154,7 +154,8 @@ class OfflineSalesService {
      */
     @Transactional
     WaitingAccepted reportWaiting(WaitingRequest r) {
-        UUID by = CurrentPrincipal.require().userId();
+        Principal principal = CurrentPrincipal.require();
+        UUID by = principal.userId();
         List<FieldProblem> problems = new java.util.ArrayList<>();
         for (int i = 0; i < r.items().size(); i++) {
             if (!repo.branchExists(r.items().get(i).branchId())) {
@@ -163,6 +164,19 @@ class OfflineSalesService {
         }
         if (!problems.isEmpty()) {
             throw ApiException.validation(problems);
+        }
+        // The same may-sell-here checks as report(): never a summary for a branch the reporter does not sell at.
+        for (UUID branchId :
+                r.items().stream().map(WaitingSale::branchId).distinct().toList()) {
+            if (!principal.may("retail.sale.create", branchId)) {
+                throw new ApiException(
+                        HttpStatus.FORBIDDEN,
+                        "permission_denied",
+                        "Permission denied",
+                        "You do not sell at this branch, so you cannot report a sale waiting there.");
+            }
+            roles.requireMaySell(branchId);
+            branches.requireSells(branchId, "branch_id");
         }
         int accepted = 0;
         for (WaitingSale w : r.items()) {

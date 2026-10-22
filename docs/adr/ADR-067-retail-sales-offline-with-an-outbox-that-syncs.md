@@ -65,7 +65,11 @@ left, the branch, the period, the person's roles.
    The sale stores `request_hash`, the SHA-256 of a fixed canonical text of what the sale is (the branch, the payment
    method, the credit buyer's `customer_id`, and per line the item, the pack, the quantity and the price), never of how it
    was delivered (`occurred_at`, `recorded_offline`, `prices_as_of`) or of a field added later: a later send under the same client sale id with a different request is 422
-   `client_sale_conflict` and records nothing. Once an answer is lost the sale form is locked: Try again sends the same
+   `client_sale_conflict` and records nothing. The hash covers exactly `branch_id`, `payment_method`, `customer_id` and
+   per line `product_id`, `unit_id`, `qty` (trailing zeros dropped) and `unit_price_minor`. It leaves out `sale_date`,
+   `price_list_id`, `buyer_name`, `buyer_contact`, `due_date` and `credit_override_reason`, so a replay that changes only
+   those is answered with the earlier sale, not a conflict; the outbox always resends the same body, so this never
+   arises from the device. Once an answer is lost the sale form is locked: Try again sends the same
    request with the same key, and Keep it on this phone queues that same request (dated when it was first sent, marked
    offline) with a new key, except a credit sale, which is only tried again (decision 1: the server refuses a credit sale
    recorded offline); changing the sale means clearing it, which starts a new client sale id, after a confirmation.

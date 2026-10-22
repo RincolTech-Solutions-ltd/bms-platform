@@ -5,6 +5,8 @@ import { getAccessToken, refreshFailedOffline, refreshSession, subscribe as onTo
 import { REFRESH_EVERY_MS, refreshCatalogue, type CatalogueSource } from './catalogue';
 import { browserConnectivity, type Connectivity } from './connectivity';
 import { waiting, type OutboxItem } from './outbox';
+import { deviceStore, scopeOf, type Catalogue, type OfflineStore } from './store';
+import { SyncEngine, browserTabLock, type SyncDeps, type SyncSnapshot } from './sync-engine';
 
 /** A sale another person left waiting on this phone, in short, for the managers (ADR-067 decision 9). */
 export interface WaitingSummary {
@@ -30,8 +32,6 @@ export function summaries(items: OutboxItem[]): WaitingSummary[] {
     total_minor: i.totalMinor,
   }));
 }
-import { deviceStore, scopeOf, type Catalogue, type OfflineStore } from './store';
-import { SyncEngine, browserTabLock, type SyncDeps, type SyncSnapshot } from './sync-engine';
 
 // Selling offline in the staff area (issue #458, ADR-067): one engine, one connectivity watch and one catalogue copy for the
 // signed-in person on this business, made in the staff layout and given to the sale screen, the status dot and sign-out.
