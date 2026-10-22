@@ -75,7 +75,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Secondary button | `<button>` | The default; 44px tall. Pressed: it sinks to 98% and darkens. Disabled (`disabled` or `aria-disabled="true"`): flat grey with muted text |
 | Primary button | `.btn-primary` (retail: `.rt-primary`; #87: `.btn-brand`) | One per view, the main action, at the bottom of a form |
 | Danger, ghost | `.btn-danger`, `.btn-ghost` | Reject or destroy; quiet actions such as Remove and Sign out |
-| Busy button | `<BusyButton busy={save.isPending} className="btn-primary">Save</BusyButton>` (`app/ui/BusyButton.tsx`, `.busy-button`, `.busy-spinner`; #456) | Every button that writes (POST, PUT, PATCH, DELETE: a sale, a payment, an invitation, a setting, a sign-in, an approval). While busy it keeps its label, shows a small spinner in its end padding (the width does not jump), is `disabled` and `aria-busy="true"`, and a visually hidden status beside it says Working. A press holds it until busy shows, so a double click sends once, and while busy its form drops an Enter re-submit. Under reduced motion the spinner is a pulsing dot. Takes every `<button>` prop |
+| Busy button | `<BusyButton busy={save.isPending} className="btn-primary">Save</BusyButton>` (`app/ui/BusyButton.tsx`, `.busy-button`, `.busy-spinner`; #456) | Every button that writes (POST, PUT, PATCH, DELETE: a sale, a payment, an invitation, a setting, a sign-in, an approval). While busy it keeps its label (never swap it for Saving or Sending: the spinner shows the work), shows a small spinner placed absolutely in its end padding (the width does not jump), and is `aria-busy="true"` and `aria-disabled="true"` rather than `disabled`, so it keeps keyboard focus while its own press guard drops every press. It has no live region of its own: the one `BusyAnnouncer` the app shell mounts says Working once while any button is busy (twenty rows sharing one flag are announced once) and clears when the last is done. A press holds it until busy shows, or until an `onClick` that awaits has settled (released in a `finally`, so a throw cannot stick it), so a double click sends once, and while busy its form drops an Enter re-submit. Under reduced motion the spinner is a pulsing dot. Takes every `<button>` prop |
 | Link as button | `<Link className="btn btn-primary">` | Sizes `.btn-lg`, `.btn-sm` (still 44px tall), `.btn-block` |
 | Field | `<label>Text<input/></label>` or `<label htmlFor>` then the input | Label above, `.field-hint` and `.field-error` under it; `aria-invalid="true"` turns the edge red; a focused field shows the focus edge and halo however it got focus, and a wrapping label turns the link colour |
 | Choice row | `<label><input type="radio"/>Text</label>` | The whole row is the tap target; the chosen row is tinted |
@@ -253,17 +253,21 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
 5. A tenant colour is applied for you; never write a brand colour. Draw with the colour roles, never a palette token, so
    the screen follows the theme (see Light and dark theme above); check a new screen in both.
 6. A button that writes is a `BusyButton` with the mutation's `isPending` (or the screen's own submitting state) as
-   `busy`; never a plain `<button disabled={save.isPending}>`. Read-only buttons (refresh, filters, tabs, navigation,
+   `busy`; never a plain `<button disabled={save.isPending}>`. Its label stays the same while busy: no
+   `{save.isPending ? 'Saving' : 'Save'}` and no busy label prop. Read-only buttons (refresh, filters, tabs, navigation,
    opening a dialog) stay plain, and so does a Cancel that only waits, with `/* busy-exempt: <reason> */` in its tag. A
    mutation no button sends (a save as you type, a mark as read) has `// busy-exempt: <reason>` above it.
-   `src/app/ui/busy-guard.test.ts` fails otherwise.
+   `src/app/ui/busy-guard.test.ts` fails a mutation that a press (onClick, onSubmit or a component callback, directly
+   or through a local function) sends unless its pending flag reaches a `busy={...}` attribute in that file, or the
+   guard's `ALLOWED` list names it with a reason.
 7. Give the main controls of a new screen `data-tour` ids and add the screen's steps to
    `frontend/src/tour/tours.ts` (a page tour at least), with plain, short sentences.
 
 ## Checks
 
-- `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every `useMutation` has its `isPending`
-  read or a `busy-exempt` reason, and no plain button is disabled by a pending state) and `BusyButton.dom.test.tsx`.
+- `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every mutation a press sends, including
+  `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
+  button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the
