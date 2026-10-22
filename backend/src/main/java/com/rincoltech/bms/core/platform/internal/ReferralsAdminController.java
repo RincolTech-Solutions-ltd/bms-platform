@@ -142,6 +142,10 @@ class ReferralsAdminController {
                                     + " the rule's months. Only for a line worked out from a payment")
             Boolean refunded) {}
 
+    @Schema(name = "ReferralPaymentRefundedRequest")
+    record RefundedRequest(
+            @NotBlank @Size(min = 5, max = 300) String reason) {}
+
     @Schema(name = "ReferralLinePaidRequest", description = "The commission was paid outside the app; this records it")
     record PaidRequest(
             @NotNull LocalDate paidOn,
@@ -310,11 +314,26 @@ class ReferralsAdminController {
                 CurrentPrincipal.require().userId());
     }
 
+    @PostMapping("/referrals/payments/{payment_id}/refunded")
+    @RequiresPermission("platform.tenants.manage")
+    @Operation(
+            summary =
+                    "Record that a referred business's subscription payment was refunded, with a reason, whether or not it"
+                            + " earned a line: it no longer uses up the rule's months; 404 when the payment has no referral, 409"
+                            + " payment_already_refunded",
+            operationId = "platformMarkReferralPaymentRefunded")
+    ReferralDetail paymentRefunded(
+            @PathVariable("payment_id") UUID paymentId, @Valid @RequestBody RefundedRequest request) {
+        return referrals.markPaymentRefunded(
+                paymentId, request.reason(), CurrentPrincipal.require().userId());
+    }
+
     @PostMapping("/referrals/commissions/{line_id}/paid")
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary = "Record that one commission line was paid (date, method, reference, note), with a reason; the app"
-                    + " never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive"
+                    + " never pays; 409 commission_already_paid, 409 commission_line_reversed, 409"
+                    + " commission_reversal_of_unpaid, 409 referrer_inactive"
                     + " unless confirm_referrer_inactive",
             operationId = "platformMarkReferralCommissionPaid")
     ReferralDetail paid(@PathVariable("line_id") UUID lineId, @Valid @RequestBody PaidRequest request) {

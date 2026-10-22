@@ -94,7 +94,10 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     so when the operator reverses a `payment` line with `refunded: true` the refund is recorded on that payment's outcome
     (`refunded_at`, `refunded_by_line_id`, set once) and the payment is left out of the count from then on, so the client's
     next payment earns. A reversal without `refunded` (the commission was withdrawn, the money was kept) leaves the months
-    used. The
+    used. A refunded payment that has no line to reverse (it gave `no_rule`, `months_used`, `cap_reached` or `zero`), or
+    whose line was reversed without `refunded` by mistake, is recorded refunded on its own route
+    (`POST /platform/referrals/payments/{payment_id}/refunded`, with a reason, audited `platform.referral.payment_refunded`;
+    `refunded_by_platform_user_id`), with the same effect. The
     count does not compare creation times: recording a payment locks the business's subscription row first (`V75`), so two
     payments recorded at the same moment are counted one after the other and never both as the first. The cap stays per
     referral row. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered
@@ -111,7 +114,9 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     business's administrators.)
 11. **A reversed line is not paid.** An unpaid line that was reversed nets to nothing with its reversal, so marking it paid is
     refused with 409 `commission_line_reversed`; a line paid before it was reversed stays paid, and the reversal records what
-    the referrer owes back.
+    the referrer owes back. The reversal itself is marked paid (the money came back, or was set off) only when the line it
+    reverses was paid: the reversal of an unpaid line is refused with 409 `commission_reversal_of_unpaid`, since marking it
+    would show money due that was never owed (review of 22 Oct 2026, second round).
 12. **A suspended or cancelled business is named so, and a suspended or cancelled referrer's lines are flagged.** The status of
     a referred business shown to its referrer's owner and administrators and to the operator is also `suspended` or
     `cancelled`, from the referred business's subscription (or `suspended` for a suspended business). A referrer business that

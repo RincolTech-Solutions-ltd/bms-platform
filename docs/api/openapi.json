@@ -7228,6 +7228,16 @@
         },
         "required" : [ "reason" ]
       },
+      "ReferralPaymentRefundedRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
       "ReferralRuleBody" : {
         "description" : "The rule; null clears it (the default: nothing is worked out; a referral: the default)",
         "properties" : {
@@ -29785,7 +29795,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive unless confirm_referrer_inactive",
+        "summary" : "Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 commission_reversal_of_unpaid, 409 referrer_inactive unless confirm_referrer_inactive",
         "tags" : [ "platform" ]
       }
     },
@@ -29912,6 +29922,44 @@
           }
         },
         "summary" : "The same referrals as CSV, one row per referral and currency, at most 10,000; audited",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/payments/{payment_id}/refunded" : {
+      "post" : {
+        "operationId" : "platformMarkReferralPaymentRefunded",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "payment_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralPaymentRefundedRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Record that a referred business's subscription payment was refunded, with a reason, whether or not it earned a line: it no longer uses up the rule's months; 404 when the payment has no referral, 409 payment_already_refunded",
         "tags" : [ "platform" ]
       }
     },

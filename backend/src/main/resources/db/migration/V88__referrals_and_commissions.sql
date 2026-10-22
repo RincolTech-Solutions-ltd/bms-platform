@@ -130,17 +130,25 @@ ALTER TABLE onboarding_applications
 -- Sets the referrer of an application (the caller resolved the code to the business): one just created, or the open one a
 -- returning applicant brings a code to (ADR-069 decision 13). Only while it has no referrer and is still submitted (not yet
 -- in review), so a code typed later never replaces the first one.
+-- The sign-up runs with no tenant bound; a tenant-bound call is refused.
 CREATE FUNCTION onboarding_application_set_referrer(p_id uuid, p_tenant_id uuid, p_code text) RETURNS void
-LANGUAGE sql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'the referrer of an application is set by the sign-up only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
     UPDATE onboarding_applications SET referral_code = upper(btrim(p_code)), referrer_tenant_id = p_tenant_id
-     WHERE id = p_id AND referrer_tenant_id IS NULL AND status = 'submitted'
+     WHERE id = p_id AND referrer_tenant_id IS NULL AND status = 'submitted';
+END
 $$;
 
 -- True when the email or the phone is that of the Owner or an administrator (not deactivated) of the business: a business is
 -- not referred by its own people (ADR-069 decision 10). Emails compare as the sign-up compares them (onboarding_email_key),
 -- phones in E.164.
-CREATE FUNCTION referral_is_self(p_referrer uuid, p_email text, p_phone text) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+-- bms_referral_is_self is the check, for the definer functions only; referral_is_self is the sign-up's (no tenant bound), and
+-- refuses a tenant-bound call, so a tenant session cannot ask whether an address is another business's administrator.
+CREATE FUNCTION bms_referral_is_self(p_referrer uuid, p_email text, p_phone text) RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
     SELECT EXISTS (
         SELECT 1 FROM users u
          WHERE u.tenant_id = p_referrer AND u.kind = 'staff' AND u.status <> 'deactivated'
@@ -149,6 +157,17 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
                                          AND ra.role_key = 'tenant_admin' AND ra.revoked_at IS NULL))
            AND ((u.email IS NOT NULL AND onboarding_email_key(u.email) = onboarding_email_key(p_email))
                 OR (u.phone_e164 IS NOT NULL AND u.phone_e164 = p_phone)))
+$$;
+REVOKE ALL ON FUNCTION bms_referral_is_self(uuid, text, text) FROM PUBLIC;
+
+CREATE FUNCTION referral_is_self(p_referrer uuid, p_email text, p_phone text) RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'a self-referral is checked by the sign-up only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN bms_referral_is_self(p_referrer, p_email, p_phone);
+END
 $$;
 
 -- The referrer of one application for the operator, or no row.
@@ -343,8 +362,10 @@ CREATE TABLE referral_payment_outcomes (
                                                                 'currency_differs', 'cap_reached', 'zero')),
     created_at          timestamptz NOT NULL DEFAULT now(),
     refunded_at         timestamptz,
+    -- The reversal that said so, or null when the operator marked the payment refunded on its own (a payment with no line).
     refunded_by_line_id uuid        REFERENCES referral_commission_lines (id),
-    CHECK ((refunded_at IS NULL) = (refunded_by_line_id IS NULL))
+    refunded_by_platform_user_id uuid REFERENCES platform_users (id),
+    CHECK (refunded_at IS NOT NULL OR (refunded_by_line_id IS NULL AND refunded_by_platform_user_id IS NULL))
 );
 CREATE INDEX referral_payment_outcomes_by_referral ON referral_payment_outcomes (referral_id);
 ALTER TABLE referral_payment_outcomes ENABLE ROW LEVEL SECURITY;
@@ -354,7 +375,7 @@ REVOKE ALL ON referral_payment_outcomes FROM PUBLIC;
 CREATE FUNCTION bms_payment_outcome_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_refund constant text[] := ARRAY['refunded_at', 'refunded_by_line_id'];
+    v_refund constant text[] := ARRAY['refunded_at', 'refunded_by_line_id', 'refunded_by_platform_user_id'];
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'a payment outcome is never deleted' USING ERRCODE = 'insufficient_privilege';
@@ -549,17 +570,22 @@ CREATE FUNCTION platform_referral_from_application(p_application_id uuid, p_tena
 RETURNS TABLE (referral_id uuid, referrer_tenant_id uuid, outcome text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
+    v_bound uuid := nullif(current_setting('app.tenant_id', true), '')::uuid;
     v_code  text;
     v_email text;
     v_phone text;
 BEGIN
+    -- Activate runs bound to the new business (TenantProvisioning); any other bound tenant is refused.
+    IF v_bound IS NOT NULL AND v_bound <> p_tenant_id THEN
+        RAISE EXCEPTION 'a referral is recorded by Activate only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
     SELECT a.referrer_tenant_id, a.referral_code, a.contact_email, a.contact_phone_e164
       INTO referrer_tenant_id, v_code, v_email, v_phone
       FROM onboarding_applications a WHERE a.id = p_application_id;
     IF referrer_tenant_id IS NULL
        OR EXISTS (SELECT 1 FROM tenant_referrals r WHERE r.referred_tenant_id = p_tenant_id AND r.ended_at IS NULL) THEN
         outcome := 'none';
-    ELSIF referrer_tenant_id = p_tenant_id OR referral_is_self(referrer_tenant_id, v_email, v_phone) THEN
+    ELSIF referrer_tenant_id = p_tenant_id OR bms_referral_is_self(referrer_tenant_id, v_email, v_phone) THEN
         outcome := 'self';
     ELSE
         referral_id := gen_random_uuid();
@@ -779,6 +805,9 @@ BEGIN
         RETURN NEXT;
         RETURN;
     END IF;
+    -- A line holds at most 1,000,000,000 minor units: a larger amount is capped there rather than refusing (and rolling
+    -- back) the subscription payment that caused it.
+    v_amount := least(v_amount, 1000000000);
     v_inactive := bms_referrer_status(v_ref.tenant_id) <> 'active';
     line_id := gen_random_uuid();
     -- The snapshot is on a row the referrer reads: it names the rule, never the referred business's payment amount.
@@ -800,6 +829,10 @@ $$;
 
 -- A line the operator typed for one referral (current or ended). Returns the referrer. It runs bound to the referrer, so its
 -- Idempotency-Key row is that business's (as a payment's is the paying business's), and only for an active platform user.
+-- Why a bound call is allowed: the only caller is the platform console's typed-line route, which binds the referrer through
+-- TenantContext.callAs; SecurityArchitectureTest allows callAs only in core.platform, core.jobs and the kernel, and no tenant
+-- route reaches core.referrals' addLine. A tenant request bound to its own business, or to any other, refuses here unless it
+-- is bound to exactly the referral's referrer and names an active operator, which no tenant code path supplies.
 CREATE FUNCTION platform_referral_add_manual_line(
     p_id uuid, p_referral_id uuid, p_amount_minor bigint, p_currency text, p_note text, p_platform_user_id uuid)
 RETURNS uuid
@@ -856,15 +889,17 @@ BEGIN
     VALUES (p_id, v_line.tenant_id, v_line.referral_id, 'reversal', v_line.id, -v_line.amount_minor, v_line.currency,
             p_note, p_platform_user_id);
     IF p_refunded THEN
-        UPDATE referral_payment_outcomes SET refunded_at = p_now, refunded_by_line_id = p_id
-         WHERE payment_id = v_line.payment_id;
+        UPDATE referral_payment_outcomes
+           SET refunded_at = p_now, refunded_by_line_id = p_id, refunded_by_platform_user_id = p_platform_user_id
+         WHERE payment_id = v_line.payment_id AND refunded_at IS NULL;
     END IF;
     RETURN v_line.referral_id::text;
 END
 $$;
 
 -- Marks one line paid (the app records it; the money moves outside it). Returns 'not_found', 'already_paid', 'reversed' (an
--- unpaid line that was reversed is never paid, ADR-069 decision 11), 'referrer_inactive' (the referrer is suspended or
+-- unpaid line that was reversed is never paid, ADR-069 decision 11), 'reversal_of_unpaid' (the reversal of a line that was
+-- never paid is never paid either), 'referrer_inactive' (the referrer is suspended or
 -- cancelled now and p_confirm_inactive is false, decision 12), or the referral id as text.
 CREATE FUNCTION platform_referral_mark_paid(
     p_line_id uuid, p_paid_on date, p_method text, p_reference text, p_note text, p_confirm_inactive boolean,
@@ -887,6 +922,12 @@ BEGIN
     IF EXISTS (SELECT 1 FROM referral_commission_lines WHERE reverses_line_id = p_line_id) THEN
         RETURN 'reversed';
     END IF;
+    -- A reversal is settled only against a line that was paid: marking the reversal of an unpaid line paid would show money
+    -- due that was never owed.
+    IF v_line.kind = 'reversal' AND NOT EXISTS (SELECT 1 FROM referral_commission_lines o
+                                                 WHERE o.id = v_line.reverses_line_id AND o.paid_on IS NOT NULL) THEN
+        RETURN 'reversal_of_unpaid';
+    END IF;
     IF NOT p_confirm_inactive AND bms_referrer_status(v_line.tenant_id) <> 'active' THEN
         RETURN 'referrer_inactive';
     END IF;
@@ -898,10 +939,42 @@ BEGIN
 END
 $$;
 
+-- Records that a payment of a referred business was refunded, whether or not it earned a line (a payment that gave no_rule,
+-- months_used, cap_reached or zero has none, and a line reversed without refunded by mistake cannot be reversed again), so it
+-- no longer uses up the rule's months (ADR-069 decision 9). Returns 'not_found' (no referral outcome for that payment),
+-- 'already_refunded', or the referral id as text.
+CREATE FUNCTION platform_referral_mark_payment_refunded(p_payment_id uuid, p_platform_user_id uuid, p_now timestamptz)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+    v_outcome referral_payment_outcomes%ROWTYPE;
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'commission lines are the platform operator''s' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    SELECT * INTO v_outcome FROM referral_payment_outcomes WHERE payment_id = p_payment_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'not_found';
+    END IF;
+    IF v_outcome.refunded_at IS NOT NULL THEN
+        RETURN 'already_refunded';
+    END IF;
+    UPDATE referral_payment_outcomes SET refunded_at = p_now, refunded_by_platform_user_id = p_platform_user_id
+     WHERE payment_id = p_payment_id;
+    RETURN v_outcome.referral_id::text;
+END
+$$;
+
 -- The referral a line belongs to, for the operator.
 CREATE FUNCTION platform_referral_of_line(p_line_id uuid) RETURNS uuid
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
-    SELECT l.referral_id FROM referral_commission_lines l WHERE l.id = p_line_id
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'referrals are read across businesses by the platform operator only'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN (SELECT l.referral_id FROM referral_commission_lines l WHERE l.id = p_line_id);
+END
 $$;
 
 REVOKE ALL ON FUNCTION referral_code_tenant(text) FROM PUBLIC;
@@ -922,6 +995,7 @@ REVOKE ALL ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, tex
 REVOKE ALL ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, boolean, uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_referral_of_line(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_referral_mark_payment_refunded(uuid, uuid, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION referral_code_tenant(text) TO bms_app;
 GRANT EXECUTE ON FUNCTION onboarding_application_set_referrer(uuid, uuid, text) TO bms_app;
 GRANT EXECUTE ON FUNCTION referral_is_self(uuid, text, text) TO bms_app;
@@ -940,6 +1014,7 @@ GRANT EXECUTE ON FUNCTION platform_referral_add_manual_line(uuid, uuid, bigint, 
 GRANT EXECUTE ON FUNCTION platform_referral_reverse_line(uuid, uuid, text, boolean, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_mark_paid(uuid, date, text, text, text, boolean, uuid, timestamptz) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_referral_of_line(uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_referral_mark_payment_refunded(uuid, uuid, timestamptz) TO bms_app;
 
 -- ---------------------------------------------------------------------------------------------
 -- 9. The permission to read the business's own referrals (owner and administrators).

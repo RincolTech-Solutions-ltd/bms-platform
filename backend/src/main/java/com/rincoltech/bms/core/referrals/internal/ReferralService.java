@@ -494,6 +494,37 @@ class ReferralService implements Referrals {
 
     @Override
     @Transactional
+    public ReferralDetail markPaymentRefunded(UUID paymentId, String reason, UUID operatorId) {
+        String result = jdbc.sql("SELECT platform_referral_mark_payment_refunded(?, ?, ?)")
+                .params(paymentId, operatorId, Timestamp.from(clock.now()))
+                .query(String.class)
+                .single();
+        if ("not_found".equals(result)) {
+            throw ApiException.notFound();
+        }
+        if ("already_refunded".equals(result)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "payment_already_refunded",
+                    "Already refunded",
+                    "This payment is already recorded as refunded.");
+        }
+        UUID referralId = UUID.fromString(result);
+        ReferralDetail detail = detail(referralId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("payment_id", paymentId);
+        data.put("referral_id", referralId);
+        data.put("reason", reason.trim());
+        audit.record(
+                "platform.referral.payment_refunded",
+                operatorId,
+                detail.referral().referrerTenantId(),
+                data);
+        return detail;
+    }
+
+    @Override
+    @Transactional
     public ReferralDetail markPaid(UUID lineId, Payout payout, UUID operatorId) {
         if (payout.method() == null || !PAID_METHODS.contains(payout.method())) {
             throw ApiException.validation(List.of(new FieldProblem(
@@ -534,6 +565,13 @@ class ReferralService implements Referrals {
                     "commission_line_reversed",
                     "Reversed",
                     "This line was reversed, so nothing is owed on it. It cannot be marked paid.");
+        }
+        if ("reversal_of_unpaid".equals(result)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "commission_reversal_of_unpaid",
+                    "Nothing to settle",
+                    "This reversal cancels a line that was never paid, so nothing changes hands. It cannot be marked paid.");
         }
         if ("referrer_inactive".equals(result)) {
             // ADR-069 decision 12: the referrer stopped, so the operator decides and says so before paying.

@@ -1070,6 +1070,21 @@ class RlsIsolationIT {
                                 "SELECT count(*) FROM platform_referral_set_referrer(?, NULL, NULL, now())",
                                 a.tenantId())))
                 .hasStackTraceContaining("platform operator only");
+        // The sign-up's and Activate's functions refuse a tenant-bound call too (review of #467): no oracle on another
+        // business's administrators, no referral written for another business, no cross-business read of a line.
+        for (String call : List.of(
+                // count(f(..)) consumes the result, so the planner cannot drop the call.
+                "SELECT count(referral_is_self(?, 'someone@example.test', NULL))",
+                "SELECT count(*) FROM (SELECT onboarding_application_set_referrer(gen_random_uuid(), ?, 'TESTRF22')) x",
+                "SELECT count(platform_referral_of_line(?))",
+                "SELECT count(platform_referral_mark_payment_refunded(?, NULL, now()))",
+                "SELECT count(*) FROM platform_referral_from_application(gen_random_uuid(), ?, NULL)")) {
+            assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, call, b.tenantId())))
+                    .as(call)
+                    .satisfiesAnyOf(
+                            e -> assertThat(e).hasStackTraceContaining(" only"),
+                            e -> assertThat(e).hasStackTraceContaining("platform operator's"));
+        }
         for (String table : List.of("referral_commission_rules", "referral_settings", "referral_payment_outcomes")) {
             assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM " + table)))
                     .as("SELECT on %s", table)

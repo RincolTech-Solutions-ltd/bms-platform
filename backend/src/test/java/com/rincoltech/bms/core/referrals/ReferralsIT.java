@@ -1344,6 +1344,111 @@ class ReferralsIT extends IntegrationTest {
         assertThat(audits("platform.referral.rule_changed")).isZero();
     }
 
+    /**
+     * A payment that earned no line (here no rule was in force) can still be recorded as refunded, on its own route, so it no
+     * longer uses up the months: the next payment earns for all twelve. Recorded once, audited; a payment with no referral
+     * outcome is 404.
+     */
+    @Test
+    void aRefundedPaymentWithNoLineFreesItsMonths() {
+        TestDatabase.Fixture a = TestDatabase.tenant("refrefund2", false);
+        Business x = business("ref-refund-noline");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        TestDatabase.owner()
+                .sql("UPDATE referral_settings SET default_rule_id = NULL")
+                .update();
+        UUID payment =
+                UUID.fromString(pay(x.id(), 180000, 3).getBody().get("id").asString());
+        assertThat(outcomes(rx)).containsExactly("no_rule");
+
+        String path = "/api/v1/platform/referrals/payments/" + payment + "/refunded";
+        ResponseEntity<JsonNode> refunded =
+                platform.post(path, Map.of("reason", "Test: the payment was sent back"), operator.accessToken());
+        assertThat(refunded.getStatusCode()).as("%s", refunded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(platform.post(path, Map.of("reason", "Test: twice"), operator.accessToken())
+                        .getBody()
+                        .get("code")
+                        .asString())
+                .isEqualTo("payment_already_refunded");
+        assertThat(platform.post(
+                                "/api/v1/platform/referrals/payments/" + UUID.randomUUID() + "/refunded",
+                                Map.of("reason", "Test: no such payment"),
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(audits("platform.referral.payment_refunded")).isEqualTo(1);
+
+        seededDefault();
+        pay(x.id(), 720000, 12);
+        // All twelve months earn: the refunded three months are not counted.
+        assertThat(amounts(detail(rx))).containsExactly(72000L);
+    }
+
+    /**
+     * The reversal of a line that was never paid is never marked paid either: it would show money due that was never owed.
+     * The reversal of a paid line is settled like any line.
+     */
+    @Test
+    void aReversalIsMarkedPaidOnlyWhenItsLineWasPaid() {
+        TestDatabase.Fixture a = TestDatabase.tenant("refrevpaid", false);
+        Business x = business("ref-rev-paid");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        Map<String, Object> paid = new LinkedHashMap<>();
+        paid.put("paid_on", LocalDate.now(KAMPALA).toString());
+        paid.put("method", "cash");
+        paid.put("reason", "Test: handed over");
+
+        UUID unpaid = UUID.fromString(addLine(rx, 10000, "Test: worked out by hand", "ref-line-" + UUID.randomUUID())
+                .getBody()
+                .get("lines")
+                .get(0)
+                .get("id")
+                .asString());
+        UUID reversalOfUnpaid = UUID.fromString(reverse(unpaid, "Test: typed twice", null)
+                .getBody()
+                .get("lines")
+                .get(1)
+                .get("id")
+                .asString());
+        ResponseEntity<JsonNode> refused = platform.post(
+                "/api/v1/platform/referrals/commissions/" + reversalOfUnpaid + "/paid", paid, operator.accessToken());
+        assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("commission_reversal_of_unpaid");
+        JsonNode total = detail(rx).get("referral").get("totals").get(0);
+        assertThat(total.get("due_minor").asLong()).isZero();
+        assertThat(total.get("paid_minor").asLong()).isZero();
+
+        UUID settled = UUID.fromString(addLine(rx, 700, "Test: a bonus", "ref-line-" + UUID.randomUUID())
+                .getBody()
+                .get("lines")
+                .get(2)
+                .get("id")
+                .asString());
+        assertThat(platform.post(
+                                "/api/v1/platform/referrals/commissions/" + settled + "/paid",
+                                paid,
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        UUID reversalOfPaid = UUID.fromString(reverse(settled, "Test: the bonus was a mistake", null)
+                .getBody()
+                .get("lines")
+                .get(3)
+                .get("id")
+                .asString());
+        assertThat(platform.post(
+                                "/api/v1/platform/referrals/commissions/" + reversalOfPaid + "/paid",
+                                paid,
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        total = detail(rx).get("referral").get("totals").get(0);
+        assertThat(total.get("earned_minor").asLong()).isZero();
+        assertThat(total.get("due_minor").asLong()).isZero();
+    }
+
     /** An unpaid line that was reversed is never marked paid (decision 11). */
     @Test
     void aReversedLineIsNeverMarkedPaid() {

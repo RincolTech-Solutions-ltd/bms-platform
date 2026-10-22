@@ -2904,7 +2904,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 referrer_inactive unless confirm_referrer_inactive */
+        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 commission_reversal_of_unpaid, 409 referrer_inactive unless confirm_referrer_inactive */
         post: operations["platformMarkReferralCommissionPaid"];
         delete?: never;
         options?: never;
@@ -2958,6 +2958,23 @@ export interface paths {
         get: operations["platformExportReferrals"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/payments/{payment_id}/refunded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that a referred business's subscription payment was refunded, with a reason, whether or not it earned a line: it no longer uses up the rule's months; 404 when the payment has no referral, 409 payment_already_refunded */
+        post: operations["platformMarkReferralPaymentRefunded"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10010,6 +10027,9 @@ export interface components {
             reason: string;
             /** @description True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment */
             refunded?: boolean;
+        };
+        ReferralPaymentRefundedRequest: {
+            reason: string;
         };
         /** @description The rule; null clears it (the default: nothing is worked out; a referral: the default) */
         ReferralRuleBody: {
@@ -22830,6 +22850,32 @@ export interface operations {
                 };
                 content: {
                     "text/csv": string;
+                };
+            };
+        };
+    };
+    platformMarkReferralPaymentRefunded: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralPaymentRefundedRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
                 };
             };
         };
