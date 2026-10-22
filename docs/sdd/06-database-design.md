@@ -641,7 +641,9 @@ default), `started_at`, `ended_at` (set when the operator moves the business to 
 `UNIQUE (tenant_id, id)`; `CHECK (tenant_id <> referred_tenant_id)` (a business never refers itself); a partial unique index on
 `referred_tenant_id` where `ended_at IS NULL` (one current referrer). A trigger refuses a delete and any update but `rule_id` and
 setting `ended_at` once. Written by `platform_referral_from_application` (Activate) and `platform_referral_set_referrer` (the
-operator: ends the current row and starts a new one, so lines stay with the referrer who earned them).
+operator: ends the current row and starts a new one, so lines stay with the referrer who earned them). The months a rule's
+first N count start at the business's earliest `started_at` over all its rows, so a new row earns only the months left
+(ADR-069 decision 9).
 
 ### `referral_commission_lines` (RLS on the referrer; `bms_app` SELECT only; `V88`, ADR-069)
 

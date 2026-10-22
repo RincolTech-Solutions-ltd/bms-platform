@@ -653,10 +653,11 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 -- 8. The commission of one payment (ADR-069 decision 5). Runs in the transaction that records the payment, bound to the paying
 --    business; the payment must be that business's own. Paid months are counted over every other confirmed payment of the
---    referred business recorded since this referral started (ADR-069 decision 9), leaving out the payments whose outcome was
---    currency_differs and the payments recorded as refunded (each outcome is kept in referral_payment_outcomes); recording a
---    payment locks the business's subscription first (V75), so two payments recorded at once
---    are counted one after the other and never both as the first. Amounts are whole minor units, rounded half up. A line
+--    referred business recorded since its first referral started, under this referral or an earlier one (ADR-069 decision 9),
+--    so a correction or a clear-and-reset never restarts the months: a new referrer earns only the months left. The payments
+--    whose outcome was currency_differs and the payments recorded as refunded are left out (each outcome is kept in
+--    referral_payment_outcomes). Recording a payment locks the business's subscription first (V75), so two payments recorded
+--    at once are counted one after the other and never both as the first. Amounts are whole minor units, rounded half up. A line
 --    worked out while the referrer business is suspended or cancelled is flagged referrer_inactive. Outcomes: added,
 --    no_referral, no_rule, not_first_payment, months_used, currency_differs, cap_reached, zero.
 -- ---------------------------------------------------------------------------------------------
@@ -666,6 +667,7 @@ RETURNS TABLE (line_id uuid, referral_id uuid, referrer_tenant_id uuid, amount_m
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
     v_tenant   uuid := current_setting('app.tenant_id')::uuid;
+    v_first    timestamptz;
     v_pay      subscription_payments%ROWTYPE;
     v_ref      tenant_referrals%ROWTYPE;
     v_rule     referral_commission_rules%ROWTYPE;
@@ -702,8 +704,9 @@ BEGIN
         RETURN NEXT;
         RETURN;
     END IF;
+    SELECT min(r.started_at) INTO v_first FROM tenant_referrals r WHERE r.referred_tenant_id = v_tenant;
     SELECT coalesce(sum(sp.months), 0) INTO v_before FROM subscription_payments sp
-     WHERE sp.tenant_id = v_tenant AND sp.status = 'confirmed' AND sp.id <> v_pay.id AND sp.created_at >= v_ref.started_at
+     WHERE sp.tenant_id = v_tenant AND sp.status = 'confirmed' AND sp.id <> v_pay.id AND sp.created_at >= v_first
        AND NOT EXISTS (SELECT 1 FROM referral_payment_outcomes o
                         WHERE o.payment_id = sp.id AND (o.outcome = 'currency_differs' OR o.refunded_at IS NOT NULL));
     IF v_rule.kind <> 'percent_of_payment' AND v_rule.currency <> v_pay.currency THEN

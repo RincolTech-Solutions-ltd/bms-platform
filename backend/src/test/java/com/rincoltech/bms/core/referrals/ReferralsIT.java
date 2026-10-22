@@ -1144,6 +1144,73 @@ class ReferralsIT extends IntegrationTest {
         assertThat(outcomes(ry)).containsExactly("added", "months_used");
     }
 
+    /**
+     * Clearing the referrer and setting the same one again does not restart the 12 months: the months are counted over every
+     * referral of the referred business from its first one, so twelve monthly payments earn twelve lines in all.
+     */
+    @Test
+    void aClearAndResetDoesNotRestartTheMonths() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refreset", false);
+        Business x = business("ref-reset");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID first = currentReferral(x.id());
+        for (int month = 1; month <= 8; month++) {
+            pay(x.id(), 60000, 1);
+        }
+        assertThat(setReferrer(x.id(), null, "Test: cleared by mistake").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(setReferrer(x.id(), code(a.tenantId()), "Test: set again").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        UUID second = currentReferral(x.id());
+        assertThat(second).isNotEqualTo(first);
+        for (int month = 9; month <= 14; month++) {
+            pay(x.id(), 60000, 1);
+        }
+        assertThat(amounts(detail(first))).hasSize(8).containsOnly(6000L);
+        assertThat(amounts(detail(second))).hasSize(4).containsOnly(6000L);
+        assertThat(outcomes(second)).containsExactly("added", "added", "added", "added", "months_used", "months_used");
+    }
+
+    /**
+     * A correction to another referrer after the twelfth month gives the new referrer nothing: the months already used under
+     * the first referral count, so the new one has none left. A correction at month 5 gives it the 7 months left.
+     */
+    @Test
+    void aCorrectionGetsOnlyTheMonthsLeft() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refcorra", false);
+        TestDatabase.Fixture b = TestDatabase.tenant("refcorrb", false);
+        Business x = business("ref-corr-late");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID byA = currentReferral(x.id());
+        for (int month = 1; month <= 12; month++) {
+            pay(x.id(), 60000, 1);
+        }
+        setReferrer(x.id(), code(b.tenantId()), "Test: it was the other shop");
+        UUID byB = currentReferral(x.id());
+        pay(x.id(), 60000, 1);
+        pay(x.id(), 720000, 12);
+        assertThat(amounts(detail(byA))).hasSize(12).containsOnly(6000L);
+        assertThat(detail(byB).get("lines")).isEmpty();
+        assertThat(outcomes(byB)).containsExactly("months_used", "months_used");
+
+        Business y = business("ref-corr-early");
+        setReferrer(y.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID yByA = currentReferral(y.id());
+        for (int month = 1; month <= 5; month++) {
+            pay(y.id(), 60000, 1);
+        }
+        setReferrer(y.id(), code(b.tenantId()), "Test: it was the other shop");
+        UUID yByB = currentReferral(y.id());
+        pay(y.id(), 720000, 12);
+        assertThat(amounts(detail(yByA))).hasSize(5).containsOnly(6000L);
+        // 7 of the 12 months are left: 10% of 720,000, pro rata 7/12.
+        assertThat(amounts(detail(yByB))).containsExactly(42000L);
+        assertThat(detail(yByB).get("lines").get(0).get("months_counted").asInt())
+                .isEqualTo(7);
+    }
+
     /** Two businesses referred by the same shop each have their own 12 months. */
     @Test
     void eachReferredBusinessHasItsOwnTwelveMonths() {

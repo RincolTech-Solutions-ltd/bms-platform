@@ -35,8 +35,8 @@ data, and a business must not be able to refer itself.
    current referral per referred business, and a CHECK refuses a row where a business refers itself (the service refuses it
    first with 422 `referral_self`). The platform operator sets, corrects or clears the referrer of a business with a reason
    (`PUT /platform/tenants/{id}/referrer`, audited `platform.referral.referrer_changed` with before and after); a correction ends
-   the current referral and starts a new one, so commission lines already worked out stay with the referrer who earned them. The
-   same referrer again changes nothing.
+   the current referral and starts a new one, so commission lines already worked out stay with the referrer who earned them,
+   and the new referral earns only the paid months left (decision 9). The same referrer again changes nothing.
 4. **The commission rule is configuration the operator types; nothing is built in.** A rule is one of: `percent_of_payment`
    (basis points of each subscription payment, for the first N paid months of the referred business, N empty for no end, with an
    optional cap on the referral's total), `fixed_first_payment` (a fixed amount once, on the referred business's first payment)
@@ -83,10 +83,12 @@ data, and a business must not be able to refer itself.
 
 The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions below; the platform owner chose the defaults.
 
-9. **The months used count only payments made under this referral, in the rule's currency, one payment at a time.** The first
-    N paid months of a rule count every other confirmed payment of the referred business recorded on or after the day this
-    referral started (`tenant_referrals.started_at`); payments recorded before the referral existed, under an earlier referrer
-    or none, do not use N up, and neither does a payment that earned nothing because its currency differed from the rule's
+9. **The months used count per referred client from its first referral, in the rule's currency, one payment at a time.** The
+    first N paid months of a rule count every other confirmed payment of the referred business recorded on or after the moment
+    its **first** referral started (the earliest `tenant_referrals.started_at` of that business, under any referrer). A
+    correction to another referrer or a clear-and-reset therefore never restarts the months: the referral it starts earns only
+    the months that are left (none after month 12 under the default), so a client never pays out more than N months of
+    commission in all. Payments recorded before the business had any referral do not use N up, and neither does a payment that earned nothing because its currency differed from the rule's
     (outcome `currency_differs`, kept per payment in `referral_payment_outcomes`, so a later rule in that currency still starts
     at its first month). A refunded payment does not use N up either: a subscription payment stays `confirmed` and append-only,
     so when the operator reverses a `payment` line with `refunded: true` the refund is recorded on that payment's outcome
@@ -95,7 +97,9 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     used. The
     count does not compare creation times: recording a payment locks the business's subscription row first (`V75`), so two
     payments recorded at the same moment are counted one after the other and never both as the first. The cap stays per
-    referral row.
+    referral row. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered
+    late counts from the day it was entered. (The review of 22 Oct 2026, FAIL, replaced the earlier count from this referral's
+    own start, which let a correction or a clear-and-reset pay a second N months.)
 10. **A business is not referred by its own people.** At the sign-up, after the code resolves, the applicant's email (compared as
     the sign-up compares addresses, `onboarding_email_key`) and phone (E.164) are compared with the Owner and the administrators
     (not deactivated) of the business the code belongs to (`referral_is_self`); a match is 422 `referral_self` on the
@@ -118,8 +122,8 @@ The product owner decided the default rule on 22 Oct 2026.
 
 14. **Default rule.** Unless the operator says otherwise, a business that refers another earns 10 percent of each subscription
     payment the referred business makes, for that business's first 12 paid months; then it stops. There is no cap. The 12
-    months are per referred business: each referred business has its own 12 months, counted from when its referral was
-    created (decision 9), so a referrer with two referred businesses earns on each for its own 12 paid months. A payment that
+    months are per referred business: each referred business has its own 12 months, counted from when its first referral was
+    created, whoever the referrer is now (decision 9), so a referrer with two referred businesses earns on each for its own 12 paid months. A payment that
     covers several months counts as the months it covers: a year paid upfront earns 10 percent of that payment once and uses up
     all 12 months, so the next payment earns nothing. A payment that runs past the twelfth month earns only on the months still
     inside it (decision 5).
