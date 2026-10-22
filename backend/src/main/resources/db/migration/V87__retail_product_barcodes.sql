@@ -16,8 +16,9 @@
 --
 -- generated marks a Code 128 code the system made for a product that had none, for its labels;
 -- its number comes from tenant_sequences ('retail_barcode'). Flyway runs with outOfOrder off, so
--- the number follows the agreed merge order of V85 to V92: V85 #465 (merged), V86 #463,
--- V87 this pull request, V88 #467, V89 #475, V90 #474, V91 #478, V92 #480.
+-- the number follows the agreed merge order in the AGENTS.md ledger: V85 #465 and V86 #463
+-- (both merged), V87 this pull request, V88 #467, V89 #475, V90 #474, V91 #478; payments #315
+-- and #318 take the numbers after V91.
 
 CREATE TABLE retail_product_barcodes (
     id          uuid        NOT NULL PRIMARY KEY,

@@ -260,6 +260,9 @@ class RetailBarcodesIT extends IntegrationTest {
                         .getStatusCode())
                 .isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(lookup(EAN).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // An item with no barcode left has no barcodes field at all, as the schema says, not an empty list.
+        assertThat(api.get("/products/" + item, ADMIN).getBody().has("barcodes"))
+                .isFalse();
         long audited = TestDatabase.owner()
                 .sql("SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action IN"
                         + " ('retail.barcode.added', 'retail.barcode.removed')")

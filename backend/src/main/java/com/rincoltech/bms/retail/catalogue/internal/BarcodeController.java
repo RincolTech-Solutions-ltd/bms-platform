@@ -6,7 +6,9 @@ import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BarcodeList;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BarcodeMatch;
 import com.rincoltech.bms.retail.catalogue.internal.CatalogueApi.BarcodeRequest;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -64,6 +66,13 @@ class BarcodeController {
     @Operation(
             summary = "Add a barcode to an item or one of its pack sizes; check digits are checked (#345)",
             operationId = "addRetailProductBarcode")
+    @ApiResponse(
+            responseCode = "201",
+            description = "The barcode added",
+            content =
+                    @Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = Barcode.class)))
     ResponseEntity<Barcode> add(
             @PathVariable("product_id") UUID productId, @Valid @RequestBody BarcodeRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.add(productId, request));
@@ -72,6 +81,7 @@ class BarcodeController {
     @DeleteMapping("/products/{product_id}/barcodes/{barcode_id}")
     @RequiresPermission("retail.catalogue.manage")
     @Operation(summary = "Remove a barcode from an item (#345)", operationId = "removeRetailProductBarcode")
+    @ApiResponse(responseCode = "204", description = "The barcode was removed")
     ResponseEntity<Void> remove(
             @PathVariable("product_id") UUID productId, @PathVariable("barcode_id") UUID barcodeId) {
         service.remove(productId, barcodeId);

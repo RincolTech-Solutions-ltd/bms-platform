@@ -34846,7 +34846,7 @@
           "required" : true
         },
         "responses" : {
-          "200" : {
+          "201" : {
             "content" : {
               "application/json" : {
                 "schema" : {
@@ -34854,7 +34854,7 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "The barcode added"
           }
         },
         "summary" : "Add a barcode to an item or one of its pack sizes; check digits are checked (#345)",
@@ -34882,8 +34882,8 @@
           }
         } ],
         "responses" : {
-          "200" : {
-            "description" : "OK"
+          "204" : {
+            "description" : "The barcode was removed"
           }
         },
         "summary" : "Remove a barcode from an item (#345)",

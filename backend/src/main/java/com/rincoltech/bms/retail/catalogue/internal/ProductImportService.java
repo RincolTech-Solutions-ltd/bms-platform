@@ -450,7 +450,9 @@ class ProductImportService {
     private void addBarcode(UUID productId, UUID unitId, String raw, String format, UUID by) {
         Barcodes.Checked c = Barcodes.check(raw, format).checked();
         barcodes.byKey(Barcodes.key(c)).ifPresent(h -> {
-            if (h.productActive()) {
+            // The holder is locked and read again, so an item switched on at this moment keeps its code.
+            if (h.productActive()
+                    || repo.lock(h.productId()).map(Product::active).orElse(false)) {
                 throw barcodeConflict(c);
             }
             barcodes.delete(h.barcode().id());

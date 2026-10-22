@@ -114,7 +114,8 @@ class CatalogueService {
                     List<CatalogueApi.Barcode> own = codes.getOrDefault(p.id(), List.of()).stream()
                             .filter(b -> units || b.unitId() == null)
                             .toList();
-                    Product q = p.withBarcodes(own);
+                    // Absent, not an empty list, for an item with no barcode, as the schema says.
+                    Product q = p.withBarcodes(own.isEmpty() ? null : own);
                     return units ? q.withPacks(packs.getOrDefault(p.id(), List.of())) : q;
                 })
                 .toList();

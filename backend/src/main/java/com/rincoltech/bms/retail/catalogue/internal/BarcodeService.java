@@ -129,6 +129,17 @@ class BarcodeService {
                             + "). Remove it there first, or switch that item off: a code taken from a"
                             + " switched-off item is removed there for good.");
         }
+        // The holder is locked (always after the taker) and read again, so a switch-on of it at this moment either
+        // waits
+        // for this release or wins and keeps its code: a code is never taken from an item that is active.
+        if (catalogue.lock(held.productId()).map(Product::active).orElse(false)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "barcode_taken",
+                    "Duplicate",
+                    "This barcode is on another item already: " + held.productDescription() + " (code "
+                            + held.productCode() + "), which was switched on a moment ago. Remove it there first.");
+        }
         repo.delete(held.barcode().id());
         Map<String, Object> was = new LinkedHashMap<>();
         was.put("product_id", held.productId());
