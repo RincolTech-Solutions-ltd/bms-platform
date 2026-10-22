@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // The busy guard (#456): a button that writes shows that it is working and cannot be pressed twice.
-// Two source checks keep new screens honest.
+// Two source checks keep new screens honest. Both are heuristics over the source text, not a type or
+// data-flow check: check 1 asks only that the pending flag appears inside some `busy=` attribute (or an
+// alias of one) somewhere in the same file, not that it is the busy of the button that sends the
+// mutation, so a wrong pairing in one file still passes. Review the pairing by eye.
 //
 // 1. A mutation sent from a press is busy. A mutation is `useMutation(` (with or without generics,
 //    named or destructured) or a call of a local hook that returns one (`return useMutation(`). When its
