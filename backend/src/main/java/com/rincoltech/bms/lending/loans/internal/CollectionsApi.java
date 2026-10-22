@@ -62,7 +62,10 @@ final class CollectionsApi {
             UUID branchId,
             String memberNo,
             String memberName,
+
+            @Schema(description = "Masked (+256*****0001) unless the caller may read members in the loan's branch")
             String phone,
+
             int itemNo,
             LocalDate dueDate,
 
@@ -73,10 +76,35 @@ final class CollectionsApi {
             long waivedMinor,
             long outstandingMinor,
             UUID officerUserId,
-            String officerName) {}
+            String officerName) {
+
+        DueLine withPhone(String shown) {
+            return new DueLine(
+                    loanId,
+                    loanNo,
+                    branchId,
+                    memberNo,
+                    memberName,
+                    shown,
+                    itemNo,
+                    dueDate,
+                    dueMinor,
+                    paidMinor,
+                    waivedMinor,
+                    outstandingMinor,
+                    officerUserId,
+                    officerName);
+        }
+    }
 
     @Schema(name = "DueList", description = "FR-CLN-02, chapter 14 lending.due_list: sorted by officer then due date")
-    record DueList(LocalDate dateFrom, LocalDate dateTo, List<DueLine> items) {}
+    record DueList(
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            List<DueLine> items,
+
+            @Schema(description = "More lines matched than the limit; narrow by officer, branch or dates")
+            boolean truncated) {}
 
     @Schema(name = "ArrearsListLine")
     record ArrearsLine(
@@ -85,7 +113,10 @@ final class CollectionsApi {
             UUID branchId,
             String memberNo,
             String memberName,
+
+            @Schema(description = "Masked (+256*****0001) unless the caller may read members in the loan's branch")
             String phone,
+
             UUID officerUserId,
             String officerName,
             int daysPastDue,
@@ -100,7 +131,30 @@ final class CollectionsApi {
             @Schema(description = "The earliest pending promise to pay, if any")
             LocalDate promisedDate,
 
-            Long promisedAmountMinor) {}
+            Long promisedAmountMinor) {
+
+        ArrearsLine withPhone(String shown) {
+            return new ArrearsLine(
+                    loanId,
+                    loanNo,
+                    branchId,
+                    memberNo,
+                    memberName,
+                    shown,
+                    officerUserId,
+                    officerName,
+                    daysPastDue,
+                    parBucket,
+                    arrearsMinor,
+                    penaltiesOutstandingMinor,
+                    principalOutstandingMinor,
+                    lastRepaymentOn,
+                    lastActionType,
+                    lastActionAt,
+                    promisedDate,
+                    promisedAmountMinor);
+        }
+    }
 
     @Schema(name = "ArrearsBucket")
     record ArrearsBucket(String parBucket, int loans, long arrearsMinor, List<ArrearsLine> items) {}
@@ -108,7 +162,11 @@ final class CollectionsApi {
     @Schema(
             name = "ArrearsList",
             description = "FR-CLN-03, chapter 14 lending.arrears_list: loans with DPD above 0 by PAR bucket")
-    record ArrearsList(List<ArrearsBucket> buckets) {}
+    record ArrearsList(
+            List<ArrearsBucket> buckets,
+
+            @Schema(description = "More loans matched than the limit; the bucket totals still count every loan")
+            boolean truncated) {}
 
     @Schema(name = "PromiseListLine")
     record PromiseLine(
@@ -125,5 +183,9 @@ final class CollectionsApi {
             Instant performedAt) {}
 
     @Schema(name = "PromiseList")
-    record PromiseList(List<PromiseLine> items) {}
+    record PromiseList(
+            List<PromiseLine> items,
+
+            @Schema(description = "More promises matched than the limit")
+            boolean truncated) {}
 }

@@ -79,8 +79,9 @@ class CollectionsController {
             @RequestParam(name = "date_from", required = false) LocalDate from,
             @RequestParam(name = "date_to", required = false) LocalDate to,
             @RequestParam(name = "officer_user_id", required = false) UUID officerId,
-            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
-        return service.dueList(from, to, officerId, branchIds);
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        return service.dueList(from, to, officerId, branchIds, limit);
     }
 
     @GetMapping("/collections/arrears")
@@ -89,8 +90,9 @@ class CollectionsController {
     ArrearsList arrears(
             @RequestParam(name = "bucket", required = false) String bucket,
             @RequestParam(name = "officer_user_id", required = false) UUID officerId,
-            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
-        return service.arrears(bucket, officerId, branchIds);
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        return service.arrears(bucket, officerId, branchIds, limit);
     }
 
     @GetMapping("/collections/promises")
@@ -99,7 +101,8 @@ class CollectionsController {
     PromiseList promises(
             @RequestParam(name = "promise_status", required = false) String status,
             @RequestParam(name = "officer_user_id", required = false) UUID officerId,
-            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds) {
-        return service.promises(status, officerId, branchIds);
+            @RequestParam(name = "branch_id", required = false) List<UUID> branchIds,
+            @RequestParam(name = "limit", required = false) Integer limit) {
+        return service.promises(status, officerId, branchIds, limit);
     }
 }

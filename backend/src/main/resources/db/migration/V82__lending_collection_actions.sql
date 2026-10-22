@@ -4,8 +4,9 @@
 -- ---------------------------------------------------------------------------------------------
 -- lending_collection_actions (chapter 6 section 6.7; FR-CLN-04, FR-CLN-05). Append-only except a
 -- promise's settlement: the nightly run moves a pending promise to kept or broken, and moves a
--- settled one again when a later back-dated repayment or a reversal changes what was paid in its
--- window (promise_settled_on is the business date of the latest settlement). The person who acted
+-- settled one again (back to pending too, before its date) when a later back-dated repayment or a
+-- reversal changes what was paid in its window (promise_settled_on is the business date of the
+-- latest settlement, null while pending). The person who acted
 -- is staff of the business (a composite foreign key to users).
 -- ---------------------------------------------------------------------------------------------
 
@@ -46,7 +47,7 @@ BEGIN
     IF TG_OP = 'UPDATE'
        AND (to_jsonb(NEW) - 'promise_status' - 'promise_settled_on')
            = (to_jsonb(OLD) - 'promise_status' - 'promise_settled_on')
-       AND OLD.action_type = 'promise_to_pay' AND NEW.promise_status IN ('kept', 'broken') THEN
+       AND OLD.action_type = 'promise_to_pay' AND NEW.promise_status IS NOT NULL THEN
         RETURN NEW;
     END IF;
     RAISE EXCEPTION '% on lending_collection_actions may only settle a promise', TG_OP

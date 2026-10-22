@@ -910,10 +910,10 @@ Codes (422 unless stated): `term_not_offered`, `amount_out_of_range`, `product_a
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/lending/collections/due-list` | `lending.collections.read` | `?date_from&date_to&officer_user_id&branch_id`. FR-CLN-02. Today by default, at most 92 days (422 `invalid_range`, `range_too_long`) |
-| GET | `/lending/collections/arrears` | `lending.collections.read` | `?bucket=1_30&officer_user_id&branch_id`. FR-CLN-03. `{buckets: [{par_bucket, loans, arrears_minor, items}]}`; 422 `invalid_bucket` |
+| GET | `/lending/collections/due-list` | `lending.collections.read` | `?date_from&date_to&officer_user_id&branch_id&limit`. FR-CLN-02. Today by default, at most 92 days (422 `invalid_range`, `range_too_long`); at most `limit` lines (200, up to 500) and `truncated`; `phone` masked without `lending.members.read` in the loan's branch |
+| GET | `/lending/collections/arrears` | `lending.collections.read` | `?bucket=1_30&officer_user_id&branch_id&limit`. FR-CLN-03. `{buckets: [{par_bucket, loans, arrears_minor, items}], truncated}`: the totals count every loan, the items at most `limit` (200, up to 500); `phone` masked as on the due list; 422 `invalid_bucket` |
 | POST | `/lending/collections/reassign` | `lending.collections.assign` | `{loan_ids, officer_user_id}`, at most 500, all or none (404 when any is out of scope) |
-| GET | `/lending/collections/promises` | `lending.collections.read` | `?promise_status=pending&officer_user_id&branch_id`; 422 `invalid_promise_status` |
+| GET | `/lending/collections/promises` | `lending.collections.read` | `?promise_status=pending&officer_user_id&branch_id&limit`; at most `limit` (200, up to 500) and `truncated`; 422 `invalid_promise_status` |
 
 ### 7.11.18 Member portal (`/member`, member principals only)
 

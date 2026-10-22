@@ -703,9 +703,7 @@ class RlsIsolationIT {
                         INSERT INTO lending_collection_actions (id, tenant_id, loan_id, action_type, note, performed_by,
                                                                 performed_at)
                         VALUES (?, ?, ?, 'call', 'Test call', ?, now())
-                        """)
-                .params(UUID.randomUUID(), t.tenantId(), loan, user)
-                .update();
+                        """).params(UUID.randomUUID(), t.tenantId(), loan, user).update();
         owner.sql("""
                         INSERT INTO lending_arrears_runs (tenant_id, business_date, started_at, lease_until, finished_at)
                         VALUES (?, DATE '2026-02-17', now(), now(), now())

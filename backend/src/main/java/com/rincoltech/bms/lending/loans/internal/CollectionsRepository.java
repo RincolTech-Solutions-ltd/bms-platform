@@ -98,7 +98,7 @@ class CollectionsRepository {
     }
 
     /** FR-CLN-02: every item of an active loan due in the range. */
-    List<DueLine> dueList(List<UUID> branchIds, UUID officerId, LocalDate from, LocalDate to) {
+    List<DueLine> dueList(List<UUID> branchIds, UUID officerId, LocalDate from, LocalDate to, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -118,7 +118,9 @@ class CollectionsRepository {
         p.put("from", from);
         p.put("to", to);
         filters(sql, p, branchIds, officerId);
-        sql.append(" ORDER BY u.full_name NULLS LAST, l.officer_user_id, i.due_date, l.loan_no, i.item_no");
+        sql.append(
+                " ORDER BY u.full_name NULLS LAST, l.officer_user_id, i.due_date, l.loan_no, i.item_no LIMIT :limit");
+        p.put("limit", limit);
         return jdbc.sql(sql.toString())
                 .params(p)
                 .query((rs, n) -> {
@@ -144,8 +146,42 @@ class CollectionsRepository {
                 .list();
     }
 
-    /** FR-CLN-03: every active loan with DPD above 0, most overdue first. */
-    List<ArrearsLine> arrears(List<UUID> branchIds, UUID officerId) {
+    /** The DPD range of a PAR bucket, for SQL. */
+    private static String bucketRange(String bucket) {
+        return switch (bucket) {
+            case "1_30" -> " AND l.days_past_due BETWEEN 1 AND 30";
+            case "31_60" -> " AND l.days_past_due BETWEEN 31 AND 60";
+            case "61_90" -> " AND l.days_past_due BETWEEN 61 AND 90";
+            default -> " AND l.days_past_due > 90";
+        };
+    }
+
+    /** FR-CLN-03: per PAR bucket, how many loans and how much in arrears, every loan counted. */
+    Map<String, long[]> arrearsTotals(List<UUID> branchIds, UUID officerId) {
+        Map<String, long[]> out = new LinkedHashMap<>();
+        if (branchIds != null && branchIds.isEmpty()) {
+            return out;
+        }
+        Map<String, Object> p = new LinkedHashMap<>();
+        StringBuilder sql = new StringBuilder("""
+                SELECT CASE WHEN l.days_past_due <= 30 THEN '1_30' WHEN l.days_past_due <= 60 THEN '31_60'
+                            WHEN l.days_past_due <= 90 THEN '61_90' ELSE 'over_90' END AS bucket,
+                       count(*) AS loans, coalesce(sum(l.arrears_minor), 0) AS arrears
+                  FROM lending_loans l
+                 WHERE l.status = 'active' AND l.days_past_due > 0
+                """);
+        filters(sql, p, branchIds, officerId);
+        sql.append(" GROUP BY 1");
+        jdbc.sql(sql.toString())
+                .params(p)
+                .query((rs, n) ->
+                        out.put(rs.getString("bucket"), new long[] {rs.getLong("loans"), rs.getLong("arrears")}))
+                .list();
+        return out;
+    }
+
+    /** FR-CLN-03: active loans with DPD above 0 (in one bucket when given), most overdue first, at most {@code limit}. */
+    List<ArrearsLine> arrears(List<UUID> branchIds, UUID officerId, String bucket, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -166,7 +202,11 @@ class CollectionsRepository {
                  WHERE l.status = 'active' AND l.days_past_due > 0
                 """);
         filters(sql, p, branchIds, officerId);
-        sql.append(" ORDER BY l.days_past_due DESC, l.loan_no");
+        if (bucket != null) {
+            sql.append(bucketRange(bucket));
+        }
+        sql.append(" ORDER BY l.days_past_due DESC, l.loan_no LIMIT :limit");
+        p.put("limit", limit);
         return jdbc.sql(sql.toString())
                 .params(p)
                 .query((rs, n) -> new ArrearsLine(
@@ -192,7 +232,7 @@ class CollectionsRepository {
     }
 
     /** Promises to pay with one status, earliest promised date first. */
-    List<PromiseLine> promises(List<UUID> branchIds, UUID officerId, String status) {
+    List<PromiseLine> promises(List<UUID> branchIds, UUID officerId, String status, int limit) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -207,7 +247,8 @@ class CollectionsRepository {
                 """);
         p.put("status", status);
         filters(sql, p, branchIds, officerId);
-        sql.append(" ORDER BY a.promised_date, l.loan_no, a.id");
+        sql.append(" ORDER BY a.promised_date, l.loan_no, a.id LIMIT :limit");
+        p.put("limit", limit);
         return jdbc.sql(sql.toString())
                 .params(p)
                 .query((rs, n) -> new PromiseLine(
@@ -225,41 +266,66 @@ class CollectionsRepository {
                 .list();
     }
 
-    /** A pending promise and what has been repaid on its loan from the day it was made to its date. */
-    record OpenPromise(UUID id, LocalDate promisedDate, long promisedMinor, long paidMinor) {}
+    /** A promise to pay with its status as it stands. */
+    record StoredPromise(Promises.Promise promise, String status, LocalDate promisedDate) {}
 
     /**
-     * FR-CLN-05: every pending promise with its repayments (repayments and recoveries that are not
-     * reversed, by value date) from the day it was made, in the tenant's zone, to the promised date.
+     * FR-CLN-05: every promise on a loan that has one still open or promised in the last {@code days} days, so a
+     * back-dated payment or a reversal can settle it again; the day each was made is read in the tenant's zone.
      */
-    List<OpenPromise> openPromises(String zone) {
+    List<StoredPromise> promisesToSettle(String zone, LocalDate since) {
         return jdbc.sql("""
-                        SELECT a.id, a.promised_date, a.promised_amount_minor,
-                               (SELECT coalesce(sum(t.amount_minor), 0) FROM lending_loan_transactions t
-                                 WHERE t.loan_id = a.loan_id AND t.txn_type IN ('repayment', 'recovery')
-                                   AND t.value_date BETWEEN (a.performed_at AT TIME ZONE ?)::date AND a.promised_date
-                                   AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r
-                                                    WHERE r.reverses_txn_id = t.id)) AS paid
+                        SELECT a.id, a.loan_id, (a.performed_at AT TIME ZONE ?)::date AS made_on, a.promised_date,
+                               a.promised_amount_minor, a.promise_status
                           FROM lending_collection_actions a
-                         WHERE a.promise_status = 'pending'
-                         ORDER BY a.promised_date, a.id
+                         WHERE a.action_type = 'promise_to_pay'
+                           AND a.loan_id IN (SELECT o.loan_id FROM lending_collection_actions o
+                                              WHERE o.action_type = 'promise_to_pay'
+                                                AND (o.promise_status = 'pending' OR o.promised_date >= ?))
                         """)
-                .param(zone)
-                .query((rs, n) -> new OpenPromise(
-                        rs.getObject("id", UUID.class),
-                        rs.getObject("promised_date", LocalDate.class),
-                        rs.getLong("promised_amount_minor"),
-                        rs.getLong("paid")))
+                .params(zone, since)
+                .query((rs, n) -> new StoredPromise(
+                        new Promises.Promise(
+                                rs.getObject("id", UUID.class),
+                                rs.getObject("loan_id", UUID.class),
+                                rs.getObject("made_on", LocalDate.class),
+                                rs.getObject("promised_date", LocalDate.class),
+                                rs.getLong("promised_amount_minor")),
+                        rs.getString("promise_status"),
+                        rs.getObject("promised_date", LocalDate.class)))
                 .list();
     }
 
-    void settlePromise(UUID id, String status, LocalDate on) {
-        jdbc.sql("""
-                        UPDATE lending_collection_actions SET promise_status = ?, promise_settled_on = ?
-                         WHERE id = ? AND promise_status = 'pending'
+    /** The repayments and recoveries that stand on these loans, dated on or after {@code from}. */
+    List<Promises.Payment> paymentsFor(List<UUID> loanIds, LocalDate from) {
+        if (loanIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT t.loan_id, t.value_date, t.amount_minor FROM lending_loan_transactions t
+                         WHERE t.loan_id IN (:loans) AND t.txn_type IN ('repayment', 'recovery') AND t.value_date >= :from
+                           AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)
                         """)
-                .params(status, on, id)
-                .update();
+                .param("loans", loanIds)
+                .param("from", from)
+                .query((rs, n) -> new Promises.Payment(
+                        rs.getObject(1, UUID.class), rs.getObject(2, LocalDate.class), rs.getLong(3)))
+                .list();
+    }
+
+    /** Settles a promise again; pending clears the settled date. Nothing when the status is the same. */
+    boolean settlePromise(UUID id, String status, LocalDate on) {
+        return jdbc.sql("""
+                        UPDATE lending_collection_actions
+                           SET promise_status = :status,
+                               promise_settled_on = CASE WHEN :status = 'pending' THEN NULL ELSE CAST(:on AS date) END
+                         WHERE id = :id AND promise_status IS DISTINCT FROM :status
+                        """)
+                        .param("status", status)
+                        .param("on", on)
+                        .param("id", id)
+                        .update()
+                == 1;
     }
 
     private static void filters(StringBuilder sql, Map<String, Object> p, List<UUID> branchIds, UUID officerId) {

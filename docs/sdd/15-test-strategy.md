@@ -408,7 +408,9 @@ refusing a cashier, an officer of another branch, an unknown user and a caller w
 permission), lists the items due today and over a range with its limit, lists arrears by bucket,
 logs actions with each refusal, and lets the nightly run keep one promise, break one and leave one
 open, with the action guard refusing a change of note. A pending approval stays current across the
-nightly run (`frArr01_theNightlyRunLeavesPendingApprovalsCurrent`).
+nightly run (`frArr01_theNightlyRunLeavesPendingApprovalsCurrent`). After the review of #272: a list capped at its limit says it
+was cut and keeps the bucket totals, a caller without members read sees masked phones, one payment
+keeps one promise only, and a reversal reopens a kept promise the next night.
 `-Dbms.golden.record=true` rewrites the golden files for review. `make document-samples` writes
 each document as a PDF and a PNG per page to `backend/target/document-samples`, the visual check
 of the quality bar before a template change is merged.

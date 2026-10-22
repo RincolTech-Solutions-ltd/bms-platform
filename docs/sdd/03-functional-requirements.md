@@ -862,10 +862,17 @@ pending money approval stays current. Loans that are finished (closed, rejected,
 restructured) keep their officer. Collection actions are logged on an active or written-off loan;
 every action but a promise needs a note, and a promise needs a date (today or later) and an amount.
 The due list, the arrears list (all four buckets, or one) and the promise list follow chapter 14
-section 14.4 in the caller's `lending.collections.read` scope. The nightly arrears run settles
-pending promises last: kept when repayments and recoveries not reversed, valued from the day the
-promise was made to its date, reach its amount; broken the day after its date otherwise. FR-CLN-06
-is a report (extras D3, #222).
+section 14.4 in the caller's `lending.collections.read` scope, each at most `limit` lines (200 by
+default, 500 at most) with `truncated` when more matched (the arrears bucket totals still count every
+loan), and a member's phone is shown whole only to a caller who may also read members in the loan's
+branch, masked (`+256*****0001`) otherwise (migration V82). The nightly arrears run settles promises
+last, in a transaction of its own: kept when repayments and recoveries not reversed, valued from the
+day the promise was made to its date, reach its amount; broken the day after its date otherwise; each
+payment counts toward one promise only (a loan's promises, earliest made first, take the payments in
+their own window), and every open promise and every promise due in the last 31 days is settled again
+each night from the payments that stand, so a back-dated payment can keep a broken promise and a
+reversal can break or reopen a kept one. A reassignment asks `StaffDirectory` once per branch.
+FR-CLN-06 is a report (extras D3, #222).
 
 ## 3.27 Member self-service (MSS)
 
