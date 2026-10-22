@@ -131,8 +131,8 @@ left, the branch, the period, the person's roles.
    server says it is offline. The refresh cookie is never read or kept by the app. Since only the logout call ends the
    server session behind that HttpOnly cookie, a sign-out that gets no answer notes a pending logout on the device
    (`localStorage`); the next start ends that session (it rotates the cookie for that one call and never shows the
-   session) before anything restores one, and no refresh runs and the app stays on sign-in until it has. Each of those two
-   calls gives up after 10 seconds, and a timeout counts as no answer: the sign-out stays pending, the old session is never
+   session) before anything restores one, and no refresh runs and the app stays on sign-in until it has. Those two calls
+   share one 10 second limit, and a timeout counts as no answer: the sign-out stays pending, the old session is never
    restored, and the sign-in page says "Could not finish signing out. Connect to the internet and try again." with a Try
    again button, since the installed app has no address bar to leave a loader by. A new sign-in
    on the device clears the note. Where the note cannot be kept, sign-out with no network is refused: "Connect to the

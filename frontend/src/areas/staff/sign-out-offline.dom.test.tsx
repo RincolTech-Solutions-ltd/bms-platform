@@ -106,11 +106,11 @@ const stalled = vi.fn((_url: string, init?: RequestInit) =>
   new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))));
 
 describe('ending a pending sign-out on a connection that never answers', () => {
-  async function startStalled() {
+  async function startStalled(network: typeof stalled = stalled) {
     await signOutOffline();
     const me = vi.spyOn(api, 'GET').mockImplementation((() => new Promise(() => undefined)) as never);
-    stalled.mockClear();
-    vi.stubGlobal('fetch', stalled);
+    network.mockClear();
+    vi.stubGlobal('fetch', network);
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // The test environment's AbortSignal.timeout runs on Node's own clock, which fake timers do not move: this one aborts
     // on the faked clock, as the browser's does on the page's.
@@ -169,5 +169,31 @@ describe('ending a pending sign-out on a connection that never answers', () => {
     expect(getAccessToken()).toBeNull();
     expect(me).not.toHaveBeenCalledWith('/api/v1/me');
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+  });
+
+  it('shares one 10 second limit when the refresh answers late and the logout never does', async () => {
+    // The refresh answers after 6 seconds; the logout then hangs, and the page still gives up at 10, not 16.
+    const lateThenStalled = vi.fn((url: string, init?: RequestInit) =>
+      url === '/api/v1/auth/refresh'
+        ? new Promise<Response>((resolve) => setTimeout(() => void json(200, { access_token: 'test-token-seller-4' }).then(resolve), 6_000))
+        : stalled(url, init));
+    const me = await startStalled(lateThenStalled);
+    expect(lateThenStalled).toHaveBeenCalledWith('/api/v1/auth/logout', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(await screen.findByText('Could not finish signing out. Connect to the internet and try again.')).toBeTruthy();
+    expect(logoutPending()).toBe(true);
+    expect(getAccessToken()).toBeNull();
+    expect(me).not.toHaveBeenCalledWith('/api/v1/me');
+  });
+
+  it('Try again while still offline keeps the notice and the pending sign-out, and can be pressed again', async () => {
+    await startStalled();
+    const again = await screen.findByRole('button', { name: 'Try again' });
+    fireEvent.click(again);
+    await waitFor(() => expect(again.getAttribute('aria-busy')).toBe('true'));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitFor(() => expect(again.getAttribute('aria-busy')).not.toBe('true'));
+    expect(screen.getByText('Could not finish signing out. Connect to the internet and try again.')).toBeTruthy();
+    expect(logoutPending()).toBe(true);
+    expect(getAccessToken()).toBeNull();
   });
 });

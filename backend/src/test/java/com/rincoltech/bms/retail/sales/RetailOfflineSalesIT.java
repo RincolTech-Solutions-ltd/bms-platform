@@ -1129,7 +1129,6 @@ class RetailOfflineSalesIT extends IntegrationTest {
                 .anySatisfy(item -> assertThat(item.get("id").asString()).isEqualTo(id));
     }
 
-    /** A sale recorded under a client sale id, then a client_sale_conflict report of a different sale under it: its id. */
     /**
      * A sale is recorded, then a changed body under its client sale id is reported as not_taken_after_retries and discarded:
      * decidable() compares the request hash, not the code, so it ends discarded and never linked to the other sale.
@@ -1165,6 +1164,7 @@ class RetailOfflineSalesIT extends IntegrationTest {
                 .isEqualTo("discarded:null");
     }
 
+    /** A sale recorded under a client sale id, then a client_sale_conflict report of a different sale under it: its id. */
     private String conflictReport() {
         api.stockUp(t.headOffice(), product, "5");
         UUID client = UUID.randomUUID();

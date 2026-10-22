@@ -108,11 +108,11 @@ function clearLogoutPending(): void {
 // A stalled connection (a captive portal, a weak signal) must not hold the installed app, which has no address bar, on a loader.
 const PENDING_LOGOUT_TIMEOUT_MS = 10_000;
 
-function timeoutSignal(ms: number): AbortSignal {
-  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+function deadline(ms: number): { signal: AbortSignal; clear: () => void } {
+  if (typeof AbortSignal.timeout === 'function') return { signal: AbortSignal.timeout(ms), clear: () => undefined };
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), ms);
-  return controller.signal;
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 /**
@@ -122,12 +122,14 @@ function timeoutSignal(ms: number): AbortSignal {
  */
 export async function endPendingLogout(): Promise<boolean> {
   if (!logoutPending()) return true;
+  // One deadline for both calls, so the person waits 10 seconds at most.
+  const limit = deadline(PENDING_LOGOUT_TIMEOUT_MS);
   try {
     const refreshed = await fetch(refreshPath, {
       method: 'POST',
       credentials: 'same-origin',
       headers: tenantHeaders(),
-      signal: timeoutSignal(PENDING_LOGOUT_TIMEOUT_MS),
+      signal: limit.signal,
     });
     // 401: the server already refuses the cookie, so the session is gone; any other refusal may be passing.
     if (!refreshed.ok && refreshed.status !== 401) return false;
@@ -137,7 +139,7 @@ export async function endPendingLogout(): Promise<boolean> {
         method: 'POST',
         credentials: 'same-origin',
         headers: { ...tenantHeaders(), Authorization: `Bearer ${token}` },
-        signal: timeoutSignal(PENDING_LOGOUT_TIMEOUT_MS),
+        signal: limit.signal,
       });
       if (!out.ok) return false;
     }
@@ -145,6 +147,8 @@ export async function endPendingLogout(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  } finally {
+    limit.clear();
   }
 }
 
