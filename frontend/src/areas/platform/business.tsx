@@ -11,6 +11,7 @@ import {
   recordPayment,
   resetOwnerSignIn,
   resetOwnerTwoStep,
+  makeOwner,
   resumeBusiness,
   setBusinessModules,
   setBusinessPilot,
@@ -63,7 +64,8 @@ function errorText(err: unknown): string {
 
 export function BusinessFacts({ detail }: { detail: BusinessDetail }) {
   const b = detail.tenant ?? {};
-  const owner = (detail.admins ?? [])[0];
+  // The Owner of the business (ADR-062), listed first among the administrators; an older business may have none yet.
+  const owner = (detail.admins ?? []).find((a) => a.is_owner === true);
   return (
     <dl className="facts" data-tour="biz-details">
       <dt>Address</dt>
@@ -77,7 +79,13 @@ export function BusinessFacts({ detail }: { detail: BusinessDetail }) {
         )}
       </dd>
       <dt>Owner</dt>
-      <dd>{owner ? `${owner.full_name ?? ''}, ${owner.email ?? owner.phone ?? ''}` : 'No administrator yet'}</dd>
+      <dd>
+        {owner
+          ? `${owner.full_name ?? ''}, ${owner.email ?? owner.phone ?? ''}`
+          : (detail.admins ?? []).length > 0
+            ? 'No owner yet: choose one of the administrators below'
+            : 'No administrator yet'}
+      </dd>
       <dt>Last sign-in</dt>
       <dd>{b.last_sign_in_at ? formatMoment(b.last_sign_in_at) : 'Nobody has signed in yet'}</dd>
       <dt>Created</dt>
@@ -277,7 +285,7 @@ type Open =
   | { kind: 'none' }
   | { kind: 'confirm'; action: Action; value?: string; planName?: string }
   | { kind: 'payment'; reviewing: boolean }
-  | { kind: 'rescue'; admin: TenantAdmin; what: 'sign-in' | 'two-step' };
+  | { kind: 'rescue'; admin: TenantAdmin; what: 'sign-in' | 'two-step' | 'owner' };
 
 function newKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? `pay-${crypto.randomUUID()}` : `pay-${Date.now()}-${Math.random()}`;
@@ -417,7 +425,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     );
   }
 
-  function rescue(admin: TenantAdmin, what: 'sign-in' | 'two-step') {
+  function rescue(admin: TenantAdmin, what: 'sign-in' | 'two-step' | 'owner') {
     if (busy) return;
     if (!/^\d{6}$/.test(code.trim())) {
       setError('Type the 6 digit code from your own authenticator app.');
@@ -431,7 +439,11 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
     setBusy(true);
     setError(null);
     const call =
-      what === 'sign-in'
+      what === 'owner'
+        ? makeOwner(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then(() =>
+            setDone(`${admin.full_name ?? 'The administrator'} is now the owner of the business.`),
+          )
+        : what === 'sign-in'
         ? resetOwnerSignIn(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then((r) => setLink(r.url ?? null))
         : resetOwnerTwoStep(tenantId, admin.id ?? '', code.trim(), rescueReason.trim()).then(() =>
             setDone(`${admin.full_name ?? 'The owner'} can sign in with the password and set up two-step sign-in again.`),
@@ -745,6 +757,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                   <p className="ln-item-head">
                     <strong>{a.full_name}</strong>
                     <span className="badge">{a.status === 'invited' ? 'Invited' : a.status === 'active' ? 'Active' : 'Deactivated'}</span>
+                    {a.is_owner === true && <span className="badge badge-info">Owner</span>}
                   </p>
                   <p className="ln-item-facts">
                     <span>{a.email ?? a.phone}</span>
@@ -761,6 +774,11 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                           Reset lost two-step sign-in
                         </button>
                       )}
+                      {a.is_owner !== true && (
+                        <button type="button" data-tour="biz-make-owner" onClick={() => setOpen({ kind: 'rescue', admin: a, what: 'owner' })}>
+                          Make the owner
+                        </button>
+                      )}
                     </div>
                   )}
                   {open.kind === 'rescue' && open.admin.id === a.id && (
@@ -773,7 +791,9 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                     >
                       <p>
                         <strong>
-                          {open.what === 'sign-in'
+                          {open.what === 'owner'
+                            ? `Make ${a.full_name ?? 'this administrator'} the owner of the business? Only they can then add, remove or change an administrator, and nobody in the business can remove them. ${(detail.admins ?? []).find((x) => x.is_owner === true)?.full_name ?? 'The owner of now'} stays an administrator.`
+                            : open.what === 'sign-in'
                             ? `Make a one-time link for ${a.full_name ?? 'the owner'} to set a new password? It works for one hour and is shown to you once.`
                             : `Clear the two-step sign-in of ${a.full_name ?? 'the owner'}? Their sessions end and they set it up again at the next sign-in.`}
                         </strong>
@@ -807,7 +827,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                       )}
                       <div className="cluster">
                         <button type="submit" className="btn-primary" disabled={busy}>
-                          {busy ? 'Working' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
+                          {busy ? 'Working' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
                         </button>
                         <button type="button" className="btn-ghost" onClick={close} disabled={busy}>
                           Cancel

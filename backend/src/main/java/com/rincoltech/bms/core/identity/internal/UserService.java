@@ -71,6 +71,7 @@ class UserService implements TenantAdmins {
     private final AuditLog audit;
     private final BusinessClock clock;
     private final PasswordResets resets;
+    private final Owners owners;
 
     UserService(
             JdbcClient jdbc,
@@ -84,7 +85,8 @@ class UserService implements TenantAdmins {
             Notifier notifier,
             AuditLog audit,
             BusinessClock clock,
-            PasswordResets resets) {
+            PasswordResets resets,
+            Owners owners) {
         this.jdbc = jdbc;
         this.grants = grants;
         this.accounts = accounts;
@@ -97,6 +99,7 @@ class UserService implements TenantAdmins {
         this.audit = audit;
         this.clock = clock;
         this.resets = resets;
+        this.owners = owners;
     }
 
     // ---- Invitations (FR-IAM-01) ----------------------------------------------------------
@@ -105,6 +108,9 @@ class UserService implements TenantAdmins {
     InvitedUserResponse invite(InviteUserRequest request) {
         Principal admin = CurrentPrincipal.require();
         List<RoleAssignmentRequest> roles = checkRoles(admin, request.roles());
+        if (roles.stream().anyMatch(r -> r.roleKey().equals(TENANT_ADMIN))) {
+            owners.requireOwner(admin, "invite an administrator");
+        }
         UUID id = createInvitedUser(request.fullName(), request.email(), request.phone());
         for (RoleAssignmentRequest role : roles) {
             insertAssignment(id, role, admin.userId());
@@ -125,6 +131,9 @@ class UserService implements TenantAdmins {
     InvitationLink reissueInvitation(UUID userId) {
         Principal admin = CurrentPrincipal.require();
         UserResponse user = lockUser(userId);
+        if (isTenantAdmin(userId)) {
+            owners.requireMayChangeAdmin(admin, userId, "a new invitation link for an administrator");
+        }
         if (!"invited".equals(user.status())) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
@@ -179,6 +188,7 @@ class UserService implements TenantAdmins {
         jdbc.sql("UPDATE user_invitations SET accepted_at = ? WHERE id = ?")
                 .params(Timestamp.from(now), invitation.id())
                 .update();
+        owners.claimIfFirstAdmin(user.id());
         audit.record(
                 new AuditLog.Entry(
                         "core.invitation.accepted",
@@ -197,6 +207,7 @@ class UserService implements TenantAdmins {
     public Invitation inviteFirstAdmin(String fullName, String email, String phone, UUID platformUserId) {
         UUID id = createInvitedUser(fullName, email, phone);
         insertAssignment(id, new RoleAssignmentRequest(TENANT_ADMIN, null), platformUserId);
+        owners.markFirstOwner(id, platformUserId, "platform", "the first administrator of a new business");
         UserResponse user = find(id).orElseThrow();
         Map<String, Object> after = new LinkedHashMap<>();
         after.put("full_name", user.fullName());
@@ -233,6 +244,46 @@ class UserService implements TenantAdmins {
         }
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public void requireOwnerCandidate(UUID userId) {
+        owners.requireCandidate(userId, false);
+        if (owners.isOwner(userId)) {
+            throw ApiException.rule("already_owner", "This person is already the owner of the business.");
+        }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public UUID transferOwnership(UUID userId, UUID platformUserId, String reason) {
+        return owners.transfer(userId, platformUserId, "platform", reason, false);
+    }
+
+    // ---- The Owner (ADR-062, FR-IAM-18) ---------------------------------------------------
+
+    /**
+     * Everything the Owner's transfer refuses, read-only and without a lock, so the Owner's code or password is not spent on a
+     * call that cannot succeed: the caller is not the Owner (403 {@code owner_only}, 409 {@code no_owner}), the target is the
+     * caller (422 {@code already_owner}), is not a staff user of this business (404), or is not an active administrator (422
+     * {@code owner_must_be_active_admin}). {@link #transferOwnership} checks it all again under the lock.
+     */
+    @Transactional(readOnly = true)
+    void precheckTransfer(UUID to) {
+        UUID actor = CurrentPrincipal.require().userId();
+        Owners.requireActorIsOwner(owners.current().orElse(null), actor);
+        if (to.equals(actor)) {
+            throw ApiException.rule("already_owner", "You are already the owner of the business.");
+        }
+        owners.requireCandidate(to, false);
+    }
+
+    /** The Owner hands ownership to another active administrator; the Owner stays an administrator. */
+    @Transactional
+    UserResponse transferOwnership(UUID to) {
+        owners.transfer(to, CurrentPrincipal.require().userId(), "staff", null, true);
+        return find(to).orElseThrow();
+    }
+
     // ---- Reads ----------------------------------------------------------------------------
 
     @Transactional(readOnly = true)
@@ -240,8 +291,8 @@ class UserService implements TenantAdmins {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         String after = Cursor.decode(cursor).orElse(null);
         StringBuilder sql = new StringBuilder(
-                "SELECT id, full_name, email, phone_e164, status, mfa_enabled, last_login_at, created_at, version"
-                        + " FROM users WHERE kind = 'staff'");
+                "SELECT id, full_name, email, phone_e164, status, mfa_enabled, last_login_at, created_at, version,"
+                        + " is_owner FROM users WHERE kind = 'staff'");
         Map<String, Object> params = new LinkedHashMap<>();
         if (statuses != null && !statuses.isEmpty()) {
             sql.append(" AND status IN (:statuses)");
@@ -275,6 +326,11 @@ class UserService implements TenantAdmins {
     UserResponse update(UUID userId, String ifMatch, UpdateUserRequest request) {
         int expected = Versions.fromIfMatch(ifMatch);
         UserResponse before = lockUser(userId);
+        Principal actor = CurrentPrincipal.require();
+        // A changed email or phone of an administrator would let the next reset link reach someone else (ADR-062).
+        if (!actor.userId().equals(userId) && isTenantAdmin(userId)) {
+            owners.requireMayChangeAdmin(actor, userId, "change an administrator's contact");
+        }
         if (before.version() != expected) {
             throw Versions.conflict(before.version());
         }
@@ -305,7 +361,20 @@ class UserService implements TenantAdmins {
         UserResponse before = lockUser(userId);
         List<RoleAssignmentRequest> roles = checkRoles(admin, requested);
         boolean keepsAdmin = roles.stream().anyMatch(r -> r.roleKey().equals(TENANT_ADMIN));
-        if (!keepsAdmin && isTenantAdmin(userId)) {
+        boolean wasAdmin = isTenantAdmin(userId);
+        // ADR-062: only the Owner changes another administrator's roles or makes someone an administrator; nobody
+        // demotes the Owner, who hands ownership on first. An administrator may still change their own roles.
+        if (wasAdmin && !admin.userId().equals(userId)) {
+            owners.requireMayChangeAdmin(admin, userId, "change an administrator's roles");
+        } else if (!wasAdmin && keepsAdmin) {
+            owners.requireOwner(admin, "make someone an administrator");
+        }
+        if (!keepsAdmin && owners.isOwner(userId)) {
+            throw ApiException.rule(
+                    "owner_must_transfer_first",
+                    "The owner stays an administrator. Hand ownership to another administrator first.");
+        }
+        if (!keepsAdmin && wasAdmin) {
             requireAnotherActiveAdmin(userId);
         }
         Set<String> wanted = new LinkedHashSet<>();
@@ -353,6 +422,7 @@ class UserService implements TenantAdmins {
                     "The user is already deactivated.");
         }
         if (isTenantAdmin(userId)) {
+            owners.requireMayChangeAdmin(admin, userId, "deactivate an administrator");
             requireAnotherActiveAdmin(userId);
         }
         Instant now = clock.now();
@@ -392,6 +462,9 @@ class UserService implements TenantAdmins {
                     "cannot_reset_own_mfa", "Use a recovery code, or ask another tenant admin to reset your MFA.");
         }
         UserResponse before = lockUser(userId);
+        if (isTenantAdmin(userId)) {
+            owners.requireMayChangeAdmin(admin, userId, "reset an administrator's two-step sign-in");
+        }
         clearMfa(before);
         audit.record(new AuditLog.Entry(
                 "core.user.mfa_reset",
@@ -645,7 +718,8 @@ class UserService implements TenantAdmins {
 
     Optional<UserResponse> find(UUID userId) {
         return jdbc.sql("""
-                        SELECT id, full_name, email, phone_e164, status, mfa_enabled, last_login_at, created_at, version
+                        SELECT id, full_name, email, phone_e164, status, mfa_enabled, last_login_at, created_at, version,
+                               is_owner
                           FROM users WHERE id = ? AND kind = 'staff'
                         """).param(userId).query(this::map).optional();
     }
@@ -664,7 +738,8 @@ class UserService implements TenantAdmins {
                         .map(a -> new RoleAssignment(a.roleKey(), a.roleName(), a.branchId()))
                         .toList(),
                 SessionStore.instant(rs.getTimestamp("created_at")),
-                rs.getInt("version"));
+                rs.getInt("version"),
+                rs.getBoolean("is_owner"));
     }
 
     private static List<String> rolesForAudit(List<RoleAssignment> roles) {

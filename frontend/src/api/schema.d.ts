@@ -2911,6 +2911,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/make-owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make an active administrator of the business its Owner, with a reason; the previous Owner stays an administrator; needs a current code from the operator's own authenticator (FR-IAM-18) */
+        post: operations["platformTransferOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenant_id}/users/{user_id}/mfa/reset": {
         parameters: {
             query?: never;
@@ -6237,6 +6254,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{user_id}/transfer-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hand ownership of the business to another active administrator; the Owner only; needs the Owner's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-18) */
+        post: operations["transferOwnership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{user_id}/roles": {
         parameters: {
             query?: never;
@@ -8262,6 +8296,8 @@ export interface components {
         };
         Me: {
             all_branches?: boolean;
+            /** @description True when the signed-in user is the Owner of the business (ADR-062): the PWA offers the owner-only actions and the Transfer ownership action only then */
+            is_owner?: boolean;
             branches?: components["schemas"]["MeBranch"][];
             /** Format: uuid */
             default_branch_id?: string;
@@ -8957,6 +8993,13 @@ export interface components {
             /** @description The admin's own current password, for an admin with no two-step sign-in */
             password?: string;
             /** @description The current 6 digit code from the admin's own authenticator app */
+            totp_code?: string;
+        };
+        /** @description Proof that the signed-in Owner is still themselves, as for the reset of a sign-in: the code from their authenticator app when they have two-step sign-in, otherwise their own password; never logged */
+        TransferOwnershipRequest: {
+            /** @description The Owner's own current password, for an Owner with no two-step sign-in */
+            password?: string;
+            /** @description The current 6 digit code from the Owner's own authenticator app */
             totp_code?: string;
         };
         RetailAccountAllocation: {
@@ -15735,6 +15778,8 @@ export interface components {
             id?: string;
             /** Format: date-time */
             last_login_at?: string;
+            /** @description True for the Owner of the business, listed first (ADR-062) */
+            is_owner?: boolean;
             mfa_enabled?: boolean;
             phone?: string;
             /** @description invited, active or deactivated */
@@ -16134,6 +16179,8 @@ export interface components {
             full_name?: string;
             /** Format: uuid */
             id?: string;
+            /** @description True for the Owner of the business: one per business, an administrator whom nobody inside the business can remove, deactivate or demote, and who alone adds, removes or changes administrators (ADR-062) */
+            is_owner?: boolean;
             /** Format: date-time */
             last_login_at?: string;
             mfa_enabled?: boolean;
@@ -21195,6 +21242,31 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
                 };
+            };
+        };
+    };
+    platformTransferOwnership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformStepUpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -27230,6 +27302,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignInResetLink"];
+                };
+            };
+        };
+    };
+    transferOwnership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferOwnershipRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
                 };
             };
         };

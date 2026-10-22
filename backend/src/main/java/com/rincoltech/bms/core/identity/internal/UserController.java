@@ -8,6 +8,7 @@ import com.rincoltech.bms.core.identity.internal.UserApi.InvitedUserResponse;
 import com.rincoltech.bms.core.identity.internal.UserApi.ResetSignInRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.RoleAssignmentRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.SignInResetLink;
+import com.rincoltech.bms.core.identity.internal.UserApi.TransferOwnershipRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UnlockSignInRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UpdateUserRequest;
 import com.rincoltech.bms.core.identity.internal.UserApi.UserPage;
@@ -160,17 +161,43 @@ class UserController {
             HttpServletResponse response) {
         NoStore.apply(response);
         resets.precheckForAdmin(userId);
+        stepUp(request.totpCode(), request.password());
+        return resets.issueForAdmin(userId);
+    }
+
+    /**
+     * ADR-062: the Owner hands ownership to another active administrator, who becomes the one Owner; the old Owner stays an
+     * administrator. As for the reset of a sign-in, the target is checked first (read-only), then the Owner proves they are still
+     * themselves, then the transfer runs under a lock and checks again.
+     */
+    @PostMapping("/{user_id}/transfer-ownership")
+    @RequiresPermission("core.users.manage")
+    @Operation(
+            summary =
+                    "Hand ownership of the business to another active administrator; the Owner only; needs the Owner's authenticator code, or their own password when they have no two-step sign-in (FR-IAM-18)",
+            operationId = "transferOwnership")
+    UserResponse transferOwnership(
+            @PathVariable("user_id") UUID userId, @Valid @RequestBody TransferOwnershipRequest request) {
+        service.precheckTransfer(userId);
+        stepUp(request.totpCode(), request.password());
+        return service.transferOwnership(userId);
+    }
+
+    /**
+     * The proof that the signed-in admin is still themselves, before the transaction of the action (ADR-042): a fresh code from
+     * their own authenticator when they have one enrolled, otherwise their own current password. Neither is ever logged.
+     */
+    private void stepUp(String totpCode, String password) {
         if (resets.actorHasSecondFactor()) {
-            if (request.totpCode() == null || request.totpCode().isBlank()) {
+            if (totpCode == null || totpCode.isBlank()) {
                 throw ApiException.rule("totp_required", "Enter the current code from your authenticator app.");
             }
-            security.requireTotp(request.totpCode());
+            security.requireTotp(totpCode);
         } else {
-            if (request.password() == null || request.password().isEmpty()) {
+            if (password == null || password.isEmpty()) {
                 throw ApiException.rule("password_required", "Enter your own password to confirm.");
             }
-            passwords.requirePassword(request.password());
+            passwords.requirePassword(password);
         }
-        return resets.issueForAdmin(userId);
     }
 }

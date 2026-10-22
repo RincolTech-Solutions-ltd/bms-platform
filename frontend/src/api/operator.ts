@@ -173,6 +173,15 @@ export async function resetOwnerTwoStep(tenantId: string, userId: string, totpCo
   if (error) fail(error, 'Could not reset the two-step sign-in');
 }
 
+/** ADR-062: make an active administrator the Owner of the business, for an Owner who lost access; the operator's code and a reason. */
+export async function makeOwner(tenantId: string, userId: string, totpCode: string, reason: string): Promise<void> {
+  const { error } = await api.POST('/api/v1/platform/tenants/{tenant_id}/users/{user_id}/make-owner', {
+    params: { path: { tenant_id: tenantId, user_id: userId } },
+    body: { totp_code: totpCode, reason },
+  });
+  if (error) fail(error, 'Could not make this administrator the owner');
+}
+
 export async function listPricePlans(includeInactive = true): Promise<Plan[]> {
   const { data, error } = await api.GET('/api/v1/platform/plans', {
     params: { query: { include_inactive: includeInactive } },
