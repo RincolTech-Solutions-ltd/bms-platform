@@ -3742,4 +3742,65 @@ class LoanServicingIT extends LoanFixtures {
                 .singleElement()
                 .satisfies(p -> assertThat(p.get("action_id").asString()).isEqualTo(later));
     }
+
+    // ---- Home's Lending card (issue #471) ---------------------------------------------------
+
+    /** What the schedule still owes on items due today (when) or before today, the way the summary adds it up. */
+    long owed(String loan, boolean dueToday) {
+        long sum = 0;
+        for (JsonNode item : get(loan, "/schedule").get("items")) {
+            LocalDate due = LocalDate.parse(item.get("due_date").asString());
+            if (dueToday ? due.equals(today) : due.isBefore(today)) {
+                sum += item.get("outstanding_minor").asLong();
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * Issue #471, ADR-072: the summary counts active loans with an instalment left unpaid today and before today, with what is
+     * still owed on them, read live from the schedule; a repayment lowers it, another branch's scope sees nothing, and a user
+     * without lending.loans.read is refused.
+     */
+    @Test
+    void issue471_theHomeSummaryCountsLoansDueTodayAndInArrears() {
+        String product = exampleB("HOME");
+        String due = approved(product, 1_200_000, 3, 81);
+        disburse(due, today.minusMonths(1));
+        String late = approved(product, 1_200_000, 3, 82);
+        disburse(late, today.minusMonths(2).minusDays(5));
+        approved(product, 1_200_000, 3, 83);
+
+        JsonNode s = asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(s.get("date").asString()).isEqualTo(today.toString());
+        assertThat(s.get("currency").asString())
+                .isEqualTo(get(due, "/schedule").get("currency").asString());
+        long dueToday = owed(due, true) + owed(late, true);
+        long arrears = owed(due, false) + owed(late, false);
+        assertThat(arrears).as("the late loan's first two instalments are past").isPositive();
+        assertThat(s.get("due_today_minor").asLong()).isEqualTo(dueToday);
+        assertThat(s.get("in_arrears_minor").asLong()).isEqualTo(arrears);
+        assertThat(s.get("in_arrears_count").asInt()).isEqualTo(owed(due, false) > 0 ? 2 : 1);
+        assertThat(s.get("due_today_count").asInt())
+                .isEqualTo((owed(due, true) > 0 ? 1 : 0) + (owed(late, true) > 0 ? 1 : 0));
+
+        repaid(late, 100_000, today);
+        JsonNode after =
+                asOfficer(HttpMethod.GET, LOANS + "/summary", null, null).getBody();
+        assertThat(after.get("in_arrears_minor").asLong()).isEqualTo(arrears - 100_000);
+
+        JsonNode elsewhere = send(
+                        HttpMethod.GET,
+                        LOANS + "/summary",
+                        as(officer, officerPerms, UUID.randomUUID().toString(), null),
+                        null)
+                .getBody();
+        assertThat(elsewhere.get("in_arrears_count").asInt()).isZero();
+        assertThat(elsewhere.get("in_arrears_minor").asLong()).isZero();
+        assertThat(elsewhere.get("due_today_count").asInt()).isZero();
+
+        assertThat(send(HttpMethod.GET, LOANS + "/summary", as(officer, "core.approvals.read", "*", null), null)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
 }
