@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NoResults, SearchBox, SearchResults } from '../../../app/ui/SearchBox';
 import { useLiveSearch } from '../../../app/ui/useLiveSearch';
 import type { Me } from '../../../api/client';
@@ -152,22 +152,8 @@ export function useBranchName(): (id: string | undefined) => string {
   return (id) => branchLabel((me.branches ?? []).find((b) => b.id === id));
 }
 
-const PHONE = '(max-width: 719px)';
-const subscribePhone = (notify: () => void) => {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => undefined;
-  const query = window.matchMedia(PHONE);
-  query.addEventListener('change', notify);
-  return () => query.removeEventListener('change', notify);
-};
-
-/** True below 720px, where a wide table gives way to one card per row. False when rendered without a window. */
-export function useIsPhone(): boolean {
-  return useSyncExternalStore(
-    subscribePhone,
-    () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(PHONE).matches,
-    () => false,
-  );
-}
+/** True below 720px, where a wide table gives way to one card per row. Shared with the phone side menu (issue #455). */
+export { useIsPhone } from '../../../components/side-menu';
 
 /**
  * Says plainly when the chosen branch holds no stock (#103), with a button for each of the user's

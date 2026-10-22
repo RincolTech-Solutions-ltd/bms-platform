@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Outlet, createLazyRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
@@ -10,6 +10,7 @@ import { TurnOnCard } from '../../push/TurnOnCard';
 import { HelpMenu, TourProvider } from '../../tour/host';
 import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
 import { icons } from '../../components/icons';
+import { AreaTabs, type MenuLink, SideMenu, useIsPhone } from '../../components/side-menu';
 import { BrandLoader } from '../../components/states';
 import { BranchPicker, useActiveBranch } from './branch-picker';
 import { StaffContext } from './context';
@@ -19,7 +20,7 @@ import { showCollateral, showMembers } from './lending/member-permissions';
 import { showLending } from './lending/permissions';
 import { showSavings } from './lending/savings-permissions';
 import { showReports } from './reports/permissions';
-import { RetailNav } from './retail/nav';
+import { RetailMenuGroup, RetailNav } from './retail/nav';
 import { canSeeProfit, showRetail } from './retail/permissions';
 import { showReceivePayments } from './payments/state';
 import { showSms } from './sms/state';
@@ -68,6 +69,7 @@ function StaffLayout() {
     if (signedIn && !mock) void push.sync();
   }, [signedIn, mock]);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const phone = useIsPhone();
   // Feedback sends the page the person came from (issue #447).
   useEffect(() => rememberPage(pathname), [pathname]);
   const managesSettings = (me.data?.permissions ?? []).includes('core.settings.manage');
@@ -110,7 +112,7 @@ function StaffLayout() {
           </p>
         )}
         <TwoStepNotices me={profile} pathname={pathname} />
-        {pathname.startsWith('/staff/retail') && showRetail(profile) && <RetailNav me={profile} />}
+        {!phone && pathname.startsWith('/staff/retail') && showRetail(profile) && <RetailNav me={profile} />}
         <StaffBreadcrumbs />
         {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
         </CrumbProvider>
@@ -119,42 +121,51 @@ function StaffLayout() {
   );
 }
 
+/** The areas the session may open, in tab order; Retail carries its shortcuts as a group for the phone side menu. */
+function staffAreas(me: Me): MenuLink[] {
+  const permissions = me.permissions ?? [];
+  const areas: (MenuLink | false)[] = [
+    { to: '/staff', label: 'Home', icon: icons.home, exact: true },
+    permissions.includes('core.approvals.read') && { to: '/staff/approvals', label: 'Approvals', icon: icons.approve, tour: 'nav-approvals' },
+    showLending(me) && { to: '/staff/lending', label: 'Loans', icon: icons.calendar, exact: true, tour: 'nav-lending' },
+    showMembers(me) && { to: '/staff/lending/members', label: 'Members', icon: icons.people, tour: 'nav-members' },
+    !showMembers(me) && showCollateral(me) && { to: '/staff/lending/collateral', label: 'Collateral', icon: icons.lock },
+    showSavings(me) && { to: '/staff/lending/savings', label: 'Savings', icon: icons.savings },
+    showInvestments(me) && { to: '/staff/lending/investments', label: 'Investments', icon: icons.valuation },
+    showInsights(me) && { to: '/staff/insights', label: 'Insights', icon: icons.salesAnalysis, tour: 'nav-insights' },
+    canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.evaluation },
+    showReports(me) && { to: '/staff/reports', label: 'Reports', icon: icons.documents },
+    showRetail(me) && { to: '/staff/retail', label: 'Retail', icon: icons.sale, tour: 'nav-retail', group: <RetailMenuGroup me={me} /> },
+    showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
+    showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.banking },
+    showUsers(me) && { to: '/staff/users', label: 'Users', icon: icons.user, tour: 'nav-users' },
+    { to: '/staff/notifications', label: 'Notifications', icon: icons.bell, tour: 'nav-notifications' },
+    { to: '/staff/feedback', label: 'Feedback', icon: icons.chat, tour: 'nav-feedback' },
+    permissions.includes('core.settings.manage') && { to: '/staff/setup', label: 'Business set-up', icon: icons.settings },
+  ];
+  return areas.filter((a): a is MenuLink => a !== false);
+}
+
 /**
- * Who is signed in, Help, the branch switcher, sign out and the area tabs. Carries the data-tour
- * anchors the first-run tours light up (tour/tours.ts).
+ * Who is signed in, Help, the branch switcher, sign out and the area tabs; below 720px the tabs, the name's Sign out and the
+ * retail bar give way to the side menu (issue #455). Carries the data-tour anchors the first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({ me, branch, onBranch, onSignOut }: { me: Me; branch: string | null; onBranch: (selection: string) => void; onSignOut: () => void }) {
-  const permissions = me.permissions ?? [];
+  const phone = useIsPhone();
+  const areas = staffAreas(me);
   return (
     <header className="staff-bar">
       <div className="staff-bar-top">
+        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={areas} tours={['retail-nav']} name={me.full_name} onSignOut={onSignOut} />}
         <span className="staff-user">
           <span className="avatar">{icons.user}</span>
           <span className="staff-user-name">{me.full_name}</span>
         </span>
         <HelpMenu feedback />
         <BranchPicker me={me} branch={branch} onChoose={onBranch} />
-        <button className="btn-ghost btn-sm" onClick={onSignOut}>Sign out</button>
+        {!phone && <button className="btn-ghost btn-sm" onClick={onSignOut}>Sign out</button>}
       </div>
-      <nav className="tabs" aria-label="Staff areas" data-tour="nav-areas">
-        <Link to="/staff" activeOptions={{ exact: true }}>Home</Link>
-        {permissions.includes('core.approvals.read') && <Link to="/staff/approvals" data-tour="nav-approvals">Approvals</Link>}
-        {showLending(me) && <Link to="/staff/lending" activeOptions={{ exact: true }} data-tour="nav-lending">Loans</Link>}
-        {showMembers(me) && <Link to="/staff/lending/members" data-tour="nav-members">Members</Link>}
-        {!showMembers(me) && showCollateral(me) && <Link to="/staff/lending/collateral">Collateral</Link>}
-        {showSavings(me) && <Link to="/staff/lending/savings">Savings</Link>}
-        {showInvestments(me) && <Link to="/staff/lending/investments">Investments</Link>}
-        {showInsights(me) && <Link to="/staff/insights" data-tour="nav-insights">Insights</Link>}
-        {canConfigureAdvisor(me) && <Link to="/staff/assistant">AI assistant</Link>}
-        {showReports(me) && <Link to="/staff/reports">Reports</Link>}
-        {showRetail(me) && <Link to="/staff/retail" data-tour="nav-retail">Retail</Link>}
-        {showSms(me) && <Link to="/staff/sms">SMS</Link>}
-        {showReceivePayments(me) && <Link to="/staff/payments">Receive payments</Link>}
-        {showUsers(me) && <Link to="/staff/users" data-tour="nav-users">Users</Link>}
-        <Link to="/staff/notifications" data-tour="nav-notifications">Notifications</Link>
-        <Link to="/staff/feedback" data-tour="nav-feedback">Feedback</Link>
-        {permissions.includes('core.settings.manage') && <Link to="/staff/setup">Business set-up</Link>}
-      </nav>
+      {!phone && <AreaTabs label="Staff areas" tour="nav-areas" links={areas} />}
     </header>
   );
 }

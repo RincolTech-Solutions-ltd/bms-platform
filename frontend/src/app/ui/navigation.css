@@ -1,6 +1,6 @@
 /*
  * Navigation: the staff bar under the shell's brand bar (who is signed in, the branch, sign out, and
- * the area tabs, which scroll sideways on a phone), and the retail bottom bar on phones.
+ * the area tabs from 720px), the side menu that holds the areas on a phone, and the retail bar.
  */
 
 /* Full-bleed band without widening the page: the background is a clipped spread shadow. */
@@ -112,6 +112,165 @@
     order: 0;
     flex: 0 1 320px;
   }
+}
+
+/*
+ * The phone side menu (components/side-menu.tsx, issue #455): below 720px a menu button at the top left of the staff bar opens a
+ * drawer from the left, 85% of the width and at most 320px, over a dimmed backdrop. It keeps clear of the iPhone notch and home
+ * bar, slides in over --motion (once in 1ms under reduced motion, base.css) and appears at once when a tour step opens it.
+ */
+.menu-button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--tap);
+  min-width: var(--tap);
+  padding: 0;
+  flex: none;
+}
+
+.menu-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.side-menu {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+}
+
+.side-menu[hidden] {
+  display: none;
+}
+
+.side-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--color-scrim);
+  animation: rt-fade var(--motion) var(--ease-out);
+}
+
+.side-menu-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(85vw, 320px);
+  padding: calc(var(--space-2) + env(safe-area-inset-top)) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom))
+    calc(var(--space-3) + env(safe-area-inset-left));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+  animation: rt-drawer-in var(--motion) var(--ease-out);
+}
+
+.side-menu-instant .side-menu-backdrop,
+.side-menu-instant .side-menu-panel {
+  animation: none;
+}
+
+@keyframes rt-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+body.side-menu-open {
+  overflow: hidden;
+}
+
+.side-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.side-menu-title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.side-menu-links {
+  flex: 1 0 auto;
+}
+
+.side-menu-links ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.side-menu-links a {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.side-menu-links a svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.side-menu-links a:hover {
+  background: var(--color-hover);
+}
+
+.side-menu-links a[aria-current='page'] {
+  background: var(--color-accent-tint);
+  color: var(--color-link);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.side-menu-links a[aria-current='page'] svg {
+  color: var(--color-link);
+}
+
+.side-menu-group {
+  margin: 0 0 var(--space-2) var(--space-6);
+  border-left: 1px solid var(--color-border);
+}
+
+.side-menu-group a {
+  font-weight: var(--weight-regular);
+  font-size: var(--text-sm);
+}
+
+.side-menu-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.side-menu-foot button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.side-menu-foot button svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* The retail bottom bar: fixed on phones, an inline row of links above the title on wider screens. */

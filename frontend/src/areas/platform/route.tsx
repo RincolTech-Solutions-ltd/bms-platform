@@ -1,8 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createLazyRoute, Link, Outlet, useNavigate } from '@tanstack/react-router';
+import { createLazyRoute, Outlet, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api } from '../../api/client';
 import { platformMe } from '../../api/onboarding';
+import { icons } from '../../components/icons';
+import { AreaTabs, type MenuLink, SideMenu, useIsPhone } from '../../components/side-menu';
 import { getAccessToken, refreshSession, setAccessToken, setSessionScope, subscribe } from '../../auth/session';
 import { TourProvider } from '../../tour/host';
 import { OPERATOR } from '../../tour/tours-operator';
@@ -12,6 +14,15 @@ import { OPERATOR } from '../../tour/tours-operator';
 // and sends anyone without one to /platform/sign-in. The API decides every permission.
 
 setSessionScope('platform');
+
+// Five tabs do not fit a phone, so below 720px they are a side menu like the staff area's (issue #455).
+const AREAS: MenuLink[] = [
+  { to: '/platform', label: 'Applications', icon: icons.documents, exact: true },
+  { to: '/platform/businesses', label: 'Businesses', icon: icons.building },
+  { to: '/platform/plans', label: 'Plans and prices', icon: icons.priceLists },
+  { to: '/platform/outbox', label: 'Messages not sent', icon: icons.bell },
+  { to: '/platform/feedback', label: 'Feedback', icon: icons.chat },
+];
 
 function PortalLayout() {
   const navigate = useNavigate();
@@ -29,6 +40,7 @@ function PortalLayout() {
   }, [token, navigate]);
 
   const me = useQuery({ queryKey: ['platform-me', token], queryFn: platformMe, enabled: token !== null });
+  const phone = useIsPhone();
 
   async function signOut() {
     await api.POST('/api/v1/platform/auth/logout');
@@ -55,22 +67,17 @@ function PortalLayout() {
       <div>
         <header className="staff-bar">
           <div className="staff-bar-top">
+            {phone && <SideMenu label="Operator portal" links={AREAS} name={me.data.full_name} onSignOut={() => void signOut()} />}
             <span className="staff-user">
               <span className="staff-user-name">{me.data.full_name}</span>
             </span>
-            <button type="button" className="btn-ghost btn-sm" onClick={() => void signOut()}>
-              Sign out
-            </button>
+            {!phone && (
+              <button type="button" className="btn-ghost btn-sm" onClick={() => void signOut()}>
+                Sign out
+              </button>
+            )}
           </div>
-          <nav className="tabs" aria-label="Operator portal">
-            <Link to="/platform" activeOptions={{ exact: true }}>
-              Applications
-            </Link>
-            <Link to="/platform/businesses">Businesses</Link>
-            <Link to="/platform/plans">Plans and prices</Link>
-            <Link to="/platform/outbox">Messages not sent</Link>
-            <Link to="/platform/feedback">Feedback</Link>
-          </nav>
+          {!phone && <AreaTabs label="Operator portal" links={AREAS} />}
         </header>
         <Outlet />
       </div>
