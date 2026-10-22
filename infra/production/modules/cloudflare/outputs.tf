@@ -9,7 +9,8 @@ output "zone_id" {
 }
 
 output "r2_endpoint" {
-  description = "The S3 endpoint of the account's R2 (R2_ENDPOINT)."
+  description = "The S3 endpoint of the account's R2 (R2_ENDPOINT). Sensitive: it carries the account id."
+  sensitive   = true
   value       = "https://${var.account_id}.r2.cloudflarestorage.com"
 }
 

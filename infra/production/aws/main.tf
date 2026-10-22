@@ -21,7 +21,6 @@ module "cloud_init" {
 
 locals {
   admin_ipv4 = [for c in var.admin_cidrs : c if !strcontains(c, ":")]
-  admin_ipv6 = [for c in var.admin_cidrs : c if strcontains(c, ":")]
 }
 
 resource "aws_security_group" "prod" {
@@ -30,12 +29,11 @@ resource "aws_security_group" "prod" {
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    description      = "SSH from the team's addresses only"
-    protocol         = "tcp"
-    from_port        = 22
-    to_port          = 22
-    cidr_blocks      = local.admin_ipv4
-    ipv6_cidr_blocks = local.admin_ipv6
+    description = "SSH from the team's addresses only"
+    protocol    = "tcp"
+    from_port   = 22
+    to_port     = 22
+    cidr_blocks = local.admin_ipv4
   }
   ingress {
     description = "HTTP (redirect to HTTPS)"

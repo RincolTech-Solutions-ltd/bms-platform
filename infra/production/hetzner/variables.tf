@@ -12,8 +12,9 @@ variable "server_type" {
 }
 
 variable "cloudflare_account_id" {
-  description = "The existing Cloudflare account that holds the zone. Set it as TF_VAR_cloudflare_account_id, never in a committed file."
+  description = "The existing Cloudflare account that holds the zone. Set it as TF_VAR_cloudflare_account_id, never in a committed file. Sensitive, so plan output masks it; still never paste plan output anywhere public."
   type        = string
+  sensitive   = true
 }
 
 variable "r2_location" {
@@ -40,10 +41,10 @@ variable "admin_cidrs" {
   validation {
     condition = length(var.admin_cidrs) > 0 && alltrue([
       for c in var.admin_cidrs : can(cidrhost(c, 0)) && (
-        strcontains(c, ":") ? tonumber(split("/", c)[1]) >= 32 : tonumber(split("/", c)[1]) >= 16
+        strcontains(c, ":") ? tonumber(split("/", c)[1]) >= 48 : tonumber(split("/", c)[1]) >= 16
       )
     ])
-    error_message = "Give at least one address in CIDR form, an IPv4 prefix of /16 or longer and an IPv6 prefix of /32 or longer; never the whole internet."
+    error_message = "Give at least one address in CIDR form, an IPv4 prefix of /16 or longer and an IPv6 prefix of /48 or longer; never the whole internet."
   }
 }
 
@@ -95,15 +96,23 @@ variable "documents_bucket_name" {
 }
 
 variable "daily_retention_days" {
-  description = "Lock window of daily backups (ADR-058)."
+  description = "Lock window of daily backups (ADR-058). prevent_destroy does not stop an in-place change of the lock rules, so a shorter window is refused here."
   type        = number
   default     = 30
+  validation {
+    condition     = var.daily_retention_days >= 30
+    error_message = "Daily backups stay locked for at least 30 days (ADR-058, NFR-BAK-03)."
+  }
 }
 
 variable "monthly_retention_days" {
-  description = "Lock window of monthly backups (ADR-058)."
+  description = "Lock window of monthly backups (ADR-058). prevent_destroy does not stop an in-place change of the lock rules, so a shorter window is refused here."
   type        = number
   default     = 365
+  validation {
+    condition     = var.monthly_retention_days >= 365
+    error_message = "Monthly backups stay locked for at least 365 days (ADR-058, NFR-BAK-03)."
+  }
 }
 
 variable "restrict_tokens_to_host" {

@@ -1,6 +1,7 @@
 variable "account_id" {
   description = "The existing Cloudflare account that holds the zone and R2. Passed in, never written in a file of this repository."
   type        = string
+  sensitive   = true
 }
 
 variable "name" {
