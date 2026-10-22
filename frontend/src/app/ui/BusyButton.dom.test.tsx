@@ -84,6 +84,40 @@ describe('the busy button (#456)', () => {
     expect(onClick).toHaveBeenCalledTimes(2);
   });
 
+  it('lets a press through after ten seconds when an onClick never settles and busy never shows', () => {
+    vi.useFakeTimers();
+    try {
+      const onClick = vi.fn(() => new Promise<void>(() => undefined));
+      render(<BusyButton type="button" busy={false} onClick={onClick}>Save</BusyButton>);
+      const button = screen.getByRole('button', { name: 'Save' });
+      fireEvent.click(button);
+      act(() => vi.advanceTimersByTime(9_999));
+      fireEvent.click(button);
+      expect(onClick).toHaveBeenCalledTimes(1);
+      act(() => vi.advanceTimersByTime(1));
+      fireEvent.click(button);
+      expect(onClick).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps holding past ten seconds while busy shows', () => {
+    vi.useFakeTimers();
+    try {
+      const onClick = vi.fn();
+      const { rerender } = render(<BusyButton type="button" busy={false} onClick={onClick}>Save</BusyButton>);
+      const button = screen.getByRole('button', { name: 'Save' });
+      fireEvent.click(button);
+      rerender(<BusyButton type="button" busy onClick={onClick}>Save</BusyButton>);
+      act(() => vi.advanceTimersByTime(10_000));
+      fireEvent.click(button);
+      expect(onClick).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets the next press through after an onClick that throws, but not in the same task', async () => {
     const onClick = vi.fn(() => { throw new Error('refused'); });
     render(<BusyButton type="button" busy={false} onClick={onClick}>Save</BusyButton>);

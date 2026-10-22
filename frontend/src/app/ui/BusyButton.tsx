@@ -36,6 +36,9 @@ export function BusyAnnouncer() {
   );
 }
 
+// The longest a press or submit holds a button whose busy never turns on (an onClick that never settles).
+const HOLD_MAX = 10_000;
+
 export type BusyButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { busy: boolean };
 
 export function BusyButton({ busy, disabled, className, onClick, children, ...rest }: BusyButtonProps) {
@@ -79,13 +82,15 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
 
   // Holds the button for one press or submit and returns the call that says its work is over. Two tasks
   // after that the query library and React have rendered any pending state it started; if busy shows,
-  // the busy effect releases the hold when busy ends. A newer hold is never released by an older one.
+  // the busy effect releases the hold when busy ends. If busy never shows the hold ends after HOLD_MAX at
+  // the latest, so the button cannot stick. A newer hold is never released by an older one.
   function hold() {
     held.current = true;
     const id = ++holds.current;
     const release = () => {
       if (holds.current === id && !busyNow.current) held.current = false;
     };
+    setTimeout(release, HOLD_MAX);
     return () => void setTimeout(() => setTimeout(release));
   }
 
