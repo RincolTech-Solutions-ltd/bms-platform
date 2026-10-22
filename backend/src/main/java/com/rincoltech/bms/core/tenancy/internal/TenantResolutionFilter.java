@@ -18,13 +18,20 @@ import tools.jackson.databind.ObjectMapper;
  * Resolves the tenant of every {@code /api/v1} request from the host (chapter 7 section 7.2) and
  * binds it to the thread for exactly this request. No slug, an unknown slug or an inactive
  * tenant stops the request here with 404 {@code unknown_tenant}: nothing downstream ever runs
- * without a tenant, and nothing downstream can choose a different one.
+ * without a tenant (apart from the installed app's manifest and icons, {@link #TENANT_OPTIONAL}),
+ * and nothing downstream can choose a different one.
  */
 class TenantResolutionFilter extends OncePerRequestFilter {
 
     static final String TENANT_HEADER = "X-Tenant";
     /** Request attribute holding the resolved tenant's status, {@code active} or {@code suspended}. */
     static final String STATUS_ATTRIBUTE = "bms.tenant.status";
+
+    /**
+     * The installed app's manifest and icons (ADR-064) answer on any host: the business's own where the
+     * host resolves one, the platform's otherwise. Nothing else under this prefix runs without a tenant.
+     */
+    static final String TENANT_OPTIONAL = AppManifestController.BASE + "/";
 
     private final TenancyProperties properties;
     private final TenantHostPattern hosts;
@@ -57,6 +64,10 @@ class TenantResolutionFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         Optional<Resolved> tenant = slugFrom(request).flatMap(this::resolve);
+        if (tenant.isEmpty() && request.getRequestURI().startsWith(TENANT_OPTIONAL)) {
+            chain.doFilter(request, response);
+            return;
+        }
         if (tenant.isEmpty()) {
             Problems.write(
                     response,
