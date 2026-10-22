@@ -1130,6 +1130,41 @@ class RetailOfflineSalesIT extends IntegrationTest {
     }
 
     /** A sale recorded under a client sale id, then a client_sale_conflict report of a different sale under it: its id. */
+    /**
+     * A sale is recorded, then a changed body under its client sale id is reported as not_taken_after_retries and discarded:
+     * decidable() compares the request hash, not the code, so it ends discarded and never linked to the other sale.
+     */
+    @Test
+    void aChangedBodyReportedUnderAnotherCodeIsDiscardedNotLinkedToTheOtherSale() {
+        api.stockUp(t.headOffice(), product, "5");
+        UUID client = UUID.randomUUID();
+        ResponseEntity<JsonNode> sold = send(
+                offlineSale(client, Instant.now().minus(Duration.ofHours(2)), "1", 2_000),
+                UUID.randomUUID().toString());
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        Map<String, Object> report =
+                failureReport(client, offlineSale(client, Instant.now().minus(Duration.ofHours(2)), "2", 2_000));
+        report.put("code", "not_taken_after_retries");
+        report.put("message", "The server did not take the sale after several tries.");
+        ResponseEntity<JsonNode> reported = api.post("/offline-failures", report, SALES);
+        assertThat(reported.getStatusCode()).as("%s", reported.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(reported.getBody().get("status").asString()).isEqualTo("open");
+        String id = reported.getBody().get("id").asString();
+
+        RetailTestSupport boss = new RetailTestSupport(http, t);
+        ResponseEntity<JsonNode> discarded =
+                boss.post("/offline-failures/" + id + "/discard", Map.of("reason", "Entered again by hand"), MANAGER);
+        assertThat(discarded.getStatusCode()).as("%s", discarded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(discarded.getBody().get("status").asString()).isEqualTo("discarded");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status || ':' || coalesce(sale_id::text, 'null') FROM retail_offline_failures"
+                                + " WHERE id = ?::uuid")
+                        .param(id)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("discarded:null");
+    }
+
     private String conflictReport() {
         api.stockUp(t.headOffice(), product, "5");
         UUID client = UUID.randomUUID();
