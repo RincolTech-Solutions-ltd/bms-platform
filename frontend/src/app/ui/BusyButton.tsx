@@ -44,8 +44,10 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
   busyNow.current = busy;
   // A second press can land before the pending state renders (a double click is two events in one
   // task), so a press holds the button until busy shows, or until the press's own work is over (an
-  // onClick that awaits or throws) and one more task has passed (a form that refused its input).
+  // onClick that awaits or throws) and one more task has passed (a form that refused its input). A
+  // submit of its form that this button did not send holds it the same way.
   const held = useRef(false);
+  const holds = useRef(0);
 
   useEffect(() => {
     if (!busy) {
@@ -59,6 +61,7 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
   // Enter in a field presses the form's first submit button, which the press guard covers; a form with
   // another submit button first, or one submitted from code, still submits, so while busy (or held by a
   // press of this button) the form drops any submit this button did not send before the screen sees it.
+  // A submit that gets through holds the button too, so two submits from code in one task send once.
   useEffect(() => {
     const owner = button.current?.form;
     if (!owner || (rest.type !== undefined && rest.type !== 'submit')) return;
@@ -66,28 +69,38 @@ export function BusyButton({ busy, disabled, className, onClick, children, ...re
       if (busyNow.current || (held.current && e.submitter !== button.current)) {
         e.preventDefault();
         e.stopImmediatePropagation();
+      } else if (!held.current) {
+        hold()();
       }
     };
     owner.addEventListener('submit', drop);
     return () => owner.removeEventListener('submit', drop);
   }, [rest.type]);
 
+  // Holds the button for one press or submit and returns the call that says its work is over. Two tasks
+  // after that the query library and React have rendered any pending state it started; if busy shows,
+  // the busy effect releases the hold when busy ends. A newer hold is never released by an older one.
+  function hold() {
+    held.current = true;
+    const id = ++holds.current;
+    const release = () => {
+      if (holds.current === id && !busyNow.current) held.current = false;
+    };
+    return () => void setTimeout(() => setTimeout(release));
+  }
+
   function press(e: MouseEvent<HTMLButtonElement>) {
     if (busyNow.current || held.current) {
       e.preventDefault();
       return;
     }
-    held.current = true;
-    // Two tasks later the query library and React have rendered any pending state the press started.
-    const release = () => setTimeout(() => setTimeout(() => {
-      if (!busyNow.current) held.current = false;
-    }));
+    const done = hold();
     let result: unknown;
     try {
       result = onClick?.(e);
     } finally {
-      if (result instanceof Promise) void result.finally(release);
-      else release();
+      if (result instanceof Promise) void result.finally(done);
+      else done();
     }
   }
 

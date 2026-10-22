@@ -152,6 +152,23 @@ describe('the busy button (#456)', () => {
     expect(screen.getByRole('button', { name: 'Record' }).getAttribute('aria-busy')).toBe('true');
   });
 
+  it('sends once when its form is submitted twice from code in one task, and again two tasks later', async () => {
+    const onSubmit = vi.fn((e: FormEvent) => e.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <input aria-label="Amount" />
+        <BusyButton type="submit" busy={false}>Record</BusyButton>
+      </form>,
+    );
+    const form = screen.getByLabelText('Amount').closest('form') as HTMLFormElement;
+    form.requestSubmit();
+    form.requestSubmit();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve)); await new Promise((resolve) => setTimeout(resolve)); });
+    form.requestSubmit();
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
   it('submits its form once on a double click', () => {
     const onSubmit = vi.fn((e: FormEvent) => e.preventDefault());
     render(
