@@ -19,6 +19,7 @@ import com.rincoltech.bms.testsupport.SmsTenants;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -733,6 +734,55 @@ class SmsEventsIT extends IntegrationTest {
     }
 
     // ---- Opt-out, other tenants, backlog --------------------------------------------------------------------
+
+    /**
+     * The review of #290: with a daily cap of 1, the second "due today" reminder is held by the cap and then expires at
+     * its own time (the end of its due date at the latest) instead of being sent the next day, when it would be wrong.
+     */
+    @Test
+    void frNtf18_aLoanReminderOverTheDailyCapExpiresInsteadOfGoingTheNextDay() {
+        Rig rig = new Rig(BASE);
+        TestDatabase.Fixture a = tenant(1);
+        Instant endOfDueDay = LocalDate.ofInstant(BASE, java.time.ZoneId.of("Africa/Kampala"))
+                .plusDays(1)
+                .atStartOfDay(java.time.ZoneId.of("Africa/Kampala"))
+                .toInstant();
+        Map<String, String> due =
+                Map.of("loan_no", "LN-HQ-000123", "currency", "UGX", "amount", "520,000", "due_date", "10/06/2031");
+        for (int i = 0; i < 2; i++) {
+            String phone = "07000001" + (40 + i);
+            String ref = "item-" + i;
+            assertThat(inTenant(
+                            a,
+                            () -> rig.events.queue(new MemberSms(
+                                    "loan.due_today",
+                                    UUID.randomUUID(),
+                                    phone,
+                                    due,
+                                    ref,
+                                    Outbox.REMINDER,
+                                    null,
+                                    endOfDueDay))))
+                    .isEqualTo(Result.QUEUED);
+        }
+        rig.dispatch();
+        assertThat(rig.provider.sent()).hasSize(1);
+        Map<String, Object> held = rows(a).stream()
+                .filter(r -> "pending".equals(r.get("status")))
+                .findFirst()
+                .orElseThrow();
+        assertThat(at(held.get("expires_at")))
+                .as("the cap never moves its expiry later")
+                .isBeforeOrEqualTo(endOfDueDay);
+
+        rig.at(BASE.plus(java.time.Duration.ofDays(1)));
+        rig.dispatch();
+        assertThat(rig.provider.sent()).as("not sent the next day").hasSize(1);
+        assertThat(rows(a))
+                .filteredOn(r -> held.get("idempotency_key").equals(r.get("idempotency_key")))
+                .singleElement()
+                .satisfies(r -> assertThat(r.get("last_error")).isEqualTo("expired"));
+    }
 
     /** The second review of #290: an arrears notice to an opted-out member is refused at the channel. */
     @Test

@@ -419,12 +419,20 @@ class LoanServicer implements LoanServicing {
         }
         if (!recovery) {
             repo.insertAllocations(txnId, txnId, applied.allocations());
-            // The reminders of the instalments this payment reached are withdrawn before they are sent (#290 review).
-            notices.withdrawReminders(applied.allocations().stream()
+            // The reminders of the instalments this payment paid up are withdrawn before they are sent; one still
+            // overdue
+            // after a small payment keeps its notice (#290 review).
+            java.util.Set<UUID> reached = applied.allocations().stream()
                     .map(Allocation::itemId)
                     .filter(java.util.Objects::nonNull)
-                    .distinct()
-                    .toList());
+                    .collect(java.util.stream.Collectors.toSet());
+            List<UUID> paidUp = new ArrayList<>();
+            for (Item i : items) {
+                if (i.unpaidContract() == 0 && reached.contains(i.id)) {
+                    paidUp.add(i.id);
+                }
+            }
+            notices.withdrawReminders(paidUp);
             PenaltyReconciler.Moved moved =
                     penalties.reconcile(loan.id(), terms(loan).penalty(), items, txnId, today);
             if (moved.cancelledMinor() > 0) {

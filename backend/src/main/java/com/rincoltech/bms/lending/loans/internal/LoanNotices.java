@@ -242,7 +242,7 @@ class LoanNotices {
      */
     void withdrawReminders(java.util.Collection<UUID> itemIds) {
         for (UUID itemId : itemIds) {
-            sms.cancel(itemId.toString());
+            sms.cancelSettled(itemId.toString());
         }
     }
 

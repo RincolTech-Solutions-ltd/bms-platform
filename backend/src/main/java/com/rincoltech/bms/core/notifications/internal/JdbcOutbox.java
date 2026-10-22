@@ -90,6 +90,15 @@ class JdbcOutbox implements Outbox {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public int cancelUnclaimed(String eventRef, String reason) {
+        return jdbc.sql("SELECT notification_outbox_cancel_unclaimed(?, ?, ?)")
+                .params(eventRef, Timestamp.from(clock.now()), reason)
+                .query(Integer.class)
+                .single();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public int cancelUnclaimed(String eventRef) {
         return jdbc.sql("SELECT notification_outbox_cancel_unclaimed(?, ?)")
                 .params(eventRef, Timestamp.from(clock.now()))

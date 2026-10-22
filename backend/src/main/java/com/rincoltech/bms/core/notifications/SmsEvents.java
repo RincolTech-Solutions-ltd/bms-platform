@@ -198,4 +198,10 @@ public interface SmsEvents {
      * sender may be at the provider and is left. Guarded like the rest; returns how many were withdrawn (0 on a failure).
      */
     int cancel(String eventRef);
+
+    /**
+     * As {@link #cancel}, for a reminder or arrears notice the member no longer needs (the instalment was paid, the loan
+     * closed or written off): the rows are labelled {@code cancelled_settled}, not as a reversal. Guarded likewise.
+     */
+    int cancelSettled(String eventRef);
 }

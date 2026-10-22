@@ -147,6 +147,12 @@ class SmsEventsService implements SmsEvents {
         return guarded("cancel", 0, () -> outbox.cancelUnclaimed(eventRef));
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int cancelSettled(String eventRef) {
+        return guarded("cancel", 0, () -> outbox.cancelUnclaimed(eventRef, "cancelled_settled"));
+    }
+
     /** Runs {@code body} in a savepoint; on any failure rolls back to it, logs the label and the error class, answers {@code onFailure}. */
     private <T> T guarded(String label, T onFailure, Supplier<T> body) {
         try {

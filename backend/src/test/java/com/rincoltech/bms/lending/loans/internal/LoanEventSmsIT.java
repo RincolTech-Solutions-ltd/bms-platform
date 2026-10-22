@@ -260,7 +260,7 @@ class LoanEventSmsIT extends LoanFixtures {
     List<Map<String, Object>> rows(TestDatabase.Fixture tenant) {
         return TestDatabase.owner()
                 .sql("SELECT idempotency_key, recipient, template_key, category, subject_type, subject_id, status,"
-                        + " params::text AS params, created_at, expires_at FROM notification_outbox"
+                        + " last_error, params::text AS params, created_at, expires_at FROM notification_outbox"
                         + " WHERE channel = 'sms' AND tenant_id = ? ORDER BY created_at, template_key")
                 .param(tenant.tenantId())
                 .query()
@@ -1031,6 +1031,10 @@ class LoanEventSmsIT extends LoanFixtures {
                 java.time.Duration.ofHours(7).plusMinutes(29)));
         repaid(late, 520_000, today(), null);
         assertThat(status(LoanNotices.OVERDUE_1)).as("withdrawn, never sent").isEqualTo("failed");
+        assertThat(only(LoanNotices.OVERDUE_1).get("last_error")).isEqualTo("cancelled_settled");
+        assertThat(status(LoanNotices.DUE_TODAY))
+                .as("the other loan's reminder stands")
+                .isEqualTo("pending");
     }
 
     /** The second review of #290: the first run after SMS is switched on never texts a loan already 400 days late. */
@@ -1066,5 +1070,60 @@ class LoanEventSmsIT extends LoanFixtures {
                 .update();
         nightly();
         assertThat(templates()).filteredOn(LoanNotices.OVERDUE_1::equals).hasSize(2);
+    }
+
+    /** The review of #290: a small payment that leaves the instalment overdue keeps its overdue notice. */
+    @Test
+    void frNtf02_aPartialPaymentKeepsTheOverdueNotice() {
+        smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
+        String loan = approved(instalmentProduct("PARTPAY"), 1_200_000, 3, 49);
+        disburse(loan, today().minusMonths(1).minusDays(1), null);
+        nightly();
+        assertThat(status(LoanNotices.OVERDUE_1)).isEqualTo("pending");
+        repaid(loan, 1_000, today(), null);
+        assertThat(status(LoanNotices.OVERDUE_1))
+                .as("still overdue, still told")
+                .isEqualTo("pending");
+    }
+
+    String itemId(String loan, int no) {
+        return TestDatabase.owner()
+                .sql("SELECT id::text FROM lending_schedule_items WHERE loan_id = ?::uuid AND item_no = ?")
+                .params(loan, no)
+                .query(String.class)
+                .single();
+    }
+
+    void noticeSent(String loan, int itemNo, LocalDate on) {
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO lending_loan_notices (id, tenant_id, loan_id, schedule_item_id, template_key,
+                                                          business_date)
+                        VALUES (gen_random_uuid(), ?, ?::uuid, ?::uuid, 'loan.overdue_1', ?)
+                        """)
+                .params(t.tenantId(), loan, itemId(loan, itemNo), on)
+                .update();
+    }
+
+    /**
+     * The review of #290: a loan told about one instalment three days ago is not told about another today; one told
+     * seven days ago is.
+     */
+    @Test
+    void frNtf02_sevenDaysBetweenNoticesAboutDifferentInstalments() {
+        smsOn();
+        movable.set(MovableClockConfig.AFTER_MIDNIGHT);
+        String recent = approved(instalmentProduct("GAPA"), 1_200_000, 3, 50);
+        disburse(recent, today().minusMonths(1).minusDays(1), null);
+        noticeSent(recent, 2, today().minusDays(3));
+        String week = approved(instalmentProduct("GAPB"), 1_200_000, 3, 51);
+        disburse(week, today().minusMonths(1).minusDays(1), null);
+        noticeSent(week, 2, today().minusDays(7));
+        nightly();
+        assertThat(rows(t))
+                .filteredOn(r -> LoanNotices.OVERDUE_1.equals(r.get("template_key")))
+                .singleElement()
+                .satisfies(r -> assertThat((String) r.get("idempotency_key")).contains(itemId(week, 1)));
     }
 }

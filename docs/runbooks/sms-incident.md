@@ -30,7 +30,9 @@ listed?), and the failed rows with tenant, category, masked recipient and `last_
 | `blocked_optout` | The member opted out | Nothing; it is logged on purpose |
 | `tenant_sms_off` | The operator, or the tenant's own administrator, switched the tenant off after the row was queued | Nothing, or switch it on (a tenant's own switch is in its SMS settings; switching on drops the queued rows) |
 | `backlog_dropped` | Sending was switched on and this row was older than that moment | Nothing |
-| `expired` | A receipt older than an hour, or a reminder past its window day | Nothing; stale messages are not sent |
+| `expired` | A receipt older than an hour, a reminder past its window day, or a loan reminder or arrears notice past its own day (one held back by the daily cap is not sent the next day: "due today" would be wrong) | Nothing; stale messages are not sent |
+| `cancelled_reversed` | The entry the text was about was reversed before it went | Nothing; a correction is the cashier's word |
+| `cancelled_settled` | A loan reminder or arrears notice withdrawn before it went because the member paid the instalment up, or the loan was closed or written off | Nothing; the member no longer needs it |
 
 ## "SMS stopped for a tenant" checklist
 
