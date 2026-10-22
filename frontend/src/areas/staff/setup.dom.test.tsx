@@ -51,7 +51,7 @@ vi.mock('@tanstack/react-router', async (original) => ({
   Link: ({ children }: { children: ReactNode }) => <a href="#test">{children}</a>,
 }));
 
-const { Setup, noticesWording, reportsWording } = await import('./setup');
+const { Setup, hasRetail, reportsWording } = await import('./setup');
 const { ICON_VERSION_KEY, NewLogoCard } = await import('../../install/NewIcon');
 
 const REAL_AGENT = navigator.userAgent;
@@ -142,20 +142,28 @@ describe('the set-up note on the new icon', () => {
 describe('the set-up hints and module wording', () => {
   it('explains the receipt footer and previews the bottom of a receipt', async () => {
     show();
-    const footer = (await screen.findByLabelText(/Receipt footer/)) as HTMLTextAreaElement;
+    const footer = (await screen.findByRole('textbox', { name: 'Receipt footer' })) as HTMLTextAreaElement;
     expect(footer.getAttribute('aria-describedby')).toBe('footer-hint');
     expect(document.getElementById('footer-hint')?.textContent).toContain('A short line printed at the bottom of every receipt');
     expect(footer.placeholder).not.toBe('');
     expect(screen.queryByTestId('footer-preview')).toBeNull();
     fireEvent.change(footer, { target: { value: 'Thank you, call 0700 000000' } });
-    expect(screen.getByTestId('footer-preview').textContent).toContain('Thank you, call 0700 000000');
+    expect(screen.getByRole('group', { name: 'Bottom of a receipt' }).textContent).toContain('Thank you, call 0700 000000');
   });
 
   it('explains the business name and the theme colour', async () => {
     show();
-    await screen.findByRole('heading', { name: 'Business set-up' });
+    const name = await screen.findByRole('textbox', { name: 'Business name' });
+    expect(name.getAttribute('aria-describedby')).toBe('name-hint');
     expect(document.getElementById('name-hint')?.textContent).toContain('on the app, receipts and text messages');
-    expect(screen.getByText(/colour of the app's top bar and buttons/)).toBeTruthy();
+    expect(document.getElementById('colour-hint')?.textContent).toBe(
+      "The colour of the app's top bar and buttons. The app picks white or dark text for it; colours where neither is readable are refused.",
+    );
+    expect(screen.getByLabelText('Pick a colour').getAttribute('aria-describedby')).toBe('colour-hint');
+    const hex = screen.getByRole('textbox', { name: 'Hex' });
+    expect(hex.getAttribute('aria-describedby')).toBe('colour-hint');
+    fireEvent.change(hex, { target: { value: '#12' } });
+    expect(hex.getAttribute('aria-describedby')).toBe('colour-hint colour-problem');
   });
 
   it('keeps lending words off a retail-only business', async () => {
@@ -171,12 +179,21 @@ describe('the set-up hints and module wording', () => {
     const reports = await screen.findByLabelText(/Let staff run reports/);
     expect(reports.parentElement?.textContent).toContain('portfolio at risk and others');
     expect(document.body.textContent).not.toMatch(/low stock|sales, stock/);
+    expect(screen.queryByRole('group', { name: 'Notifications' })).toBeNull();
   });
 
-  it('names both when both modules are on, or when /me has no module list', () => {
+  it('names both when both modules are on', async () => {
+    show({ modules: ['lending', 'retail'] });
+    await screen.findByLabelText(/Let staff run reports/);
+    expect(document.body.textContent).toContain('portfolio at risk');
+    expect(document.body.textContent).toContain('low stock');
+  });
+
+  it('words the reports for the modules on, neutrally for none, and both when /me has no module list', () => {
     expect(reportsWording(['lending', 'retail'])).toBe('sales, stock, profit, portfolio at risk and others');
     expect(reportsWording(undefined)).toBe(reportsWording(['lending', 'retail']));
-    expect(noticesWording(undefined)).toBe(noticesWording(['retail']));
-    expect(noticesWording([])).toBe('');
+    expect(reportsWording([])).toBe('and others');
+    expect(hasRetail(undefined)).toBe(true);
+    expect(hasRetail(['lending'])).toBe(false);
   });
 });

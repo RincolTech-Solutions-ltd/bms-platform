@@ -272,7 +272,8 @@ is dismissed (`setup_dismissed`, tenant wide). Each field whose meaning is not o
 one-line plain-words hint, and the receipt footer shows a live preview of the bottom of a receipt.
 Wording that belongs to one module follows the tenant's modules from `/me` (issue #468): the
 reports switch speaks of sales, stock and profit for retail and of portfolio at risk for lending,
-and the phone notices (all retail today) are named only to a business with retail.
+and the link to the business notifications (all retail today) is shown only to a business with
+retail.
 
 - **Logo rules.** PNG, JPEG or WebP by content, never by file name; no SVG (it can carry script)
   and no GIF; at most 1 MB; at least 128 px on the short side; re-encoded on the server (metadata
