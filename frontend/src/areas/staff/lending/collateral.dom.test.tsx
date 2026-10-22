@@ -52,7 +52,7 @@ function mount(node: ReactElement, opts: { me?: Me; members?: MemberRecord[]; it
 }
 
 const type = (label: RegExp | string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-const save = () => screen.getByRole('button', { name: /Register collateral|Save changes|Saving/ }) as HTMLButtonElement;
+const save = () => screen.getByRole('button', { name: /Register collateral|Save changes/ }) as HTMLButtonElement;
 
 describe('registering collateral', () => {
   it('needs the member, a description and, for a vehicle, the plate number, each named in plain words', async () => {

@@ -269,7 +269,7 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
         />
       )}
       {!exists && <Problem error={save.error ?? check.error} />}
-      <BusyButton busy={busy} type="submit" className="rt-primary" disabled={!complete || exists !== null || similar !== null}>{busy ? 'Saving' : product ? 'Save changes' : 'Add item'}</BusyButton>
+      <BusyButton busy={busy} type="submit" className="rt-primary" disabled={!complete || exists !== null || similar !== null}>{product ? 'Save changes' : 'Add item'}</BusyButton>
       <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
   );
@@ -325,7 +325,7 @@ export function PriceForm({ product, onSaved, onCancel }: { product: Product; on
         <label htmlFor="price-reason">Why is the price changing?</label>
         <input id="price-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} autoComplete="off" />
         <Problem error={save.error} />
-        <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!valid}>{save.isPending ? 'Saving' : 'Save the new price'}</BusyButton>
+        <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!valid}>Save the new price</BusyButton>
         <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
       </form>
       <h2>Price history</h2>

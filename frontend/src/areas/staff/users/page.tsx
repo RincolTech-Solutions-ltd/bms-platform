@@ -216,7 +216,7 @@ export function UsersScreen() {
                       <p className="cluster">
                         {u.status === 'invited' && (
                           <BusyButton type="button" className="btn-sm" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void resend(u)}>
-                            {busyId === u.id ? 'Making a link' : 'Send a new link'}
+                            Send a new link
                           </BusyButton>
                         )}
                         <button type="button" /* busy-exempt: opens a panel */ className="btn-sm" disabled={busyId !== null} onClick={() => { setMode({ kind: 'roles', id: u.id ?? '' }); setError(null); }}>
@@ -246,7 +246,7 @@ export function UsersScreen() {
                         <p>Deactivate <strong>{u.full_name}</strong>? They are signed out at once and cannot sign in again. Everything they recorded stays on the books.</p>
                         <p className="cluster">
                           <BusyButton type="button" className="btn-danger" busy={busyId === u.id} disabled={busyId !== null} onClick={() => void deactivate(u)}>
-                            {busyId === u.id ? 'Deactivating' : 'Yes, deactivate'}
+                            Yes, deactivate
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setMode(null)}>Keep them</button>
                         </p>

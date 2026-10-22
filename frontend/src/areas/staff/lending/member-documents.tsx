@@ -36,7 +36,7 @@ function OpenButton({ documentId, label }: { documentId: string; label: string }
   };
   return (
     <>
-      <BusyButton busy={busy} type="button" className="btn-sm" onClick={() => void open()} aria-label={`Open ${label}`}>{busy ? 'Opening' : 'Open'}</BusyButton>
+      <BusyButton busy={busy} type="button" className="btn-sm" onClick={() => void open()} aria-label={`Open ${label}`}>Open</BusyButton>
       {error && <span role="alert" className="field-error">{error}</span>}
     </>
   );

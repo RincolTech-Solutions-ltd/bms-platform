@@ -848,7 +848,7 @@ export function BusinessScreen({ tenantId }: { tenantId: string }) {
                       )}
                       <div className="cluster">
                         <BusyButton type="submit" className="btn-primary" busy={busy}>
-                          {busy ? 'Working' : open.what === 'invite' ? 'Yes, make the link' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
+                          {open.what === 'invite' ? 'Yes, make the link' : open.what === 'owner' ? 'Yes, make them the owner' : open.what === 'sign-in' ? 'Yes, make the link' : 'Yes, reset it'}
                         </BusyButton>
                         <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" onClick={close} disabled={busy}>
                           Cancel

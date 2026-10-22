@@ -163,7 +163,7 @@ export function ReturnFormView({ sale, back, form: chosen, branches, usualIsStor
       </section>
       {problem && planned.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="return-save">{busy ? 'Saving' : 'Record the return'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="return-save">Record the return</BusyButton>
 
     </form>
   );

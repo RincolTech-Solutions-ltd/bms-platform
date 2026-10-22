@@ -64,7 +64,7 @@ export function OperatorSignInView(p: OperatorSignInViewProps) {
             />
           </div>
           <BusyButton className="btn-brand" type="submit" busy={p.busy}>
-            {p.busy ? 'Signing in' : 'Sign in'}
+            Sign in
           </BusyButton>
         </form>
       )}
@@ -251,7 +251,7 @@ export function OperatorSetupView(p: {
             />
           </div>
           <BusyButton className="btn-brand" type="submit" busy={p.busy}>
-            {p.busy ? 'Saving' : 'Set password'}
+            Set password
           </BusyButton>
         </form>
       )}

@@ -121,7 +121,7 @@ function AddNumber({ onAdded }: { onAdded: () => void }) {
       {add.isSuccess && <p role="status" className="alert alert-success">Added.</p>}
       <p>
         <BusyButton type="submit" className="rt-primary" busy={add.isPending} disabled={phone.trim() === ''}>
-          {add.isPending ? 'Adding' : 'Add to the list'}
+          Add to the list
         </BusyButton>
       </p>
     </form>
@@ -173,7 +173,7 @@ function PasteList({ onAdded }: { onAdded: () => void }) {
         </BusyButton>
         {checked?.dry_run && checked.added + checked.changed > 0 && (
           <BusyButton type="button" className="rt-primary" busy={run.isPending && run.variables === false} disabled={run.isPending} onClick={() => run.mutate(false)}>
-            {run.isPending ? 'Adding' : `Add ${checked.added + checked.changed} to the list`}
+            {`Add ${checked.added + checked.changed} to the list`}
           </BusyButton>
         )}
       </p>

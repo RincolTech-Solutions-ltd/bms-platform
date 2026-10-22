@@ -55,7 +55,7 @@ export function OutboxView({ status, busyId, onRetry }: { status: OutboxStatus; 
                 <td>{f.failed_at?.slice(0, 16).replace('T', ' ')}</td>
                 <td>
                   <BusyButton type="button" busy={busyId !== null && busyId === f.id} disabled={busyId !== null} onClick={() => onRetry(f.id ?? '')}>
-                    {busyId === f.id ? 'Sending' : 'Send again'}
+                    Send again
                   </BusyButton>
                 </td>
               </tr>

@@ -155,7 +155,7 @@ export function InviteScreen() {
           </p>
         )}
         <p className="cluster">
-          <BusyButton type="submit" className="rt-primary" data-tour="invite-send" busy={busy} disabled={roles.isPending}>{busy ? 'Inviting' : 'Invite'}</BusyButton>
+          <BusyButton type="submit" className="rt-primary" data-tour="invite-send" busy={busy} disabled={roles.isPending}>Invite</BusyButton>
           <Link to="/staff/users" className="btn-ghost btn">Cancel</Link>
         </p>
       </form>

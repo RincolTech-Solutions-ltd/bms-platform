@@ -132,7 +132,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
           <form onSubmit={submitPassword} className="form-stack" noValidate>
             <PasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
             <BusyButton className="btn-primary btn-lg" busy={busy}>
-              {busy ? 'Saving' : 'Save and continue'}
+              Save and continue
             </BusyButton>
           </form>
           <InstallPrompt />
@@ -152,7 +152,7 @@ export function AcceptInvitation({ token, initial = { kind: 'password' } }: { to
           <ErrorLine message={message} />
           <div className="form-actions">
             <BusyButton type="button" className="btn-primary btn-lg" busy={busy} onClick={turnOn}>
-              {busy ? 'Starting' : 'Turn on two-step sign-in'}
+              Turn on two-step sign-in
             </BusyButton>
             <button type="button" /* busy-exempt: skip waits for the request */ className="btn-lg" disabled={busy} onClick={home}>
               Skip for now

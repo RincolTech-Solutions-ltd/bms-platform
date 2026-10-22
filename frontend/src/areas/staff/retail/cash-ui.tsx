@@ -123,7 +123,7 @@ export function VoidAction({ what, run, onVoided }: { what: string; run: (reason
       <Problem error={void_.error} />
       <div className="cluster">
         <BusyButton busy={void_.isPending} type="submit" className="btn-sm" disabled={reason.trim() === ''}>
-          {void_.isPending ? 'Voiding' : 'Confirm void'}
+          Confirm void
         </BusyButton>
         <button type="button" className="btn-sm" onClick={() => { setOpen(false); setReason(''); void_.reset(); }}>
           Keep it

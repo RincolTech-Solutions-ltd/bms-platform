@@ -138,7 +138,7 @@ export function SubscribeForm({ member, products }: { member: { id: string; labe
       )}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary btn-block" data-tour="investment-open" disabled={amountMinor === null || !termOk}>
-        {save.isPending ? 'Opening' : 'Open the investment'}
+        Open the investment
       </BusyButton>
       <p className="field-hint">It opens pending funding; record the money received on the next screen.</p>
     </form>

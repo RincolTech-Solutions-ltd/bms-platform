@@ -152,7 +152,8 @@ describe('recording a repayment by hand', () => {
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
-    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.textContent).toBe('Record repayment');
     expect(button.querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(button);
     expect(lend.repay).toHaveBeenCalledTimes(1);

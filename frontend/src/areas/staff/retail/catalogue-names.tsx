@@ -54,7 +54,7 @@ export function ExistsPanel({ item, canAddAnyway, busy, onOpen, onAddAnyway, onC
           <label htmlFor="duplicate-reason">Why is this a different item? (at least {MIN_DUPLICATE_REASON} characters)</label>
           <input id="duplicate-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} autoComplete="off" />
           <p className="hint">The reason is kept with the item.</p>
-          <BusyButton busy={busy ?? false} type="button" disabled={ready === null} onClick={() => ready && onAddAnyway(ready)}>{busy ? 'Saving' : 'Add anyway'}</BusyButton>
+          <BusyButton busy={busy ?? false} type="button" disabled={ready === null} onClick={() => ready && onAddAnyway(ready)}>Add anyway</BusyButton>
         </div>
       )}
     </section>
@@ -87,7 +87,7 @@ export function SimilarPanel({ items, busy, onOpen, onSaveAnyway, onChangeName }
         ))}
       </ul>
       <p className="cluster">
-        <BusyButton busy={busy ?? false} type="button" className="rt-primary" onClick={onSaveAnyway}>{busy ? 'Saving' : 'This is a different item, save it'}</BusyButton>
+        <BusyButton busy={busy ?? false} type="button" className="rt-primary" onClick={onSaveAnyway}>This is a different item, save it</BusyButton>
         <button type="button" className="btn-ghost" onClick={onChangeName}>Change the name</button>
       </p>
     </section>

@@ -64,7 +64,7 @@ export function AssistantSwitch({ saved, canManage, busy, error, onChange }: {
             <input type="checkbox" checked={ticked} onChange={(e) => setTicked(e.target.checked)} /> I have read this and accept it for my business
           </label>
           <p className="cluster">
-            <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ticked}>{busy ? 'Switching on' : 'Switch the assistant on'}</BusyButton>
+            <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ticked}>Switch the assistant on</BusyButton>
             <button type="button" /* busy-exempt: not now waits for the request */ className="btn-ghost" disabled={busy} onClick={() => { setOpening(false); setTicked(false); }}>Not now</button>
           </p>
         </form>

@@ -236,7 +236,7 @@ export function ActivateFormView({ form, problems, busy, onChange, onSubmit }: A
         )}
       </div>
       <BusyButton className="btn-brand" type="submit" busy={busy}>
-        {busy ? 'Activating' : 'Activate and send the link'}
+        Activate and send the link
       </BusyButton>
     </form>
   );

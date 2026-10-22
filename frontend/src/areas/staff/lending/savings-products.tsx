@@ -193,7 +193,7 @@ export function ProductForm({ product, currency, onDone }: { product?: SavingsPr
       {typeof terms === 'string' && d.name !== '' && <p className="field-hint">{terms}</p>}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary btn-block" disabled={!codeOk || typeof terms === 'string'}>
-        {save.isPending ? 'Saving' : product ? 'Save changes' : 'Create product'}
+        {product ? 'Save changes' : 'Create product'}
       </BusyButton>
       <button type="button" className="btn-block" onClick={onDone}>Cancel</button>
     </form>

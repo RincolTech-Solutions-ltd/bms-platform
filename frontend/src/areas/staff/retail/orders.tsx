@@ -87,7 +87,7 @@ export function DeliverPanel({ order, onDone }: { order: Order; onDone: (d: Deli
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={deliver.error} />
       <BusyButton busy={deliver.isPending} type="button" className="rt-primary" disabled={problem !== null} onClick={() => deliver.mutate()}>
-        {deliver.isPending ? 'Saving' : 'Save: delivered and paid'}
+        Save: delivered and paid
       </BusyButton>
     </fieldset>
   );
@@ -132,7 +132,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
           <legend>Out for delivery</legend>
           <label htmlFor={`rider-${order.id}`}>Who takes it? (for example the rider&apos;s name)</label>
           <input id={`rider-${order.id}`} value={rider} maxLength={120} onChange={(e) => setRider(e.target.value)} />
-          <BusyButton busy={send.isPending} type="button" disabled={rider.trim() === ''} onClick={() => send.mutate()}>{send.isPending ? 'Saving' : 'Save: out for delivery'}</BusyButton>
+          <BusyButton busy={send.isPending} type="button" disabled={rider.trim() === ''} onClick={() => send.mutate()}>Save: out for delivery</BusyButton>
         </fieldset>
       )}
       {panel === 'deliver' && <DeliverPanel order={order} onDone={(d) => { setDone(d); setPanel(null); onDelivered?.(d); }} />}
@@ -141,7 +141,7 @@ export function OrderActions({ order, onDelivered }: { order: Order; onDelivered
           <legend>Cancel this order</legend>
           <label htmlFor={`cancel-${order.id}`}>Why? (it stays on record, and the items go back on the shelf)</label>
           <input id={`cancel-${order.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-          <BusyButton busy={cancel.isPending} type="button" disabled={reason.trim().length < 3} onClick={() => cancel.mutate()}>{cancel.isPending ? 'Cancelling' : 'Cancel the order'}</BusyButton>
+          <BusyButton busy={cancel.isPending} type="button" disabled={reason.trim().length < 3} onClick={() => cancel.mutate()}>Cancel the order</BusyButton>
         </fieldset>
       )}
       <Problem error={pack.error ?? send.error ?? cancel.error} />
@@ -296,7 +296,7 @@ export function OrderForm({ branchId, onSaved }: { branchId: string; onSaved: (o
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={problem !== null} data-tour="order-save">
-        {save.isPending ? 'Saving' : 'Save the order'}
+        Save the order
       </BusyButton>
       {draft.lines.length > 0 && !save.isPending && <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this order</button>}
     </form>

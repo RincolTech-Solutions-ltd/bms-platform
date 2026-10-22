@@ -92,7 +92,7 @@ export function TurnOnCard({ push = defaultPush, now = () => Date.now() }: { pus
       </p>
       <p className="cluster">
         <BusyButton type="button" className="btn-primary" busy={busy} onClick={() => void turnOn()}>
-          {busy ? 'Turning on' : 'Turn on'}
+          Turn on
         </BusyButton>
         <button type="button" /* busy-exempt: not now is local only and waits for turn on */ className="btn-ghost" disabled={busy} onClick={notNow}>
           Not now

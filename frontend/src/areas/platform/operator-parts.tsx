@@ -78,7 +78,7 @@ export function ConfirmPanel({ id, sentence, confirm, needsReason = true, danger
       )}
       <div className="cluster">
         <BusyButton type="submit" className={danger ? 'btn-danger' : 'btn-primary'} busy={busy}>
-          {busy ? 'Saving' : confirm}
+          {confirm}
         </BusyButton>
         <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" onClick={onCancel} disabled={busy}>
           Cancel

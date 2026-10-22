@@ -127,7 +127,7 @@ export function SlowMoverSetting({ read, onSaved }: { read: CapabilitiesRead; on
       <Problem error={save.error && new Error(changeFailureText(save.error, queryClient))} />
       <p className="cluster">
         <BusyButton type="button" className="rt-primary" busy={save.isPending} disabled={problem !== null || !changed} onClick={() => save.mutate()}>
-          {save.isPending ? 'Saving' : 'Save'}
+          Save
         </BusyButton>
 
       </p>

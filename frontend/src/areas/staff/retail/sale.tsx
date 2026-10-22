@@ -332,7 +332,7 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
               {accountsOn && (
                 <>
                   <BusyButton type="button" className="rt-primary" busy={addBuyer.isPending} disabled={draft.newBuyerName.trim() === ''} onClick={() => addBuyer.mutate()}>
-                    {addBuyer.isPending ? 'Adding' : 'Add this buyer'}
+                    Add this buyer
                   </BusyButton>
                   <Problem error={addBuyer.error} />
                 </>
@@ -370,7 +370,7 @@ export function SaleForm({ branchId, onSaved }: { branchId: string; onSaved?: (s
       )}
       {overBy === null && <Problem error={save.error} />}
       <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={problem !== null} data-tour="sale-save">
-        {save.isPending ? 'Saving' : 'Save sale'}
+        Save sale
       </BusyButton>
       {draft.lines.length > 0 && !save.isPending && (
         <button type="button" onClick={() => { discard(); setAddingBuyer(false); setReceived(''); save.reset(); }}>

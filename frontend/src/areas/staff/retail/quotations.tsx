@@ -58,7 +58,7 @@ export function ConvertPanel({ form, hasTerms, busy, onChange, onConvert }: { fo
       </label>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <BusyButton type="button" className="rt-primary" busy={busy === true} disabled={problem !== null} onClick={onConvert}>
-        {busy ? 'Making the sale' : 'Make the sale'}
+        Make the sale
       </BusyButton>
     </fieldset>
   );
@@ -132,7 +132,7 @@ function QuotationCard({ q, branchName }: { q: Quotation; branchName?: string })
           <label htmlFor={`cancel-${q.id}`}>Why? (it stays on record)</label>
           <input id={`cancel-${q.id}`} value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
           <BusyButton type="button" busy={cancel.isPending} disabled={reason.trim() === ''} onClick={() => cancel.mutate()}>
-            {cancel.isPending ? 'Cancelling' : 'Cancel the quotation'}
+            Cancel the quotation
           </BusyButton>
         </fieldset>
       )}
@@ -216,7 +216,7 @@ export function QuotationForm({ branchId, onSaved }: { branchId: string; onSaved
       {problem && draft.lines.length > 0 && <Note>{problem}</Note>}
       <Problem error={save.error} />
       <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={problem !== null} data-tour="quotation-save">
-        {save.isPending ? 'Saving' : 'Save quotation'}
+        Save quotation
       </BusyButton>
 
       {draft.lines.length > 0 && !save.isPending && <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this quotation</button>}

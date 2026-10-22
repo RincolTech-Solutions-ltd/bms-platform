@@ -100,7 +100,7 @@ export function SwitchPanel({ saved, canManage, busy, error, onChange }: {
           </label>
           <p className="cluster">
             <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ticked}>
-              {busy ? 'Switching on' : 'Switch SMS on'}
+              Switch SMS on
             </BusyButton>
             <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={() => { setOpening(false); setTicked(false); }}>
               Not now
@@ -246,7 +246,7 @@ function Editor({ saved, canManage, notice, setNotice }: { saved: SmsSettings; c
         {canManage && (
           <p className="cluster">
             <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={!submitted}>
-              {save.isPending ? 'Saving' : 'Save changes'}
+              Save changes
             </BusyButton>
             {isChange(change) && (
               <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={save.isPending} onClick={() => { save.reset(); setDraft(draftOf(saved)); }}>

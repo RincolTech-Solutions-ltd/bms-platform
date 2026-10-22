@@ -190,10 +190,10 @@ describe('amount received on the sale form', () => {
     const button = saveButton();
     fireEvent.click(button);
     fireEvent.click(button);
-    const busy = await screen.findByRole('button', { name: 'Saving' }) as HTMLButtonElement;
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = saveButton();
     expect(busy).toBe(button);
-    expect(busy.disabled).toBe(true);
-    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
     expect(busy.querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(busy);
     expect(createSale).toHaveBeenCalledTimes(1);

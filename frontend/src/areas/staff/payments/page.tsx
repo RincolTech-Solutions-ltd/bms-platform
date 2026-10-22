@@ -111,7 +111,7 @@ export function CredentialsForm({ account, busy, error, onSave }: {
         <CodeField id="receive-code" value={code} onChange={setCode} problem={codeBad} />
         {error && <p role="alert" className="alert alert-danger">{error}</p>}
         <p>
-          <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ready}>{busy ? 'Saving' : 'Save the key and secret'}</BusyButton>
+          <BusyButton type="submit" className="rt-primary" busy={busy} disabled={!ready}>Save the key and secret</BusyButton>
         </p>
       </form>
     </section>
@@ -221,7 +221,7 @@ export function ReceivePaymentsPage() {
           {test.error && <p role="alert" className="alert alert-danger">{messageOf(test.error)}</p>}
           <p>
             <BusyButton type="button" className="rt-primary" busy={test.isPending} disabled={busy || !account.host_ready} onClick={() => test.mutate()}>
-              {test.isPending ? 'Testing' : 'Test connection'}
+              Test connection
             </BusyButton>
           </p>
         </section>
@@ -231,7 +231,7 @@ export function ReceivePaymentsPage() {
           {test.error && <p role="alert" className="alert alert-danger">{messageOf(test.error)}</p>}
           <p>
             <BusyButton type="button" className="btn-ghost" busy={test.isPending} disabled={busy || !account.host_ready} onClick={() => test.mutate()}>
-              {test.isPending ? 'Testing' : 'Test again'}
+              Test again
             </BusyButton>
           </p>
         </div>

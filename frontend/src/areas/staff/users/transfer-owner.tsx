@@ -85,7 +85,7 @@ export function TransferOwner({ targets, mfaEnabled, onSend, onCancel }: {
       {error && <p role="alert" className="alert alert-danger">{error}</p>}
       <p className="cluster">
         <BusyButton type="submit" className="btn-danger" busy={busy} disabled={!ready}>
-          {busy ? 'Handing over' : to ? `Yes, make ${to.full_name} the owner` : 'Hand over ownership'}
+          {to ? `Yes, make ${to.full_name} the owner` : 'Hand over ownership'}
         </BusyButton>
         <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>

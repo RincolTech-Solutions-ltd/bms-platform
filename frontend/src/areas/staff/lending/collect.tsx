@@ -151,7 +151,7 @@ export function CollectForm({ target }: { target: CollectTarget }) {
       />
       <Problem error={start.error} />
       <BusyButton busy={start.isPending} type="submit" className="rt-primary" disabled={!valid}>
-        {start.isPending ? 'Making the link' : 'Make the payment link'}
+        Make the payment link
       </BusyButton>
     </form>
   );

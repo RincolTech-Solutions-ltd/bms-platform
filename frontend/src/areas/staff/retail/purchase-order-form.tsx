@@ -88,7 +88,7 @@ export function OrderFormView({ form, suppliers, branches, picker, busy, error, 
       <p className="rt-total" aria-live="polite" data-testid="order-total">Order total {money(orderTotal(form.lines))}</p>
       {problem && form.lines.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="order-save">{busy ? 'Saving' : submitLabel}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null} data-tour="order-save">{submitLabel}</BusyButton>
 
     </form>
   );

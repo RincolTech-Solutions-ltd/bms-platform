@@ -141,7 +141,7 @@ describe('the Business page', () => {
     await settle();
     fireEvent.change(screen.getByLabelText('Why (kept with the change)'), { target: { value: 'Test: unpaid after the free month' } });
     fireEvent.click(screen.getByRole('button', { name: 'Yes, suspend it' }));
-    fireEvent.click(screen.getByRole('button', { name: /Yes, suspend it|Saving/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Yes, suspend it/ }));
     await waitFor(() => expect(api.suspendBusiness).toHaveBeenCalledTimes(1));
     expect(api.suspendBusiness).toHaveBeenCalledWith('t-1', 'Test: unpaid after the free month');
     expect(await screen.findByText(/is suspended: read only, nothing deleted/)).toBeTruthy();
@@ -161,7 +161,7 @@ describe('the Business page', () => {
     await settle();
     fireEvent.change(screen.getByLabelText('Why (kept with the change)'), { target: { value: 'Test: seen on the statement' } });
     fireEvent.click(screen.getByRole('button', { name: 'Yes, record it' }));
-    fireEvent.click(screen.getByRole('button', { name: /Yes, record it|Saving/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Yes, record it/ }));
     await waitFor(() => expect(api.recordPayment).toHaveBeenCalledTimes(1));
     const [tenant, key, body] = api.recordPayment.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(tenant).toBe('t-1');

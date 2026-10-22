@@ -81,7 +81,7 @@ export function ExpenseForm({ branchId, onSaved }: { branchId: string; onSaved?:
       {plan.problem && draft.categoryId !== '' && draft.amount.trim() !== '' && <p role="alert" className="rt-flag">{plan.problem}</p>}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save expense'}
+        Save expense
       </BusyButton>
     </form>
   );

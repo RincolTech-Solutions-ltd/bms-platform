@@ -101,7 +101,7 @@ function NamedList({ noun, plural, list, create, update }: {
           <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) add.mutate(); }}>
             <label htmlFor={`new-${plural}`}>Name of the new {noun}</label>
             <input id={`new-${plural}`} value={name} maxLength={noun === 'unit' ? 30 : 100} onChange={(e) => setName(e.target.value)} autoComplete="off" />
-            <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={name.trim() === ''}>{add.isPending ? 'Adding' : `Add ${noun}`}</BusyButton>
+            <BusyButton busy={add.isPending} type="submit" className="rt-primary" disabled={name.trim() === ''}>{`Add ${noun}`}</BusyButton>
           </form>
           <Problem error={add.error} />
         </AddPanel>

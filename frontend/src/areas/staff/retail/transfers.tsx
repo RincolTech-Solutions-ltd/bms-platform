@@ -97,7 +97,7 @@ function TransferDetail({ id, onClose }: { id: string; onClose: () => void }) {
           <input id="transfer-void-reason" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
           <Problem error={cancel.error} />
           <BusyButton type="submit" busy={cancel.isPending} disabled={reason.trim() === ''}>
-            {cancel.isPending ? 'Cancelling' : 'Cancel this move'}
+            Cancel this move
           </BusyButton>
 
         </form>

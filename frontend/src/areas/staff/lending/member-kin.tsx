@@ -64,7 +64,7 @@ function KinForm({ kin, memberId, onDone }: { kin?: NextOfKin; memberId: string;
       </Group>
       <SaveGuardNotice guard={guard} what="next of kin" found={() => <button type="button" className="btn-sm" onClick={onDone}>Close</button>} />
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Save" busyLabel="Saving" busy={save.isPending} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
+      <SaveBar label="Save" busy={save.isPending} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
 }
@@ -109,7 +109,7 @@ function KinRow({ kin, memberId, canChange, onEdit }: { kin: NextOfKin; memberId
       {asking && (
         <div role="group" aria-label="Remove next of kin" className="cluster">
           <span>Remove {kin.full_name}?</span>
-          <BusyButton busy={remove.isPending} type="button" className="btn-sm" onClick={() => remove.mutate()}>{remove.isPending ? 'Removing' : 'Yes, remove'}</BusyButton>
+          <BusyButton busy={remove.isPending} type="button" className="btn-sm" onClick={() => remove.mutate()}>Yes, remove</BusyButton>
           <button type="button" className="btn-sm btn-ghost" onClick={() => setAsking(false)}>Keep</button>
         </div>
       )}

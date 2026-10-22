@@ -124,7 +124,7 @@ export function TransferForm({ fromBranchId, onSaved, prefill }: { fromBranchId:
       <Problem error={save.error} />
       <span data-tour="transfer-save">
         <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={problem !== null}>
-          {save.isPending ? 'Saving' : sends ? 'Send stock' : 'Move stock'}
+          {sends ? 'Send stock' : 'Move stock'}
         </BusyButton>
 
       </span>

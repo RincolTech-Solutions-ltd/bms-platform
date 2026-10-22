@@ -56,7 +56,7 @@ export function PayFormView({ sale, today, form, full, busy, error, todayOnly, o
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
       <p className="cluster">
-        <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null}>{busy ? 'Saving' : full ? 'Mark as fully paid' : 'Save payment'}</BusyButton>
+        <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={problem !== null}>{full ? 'Mark as fully paid' : 'Save payment'}</BusyButton>
         <button type="button" /* busy-exempt: cancel waits for the payment */ className="btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </p>
     </form>
@@ -174,7 +174,7 @@ export function VoidFormView({ branchName, busy, error, onVoid, onCancel }: {
       </p>
       <Problem error={error} />
       <p className="cluster">
-        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>{busy ? 'Voiding' : 'Void this sale'}</BusyButton>
+        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>Void this sale</BusyButton>
         <button type="button" /* busy-exempt: keep waits for the void */ className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the sale</button>
       </p>
     </form>
@@ -248,7 +248,7 @@ export function WriteOffFormView({ owed, fee, reason, busy, error, onReason, onW
       <p className="hint" data-testid="write-off-checker">{WRITE_OFF_CHECKER}</p>
       <Problem error={error} />
       <p className="cluster">
-        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>{busy ? 'Writing off' : 'Write off'}</BusyButton>
+        <BusyButton type="submit" busy={busy === true} disabled={ready === null}>Write off</BusyButton>
         <button type="button" /* busy-exempt: keep waits for the write-off */ className="btn-ghost" disabled={busy} onClick={onCancel}>Keep the debt</button>
       </p>
     </form>

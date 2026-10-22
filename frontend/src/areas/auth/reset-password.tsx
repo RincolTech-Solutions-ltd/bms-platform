@@ -158,7 +158,7 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
           <form onSubmit={submitPassword} className="form-stack" noValidate>
             <PasswordFields password={password} confirm={confirm} onPassword={setPassword} onConfirm={setConfirm} />
             <BusyButton className="btn-primary btn-lg" busy={busy}>
-              {busy ? 'Saving' : 'Save and sign in'}
+              Save and sign in
             </BusyButton>
           </form>
           <InstallPrompt />
@@ -176,7 +176,7 @@ export function ResetPassword({ token, initial = { kind: 'password' } }: { token
               <span className="field-hint">Lost your phone? Type one of your recovery codes instead.</span>
             </div>
             <BusyButton className="btn-primary btn-lg" busy={busy}>
-              {busy ? 'Checking' : 'Continue'}
+              Continue
             </BusyButton>
           </form>
         </>

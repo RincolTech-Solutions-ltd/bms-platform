@@ -128,7 +128,7 @@ export function RepaymentForm({ loan, onDone }: { loan: Loan; onDone: (r: Repaym
       <ReferenceInput id="repay-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!valid}>
-        {save.isPending ? 'Saving' : 'Record repayment'}
+        Record repayment
       </BusyButton>
       {draft.amount !== '' && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this form</button>
@@ -175,7 +175,7 @@ export function DisburseForm({ loan }: { loan: Loan }) {
       <ReferenceInput id="disburse-ref" value={draft.reference} onChange={(v) => update({ reference: v })} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!isIsoDate(draft.date)}>
-        {save.isPending ? 'Sending' : 'Disburse'}
+        Disburse
       </BusyButton>
     </form>
   );
@@ -240,7 +240,7 @@ function ReasonForm({ id, label, submit, draftName, send }: {
       <textarea id={id} rows={2} maxLength={500} value={draft} onChange={(e) => setDraft(e.target.value)} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={draft.trim() === ''}>
-        {save.isPending ? 'Sending' : submit}
+        {submit}
       </BusyButton>
     </form>
   );

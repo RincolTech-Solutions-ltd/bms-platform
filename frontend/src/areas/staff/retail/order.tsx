@@ -75,7 +75,7 @@ function ChangeDetails({ order }: { order: Order }) {
       <p className="hint">To change the items, use Change the items.</p>
       {problem && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="button" disabled={problem !== null} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Save the changes'}</BusyButton>
+      <BusyButton busy={save.isPending} type="button" disabled={problem !== null} onClick={() => save.mutate()}>Save the changes</BusyButton>
       <button type="button" onClick={() => setOpen(false)}>Close</button>
     </fieldset>
   );
@@ -150,7 +150,7 @@ function ChangeItems({ order }: { order: Order }) {
         </>
       )}
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!shown || problem !== null} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Save the new items'}</BusyButton>
+      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!shown || problem !== null} onClick={() => save.mutate()}>Save the new items</BusyButton>
       <button type="button" onClick={() => { setOpen(false); setLines(null); save.reset(); }}>Close</button>
     </fieldset>
   );
@@ -179,7 +179,7 @@ function PayFee({ order }: { order: Order }) {
         <option value="bank">Bank</option>
       </select>
       <Problem error={pay.error} />
-      <BusyButton busy={pay.isPending} type="button" onClick={() => pay.mutate()}>{pay.isPending ? 'Saving' : 'Save: the fee is paid'}</BusyButton>
+      <BusyButton busy={pay.isPending} type="button" onClick={() => pay.mutate()}>Save: the fee is paid</BusyButton>
     </fieldset>
   );
 }

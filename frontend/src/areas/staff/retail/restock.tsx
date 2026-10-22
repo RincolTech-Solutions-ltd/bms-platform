@@ -276,7 +276,7 @@ export function RestockForm({ onSaved, draftName, initial, again = false }: { on
 
       <p className="rt-total" aria-live="polite">Total cost {money(restockTotal(lines))}</p>
       <Problem error={save.error} />
-      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} disabled={blocked}>{save.isPending ? 'Saving' : 'Save restock'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" data-tour="restock-save" busy={save.isPending} disabled={blocked}>Save restock</BusyButton>
 
       {lines.length > 0 && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this restock</button>

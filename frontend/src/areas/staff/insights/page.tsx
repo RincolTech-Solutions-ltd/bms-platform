@@ -620,7 +620,7 @@ function DrillPanel({ target, filter, exportable, onClose }: {
         <div className="rt-row iv-noprint">
           {exportable && (
             <BusyButton type="button" className="btn-sm" busy={download.isPending} onClick={() => download.mutate()}>
-              {download.isPending ? 'Exporting' : 'Export CSV'}
+              Export CSV
             </BusyButton>
           )}
           <button type="button" className="btn-ghost btn-sm" onClick={onClose}>
@@ -702,7 +702,7 @@ function DigestSettings() {
         <Problem error={save.error} />
         {save.isSuccess && !draft && <p role="status" className="alert alert-success">Saved.</p>}
         <div className="rt-row">
-          <BusyButton type="submit" busy={save.isPending}>{save.isPending ? 'Saving' : 'Save'}</BusyButton>
+          <BusyButton type="submit" busy={save.isPending}>Save</BusyButton>
           <button type="button" className="btn-ghost" onClick={() => void preview.refetch()}>Preview today&apos;s text</button>
         </div>
       </form>

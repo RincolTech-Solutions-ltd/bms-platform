@@ -129,7 +129,7 @@ export function SignIn() {
                 </button>
               </div>
             </div>
-            <BusyButton className="btn-primary btn-lg" busy={busy}>{busy ? 'Signing in' : 'Sign in'}</BusyButton>
+            <BusyButton className="btn-primary btn-lg" busy={busy}>Sign in</BusyButton>
           </form>
           <p>
             <Link to="/forgot-password">Forgot password?</Link>
@@ -148,7 +148,7 @@ export function SignIn() {
               <input id="challenge-code" className="input-code" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" required />
               <span className="field-hint">Lost your phone? Type one of your recovery codes instead.</span>
             </div>
-            <BusyButton className="btn-primary btn-lg" busy={busy}>{busy ? 'Checking' : 'Continue'}</BusyButton>
+            <BusyButton className="btn-primary btn-lg" busy={busy}>Continue</BusyButton>
           </form>
         </>
       )}

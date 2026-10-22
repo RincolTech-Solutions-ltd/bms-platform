@@ -108,7 +108,7 @@ export function PackEditor({ product }: { product: Product }) {
       {factor.trim() !== '' && problem !== null && <p id="pack-factor-problem" className="rt-flag">{problem}</p>}
       <Problem error={add.error} />
       <BusyButton busy={add.isPending} type="button" disabled={unitId === '' || problem !== null} onClick={() => add.mutate()}>
-        {add.isPending ? 'Saving' : 'Add pack'}
+        Add pack
       </BusyButton>
     </fieldset>
   );

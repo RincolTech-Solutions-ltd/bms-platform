@@ -43,7 +43,7 @@ export function WithdrawalForm({ branchId, onSaved }: { branchId: string; onSave
       <p className="hint">The cash goes into this shop's till.</p>
       <Problem error={save.error} />
       <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save withdrawal'}
+        Save withdrawal
       </BusyButton>
 
     </form>

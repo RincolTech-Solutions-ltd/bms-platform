@@ -81,7 +81,7 @@ export function AdvanceForm({ branchId, onSaved }: { branchId: string; onSaved?:
       <p className="hint">The money is taken out of this shop's till.</p>
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save advance'}
+        Save advance
       </BusyButton>
     </form>
   );
@@ -136,7 +136,7 @@ export function RepaymentForm({ branchId, onSaved }: { branchId: string; onSaved
       <p className="hint">The money goes into this shop's till or account.</p>
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save repayment'}
+        Save repayment
       </BusyButton>
     </form>
   );

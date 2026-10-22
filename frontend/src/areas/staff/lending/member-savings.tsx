@@ -49,7 +49,7 @@ function OpenAccount({ memberId }: { memberId: string }) {
       )}
       <Problem error={open.error} />
       <BusyButton busy={open.isPending} type="submit" className="rt-primary btn-block" disabled={!productId}>
-        {open.isPending ? 'Opening' : 'Open account'}
+        Open account
       </BusyButton>
     </form>
   );

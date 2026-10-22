@@ -252,7 +252,7 @@ export function NewFamilyPage() {
         {problem && preview.rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
         {save.error && <NameTaken error={save.error} busy={save.isPending} onAnyway={(reason) => save.mutate(reason)} />}
         <BusyButton busy={save.isPending} type="submit" className="rt-primary" data-tour="sizes-save" disabled={!complete}>
-          {save.isPending ? 'Saving' : preview.rows.length > 0 ? `Make these ${preview.rows.length}` : 'Make them'}
+          {preview.rows.length > 0 ? `Make these ${preview.rows.length}` : 'Make them'}
         </BusyButton>
       </form>
     </Gate>
@@ -299,7 +299,7 @@ export function MakeFamilyPanel({ product }: { product: Product }) {
       <OptionBoxes prefix="make" sizes={sizes} colours={colours} onSizes={setSizes} onColours={setColours} />
       <p>{plan.length === 0 ? 'Nothing else will be made yet.' : `Also made, at ${money(product.sell_minor ?? 0)}: ${plan.map((p) => `${variantLabel(p.size, p.colour)} (${p.code})`).join(', ')}.`}</p>
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!ready} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Give it sizes and colours'}</BusyButton>
+      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!ready} onClick={() => save.mutate()}>Give it sizes and colours</BusyButton>
       <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
     </section>
   );
@@ -428,7 +428,7 @@ export function JoinPage() {
       {problem && rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
       {save.error && <NameTaken error={save.error} busy={save.isPending} onAnyway={(reason) => save.mutate(reason)} />}
       <BusyButton busy={save.isPending} type="button" className="rt-primary" data-tour="join-save" disabled={problem !== null} onClick={() => save.mutate(undefined)}>
-        {save.isPending ? 'Saving' : 'Join them as one item'}
+        Join them as one item
       </BusyButton>
     </Gate>
   );

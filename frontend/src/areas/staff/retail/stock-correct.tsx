@@ -91,7 +91,7 @@ function QuantityForm({ row, branchId, onDone }: { row: StockRow; branchId: stri
         If the money was entered wrongly too, use Past restocks instead.
       </p>
       <Problem error={send.error} />
-      <BusyButton type="submit" className="rt-primary" busy={send.isPending} disabled={!ready}>{send.isPending ? 'Saving' : 'Save the right quantity'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={send.isPending} disabled={!ready}>Save the right quantity</BusyButton>
     </form>
   );
 }
@@ -136,7 +136,7 @@ function CategoryForm({ row, onDone }: { row: StockRow; onDone: (message: string
       </select>
       <p className="hint">The change is recorded with the old and the new category.</p>
       <Problem error={send.error} />
-      <BusyButton type="submit" className="rt-primary" busy={send.isPending} disabled={!ready}>{send.isPending ? 'Saving' : 'Move to this category'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={send.isPending} disabled={!ready}>Move to this category</BusyButton>
 
     </form>
   );

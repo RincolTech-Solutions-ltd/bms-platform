@@ -70,7 +70,7 @@ function screenOf(me: ReturnType<typeof mockMe>, node: ReactElement) {
 const open = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 const qty = () => screen.getByLabelText(/Right quantity/) as HTMLInputElement;
 const reason = () => screen.getByLabelText('Why is it being corrected?') as HTMLSelectElement;
-const save = () => screen.getByRole('button', { name: /Save the right quantity|Saving/ }) as HTMLButtonElement;
+const save = () => screen.getByRole('button', { name: /Save the right quantity/ }) as HTMLButtonElement;
 
 describe('the Correct button on a stock row', () => {
   it('is offered on the list of one branch to someone who may correct there, and opens the choices', () => {
@@ -264,7 +264,7 @@ describe('the category', () => {
     open('The category is wrong');
     const select = (await screen.findByLabelText('The right category')) as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.text)).toEqual(['Cables', 'Fittings']);
-    const move = () => screen.getByRole('button', { name: /Move to this category|Saving/ }) as HTMLButtonElement;
+    const move = () => screen.getByRole('button', { name: /Move to this category/ }) as HTMLButtonElement;
     expect(move().disabled).toBe(true);
     fireEvent.change(select, { target: { value: 'c2' } });
     fireEvent.click(move());

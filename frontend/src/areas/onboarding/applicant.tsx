@@ -89,7 +89,7 @@ export function ApplicantPage({
           <h2 id="confirm-heading">Confirm your email</h2>
           <p>Press the button to confirm this is your email address. We then look at your application.</p>
           <BusyButton className="btn-brand" type="button" busy={confirming} onClick={onConfirm}>
-            {confirming ? 'Confirming' : 'Confirm my email'}
+            Confirm my email
           </BusyButton>
         </section>
       ) : (
@@ -105,7 +105,7 @@ export function ApplicantPage({
               <textarea id="reply" value={reply} onChange={(e) => onReplyChange(e.target.value)} rows={4} maxLength={1000} required />
             </div>
             <BusyButton className="btn-brand" type="submit" busy={replying} disabled={reply.trim().length === 0}>
-              {replying ? 'Sending' : 'Send answer'}
+              Send answer
             </BusyButton>
           </form>
         </section>

@@ -174,7 +174,7 @@ function AddVariants({ family, onDone }: { family: Family; onDone: (text: string
       <VariantPreview rows={preview.rows} profit={profit} onEdit={preview.edit} />
       {problem && preview.rows.length > 0 && <p role="note" className="alert alert-warning">{problem}</p>}
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="submit" disabled={problem !== null}>{save.isPending ? 'Saving' : preview.rows.length > 0 ? `Add these ${preview.rows.length}` : 'Add'}</BusyButton>
+      <BusyButton busy={save.isPending} type="submit" disabled={problem !== null}>{preview.rows.length > 0 ? `Add these ${preview.rows.length}` : 'Add'}</BusyButton>
     </form>
   );
 }
@@ -209,7 +209,7 @@ function RenameFamily({ family, onDone }: { family: Family; onDone: (text: strin
       </select>
       <p className="hint">Every size and colour takes the new name and category. Past sales stay as they were.</p>
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!changed} onClick={() => save.mutate()}>{save.isPending ? 'Saving' : 'Save'}</BusyButton>
+      <BusyButton busy={save.isPending} type="button" className="rt-primary" disabled={!changed} onClick={() => save.mutate()}>Save</BusyButton>
       <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
     </section>
   );
@@ -253,7 +253,7 @@ function VariantForm({ product, onSaved, onCancel }: { product: Product; onSaved
       />
       <p className="hint">A photo here is for this size alone. Without one, it shows the item's photo.</p>
       <Problem error={save.error} />
-      <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!ready}>{save.isPending ? 'Saving' : 'Save changes'}</BusyButton>
+      <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!ready}>Save changes</BusyButton>
       <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
     </form>
   );

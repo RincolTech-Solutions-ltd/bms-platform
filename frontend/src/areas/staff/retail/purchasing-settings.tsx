@@ -57,7 +57,7 @@ export function PurchasingSettingsForm({ settings, busy, error, saved, onSave }:
         <p className="hint" data-testid="order-threshold">No approval limit is set for purchase orders, so a single person can send any order.</p>
       )}
       <Problem error={error} />
-      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={bad || unchanged}>{busy ? 'Saving' : 'Save purchasing settings'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" busy={busy === true} disabled={bad || unchanged}>Save purchasing settings</BusyButton>
 
     </form>
   );

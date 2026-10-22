@@ -87,7 +87,7 @@ export function PartyPicker({ id, label, parties, kinds, listed, value, onChange
           <Problem error={add.error} />
           <div className="cluster">
             <BusyButton type="button" className="btn-sm" busy={add.isPending} disabled={name.trim() === ''} onClick={() => add.mutate()}>
-              {add.isPending ? 'Adding' : 'Add to the list'}
+              Add to the list
             </BusyButton>
 
             <button type="button" className="btn-sm" onClick={() => setAdding(false)}>Cancel</button>

@@ -155,7 +155,7 @@ export function BranchesScreen() {
                       <p className="cluster">
                         {closed ? (
                           <BusyButton type="button" className="btn-sm" busy={busyId === b.id} disabled={busyId !== null} onClick={() => void reopen(b)}>
-                            {busyId === b.id ? 'Reopening' : 'Reopen this branch'}
+                            Reopen this branch
                           </BusyButton>
                         ) : (
                           <>
@@ -212,7 +212,7 @@ export function BranchesScreen() {
                         </p>
                         <p className="cluster">
                           <BusyButton type="button" className="rt-primary" busy={busyId === b.id} disabled={busyId !== null} onClick={() => void stocking(b, false)}>
-                            {busyId === b.id ? 'Saving' : 'Yes, mark it'}
+                            Yes, mark it
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setPanel(null)}>Keep it as it is</button>
                         </p>
@@ -227,7 +227,7 @@ export function BranchesScreen() {
                         </p>
                         <p className="cluster">
                           <BusyButton type="button" className="rt-primary" busy={busyId === b.id} disabled={busyId !== null} onClick={() => void selling(b, false)}>
-                            {busyId === b.id ? 'Saving' : 'Yes, make it a store'}
+                            Yes, make it a store
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setPanel(null)}>Keep it as it is</button>
                         </p>
@@ -262,7 +262,7 @@ export function BranchesScreen() {
                             disabled={busyId !== null || (panel.warning !== null && panel.reason.trim() === '')}
                             onClick={() => void close(b, panel.reason)}
                           >
-                            {busyId === b.id ? 'Closing' : panel.warning ? 'Close it anyway' : 'Yes, close it'}
+                            {panel.warning ? 'Close it anyway' : 'Yes, close it'}
                           </BusyButton>
                           <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busyId !== null} onClick={() => setPanel(null)}>Keep it open</button>
                         </p>

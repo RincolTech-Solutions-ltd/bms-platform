@@ -81,9 +81,9 @@ describe('the feedback form', () => {
     const button = sendButton();
     fireEvent.click(button);
     fireEvent.click(button);
-    const busy = await screen.findByRole('button', { name: 'Sending' });
-    expect((busy as HTMLButtonElement).disabled).toBe(true);
-    expect(busy.getAttribute('aria-busy')).toBe('true');
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = button;
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
     expect(busy.querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(busy);
     expect(send).toHaveBeenCalledTimes(1);

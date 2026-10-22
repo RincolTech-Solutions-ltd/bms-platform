@@ -143,7 +143,7 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
       {f && (
         <>
           <p className="cluster">
-            <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>{busy ? 'Getting the receipt' : 'Share receipt'}</BusyButton>
+            <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>Share receipt</BusyButton>
           </p>
           {note && <p role="status" className="alert alert-info">{note}</p>}
           <Problem error={error} />

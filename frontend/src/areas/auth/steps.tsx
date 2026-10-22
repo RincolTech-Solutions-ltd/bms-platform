@@ -227,7 +227,7 @@ export function TwoStepSetup(props: {
         />
       </div>
       <BusyButton className="btn-primary btn-lg" busy={props.busy} disabled={props.code.length !== 6}>
-        {props.busy ? 'Checking' : 'Turn on two-step sign-in'}
+        Turn on two-step sign-in
       </BusyButton>
       {props.children}
     </form>

@@ -132,7 +132,7 @@ function TestMessage({ eventKey, text, canSend }: { eventKey: string; text: stri
       {send.data && <p role="status" className="alert alert-info">{testWords(send.data)}</p>}
       <p>
         <BusyButton type="submit" className="btn-ghost" busy={send.isPending} disabled={to.trim() === ''}>
-          {send.isPending ? 'Sending' : 'Send a test message'}
+          Send a test message
         </BusyButton>
       </p>
     </form>
@@ -224,7 +224,7 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
       {canManage && (
         <p className="cluster">
           <BusyButton type="button" className="rt-primary" data-tour={tour ? 'sms-wording-save' : undefined} busy={save.isPending} disabled={!dirty || previewError !== null} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving' : 'Save my words'}
+            Save my words
           </BusyButton>
           {dirty && (
             <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={save.isPending} onClick={() => { setText(saved); save.reset(); }}>
@@ -239,7 +239,7 @@ export function TemplateEditor({ template, canManage, onNotice, tour = false }: 
           {template.override && reverting && (
             <>
               <BusyButton type="button" className="btn-ghost" busy={revert.isPending} onClick={() => revert.mutate()}>
-                {revert.isPending ? 'Going back' : 'Yes, use the default words'}
+                Yes, use the default words
               </BusyButton>
               <button type="button" className="btn-ghost" onClick={() => setReverting(false)}>
                 Keep my words

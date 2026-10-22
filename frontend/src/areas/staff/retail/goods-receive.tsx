@@ -123,7 +123,7 @@ export function ReceiveFormView({ form, blind, order, suppliers, branches, picke
       <p className="rt-total" aria-live="polite" data-testid="receive-total">Worth {money(receiveTotal(form.lines))}</p>
       {problem && form.lines.length > 0 && <p role="alert" className="rt-flag">{problem}</p>}
       <Problem error={error} />
-      <BusyButton busy={busy ?? false} type="submit" className="rt-primary" disabled={problem !== null} data-tour="receive-save">{busy ? 'Saving' : 'Save goods received'}</BusyButton>
+      <BusyButton busy={busy ?? false} type="submit" className="rt-primary" disabled={problem !== null} data-tour="receive-save">Save goods received</BusyButton>
     </form>
   );
 }

@@ -191,7 +191,7 @@ describe('the invite form', () => {
     fireEvent.click(button);
     fireEvent.submit(screen.getByRole('form', { name: 'Invite a staff user' }));
     expect(api.invite).toHaveBeenCalledTimes(1);
-    expect((screen.getByRole('button', { name: 'Inviting' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'Invite' }).getAttribute('aria-busy')).toBe('true');
     finish({ user: { full_name: 'Test Cashier 05' }, invitation: { url: LINK, expires_at: '2026-10-22T10:00:00Z' } });
     await screen.findByRole('heading', { name: 'Test Cashier 05 is invited' });
   });
@@ -205,9 +205,10 @@ describe('the invite form', () => {
     const button = screen.getByRole('button', { name: 'Invite' });
     fireEvent.click(button);
     fireEvent.click(button);
-    const busy = await screen.findByRole('button', { name: 'Inviting' });
-    expect((busy as HTMLButtonElement).disabled).toBe(true);
-    expect(busy.getAttribute('aria-busy')).toBe('true');
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = screen.getByRole('button', { name: 'Invite' });
+    expect(busy).toBe(button);
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
     expect(busy.querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(busy);
     expect(api.invite).toHaveBeenCalledTimes(1);

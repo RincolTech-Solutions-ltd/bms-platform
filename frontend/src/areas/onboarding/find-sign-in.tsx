@@ -88,7 +88,7 @@ export function FindSignIn({ initial = 'form' }: { initial?: 'form' | 'sent' }) 
                 />
               </div>
               <BusyButton className="btn-primary btn-lg" busy={busy} data-tour="find-send">
-                {busy ? 'Sending' : 'Email me the link'}
+                Email me the link
               </BusyButton>
             </form>
             <p data-tour="find-apply">

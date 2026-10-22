@@ -52,7 +52,7 @@ export function StocktakeReview({ stocktake, onCommit, committing }: { stocktake
       )}
       {stocktake.status === 'draft' && onCommit && (
         <BusyButton type="button" className="rt-primary" busy={committing === true} onClick={onCommit}>
-          {committing ? 'Saving' : 'Commit the count'}
+          Commit the count
         </BusyButton>
       )}
     </section>
@@ -126,7 +126,7 @@ function CountSheet({ branchId }: { branchId: string }) {
       {bad && <p role="alert" className="rt-flag">Some counts are not valid quantities.</p>}
       <Problem error={review.error} />
       <BusyButton type="button" className="rt-primary" busy={review.isPending} disabled={entered.length === 0 || bad} onClick={() => review.mutate()} data-tour="count-review">
-        {review.isPending ? 'Working out' : `Review variance (${entered.length} counted)`}
+        {`Review variance (${entered.length} counted)`}
       </BusyButton>
 
     </>

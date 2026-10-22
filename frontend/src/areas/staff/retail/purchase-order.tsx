@@ -134,7 +134,7 @@ export function PurchaseOrderPage() {
         <div className="stack" data-tour="order-actions">
           <p className="cluster">
             {canEditOrder(o) && <Link className="btn-sm" to="/staff/retail/purchase-orders/$orderId/edit" params={{ orderId }}>Change this order</Link>}
-            {canSendOrder(o) && <BusyButton type="button" className="rt-primary" busy={send.isPending} onClick={() => send.mutate()}>{send.isPending ? 'Sending' : 'Send to the supplier'}</BusyButton>
+            {canSendOrder(o) && <BusyButton type="button" className="rt-primary" busy={send.isPending} onClick={() => send.mutate()}>Send to the supplier</BusyButton>
 }
             {canReceiveOrder(o) && <Link className="btn rt-primary" to="/staff/retail/purchase-orders/$orderId/receive" params={{ orderId }}>Receive goods</Link>}
           </p>

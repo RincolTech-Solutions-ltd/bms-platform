@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // The staff sign-in button in a browser (issue #456): while the sign-in request is on its way the button is disabled, busy and
@@ -41,7 +41,7 @@ function shell() {
 }
 
 describe('the staff sign-in button (#456)', () => {
-  it('is disabled, busy and spinning while the sign-in is on its way, and a double click signs in once', async () => {
+  it('keeps its label, is busy, aria-disabled and spinning while the sign-in is on its way, and a double click signs in once', async () => {
     fetchImpl.seen = [];
     fetchImpl.next = () => new Promise<Response>(() => undefined);
     shell();
@@ -50,9 +50,10 @@ describe('the staff sign-in button (#456)', () => {
     const button = screen.getByRole('button', { name: 'Sign in' });
     fireEvent.click(button);
     fireEvent.click(button);
-    const busy = await screen.findByRole('button', { name: 'Signing in' });
-    expect((busy as HTMLButtonElement).disabled).toBe(true);
-    expect(busy.getAttribute('aria-busy')).toBe('true');
+    await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+    const busy = screen.getByRole('button', { name: 'Sign in' });
+    expect(busy).toBe(button);
+    expect(busy.getAttribute('aria-disabled')).toBe('true');
     expect(busy.querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(busy);
     await new Promise((resolve) => setTimeout(resolve, 10));

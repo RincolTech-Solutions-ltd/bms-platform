@@ -65,7 +65,7 @@ export function CorrectPanel({ purchase, onDone, onCancel }: { purchase: Purchas
       <input id={`void-${id}`} value={draft.reason} maxLength={300} onChange={(e) => setDraft({ reason: e.target.value })} autoComplete="off" />
       <Problem error={send.error} />
       <p className="cluster">
-        <BusyButton type="submit" className="rt-primary" busy={send.isPending && send.variables === true} disabled={ready === null || send.isPending}>{send.isPending ? 'Voiding' : 'Void and enter it again'}</BusyButton>
+        <BusyButton type="submit" className="rt-primary" busy={send.isPending && send.variables === true} disabled={ready === null || send.isPending}>Void and enter it again</BusyButton>
         <BusyButton type="button" busy={send.isPending && send.variables === false} disabled={ready === null || send.isPending} onClick={() => press(false)}>Void only</BusyButton>
         <button type="button" /* busy-exempt: keep waits for the void */ className="btn-ghost" disabled={send.isPending} onClick={onCancel}>Keep the restock</button>
 

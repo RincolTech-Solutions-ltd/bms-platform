@@ -86,7 +86,7 @@ export function OwnTwoStep({ blocking = false }: { blocking?: boolean }) {
           </label>
           <p className="cluster" data-tour="twostep-turn-on">
             <BusyButton type="button" className="btn-primary btn-lg" busy={busy} disabled={password === ''} onClick={() => void start()}>
-              {busy ? 'Starting' : 'Turn on two-step sign-in'}
+              Turn on two-step sign-in
             </BusyButton>
             {!blocking && (
               <Link to="/staff" className="btn-ghost">

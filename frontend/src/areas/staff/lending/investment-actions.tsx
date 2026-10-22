@@ -79,7 +79,7 @@ export function FundForm({ inv }: { inv: Investment }) {
       <input id="fund-ref" maxLength={100} value={draft.reference} onChange={(e) => update({ reference: e.target.value })} autoComplete="off" />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={!isIsoDate(draft.date)}>
-        {save.isPending ? 'Saving' : 'Record funding'}
+        Record funding
       </BusyButton>
     </form>
   );
@@ -126,7 +126,7 @@ export function PayForm({ inv, kind }: { inv: Investment; kind: 'pay_return' | '
       <input id={`${kind}-ref`} maxLength={100} value={draft.reference} onChange={(e) => setDraft((d) => ({ ...d, reference: e.target.value }))} autoComplete="off" />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary">
-        {save.isPending ? 'Paying' : 'Pay now'}
+        Pay now
       </BusyButton>
     </form>
   );
@@ -165,7 +165,7 @@ export function RolloverForm({ inv, onDone }: { inv: Investment; onDone: (nextId
       </fieldset>
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary">
-        {save.isPending ? 'Rolling over' : 'Roll over'}
+        Roll over
       </BusyButton>
     </form>
   );
@@ -215,7 +215,7 @@ export function EarlyWithdrawalForm({ inv }: { inv: Investment }) {
       <textarea id="early-reason" rows={2} maxLength={500} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={!q || draft.reason.trim() === ''}>
-        {save.isPending ? 'Sending' : 'Request early withdrawal'}
+        Request early withdrawal
       </BusyButton>
     </form>
   );
@@ -243,7 +243,7 @@ export function InstructionForm({ inv }: { inv: Investment }) {
       <Problem error={save.error} />
       {save.isSuccess && <p role="status" className="alert alert-success">Saved.</p>}
       <BusyButton busy={save.isPending} type="submit" className="rt-primary">
-        {save.isPending ? 'Saving' : 'Save the choice'}
+        Save the choice
       </BusyButton>
     </form>
   );
@@ -268,7 +268,7 @@ export function ReverseForm({ inv, txn }: { inv: Investment; txn: InvestmentTran
       <textarea id={`reverse-${txn.id ?? ''}`} rows={2} maxLength={500} value={draft} onChange={(e) => setDraft(e.target.value)} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={draft.trim() === ''}>
-        {save.isPending ? 'Sending' : 'Request reversal'}
+        Request reversal
       </BusyButton>
     </form>
   );

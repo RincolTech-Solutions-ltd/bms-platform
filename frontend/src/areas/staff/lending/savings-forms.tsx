@@ -136,7 +136,7 @@ export function MoneyForm({ account, kind, onDone }: { account: SavingsAccount; 
         <Problem error={save.error} />
         <div className="sv-confirm-actions">
           <BusyButton busy={save.isPending} type="button" className="rt-primary" onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving' : `Confirm ${label.toLowerCase()}`}
+            {`Confirm ${label.toLowerCase()}`}
           </BusyButton>
           <button type="button" /* busy-exempt: change waits for the save */ disabled={save.isPending} onClick={() => setConfirming(false)}>
             Change
@@ -208,7 +208,7 @@ export function CloseForm({ account }: { account: SavingsAccount }) {
         <Problem error={save.error} />
         <div className="sv-confirm-actions">
           <BusyButton busy={save.isPending} type="button" className="btn-danger" onClick={() => save.mutate()}>
-            {save.isPending ? 'Sending' : 'Confirm closure'}
+            Confirm closure
           </BusyButton>
           <button type="button" /* busy-exempt: change waits for the closure */ disabled={save.isPending} onClick={() => setConfirming(false)}>Change</button>
         </div>
@@ -244,7 +244,7 @@ export function StatusForm({ account, change }: { account: SavingsAccount; chang
       <textarea id={`sv-${change}-reason`} rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className={change === 'freeze' ? 'btn-danger btn-block' : 'rt-primary btn-block'} disabled={reason.trim() === ''}>
-        {save.isPending ? 'Saving' : words.submit}
+        {words.submit}
       </BusyButton>
     </form>
   );
@@ -272,7 +272,7 @@ export function ReverseSavingsForm({ account, txn }: { account: SavingsAccount; 
       {txn.txn_type === 'withdrawal' && <p className="field-hint">Its withdrawal fee is reversed with it.</p>}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="btn-danger btn-block" disabled={draft.trim() === ''}>
-        {save.isPending ? 'Sending' : 'Request reversal'}
+        Request reversal
       </BusyButton>
     </form>
   );

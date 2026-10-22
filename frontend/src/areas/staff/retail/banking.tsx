@@ -66,7 +66,7 @@ export function BankingForm({ branchId, onSaved }: { branchId: string; onSaved?:
       <input id="banking-reference" maxLength={100} value={draft.reference} onChange={(e) => setDraft((d) => ({ ...d, reference: e.target.value }))} />
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save banking'}
+        Save banking
       </BusyButton>
     </form>
   );

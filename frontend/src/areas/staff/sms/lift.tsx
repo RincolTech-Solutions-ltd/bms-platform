@@ -50,7 +50,7 @@ export function LiftConfirm({ what, narrow = false, busy, error, onConfirm, onCa
       {error && <p role="alert" className="field-error">{error}</p>}
       <p className="cluster">
         <BusyButton type="submit" className="rt-primary" busy={busy} disabled={problem !== null}>
-          {busy ? 'Saving' : narrow ? 'Narrow the opt-out' : 'Lift the opt-out'}
+          {narrow ? 'Narrow the opt-out' : 'Lift the opt-out'}
         </BusyButton>
         <button type="button" /* busy-exempt: cancel waits for the request */ className="btn-ghost" disabled={busy} onClick={onCancel}>
           Keep the opt-out

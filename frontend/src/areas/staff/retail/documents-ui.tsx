@@ -67,7 +67,7 @@ export function CreditNotePdf({ returnId, branchId }: { returnId: string; branch
   return (
     <p>
       <BusyButton busy={open.isPending} type="button" className="btn-sm" data-tour="credit-note-pdf" onClick={() => open.mutate()}>
-        {open.isPending ? 'Opening' : 'Open the credit note as a PDF'}
+        Open the credit note as a PDF
       </BusyButton>
       <Problem error={open.error} />
     </p>
@@ -97,7 +97,7 @@ export function PdfButton({ doc, label = 'Open PDF' }: { doc: Pick<RetailDocumen
   return (
     <>
       <BusyButton busy={open.isPending} type="button" className="btn-sm" aria-label={`${label} of ${doc.number ?? 'the document'}`} onClick={() => open.mutate()}>
-        {open.isPending ? 'Opening' : label}
+        {label}
       </BusyButton>
       <Problem error={open.error} />
     </>
@@ -224,7 +224,7 @@ export function SaleDocuments({ saleId, status, branchId }: { saleId: string; st
       <div className="rt-row">
         {more.map((t) => (
           <BusyButton key={t} busy={issue.isPending && issue.variables === t} type="button" disabled={issue.isPending} onClick={() => issue.mutate(t)}>
-            {issue.isPending && issue.variables === t ? 'Making' : `Make ${typeLabel(t).toLowerCase()}`}
+            {`Make ${typeLabel(t).toLowerCase()}`}
           </BusyButton>
         ))}
       </div>
@@ -252,7 +252,7 @@ export function TransferDocument({ transferId, branchId, status }: { transferId:
       {made ? (
         <ul style={{ listStyle: 'none', padding: 0 }}><DocumentCard doc={made} /></ul>
       ) : (
-        <BusyButton busy={issue.isPending} type="button" onClick={() => issue.mutate()}>{issue.isPending ? 'Making' : 'Make delivery note'}</BusyButton>
+        <BusyButton busy={issue.isPending} type="button" onClick={() => issue.mutate()}>Make delivery note</BusyButton>
       )}
       <Problem error={issue.error} />
     </section>

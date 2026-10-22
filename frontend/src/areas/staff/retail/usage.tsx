@@ -97,7 +97,7 @@ export function UsageForm({ branchId, onSaved }: { branchId: string; onSaved?: (
         </div>
       ))}
       <Problem error={save.error} />
-      <BusyButton type="submit" className="rt-primary" data-tour="usage-save" busy={save.isPending} disabled={!valid}>{save.isPending ? 'Saving' : 'Save'}</BusyButton>
+      <BusyButton type="submit" className="rt-primary" data-tour="usage-save" busy={save.isPending} disabled={!valid}>Save</BusyButton>
 
       {(lines.length > 0 || reason !== '') && !save.isPending && (
         <button type="button" onClick={() => { discard(); save.reset(); }}>Clear this form</button>

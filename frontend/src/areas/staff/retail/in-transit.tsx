@@ -60,7 +60,7 @@ function ReceiveForm({ transfer }: { transfer: InFlightTransfer }) {
       {problem && <p>{problem}</p>}
       <Problem error={save.error} />
       <BusyButton busy={save.isPending} type="submit" className="rt-primary" disabled={problem !== null}>
-        {save.isPending ? 'Saving' : 'Mark as received'}
+        Mark as received
       </BusyButton>
     </form>
   );
@@ -82,7 +82,7 @@ function TakeBackForm({ transfer }: { transfer: InFlightTransfer }) {
       <input id={`takeback-${id}`} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
       <Problem error={take.error} />
       <BusyButton busy={take.isPending} type="submit" disabled={reason.trim() === ''}>
-        {take.isPending ? 'Taking back' : 'Take this back'}
+        Take this back
       </BusyButton>
     </form>
   );

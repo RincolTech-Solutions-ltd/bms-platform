@@ -106,7 +106,7 @@ export function ImportPage() {
       {warning && <p role="alert" className="alert alert-warning">{warning}</p>}
       <Problem error={check.error} />
       <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="import-check" disabled={text.trim() === ''} onClick={() => check.mutate()}>
-        {check.isPending ? 'Checking' : 'Check the file'}
+        Check the file
       </BusyButton>
       {current && <ImportReport result={current} />}
       {current && current.errors === 0 && (current.added ?? 0) === 0 && <p className="empty-state">There is nothing new to add.</p>}
@@ -114,7 +114,7 @@ export function ImportPage() {
       <Problem error={apply.error} />
       {ready && (
         <BusyButton busy={apply.isPending} type="button" className="rt-primary" onClick={() => apply.mutate()}>
-          {apply.isPending ? 'Adding' : `Add ${current.added} items`}
+          {`Add ${current.added} items`}
         </BusyButton>
       )}
       {done && <Success>Added {done.added} items and skipped {done.skipped} that were already there.</Success>}

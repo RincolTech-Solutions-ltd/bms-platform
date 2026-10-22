@@ -156,7 +156,7 @@ export function PaymentPanel({ form, open, branches, today, busy, error, onChang
           )}
           {problem && amountText !== '' && <p role="alert" className="rt-flag">{problem}</p>}
           <Problem error={error} />
-          <BusyButton busy={busy ?? false} type="submit" className="rt-primary" disabled={problem !== null}>{busy ? 'Saving' : 'Save payment'}</BusyButton>
+          <BusyButton busy={busy ?? false} type="submit" className="rt-primary" disabled={problem !== null}>Save payment</BusyButton>
         </form>
       )}
     </section>
@@ -359,7 +359,7 @@ export function AccountScreen({ customerId, me, branch }: { customerId: string; 
         {canIssueDocuments(me) && holds(me, DOCUMENT_ISSUE) && (
           <p>
             <BusyButton busy={statementPdf.isPending} type="button" disabled={!ranged} data-tour="account-statement-pdf" onClick={() => statementPdf.mutate()}>
-              {statementPdf.isPending ? 'Making the PDF' : 'Open the statement as a PDF'}
+              Open the statement as a PDF
             </BusyButton>
             <Problem error={statementPdf.error} />
           </p>

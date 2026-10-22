@@ -125,7 +125,7 @@ export function FeedbackForm({ send = sendFeedback, from = pageBeforeFeedback }:
       )}
       <div className="form-actions">
         <BusyButton type="submit" className="btn-primary" busy={submit.isPending} data-tour="feedback-send">
-          {submit.isPending ? 'Sending' : 'Send feedback'}
+          Send feedback
         </BusyButton>
       </div>
     </form>

@@ -187,7 +187,7 @@ export function SignUpView({ form, problems, busy, error, done, onChange, onSubm
           <input id="website" name="website" tabIndex={-1} autoComplete="off" value={form.website} onChange={(e) => set({ website: e.target.value })} />
         </div>
         <BusyButton className="btn-brand" type="submit" busy={busy}>
-          {busy ? 'Sending' : 'Send application'}
+          Send application
         </BusyButton>
       </form>
     </main>

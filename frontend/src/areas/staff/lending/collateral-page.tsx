@@ -148,7 +148,7 @@ function Valuations({ id, currency, valuations, canAdd }: { id: string; currency
           </Group>
           <SaveGuardNotice guard={guard} what="valuation" found={() => <button type="button" className="btn-sm" onClick={() => { setOpen(false); void queryClient.invalidateQueries({ queryKey: ['collateral'] }); guard.release(); }}>Close</button>} />
           <Problem error={failure ? new Error(failure) : null} />
-          <SaveBar label="Save valuation" busyLabel="Saving" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
+          <SaveBar label="Save valuation" busy={busy} blocked={guard.blocked ? 'Wait for the check above before saving again.' : undefined} cancel={<button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>} />
         </form>
       )}
     </section>
@@ -193,7 +193,7 @@ function CustodyChange({ id, version, custody, onDone }: { id: string; version: 
         <TextField name="note" label="Note" form={form} required={type === 'note'} type="textarea" value={note} onChange={setNote} maxLength={1000} />
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Save" busyLabel="Saving" busy={busy} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
+      <SaveBar label="Save" busy={busy} cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );
 }
@@ -239,7 +239,7 @@ function ReleaseRequest({ id, version, onDone }: { id: string; version: number; 
         <p className="field-hint">A loan that this item secures must be closed first. A second person agrees in the approvals inbox.</p>
       </Group>
       <Problem error={failure ? new Error(failure) : null} />
-      <SaveBar label="Send the request" busyLabel="Sending" busy={busy} blocked={by.trim() === '' ? 'Say who is collecting it.' : undefined}
+      <SaveBar label="Send the request" busy={busy} blocked={by.trim() === '' ? 'Say who is collecting it.' : undefined}
         cancel={<button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button>} />
     </form>
   );

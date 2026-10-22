@@ -87,7 +87,7 @@ export function SavingsForm({ branchId, onSaved }: { branchId: string; onSaved?:
       )}
       <Problem error={save.error} />
       <BusyButton type="submit" className="rt-primary" busy={save.isPending} disabled={blocked}>
-        {save.isPending ? 'Saving' : 'Save savings'}
+        Save savings
       </BusyButton>
 
     </form>

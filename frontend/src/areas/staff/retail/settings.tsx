@@ -74,7 +74,7 @@ export function ChangeReview({ change, busy, onConfirm, onBack }: { change: Chan
       </ul>
       <p className="hint">The change takes effect on the next page everyone opens. It is recorded with your name.</p>
       <p className="cluster">
-        <BusyButton type="button" className="rt-primary" busy={busy === true} onClick={onConfirm}>{busy ? 'Saving' : 'Confirm'}</BusyButton>
+        <BusyButton type="button" className="rt-primary" busy={busy === true} onClick={onConfirm}>Confirm</BusyButton>
         <button type="button" /* busy-exempt: back waits for the save */ className="btn-ghost" disabled={busy} onClick={onBack}>Back</button>
 
       </p>

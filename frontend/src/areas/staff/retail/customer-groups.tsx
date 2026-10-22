@@ -88,7 +88,7 @@ export function CustomerGroups() {
             <option value="">No price list</option>
             {(lists.data ?? []).filter((l) => l.active).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
-          <BusyButton busy={create.isPending} type="submit" className="rt-primary" disabled={name.trim() === ''}>{create.isPending ? 'Adding' : 'Add group'}</BusyButton>
+          <BusyButton busy={create.isPending} type="submit" className="rt-primary" disabled={name.trim() === ''}>Add group</BusyButton>
           <Problem error={create.error} />
         </form>
       </AddPanel></div>

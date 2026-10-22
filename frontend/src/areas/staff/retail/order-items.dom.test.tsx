@@ -66,7 +66,7 @@ function page(o: Order) {
   );
 }
 
-const save = () => screen.getByRole('button', { name: /Save the new items|Saving/ }) as HTMLButtonElement;
+const save = () => screen.getByRole('button', { name: /Save the new items/ }) as HTMLButtonElement;
 
 describe('Change the items on the order page', () => {
   it('is offered while the order is ordered or packed, and not once it is out for delivery', () => {
@@ -137,8 +137,8 @@ describe('Change the items on the order page', () => {
     fireEvent.change(await screen.findByLabelText(/Quantity/), { target: { value: '3' } });
     fireEvent.click(save());
     await waitFor(() => expect(save().getAttribute('aria-busy')).toBe('true'));
-    expect(save().disabled).toBe(true);
-    expect(save().textContent).toContain('Saving');
+    expect(save().getAttribute('aria-disabled')).toBe('true');
+    expect(save().textContent).toBe('Save the new items');
     expect(save().querySelector('.busy-spinner')).not.toBeNull();
     fireEvent.click(save());
     expect(changeItems).toHaveBeenCalledTimes(1);
