@@ -524,6 +524,26 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(errorCodes(over)).containsExactly("repayments[1].amount_minor:repayments_exceed_balance");
     }
 
+    /** A past repayment dated before the disbursement is refused on its line, in the check as in the recording. */
+    @Test
+    void frExl02_aPastRepaymentBeforeTheDisbursementIsRefused() {
+        String product = product("EXL15", Map.of());
+        assertThat(setGoLive(today.minusDays(10)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate disbursed = today.minusMonths(2);
+        Map<String, Object> body = request(
+                borrower(20),
+                product,
+                900_000,
+                disbursed,
+                List.of(repayment(disbursed.minusDays(1), 100_000, "cash", "Test receipt 51")));
+        ResponseEntity<JsonNode> checked = check(body);
+        assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(errorCodes(checked)).containsExactly("repayments[0].value_date:before_disbursement");
+        assertThat(errorCodes(record(body))).containsExactly("repayments[0].value_date:before_disbursement");
+        assertThat(count("SELECT count(*) FROM lending_loans WHERE tenant_id = ?", t.tenantId()))
+                .isZero();
+    }
+
     // ---- Maker-checker (FR-EXL-04) --------------------------------------------------------
 
     /**
@@ -1111,7 +1131,7 @@ class ExistingLoansIT extends LoanFixtures {
 
     /**
      * A check reports every row: an unknown member, a date that is not year-month-day, a repayment with no loan row, a
-     * repayment after go-live. A commit of a file with errors records nothing; the corrected file is checked clean,
+     * repayment after go-live, a repayment before its disbursement. A commit of a file with errors records nothing; the corrected file is checked clean,
      * committed (each loan waiting for its checker), and committed again it skips every loan.
      */
     @Test
@@ -1130,7 +1150,9 @@ class ExistingLoansIT extends LoanFixtures {
                 + "loan,REG-002,M999999,EXL7,800000," + d2 + ",,,,,,,\n"
                 + "loan,REG-003," + two + ",EXL7,800000,31/01/2026,,,,,,,\n"
                 + "repayment,REG-009,,,,,,,," + d1.plusDays(3) + ",1000,cash,\n"
-                + "repayment,REG-001,,,,,,,," + today + ",1000,cash,\n";
+                + "repayment,REG-001,,,,,,,," + today + ",1000,cash,\n"
+                + "loan,REG-004," + two + ",EXL7,800000," + d2 + ",,,,,,,\n"
+                + "repayment,REG-004,,,,,,,," + d2.minusDays(1) + ",1000,cash,\n";
         ResponseEntity<JsonNode> checked = importCsv(bad, true);
         assertThat(checked.getStatusCode()).as("%s", checked.getBody()).isEqualTo(HttpStatus.OK);
         Map<Integer, String> outcomes = new LinkedHashMap<>();
@@ -1144,7 +1166,9 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(outcomes.get(5)).startsWith("error:The disbursement date must be year-month-day");
         assertThat(outcomes.get(6)).startsWith("error:No loan row with this ref");
         assertThat(outcomes.get(7)).startsWith("error:A repayment on or after the go-live date");
-        assertThat(checked.getBody().get("errors").asInt()).isEqualTo(5);
+        assertThat(outcomes.get(8)).startsWith("error:A repayment row of this loan has an error");
+        assertThat(outcomes.get(9)).startsWith("error:Before the disbursement date");
+        assertThat(checked.getBody().get("errors").asInt()).isEqualTo(7);
         ResponseEntity<JsonNode> refused = importCsv(bad, false);
         assertThat(refused.getBody().get("added").asInt()).isZero();
         assertThat(count("SELECT count(*) FROM lending_loans WHERE tenant_id = ?", t.tenantId()))
