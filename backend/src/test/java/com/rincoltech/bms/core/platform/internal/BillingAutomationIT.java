@@ -460,6 +460,11 @@ class BillingAutomationIT extends IntegrationTest {
         Business pilot = business("past_due", null, LocalDate.of(2026, 11, 1), true);
         Business suspended = business("suspended", null, LocalDate.of(2026, 11, 1), false);
         Business ended = business("past_due", null, LocalDate.of(2026, 11, 1), false);
+        Business scheduled = business("past_due", null, LocalDate.of(2026, 11, 1), false);
+        TestDatabase.owner()
+                .sql("UPDATE subscriptions SET next_status_change_on = ? WHERE tenant_id = ?")
+                .params(LocalDate.of(2026, 11, 30), scheduled.id())
+                .update();
         TestDatabase.owner()
                 .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
                 .param(ended.id())
@@ -478,7 +483,8 @@ class BillingAutomationIT extends IntegrationTest {
                             inGrace.id().toString(),
                             pilot.id().toString(),
                             suspended.id().toString(),
-                            ended.id().toString());
+                            ended.id().toString(),
+                            scheduled.id().toString());
             JsonNode item = null;
             for (JsonNode i : platform.get("/api/v1/platform/billing/due-for-suspension", operator.accessToken())
                     .getBody()
