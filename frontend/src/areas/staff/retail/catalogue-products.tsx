@@ -46,10 +46,10 @@ export function ChangeLine({ change }: { change: PriceChange }) {
   const cost = change.new_cost_minor == null
     ? ''
     : change.old_cost_minor == null
-      ? `, cost ${money(change.new_cost_minor)}`
+      ? `, buying price ${money(change.new_cost_minor)}`
       : change.old_cost_minor === change.new_cost_minor
-        ? `, cost stays ${money(change.new_cost_minor)}`
-        : `, cost ${money(change.old_cost_minor)} to ${money(change.new_cost_minor)}`;
+        ? `, buying price stays ${money(change.new_cost_minor)}`
+        : `, buying price ${money(change.old_cost_minor)} to ${money(change.new_cost_minor)}`;
   return (
     <li className="rt-card">
       <p><strong>{showWhen(change.at)}</strong> <span className="badge badge-info">{SOURCES[change.source ?? ''] ?? change.source}</span></p>
@@ -244,11 +244,10 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
               <p className="hint">What you pay the supplier for one. Leave 0 if you do not know it yet; a restock sets it.</p>
             </>
-          ) : (
-            <p className="hint">The cost is set when you record a restock.</p>
-          )}
+          ) : null}
           <label htmlFor="item-sell">Selling price ({RETAIL_CURRENCY})</label>
           <input id="item-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sell.trim() !== '' && sellMinor === null} autoComplete="off" />
+          {!profit && <p className="hint">The buying price is set when you record a restock.</p>}
         </>
       )}
       {exists && (

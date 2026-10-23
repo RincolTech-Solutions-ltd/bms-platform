@@ -86,7 +86,7 @@ class ProductImportService {
                         "csv",
                         "The file needs a column called "
                                 + required.replace('_', ' ')
-                                + ". The columns are: code, description, category, unit, sell price and, optionally, cost price.");
+                                + ". The columns are: code, description, category, unit, selling price and, optionally, buying price.");
             }
         }
         boolean withCost = columns.containsKey("cost_price");
