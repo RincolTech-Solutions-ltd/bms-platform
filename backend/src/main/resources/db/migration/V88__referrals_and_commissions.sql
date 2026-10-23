@@ -359,15 +359,16 @@ $$;
 CREATE TRIGGER commission_line_guard BEFORE UPDATE OR DELETE ON referral_commission_lines
     FOR EACH ROW EXECUTE FUNCTION bms_commission_line_guard();
 
--- What each payment of a referred business gave under its referral (ADR-069 decision 9): kept so that a payment that earned
+-- What each payment of a referred business gave under its referral, or, for a payment made while it had none current after
+-- its first one (no_referral), under the referral that ended last (ADR-069 decision 9): kept so that a payment that earned
 -- nothing because its currency differed from the rule's, or a payment that was refunded (the operator said so when reversing
 -- its line), never uses up the rule's months later, whatever the rule is then. Platform table, closed to bms_app; nothing is
 -- deleted, and an update only records the refund, once.
 CREATE TABLE referral_payment_outcomes (
     payment_id          uuid        NOT NULL PRIMARY KEY REFERENCES subscription_payments (id),
     referral_id         uuid        NOT NULL REFERENCES tenant_referrals (id),
-    outcome             text        NOT NULL CHECK (outcome IN ('added', 'no_rule', 'not_first_payment', 'months_used',
-                                                                'currency_differs', 'cap_reached', 'zero')),
+    outcome             text        NOT NULL CHECK (outcome IN ('added', 'no_referral', 'no_rule', 'not_first_payment',
+                                                                'months_used', 'currency_differs', 'cap_reached', 'zero')),
     created_at          timestamptz NOT NULL DEFAULT now(),
     refunded_at         timestamptz,
     -- The reversal that said so, or null when the operator marked the payment refunded on its own (a payment with no line).
@@ -745,6 +746,11 @@ BEGIN
     SELECT * INTO v_ref FROM tenant_referrals r WHERE r.referred_tenant_id = v_tenant AND r.ended_at IS NULL FOR UPDATE;
     IF NOT FOUND THEN
         outcome := 'no_referral';
+        -- A payment between a clear and a reset still uses up months (they count from the first referral), so it gets an
+        -- outcome row on the referral that ended last, and can be marked refunded. Before any referral it counts for nothing.
+        INSERT INTO referral_payment_outcomes (payment_id, referral_id, outcome)
+        SELECT v_pay.id, r.id, outcome FROM tenant_referrals r
+         WHERE r.referred_tenant_id = v_tenant ORDER BY r.ended_at DESC, r.started_at DESC LIMIT 1;
         RETURN NEXT;
         RETURN;
     END IF;

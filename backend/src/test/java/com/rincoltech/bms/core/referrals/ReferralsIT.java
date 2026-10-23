@@ -1450,6 +1450,47 @@ class ReferralsIT extends IntegrationTest {
     }
 
     /**
+     * A payment made between a clear and a reset uses up months like any other, so it gets a no_referral outcome on the
+     * referral that ended and can be marked refunded; once refunded it no longer counts (review of #467). A payment made
+     * before the business had any referral gets no outcome and counts for nothing.
+     */
+    @Test
+    void aPaymentWhileNoReferralIsCurrentCanBeMarkedRefunded() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refgap", false);
+        Business x = business("ref-gap");
+        UUID before = UUID.fromString(pay(x.id(), 60000, 1).getBody().get("id").asString());
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID first = currentReferral(x.id());
+        pay(x.id(), 60000, 1);
+        assertThat(setReferrer(x.id(), null, "Test: cleared by mistake").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        UUID gap = UUID.fromString(pay(x.id(), 180000, 3).getBody().get("id").asString());
+        assertThat(outcomes(first)).containsExactly("added", "no_referral");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM referral_payment_outcomes WHERE payment_id = ?")
+                        .param(before)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+
+        ResponseEntity<JsonNode> refunded = platform.post(
+                "/api/v1/platform/referrals/payments/" + gap + "/refunded",
+                Map.of("reason", "Test: the payment was sent back"),
+                operator.accessToken());
+        assertThat(refunded.getStatusCode()).as("%s", refunded.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(refunded.getBody().get("referral").get("referral_id").asString())
+                .isEqualTo(first.toString());
+
+        assertThat(setReferrer(x.id(), code(a.tenantId()), "Test: set again").getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        UUID second = currentReferral(x.id());
+        pay(x.id(), 720000, 12);
+        // One month used under the first referral; the refunded three are not counted, so eleven are left.
+        assertThat(amounts(detail(second))).containsExactly(66000L);
+    }
+
+    /**
      * A year paid upfront earns a line; marking that payment refunded while its line stands is refused, so its months stay
      * used and the next monthly payment earns nothing. Reversing the line with refunded frees them: commission is never
      * due both on the refunded year and on the payment after it.

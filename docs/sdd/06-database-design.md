@@ -309,8 +309,9 @@ rule, the default the product owner decided (ADR-069 decision 14: `percent_of_pa
 fixed id `00000000-0000-4000-8000-000000000890`), and points the default at it only when none is set, with a
 `platform.referral.default_rule_changed` audit row.
 
-`referral_payment_outcomes` (same protection): what each payment of a referred business gave under its referral,
-`payment_id uuid PK` (FK `subscription_payments`), `referral_id` (FK `tenant_referrals`), `outcome text` [`added`, `no_rule`,
+`referral_payment_outcomes` (same protection): what each payment of a referred business gave under its referral (for a payment
+made while no referral was current after the first one, `no_referral` under the referral that ended last),
+`payment_id uuid PK` (FK `subscription_payments`), `referral_id` (FK `tenant_referrals`), `outcome text` [`added`, `no_referral`, `no_rule`,
 `not_first_payment`, `months_used`, `currency_differs`, `cap_reached`, `zero`], `created_at`, `refunded_at timestamptz` and
 `refunded_by_line_id uuid` (FK `referral_commission_lines`, the reversal that said so) and `refunded_by_platform_user_id uuid` (FK
 `platform_users`); both are null until `refunded_at` is set. Inserted only by `platform_referral_commission_for_payment`;
