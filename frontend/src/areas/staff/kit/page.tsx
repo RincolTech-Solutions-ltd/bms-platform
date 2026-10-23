@@ -10,7 +10,6 @@ import { Skeleton } from '../../../app/ui/Skeleton';
 import { Stepper } from '../../../app/ui/Stepper';
 import { SuccessScreen } from '../../../app/ui/SuccessScreen';
 import { formatMinor } from '../../../components/money';
-import { isAdmin } from '../../../offline/offline-context';
 import { useStaff } from '../context';
 
 // The component kit page (#520): every control of src/app/ui/kit.css on one staff page, with made-up figures, so a change to the
@@ -76,7 +75,7 @@ function SkeletonExample() {
   );
 }
 
-function KitPage() {
+export function KitPage() {
   const { me } = useStaff();
   const [show, setShow] = useState<string>('all');
   const [qty, setQty] = useState('2');
@@ -85,7 +84,7 @@ function KitPage() {
   const [picking, setPicking] = useState(false);
   const [method, setMethod] = useState('Cash');
   const [done, setDone] = useState(0);
-  if (!isAdmin(me)) {
+  if (!(me.roles ?? []).some((r) => r.role_key === 'tenant_admin')) {
     return (
       <main>
         <h1>Component kit</h1>
