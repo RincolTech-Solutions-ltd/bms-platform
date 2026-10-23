@@ -7,7 +7,6 @@
   margin: 0 0 var(--space-4);
   padding: var(--space-3) var(--space-4);
   border: 1px solid transparent;
-  border-left-width: 4px;
   border-radius: var(--radius);
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -16,29 +15,24 @@
 .alert-danger {
   background: var(--color-danger-tint);
   border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-surface));
-  border-left-color: var(--color-danger);
   color: var(--color-danger);
-  font-weight: var(--weight-semibold);
 }
 
 .alert-warning {
   background: var(--color-warning-tint);
   border-color: color-mix(in srgb, var(--color-warning) 30%, var(--color-surface));
-  border-left-color: var(--color-warning);
   color: var(--color-warning);
 }
 
 .alert-success {
   background: var(--color-success-tint);
   border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-surface));
-  border-left-color: var(--color-success);
   color: var(--color-success);
 }
 
 .alert-info {
   background: var(--color-info-tint);
   border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-surface));
-  border-left-color: var(--color-accent);
   color: var(--color-text);
 }
 
