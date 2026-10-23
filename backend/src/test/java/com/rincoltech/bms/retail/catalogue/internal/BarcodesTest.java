@@ -81,6 +81,8 @@ class BarcodesTest {
         // Lengths a barcode format has, short codes and letters are not suspected.
         assertThat(Barcodes.check("12345", null).ok()).isTrue();
         assertThat(Barcodes.check("TEST-E12", null).ok()).isTrue();
+        // Scientific notation from a spreadsheet has a decimal separator; a code like 12E34 is a real Code 128.
+        assertThat(Barcodes.check("12E34", null).checked().format()).isEqualTo(Barcodes.Format.CODE128);
         assertThat(Barcodes.check("4006381333931", null).ok()).isTrue();
     }
 

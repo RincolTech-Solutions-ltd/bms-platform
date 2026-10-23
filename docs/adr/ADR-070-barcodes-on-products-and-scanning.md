@@ -3,8 +3,8 @@
 ## Status
 
 Accepted (approved by the dev lead on 22 Oct 2026; issue #345, FR-RET-68; migration `V87`). Builds on ADR-020 (the retail
-vertical), ADR-033 (pack sizes, the `units` capability) and ADR-009 (the PWA). Numbered ADR-070 because pending ADR-067, pending ADR-068
-and pending ADR-069 are claimed by open pull requests; renumbered at merge if needed.
+vertical), ADR-033 (pack sizes, the `units` capability) and ADR-009 (the PWA). Numbered ADR-070 because ADR-067 (offline sales) and ADR-068 (shop
+logos) are taken and pending ADR-069 is claimed by an open pull request; renumbered at merge if needed.
 
 ## Context
 

@@ -14,9 +14,11 @@ export interface LabelRow {
   count: string;
 }
 
-/** The barcode a label prints: the item's own (not a pack's), the first one it was given; or none yet. */
+/** The barcode a label prints: the item's own IN label code (not a pack's); or none yet. */
 export function labelCode(product: Product, made: Barcode[] = []): string | undefined {
-  const own = [...(product.barcodes ?? []), ...made.filter((b) => b.product_id === product.id)].find((b) => !b.unit_id);
+  // Always the system's own Code 128 label code: an EAN or UPC drawn as Code 128 bars would not scan on a scanner with
+  // Code 128 switched off, while every scanner that reads the labels reads them all. An item without one gets one made.
+  const own = [...(product.barcodes ?? []), ...made.filter((b) => b.product_id === product.id)].find((b) => b.generated && !b.unit_id);
   return own?.code;
 }
 
@@ -55,7 +57,7 @@ export function LabelsPage() {
           <span>
             <strong>{r.product.description}</strong>
             <br />
-            {labelCode(r.product, made) ?? 'No barcode yet: one is made for it'}
+            {labelCode(r.product, made) ?? 'No label code yet: one is made for it'}
           </span>
           <label htmlFor={`labels-count-${i}`}>Labels</label>
           <input id={`labels-count-${i}`} inputMode="numeric" style={{ width: '5em' }} value={r.count} onChange={(e) => { setReady(false); setRows((rs) => rs.map((x, n) => (n === i ? { ...x, count: e.target.value } : x))); }} />
