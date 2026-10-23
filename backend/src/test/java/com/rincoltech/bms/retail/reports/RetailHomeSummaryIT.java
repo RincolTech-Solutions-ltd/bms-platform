@@ -388,6 +388,21 @@ class RetailHomeSummaryIT extends IntegrationTest {
     }
 
     @Test
+    void aReturnOnACreditSaleTakenOffTheBuyersBalanceIsNoMoney() {
+        giveBack(d.sell(t.headOffice(), "credit", d.p2, "1", 1), "account");
+        JsonNode takings = home("", ADMIN, "*").get("takings");
+        // Nothing left the till: no line for the account, and the money taken today is what it was.
+        assertThat(takings.get("total_minor").asLong()).isEqualTo(2_400);
+        for (JsonNode m : takings.get("methods")) {
+            assertThat(m.get("method").asString()).isIn("cash", "mobile_money", "bank");
+            assertThat(m.get("out_minor").asLong())
+                    .isEqualTo(m.get("method").asString().equals("cash") ? 1_500 : 0);
+        }
+        assertThat(method(takings, "cash").get("amount_minor").asLong()).isEqualTo(1_700);
+        assertCashIsTheCashSummarys(takings);
+    }
+
+    @Test
     void aDeliveryFeeTakenInCashAtTheDoorIsCash() {
         UUID id = order(500);
         ResponseEntity<JsonNode> done = api.postKeyed(

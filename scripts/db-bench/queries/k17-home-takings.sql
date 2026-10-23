@@ -16,11 +16,12 @@ SELECT t.method, t.kind, sum(t.amount) AS amount FROM (
     LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id
    WHERE p.paid_on = DATE '2026-09-30'
   UNION ALL SELECT ap.method, 'out', ap.amount_minor FROM retail_account_payments ap
-   WHERE ap.status = 'reversed' AND ap.reversed_on = DATE '2026-09-30'
+   WHERE ap.method IN ('cash', 'mobile_money', 'bank') AND ap.status = 'reversed' AND ap.reversed_on = DATE '2026-09-30'
   UNION ALL SELECT r.refund_method, 'out', r.refund_minor FROM retail_sale_returns r
-   WHERE r.refund_minor > 0 AND r.returned_on = DATE '2026-09-30'
+   WHERE r.refund_method IN ('cash', 'mobile_money', 'bank') AND r.refund_minor > 0 AND r.returned_on = DATE '2026-09-30'
   UNION ALL SELECT r.refund_method, 'out', -r.refund_minor FROM retail_sale_returns r
-   WHERE r.refund_minor > 0 AND r.status = 'voided' AND r.voided_on = DATE '2026-09-30'
+   WHERE r.refund_method IN ('cash', 'mobile_money', 'bank') AND r.refund_minor > 0 AND r.status = 'voided'
+     AND r.voided_on = DATE '2026-09-30'
   UNION ALL SELECT o.fee_method, 'fees', o.delivery_fee_minor FROM retail_customer_orders o
    WHERE o.status = 'delivered' AND o.fee_method IN ('cash', 'mobile_money', 'bank') AND o.fee_entry_id IS NOT NULL
      AND o.delivered_on = DATE '2026-09-30'

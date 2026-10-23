@@ -118,6 +118,9 @@ class HomeService {
         byMethod.put("cash", new long[4]);
         byMethod.put("mobile_money", new long[4]);
         for (Taking t : rows) {
+            if (t.method() == null) {
+                continue;
+            }
             int kind = switch (t.kind()) {
                 case "sales" -> 0;
                 case "payments" -> 1;
@@ -132,7 +135,7 @@ class HomeService {
         for (Map.Entry<String, long[]> e : byMethod.entrySet()) {
             long[] f = e.getValue();
             long amount = Math.subtractExact(Math.addExact(Math.addExact(f[0], f[1]), f[2]), f[3]);
-            boolean always = e.getKey().equals("cash") || e.getKey().equals("mobile_money");
+            boolean always = "cash".equals(e.getKey()) || "mobile_money".equals(e.getKey());
             if (always || f[0] != 0 || f[1] != 0 || f[2] != 0 || f[3] != 0) {
                 methods.add(new Method(e.getKey(), amount, f[0], f[1], f[2], f[3]));
                 total = Math.addExact(total, amount);

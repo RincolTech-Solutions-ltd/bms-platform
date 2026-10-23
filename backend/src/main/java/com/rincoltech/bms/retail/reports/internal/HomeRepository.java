@@ -35,7 +35,8 @@ class HomeRepository {
      * later or not); payments on credit sales dated today, at the branch that took them; delivery fees taken at the door on
      * deliveries of today, and fees left on an account and paid today. Out: sales paid at the sale cancelled today, payments on
      * account reversed today, money refunded today on goods taken back (at the till that paid it), and the door fee of an order
-     * whose sale was cancelled today; a return cancelled today brings its refund back in. Payments are chosen by {@code paid_on}
+     * whose sale was cancelled today; a return cancelled today brings its refund back in. Every part out is read for cash,
+     * mobile money and bank only, as the fees are: what a return takes off a buyer's balance is not money. Payments are chosen by {@code paid_on}
      * alone, as the cash book chooses them, whenever they were entered: no index leads on {@code paid_on} (pending a migration,
      * see bench query k17), so this part reads the tenant's payments the way the cash summary does.
      */
@@ -67,11 +68,14 @@ class HomeRepository {
                         + " WHERE p.paid_on = :today"
                         + in.apply("coalesce(ap.branch_id, s.branch_id)")
                         + " UNION ALL SELECT ap.method, 'out', ap.amount_minor FROM retail_account_payments ap"
-                        + " WHERE ap.status = 'reversed' AND ap.reversed_on = :today" + in.apply("ap.branch_id")
+                        + " WHERE ap.method IN " + money + " AND ap.status = 'reversed' AND ap.reversed_on = :today"
+                        + in.apply("ap.branch_id")
                         + " UNION ALL SELECT r.refund_method, 'out', r.refund_minor FROM retail_sale_returns r"
-                        + " WHERE r.refund_minor > 0 AND r.returned_on = :today" + in.apply("r.refund_branch_id")
+                        + " WHERE r.refund_method IN " + money + " AND r.refund_minor > 0 AND r.returned_on = :today"
+                        + in.apply("r.refund_branch_id")
                         + " UNION ALL SELECT r.refund_method, 'out', -r.refund_minor FROM retail_sale_returns r"
-                        + " WHERE r.refund_minor > 0 AND r.status = 'voided' AND r.voided_on = :today"
+                        + " WHERE r.refund_method IN " + money + " AND r.refund_minor > 0 AND r.status = 'voided'"
+                        + " AND r.voided_on = :today"
                         + in.apply("r.refund_branch_id")
                         + " UNION ALL SELECT o.fee_method, 'fees', o.delivery_fee_minor FROM retail_customer_orders o"
                         + " WHERE o.status = 'delivered' AND o.fee_method IN " + money
