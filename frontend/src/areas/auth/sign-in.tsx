@@ -3,7 +3,7 @@ import { type FormEvent, useState } from 'react';
 import { api, type MfaEnrolment, problemOf, type SignInResponse } from '../../api/client';
 import { BusyButton } from '../../app/ui/BusyButton';
 import { normaliseSecondFactor, plainProblem } from '../../auth/codes';
-import { endPendingLogout, logoutPending, setAccessToken } from '../../auth/session';
+import { cancelPendingLogout, endPendingLogout, logoutPending, setAccessToken } from '../../auth/session';
 import { illustrations } from '../../components/illustrations';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { ErrorLine, RecoveryCodes, StepHeader, TwoStepSetup } from './steps';
@@ -29,7 +29,8 @@ export function SignIn() {
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState(false);
   // ADR-067 decision 9: a sign-out whose server session could not be ended yet. The installed app has no address bar, so
-  // the page itself offers the retry.
+  // the page itself offers the retry. While it runs the form is shut: the retry rotates the last person's cookie, and its
+  // answer must not land on top of a new sign-in's.
   const [pendingLogout, setPendingLogout] = useState(logoutPending);
   const [ending, setEnding] = useState(false);
 
@@ -37,7 +38,8 @@ export function SignIn() {
     if (ending) return;
     setEnding(true);
     try {
-      setPendingLogout(!(await endPendingLogout()));
+      await endPendingLogout();
+      setPendingLogout(logoutPending());
     } finally {
       setEnding(false);
     }
@@ -78,6 +80,8 @@ export function SignIn() {
 
   function submitPassword(e: FormEvent) {
     e.preventDefault();
+    if (ending) return;
+    cancelPendingLogout();
     void run(async () => {
       const { data, error } = await api.POST('/api/v1/auth/staff/login', { body: { login, password } });
       if (error || !data) throw error;
@@ -131,7 +135,7 @@ export function SignIn() {
           <form onSubmit={submitPassword} className="form-stack">
             <div>
               <label htmlFor="login">Email or phone</label>
-              <input id="login" value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required />
+              <input id="login" value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" disabled={ending} required />
             </div>
             <div>
               <label htmlFor="password">Password</label>
@@ -142,6 +146,7 @@ export function SignIn() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
+                  disabled={ending}
                   required
                 />
                 <button type="button" className="btn-sm" aria-pressed={shown} onClick={() => setShown(!shown)}>
@@ -149,7 +154,7 @@ export function SignIn() {
                 </button>
               </div>
             </div>
-            <BusyButton className="btn-primary btn-lg" busy={busy}>Sign in</BusyButton>
+            <BusyButton className="btn-primary btn-lg" busy={busy} disabled={ending}>Sign in</BusyButton>
           </form>
           <p>
             <Link to="/forgot-password">Forgot password?</Link>

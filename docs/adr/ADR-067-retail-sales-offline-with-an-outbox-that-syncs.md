@@ -134,8 +134,10 @@ left, the branch, the period, the person's roles.
    session) before anything restores one, and no refresh runs and the app stays on sign-in until it has. Those two calls
    share one 10 second limit, and a timeout counts as no answer: the sign-out stays pending, the old session is never
    restored, and the sign-in page says "Could not finish signing out. Connect to the internet and try again." with a Try
-   again button, since the installed app has no address bar to leave a loader by. A new sign-in
-   on the device clears the note. Where the note cannot be kept, sign-out with no network is refused: "Connect to the
+   again button, since the installed app has no address bar to leave a loader by. While Try again runs the sign-in form
+   is shut, since that call rotates the last person's cookie and its answer must not land on top of a new sign-in's. A
+   new sign-in on the device aborts any pending sign-out call still running and clears the note, and a call that began
+   before a sign-in never touches the note after it. Where the note cannot be kept, sign-out with no network is refused: "Connect to the
    internet to sign out."
 10. **Status in the header.** A dot in the staff bar on every staff screen: green online, grey offline, amber while syncing,
     with the state in words beside it (Online, Offline, Syncing; never colour alone) and "3 waiting to sync" ("3 waiting" on a
