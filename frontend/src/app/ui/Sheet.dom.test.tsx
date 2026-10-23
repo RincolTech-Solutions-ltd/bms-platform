@@ -16,6 +16,9 @@ function Example() {
         <button type="button" onClick={() => setOpen(true)}>
           Choose a payment
         </button>
+        <p className="toast" role="status" aria-live="polite">
+          Added Sample soap
+        </p>
       </main>
       <Sheet
         open={open}
@@ -54,8 +57,10 @@ describe('Sheet', () => {
     openIt();
     expect(dialog()).toBeTruthy();
     expect(document.activeElement?.textContent).toBe('Mobile money');
-    // Radix hides the rest of the page from a screen reader while the sheet is open.
-    expect(document.querySelector('main')?.closest('[aria-hidden="true"]')).toBeTruthy();
+    // Radix hides the rest of the page from a screen reader while the sheet is open, but never a live region: a toast is heard.
+    const opener = [...document.querySelectorAll('main button')].find((b) => b.textContent === 'Choose a payment')!;
+    expect(opener.closest('[aria-hidden="true"]')).toBeTruthy();
+    expect(screen.getByText('Added Sample soap').closest('[aria-hidden="true"]')).toBeNull();
   });
 
   it('keeps Tab inside, both ways', () => {
@@ -106,10 +111,10 @@ describe('Sheet', () => {
     expect(dialog()).toBeNull();
   });
 
-  it('never closes on a mouse drag, which may be selecting the title', () => {
+  it.each(['mouse', 'pen'])('never closes on a %s drag, only a touch', (pointerType) => {
     openIt();
     const head = document.querySelector('.sheet-head')!;
-    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerDown(head, { clientY: 100, pointerId: 1, pointerType });
     fireEvent.pointerMove(head, { clientY: 300, pointerId: 1 });
     fireEvent.pointerUp(head, { clientY: 300, pointerId: 1 });
     expect(dialog()).toBeTruthy();

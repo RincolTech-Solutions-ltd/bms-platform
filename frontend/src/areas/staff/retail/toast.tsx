@@ -15,10 +15,11 @@ const TONE_ICON = { success: icons.check, error: icons.error, info: icons.info }
 
 /**
  * The toast itself. It is announced politely (an error assertively) unless `silent`, for a screen whose on-screen message
- * already says the same to assistive technology.
+ * already says the same to assistive technology. Each names its aria-live, so a sheet open over the page (Radix hides the rest of
+ * the page then, but never a live region) still lets it be heard.
  */
 export function Toast({ message, tone, silent = false }: { message: string; tone: ToastTone; silent?: boolean }) {
-  const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert' } : { role: 'status', 'aria-live': 'polite' as const };
+  const announce = silent ? { 'aria-hidden': true } : tone === 'error' ? { role: 'alert', 'aria-live': 'assertive' as const } : { role: 'status', 'aria-live': 'polite' as const };
   return (
     <p {...announce} className={`toast toast-${tone}`}>
       <span className="toast-icon">{TONE_ICON[tone]}</span>

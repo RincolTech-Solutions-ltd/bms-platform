@@ -3,9 +3,10 @@ import { useRef, type PointerEvent, type ReactNode } from 'react';
 import { icons } from '../../components/icons';
 
 // The one sheet (#520): pickers and confirmations open in it. It is a Radix Dialog styled by our own tokens. On a phone (under
-// 720px) it rises from the bottom edge and a swipe down on its top, by touch or pen and never a mouse, closes it; on a wider
+// 720px) it rises from the bottom edge and a swipe down on its top, by touch only, closes it; on a wider
 // screen it is a centred dialog. Radix makes it modal: focus is trapped inside, Escape, a tap on the dimmed page and the close
-// button close it, the page does not scroll, and focus goes back to what opened it. Focus starts on the first control of the
+// button close it, the page does not scroll, and focus goes back to what opened it. The rest of the page is hidden from a screen
+// reader, but never a live region (aria-live), so a toast is still heard. Focus starts on the first control of the
 // content (not the close button). The screen owns `open` and closes it in `onClose`. The look is .sheet-layer in
 // src/app/ui/kit.css.
 
@@ -30,7 +31,7 @@ export function Sheet({ open, onClose, title, children, actions }: {
   const drag = useRef<{ from: number; by: number } | null>(null);
 
   const grab = (e: PointerEvent<HTMLElement>) => {
-    if (e.pointerType === 'mouse' || (e.target as HTMLElement).closest('button')) return;
+    if (e.pointerType !== 'touch' || (e.target as HTMLElement).closest('button')) return;
     drag.current = { from: e.clientY, by: 0 };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
