@@ -468,6 +468,37 @@ class BillingAutomationIT extends IntegrationTest {
         assertThat(audits("platform.tenant.subscription_overdue", b.id())).isZero();
     }
 
+    /**
+     * FR-SUB-08, FR-SUB-09: a cancellation the Owner undid (ADR-073) counts for nothing: the business gets its reminders and
+     * is made overdue the day after its last day, as any other.
+     * JUSTIFICATION-A3: a new test case; no existing case covers an undone cancellation in the billing run.
+     */
+    @Test
+    void frSub08_anUndoneCancellationIsBilledAsUsual() {
+        Business b = business("active", null, LocalDate.of(2026, 11, 8), false);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, effective_on, status, requested_by,
+                                                                    undone_at, undone_by)
+                        VALUES (?, ?, 'cancel', ?, 'undone', ?, now(), ?)
+                        """)
+                .params(UUID.randomUUID(), b.id(), LocalDate.of(2026, 11, 9), b.ownerId(), b.ownerId())
+                .update();
+
+        for (String at : List.of("2026-11-01T06:00:00Z", "2026-11-07T06:00:00Z", "2026-11-08T06:00:00Z")) {
+            clock.set(Instant.parse(at));
+            assertThat(run(b).remindersQueued()).as(at).isEqualTo(1);
+        }
+        assertThat(reminders(b)).containsExactly("due_in_7", "due_in_1", "due_today");
+        for (String kind : List.of("due_in_7", "due_in_1", "due_today")) {
+            assertThat(emails(b, "billing." + kind)).as(kind).isEqualTo(1);
+        }
+        clock.set(Instant.parse("2026-11-10T06:00:00Z"));
+        assertThat(run(b).markedOverdue()).isEqualTo(1);
+        assertThat(status(b)).isEqualTo("past_due");
+        assertThat(audits("platform.tenant.subscription_overdue", b.id())).isEqualTo(1);
+    }
+
     List<String> listed() {
         ResponseEntity<JsonNode> list =
                 platform.get("/api/v1/platform/billing/due-for-suspension", operator.accessToken());

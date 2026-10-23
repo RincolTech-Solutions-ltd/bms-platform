@@ -5,8 +5,8 @@
 Proposed (2026-10-22, issue #480; the owner's decision D2 of 23 Oct 2026). Builds the reminders and the first scheduled transition
 that ADR-024 decision 6 and ADR-056 decision 4 left to come, and narrows decision 6: the only automatic move is to `past_due`, and
 suspension stays a person's act. Builds on ADR-016 (platform operations through definer functions), ADR-034 (generated PDF
-documents), ADR-008 (background jobs on PostgreSQL) and ADR-062 (the Owner of a business). Migration `V92` (the agreed merge order:
-`V85` to `V91` are claimed by open pull requests).
+documents), ADR-008 (background jobs on PostgreSQL), ADR-062 (the Owner of a business) and ADR-073 (the Owner's own plan
+changes). Migration `V92` (the agreed merge order: `V80` to `V91` are merged, `V92` is the next number on main).
 
 ## Context
 
@@ -65,10 +65,12 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    month, paid, overdue in grace, overdue, suspended, cancelled, complimentary), the dates, how to pay and every payment with its
    receipt (`GET /api/v1/billing/payments/{id}/receipt`). Read only; payments are still the operator's. The banner is
    `GET /api/v1/billing/notice`, open to every signed-in member of staff.
-8. **Additive next to the self-serve plan (pending ADR-073).** A cancelled business gets no reminder (its status is `cancelled`).
-   A business whose cancellation is scheduled for the end of its paid period is still `active` until then: whichever of the two
-   changes merges second adds the condition that skips it in the reminder candidates (`subscription_scheduled_changes` with kind
-   `cancel` and status `scheduled`), so it is not asked to pay for a period it has cancelled.
+8. **Additive next to the self-serve plan (ADR-073).** A cancelled business gets no reminder (its status is `cancelled`).
+   A business whose cancellation is scheduled for the end of its paid period is still `active` until then. ADR-073 (`V90`, #474)
+   merged first, so this change is the second and adds the skip: a subscription with a row in `subscription_scheduled_changes`
+   of kind `cancel` and status `scheduled` is left out of the run's candidates (`platform_tenants_cancelling`), is checked
+   again in the reminder's own transaction, and is refused by `platform_mark_subscription_overdue` under the subscription's
+   row lock. It gets no reminder and is never made `past_due`; a cancellation the Owner undid counts for nothing. Done.
 
 ## Consequences
 
@@ -82,5 +84,4 @@ changes how old receipts render (the business and plan names do not change).
 
 **Watch for:** an Owner with no email (no reminder or receipt email goes; the operator sees it in the outbox list of the Business
 page); a business with no price entered for its plan (the reminders say the amount will be given; the list shows no amount); the
-grace setting lowered, which lists more businesses at once; the scheduled cancellation of pending ADR-073 until the condition of
-decision 8 is in.
+grace setting lowered, which lists more businesses at once.

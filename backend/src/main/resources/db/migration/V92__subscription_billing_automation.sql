@@ -206,7 +206,22 @@ INSERT INTO role_permissions (role_key, permission_key) VALUES
     ('tenant_admin', 'core.billing.read')
 ON CONFLICT DO NOTHING;
 
+-- The businesses whose Owner scheduled a cancellation (V90, ADR-073): the billing run skips them before it reads anything
+-- else, so a business that is leaving gets no "pay to keep using" reminder. stillDue() and the function above check again.
+CREATE FUNCTION platform_tenants_cancelling() RETURNS TABLE (tenant_id uuid)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'listed by the platform job only' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN QUERY
+    SELECT c.tenant_id FROM subscription_scheduled_changes c WHERE c.kind = 'cancel' AND c.status = 'scheduled';
+END
+$$;
+
 REVOKE ALL ON FUNCTION platform_set_billing_settings(integer, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_mark_subscription_overdue(uuid, date, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION platform_tenants_cancelling() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform_set_billing_settings(integer, text, uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_mark_subscription_overdue(uuid, date, date) TO bms_app;
+GRANT EXECUTE ON FUNCTION platform_tenants_cancelling() TO bms_app;

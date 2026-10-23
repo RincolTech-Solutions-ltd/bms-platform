@@ -231,7 +231,8 @@ class BillingService {
      * (audited by the database function), and the one whose reminder falls today gets it, at most once. A pilot, a suspended
      * or cancelled business, and a business already overdue get nothing. One with a status change the operator scheduled (an
      * end chosen for the end of its period) or a cancellation the Owner scheduled (ADR-073) is skipped: it gets no "pay to
-     * keep using" reminder, and the database function would never make it overdue nor touch its date anyway. One business's failure is logged and does not stop the others.
+     * keep using" reminder, and the database function would never make it overdue nor touch its date anyway. One business's
+     * failure is logged and does not stop the others.
      */
     RunResult run() {
         return run(null);
@@ -244,10 +245,15 @@ class BillingService {
         int queued = 0;
         int overdue = 0;
         int failures = 0;
+        java.util.Set<UUID> cancelling =
+                java.util.Set.copyOf(jdbc.sql("SELECT tenant_id FROM platform_tenants_cancelling()")
+                        .query(UUID.class)
+                        .list());
         for (TenantResponse tenant : platform.tenants(null, List.of("trial", "active"), null)) {
             if (tenant.pilot()
                     || !"active".equals(tenant.status())
                     || tenant.nextStatusChangeOn() != null
+                    || cancelling.contains(tenant.id())
                     || (only != null && !only.contains(tenant.id()))) {
                 continue;
             }
