@@ -1433,7 +1433,7 @@ side is in section 7.11.3.
 | GET | `/feedback` | authenticated staff | `{items: [FeedbackItem]}`: the caller's own, newest first, at most 100, with status, reply and `has_screenshot` (FR-FBK-02) |
 | GET | `/feedback/{feedback_id}/screenshot` | authenticated staff | The picture of one of the caller's own items; 404 for anyone else's or none |
 
-### 7.11.26 Plan (`/plan`, ADR-073, issue #472)
+### 7.11.27 Plan (`/plan`, ADR-073, issue #472)
 
 A business's own plan on its own host. The card needs `core.settings.manage` (administrators); every change is the Owner's alone
 (403 `owner_only` for anyone else). The job `core.platform.plan-scheduled-changes` (every quarter hour, `bms.platform.plan-changes-job-enabled`)
