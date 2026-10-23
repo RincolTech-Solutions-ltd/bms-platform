@@ -230,8 +230,8 @@ class BillingService {
      * One pass over every business in its free month or paid: the one overdue the day after its last day becomes past_due
      * (audited by the database function), and the one whose reminder falls today gets it, at most once. A pilot, a suspended
      * or cancelled business, and a business already overdue get nothing. One with a status change the operator scheduled (an
-     * end chosen for the end of its period) is never made overdue: the database function leaves it and its date alone.
-     * One business's failure is logged and does not stop the others.
+     * end chosen for the end of its period) is skipped: it gets no "pay to keep using" reminder, and the database function
+     * would never make it overdue nor touch its date anyway. One business's failure is logged and does not stop the others.
      */
     RunResult run() {
         return run(null);
@@ -245,7 +245,10 @@ class BillingService {
         int overdue = 0;
         int failures = 0;
         for (TenantResponse tenant : platform.tenants(null, List.of("trial", "active"), null)) {
-            if (tenant.pilot() || !"active".equals(tenant.status()) || (only != null && !only.contains(tenant.id()))) {
+            if (tenant.pilot()
+                    || !"active".equals(tenant.status())
+                    || tenant.nextStatusChangeOn() != null
+                    || (only != null && !only.contains(tenant.id()))) {
                 continue;
             }
             try {
@@ -396,13 +399,14 @@ class BillingService {
 
     /**
      * Read again in the reminder's own transaction: the subscription is still in its free month or paid and its last day is
-     * still the one the run saw, so a payment recorded during the run sends no reminder for the old date.
+     * still the one the run saw and no status change is scheduled, so a payment recorded or an end scheduled during the run
+     * sends no reminder for the old date.
      */
     private boolean stillDue(LocalDate due) {
         return jdbc.sql("""
                         SELECT CASE WHEN status = 'trial' THEN trial_ends_on ELSE current_period_end END
                           FROM subscriptions
-                         WHERE status IN ('trial', 'active') AND NOT is_pilot
+                         WHERE status IN ('trial', 'active') AND NOT is_pilot AND next_status_change_on IS NULL
                         """)
                 .query(LocalDate.class)
                 .optional()

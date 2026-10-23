@@ -412,6 +412,24 @@ class BillingAutomationIT extends IntegrationTest {
         }
     }
 
+    /** FR-SUB-08: a subscription with an end the operator scheduled gets no "pay to keep using" reminder. */
+    @Test
+    void frSub08_aScheduledEndGetsNoReminder() {
+        Business paid = business("active", null, LocalDate.of(2026, 11, 8), false);
+        Business trial = business("trial", LocalDate.of(2026, 11, 8), null, false);
+        TestDatabase.owner()
+                .sql("UPDATE subscriptions SET next_status_change_on = ? WHERE tenant_id IN (?, ?)")
+                .params(LocalDate.of(2026, 11, 8), paid.id(), trial.id())
+                .update();
+
+        for (String at : List.of("2026-11-01T06:00:00Z", "2026-11-07T06:00:00Z", "2026-11-08T06:00:00Z")) {
+            clock.set(Instant.parse(at));
+            assertThat(run(paid, trial).remindersQueued()).as(at).isZero();
+        }
+        assertThat(reminders(paid)).isEmpty();
+        assertThat(reminders(trial)).isEmpty();
+    }
+
     List<String> listed() {
         ResponseEntity<JsonNode> list =
                 platform.get("/api/v1/platform/billing/due-for-suspension", operator.accessToken());
