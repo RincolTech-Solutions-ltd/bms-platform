@@ -528,6 +528,16 @@ class PlanService {
                                plan_after = ?, decision_reason = ?
                          WHERE id = ?
                         """).params(status, automatic, operator, planAfter, reason, id).update();
+        if ("approved".equals(status)) {
+            // The module is on again: an earlier scheduled stop of it would switch it off on its day without anyone
+            // asking.
+            jdbc.sql("""
+                            UPDATE subscription_scheduled_changes c SET status = 'undone', undone_at = now()
+                              FROM subscription_module_requests r
+                             WHERE r.id = ? AND c.kind = 'stop_module' AND c.module_key = r.module_key
+                               AND c.status = 'scheduled'
+                            """).param(id).update();
+        }
     }
 
     /** The operator's lists across businesses. */

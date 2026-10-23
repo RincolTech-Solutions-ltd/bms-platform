@@ -725,6 +725,38 @@ class SelfServePlanIT extends IntegrationTest {
     }
 
     /**
+     * A module asked for again and switched on closes the stop of it still scheduled, so that stop never switches it off on its
+     * day without anyone asking (review N1).
+     */
+    @Test
+    void aModuleSwitchedOnAgainClosesItsScheduledStop() {
+        LocalDate paidUntil = today.plusDays(10);
+        Business b = business(bothPlan, true, paidUntil);
+        String stopId = withPassword(b.api(), "/api/v1/plan/modules/retail/stop", b.ownerSession())
+                .getBody()
+                .get("id")
+                .asString();
+        JdbcCall.run("DELETE FROM tenant_modules WHERE tenant_id = ? AND module_key = 'retail'", b.t().tenantId());
+
+        ResponseEntity<JsonNode> asked = b.api()
+                .post(
+                        "/api/v1/plan/module-requests",
+                        Map.of("module", "retail", "password", Api.PASSWORD),
+                        b.ownerSession().accessToken());
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(asked.getBody().get("status").asString()).isEqualTo("approved");
+
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status FROM subscription_scheduled_changes WHERE id = ?::uuid")
+                        .param(stopId)
+                        .query(String.class)
+                        .single())
+                .isEqualTo("undone");
+        assertThat(applyDue(b.t().tenantId(), paidUntil.plusDays(1))).isZero();
+        assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
+    }
+
+    /**
      * A stop due after the cancellation's day (the operator recorded a payment after the Owner cancelled, so the stop asked
      * then falls later) is closed as undone when the cancellation applies, so it never switches a module off after a resume.
      */
