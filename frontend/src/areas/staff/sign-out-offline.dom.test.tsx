@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type Me } from '../../api/client';
 import { router as appRouter } from '../../app/router';
-import { getAccessToken, logoutPending, refreshSession, setAccessToken } from '../../auth/session';
+import { endPendingLogout, getAccessToken, logoutPending, markLogoutPending, refreshSession, setAccessToken } from '../../auth/session';
 
 // ADR-067 decision 9: the refresh cookie is HttpOnly, so only the logout call ends a staff session. A sign-out with no
 // network notes a pending logout; the next start ends that session before anything restores it and stays on sign-in until
@@ -102,14 +102,14 @@ describe('signing out with no network', () => {
 });
 
 // A network that never answers (a captive portal, a very weak signal): the request only ends when its signal aborts.
-const stalled = vi.fn((_url: string, init?: RequestInit) =>
-  new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))));
+const stalled = (_url: string, init?: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)));
 
 describe('ending a pending sign-out on a connection that never answers', () => {
-  async function startStalled(network: typeof stalled = stalled) {
+  async function startStalled(answer: typeof stalled = stalled) {
     await signOutOffline();
     const me = vi.spyOn(api, 'GET').mockImplementation((() => new Promise(() => undefined)) as never);
-    network.mockClear();
+    const network = vi.fn(answer);
     vi.stubGlobal('fetch', network);
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // The test environment's AbortSignal.timeout runs on Node's own clock, which fake timers do not move: this one aborts
@@ -122,19 +122,20 @@ describe('ending a pending sign-out on a connection that never answers', () => {
       });
     }
     const router = start();
-    await vi.advanceTimersByTimeAsync(9_000);
+    // Fake time also moves with real time here, so the check before the limit keeps a margin for a slow runner.
+    await vi.advanceTimersByTimeAsync(8_000);
     expect(router.state.location.pathname).toBe('/staff');
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await waitFor(() => expect(router.state.location.pathname).toBe('/sign-in'));
-    return me;
+    return { me, network };
   }
 
   it('gives up after 10 seconds on the sign-in page with a notice, and never restores the session', async () => {
-    const me = await startStalled();
+    const { me, network } = await startStalled();
     expect(await screen.findByText('Could not finish signing out. Connect to the internet and try again.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(AbortSignal.timeout).toHaveBeenCalledWith(10_000);
-    expect(stalled).toHaveBeenCalledWith('/api/v1/auth/refresh', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(network).toHaveBeenCalledWith('/api/v1/auth/refresh', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(logoutPending()).toBe(true);
     expect(getAccessToken()).toBeNull();
     expect(me).not.toHaveBeenCalledWith('/api/v1/me');
@@ -155,7 +156,7 @@ describe('ending a pending sign-out on a connection that never answers', () => {
   });
 
   it('Try again ends the session once the network is back, and still signs nobody in', async () => {
-    const me = await startStalled();
+    const { me } = await startStalled();
     const fetch = vi.fn((url: string) =>
       url === '/api/v1/auth/refresh' ? json(200, { access_token: 'test-token-seller-3' }) : Promise.resolve(new Response(null, { status: 204 })));
     vi.stubGlobal('fetch', fetch);
@@ -173,12 +174,12 @@ describe('ending a pending sign-out on a connection that never answers', () => {
 
   it('shares one 10 second limit when the refresh answers late and the logout never does', async () => {
     // The refresh answers after 6 seconds; the logout then hangs, and the page still gives up at 10, not 16.
-    const lateThenStalled = vi.fn((url: string, init?: RequestInit) =>
+    const lateThenStalled = (url: string, init?: RequestInit) =>
       url === '/api/v1/auth/refresh'
         ? new Promise<Response>((resolve) => setTimeout(() => void json(200, { access_token: 'test-token-seller-4' }).then(resolve), 6_000))
-        : stalled(url, init));
-    const me = await startStalled(lateThenStalled);
-    expect(lateThenStalled).toHaveBeenCalledWith('/api/v1/auth/logout', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+        : stalled(url, init);
+    const { me, network } = await startStalled(lateThenStalled);
+    expect(network).toHaveBeenCalledWith('/api/v1/auth/logout', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(await screen.findByText('Could not finish signing out. Connect to the internet and try again.')).toBeTruthy();
     expect(logoutPending()).toBe(true);
     expect(getAccessToken()).toBeNull();
@@ -195,5 +196,38 @@ describe('ending a pending sign-out on a connection that never answers', () => {
     expect(screen.getByText('Could not finish signing out. Connect to the internet and try again.')).toBeTruthy();
     expect(logoutPending()).toBe(true);
     expect(getAccessToken()).toBeNull();
+  });
+
+  it('refuses a sign-in while Try again is still ending the last session, so its answer never replaces the new cookie', async () => {
+    await startStalled();
+    const signIn = vi.spyOn(api, 'POST');
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    fireEvent.change(screen.getByLabelText('Email or phone'), { target: { value: 'seller02@example.test' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'invented-password-02' } });
+    const button = screen.getByRole('button', { name: 'Sign in' });
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    fireEvent.submit(button.closest('form') as HTMLFormElement);
+    expect(signIn).not.toHaveBeenCalled();
+    // The retry gives up at its limit; then the form signs in as usual.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitFor(() => expect(button.getAttribute('aria-busy')).not.toBe('true'));
+    fireEvent.submit(button.closest('form') as HTMLFormElement);
+    await waitFor(() => expect(signIn).toHaveBeenCalledWith('/api/v1/auth/staff/login', expect.anything()));
+  });
+});
+
+describe('a sign-in while a pending sign-out is being ended', () => {
+  it('leaves the decision to the new session: the late answer reports nothing ended', async () => {
+    expect(markLogoutPending()).toBe(true);
+    let answer: (r: Response) => void = () => undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      url === '/api/v1/auth/refresh'
+        ? new Promise<Response>((resolve) => { answer = resolve; })
+        : Promise.resolve(new Response(null, { status: 204 }))));
+    const ending = endPendingLogout();
+    setAccessToken('test-token-next-person');
+    answer(new Response(JSON.stringify({ access_token: 'test-token-seller-5' }), { status: 200 }));
+    expect(await ending).toBe(false);
+    expect(getAccessToken()).toBe('test-token-next-person');
   });
 });

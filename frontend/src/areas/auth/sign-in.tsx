@@ -78,6 +78,8 @@ export function SignIn() {
 
   function submitPassword(e: FormEvent) {
     e.preventDefault();
+    // A sign-in while the last person's session is still being ended could have its cookie overwritten by theirs.
+    if (ending) return;
     void run(async () => {
       const { data, error } = await api.POST('/api/v1/auth/staff/login', { body: { login, password } });
       if (error || !data) throw error;
@@ -149,7 +151,7 @@ export function SignIn() {
                 </button>
               </div>
             </div>
-            <BusyButton className="btn-primary btn-lg" busy={busy}>Sign in</BusyButton>
+            <BusyButton className="btn-primary btn-lg" busy={busy || ending}>Sign in</BusyButton>
           </form>
           <p>
             <Link to="/forgot-password">Forgot password?</Link>

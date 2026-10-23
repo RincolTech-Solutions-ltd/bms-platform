@@ -5,6 +5,8 @@
 type Listener = () => void;
 
 let accessToken: string | null = null;
+// Counts sign-ins, so a pending sign-out that finishes after one never decides for the new session's cookie.
+let signIns = 0;
 const listeners = new Set<Listener>();
 
 export function getAccessToken(): string | null {
@@ -13,7 +15,10 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   // A new sign-in replaced the refresh cookie: the session left behind by an offline sign-out is no longer this device's.
-  if (token !== null) clearLogoutPending();
+  if (token !== null) {
+    signIns += 1;
+    clearLogoutPending();
+  }
   accessToken = token;
   listeners.forEach((l) => l());
 }
@@ -124,6 +129,7 @@ export async function endPendingLogout(): Promise<boolean> {
   if (!logoutPending()) return true;
   // One deadline for both calls, so the person waits 10 seconds at most.
   const limit = deadline(PENDING_LOGOUT_TIMEOUT_MS);
+  const signInsBefore = signIns;
   try {
     const refreshed = await fetch(refreshPath, {
       method: 'POST',
@@ -143,6 +149,7 @@ export async function endPendingLogout(): Promise<boolean> {
       });
       if (!out.ok) return false;
     }
+    if (signIns !== signInsBefore) return false;
     clearLogoutPending();
     return true;
   } catch {
