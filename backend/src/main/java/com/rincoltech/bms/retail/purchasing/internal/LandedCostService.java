@@ -170,7 +170,7 @@ class LandedCostService {
         Map<UUID, long[]> byBranch = new TreeMap<>();
         for (int i = 0; i < ps.size(); i++) {
             Planned p = ps.get(i);
-            Effect e = costing.apply(p.lot(), p.share(), true, id, no.no());
+            Effect e = costing.apply(p.lot(), p.share(), true, id, no.no(), plan.costDate(), LANDED);
             newLines.add(new NewLine(
                     UUID.randomUUID(),
                     i + 1,
@@ -579,6 +579,7 @@ class LandedCostService {
         }
         for (int i = ls.size() - 1; i >= 0; i--) {
             LineRow l = ls.get(i);
+            costing.revalueBack(lots.get(l.receiptLineId()), l.toInventoryMinor(), true, id, today, LANDED_VOID);
             if (l.costApplied()) {
                 costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, d.landedNo());
             }

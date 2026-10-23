@@ -7,6 +7,7 @@ import com.rincoltech.bms.retail.stock.Quantities;
 import com.rincoltech.bms.retail.stock.StockLedger;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -170,8 +171,14 @@ class ReceiptCosting {
      *
      * @param raise true for a landed cost (the cost goes up), false for a supplier price credit (it goes down)
      */
-    Effect apply(Lot lot, long share, boolean raise, UUID documentId, String documentNo) {
+    Effect apply(
+            Lot lot, long share, boolean raise, UUID documentId, String documentNo, LocalDate on, String sourceType) {
         Effect e = estimate(lot, share, raise, documentId);
+        // ADR-078: the part each branch's inventory takes re-averages that branch's cost, whatever happens to the last
+        // paid cost below.
+        e.byBranch()
+                .forEach((branch, part) ->
+                        stock.revalue(on, branch, lot.productId(), raise ? part : -part, sourceType, documentId));
         if (e.applied()) {
             catalogue.applyCostChange(
                     lot.productId(),
@@ -213,6 +220,18 @@ class ReceiptCosting {
                     "Void of " + documentNo + " on " + lot.receiptNo()
                             + ": cost not put back, a different cost event has set it since.");
         }
+    }
+
+    /**
+     * ADR-078: the void of a landed cost or a price credit takes its inventory part back out of the branches' averages, spread
+     * as it was recorded, in proportion to what each branch holds now (the void is refused once the goods have moved on).
+     *
+     * @param raise as for {@link #apply}: true for the void of a landed cost, whose part leaves the averages
+     */
+    void revalueBack(Lot lot, long inventory, boolean raise, UUID documentId, LocalDate on, String sourceType) {
+        spread(lot, inventory, lots.balances(lot.productId()))
+                .forEach((branch, part) ->
+                        stock.revalue(on, branch, lot.productId(), raise ? -part : part, sourceType, documentId));
     }
 
     /** The charge per base unit, rounded down: no more is capitalised than was charged. */

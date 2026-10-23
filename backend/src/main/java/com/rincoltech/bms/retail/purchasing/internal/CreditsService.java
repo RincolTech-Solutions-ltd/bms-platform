@@ -278,7 +278,7 @@ class CreditsService {
                 variance = p.ppvPart();
                 long share = p.amount() - p.ppvPart();
                 if (share > 0) {
-                    Effect e = costing.apply(p.lot(), share, false, id, no.no());
+                    Effect e = costing.apply(p.lot(), share, false, id, no.no(), on, CREDIT);
                     inventory = e.inventory();
                     inventoryByBranch = e.byBranch();
                     cogs = e.gone();
@@ -601,6 +601,9 @@ class CreditsService {
         }
         for (int i = ls.size() - 1; i >= 0; i--) {
             CreditsRepository.LineRow l = ls.get(i);
+            if (!goods) {
+                costing.revalueBack(lots.get(l.receiptLineId()), l.toInventoryMinor(), false, id, today, CREDIT_VOID);
+            }
             if (l.costApplied()) {
                 costing.restore(lots.get(l.receiptLineId()), l.costBeforeMinor(), l.costAfterMinor(), id, c.creditNo());
             }

@@ -109,7 +109,7 @@ class DashboardRepository {
         }
         return jdbc.sql("SELECT br.id AS branch_id,"
                         + " coalesce(sum(round(b.qty * p.sell_minor)) FILTER (WHERE b.qty > 0 AND p.active), 0) AS at_price,"
-                        + " coalesce(sum(round(b.qty * p.cost_minor)) FILTER (WHERE b.qty > 0 AND p.active), 0) AS at_cost,"
+                        + " coalesce(sum(round(b.qty * b.avg_cost_minor)) FILTER (WHERE b.qty > 0 AND p.active), 0) AS at_cost,"
                         + " count(*) FILTER (WHERE coalesce(b.qty, 0) <= 0) AS out_of_stock,"
                         + " count(*) FILTER (WHERE coalesce(b.qty, 0) <= :low) AS low_stock"
                         + "  FROM branches br"
