@@ -153,7 +153,9 @@ function TakingsCard({ home }: { home: Summary }) {
               <dd>{retailMoney(takings?.total_minor ?? 0)}</dd>
             </div>
           </dl>
-          {!takings?.total_minor && <p className="hint">No money taken yet today.</p>}
+          {(takings?.methods ?? []).every((m) => !m.sales_minor && !m.payments_minor && !m.fees_minor && !m.out_minor) && (
+            <p className="hint">No money taken yet today.</p>
+          )}
         </>
       )}
     </SummaryCard>
