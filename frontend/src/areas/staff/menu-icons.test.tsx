@@ -1,14 +1,20 @@
-import type { ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanstack/react-router';
+import type { ReactElement, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Me } from '../../api/client';
+import { mockMe } from '../../api/retail-mock';
+import { router as appRouter } from '../../app/router';
 import { icons } from '../../components/icons';
 import { FEATURES } from '../member/features';
 import { AREAS } from '../platform/operator-state';
-import { CATALOGUE_LINKS, SCREENS } from './retail/permissions';
-import { TILE_ICONS } from './retail/catalogue';
+import { StaffContext } from './context';
+import { STAFF_SECTIONS, staffAreas } from './menu';
+import { CatalogueLinks } from './retail/catalogue';
+import { RetailHome } from './retail/home';
 import { SHORTCUTS } from './retail/nav';
-import { STAFF_SECTIONS, staffAreas } from './route';
+import { CATALOGUE_LINKS, CATALOGUE_SCREENS, SCREENS, SCREEN_CAPABILITY, needsOf } from './retail/permissions';
 
 // Every item of a menu has its own icon (issue #483): two items of one menu never draw the same picture, compared by the drawing
 // itself, so two names for one drawing are caught too. The same item keeps its icon wherever it shows (a retail shortcut and its
@@ -16,7 +22,8 @@ import { STAFF_SECTIONS, staffAreas } from './route';
 // shortcuts read their icon by the screen's name. Business set-up is one page of fields that draws no icons today;
 // setup.dom.test.tsx fails if it ever draws one picture twice.
 
-const drawing = (icon: ReactNode) => (icon ? renderToStaticMarkup(<>{icon}</>) : '');
+// An icon as its markup; a tile's icon already is.
+const drawing = (icon: ReactNode) => (typeof icon === 'string' ? icon : icon ? renderToStaticMarkup(<>{icon}</>) : '');
 
 /** The labels that share a drawing with an earlier item, or have none, as `label = earlier label`. */
 function clashes(items: { label: string; icon: ReactNode }[]): string[] {
@@ -38,6 +45,28 @@ function everything(without: string[] = []): Me {
   return { permissions, modules: ['retail', 'lending'], module_capabilities: [], branches: [], reports_enabled: true } as unknown as Me;
 }
 
+// An administrator who holds every retail permission with every retail capability on, so every tile is drawn.
+function wholeShop(): Me {
+  const admin = mockMe('admin');
+  const screens = [...SCREENS.map((s) => s.screen), ...CATALOGUE_SCREENS, 'importer' as const];
+  const permissions = [...new Set([...(admin.permissions ?? []), ...screens.flatMap((s) => needsOf(s))])];
+  const scope = { all_branches: true, branch_ids: [] };
+  return { ...admin, permissions, permission_scopes: Object.fromEntries(permissions.map((p) => [p, scope])), module_capabilities: { retail: [...new Set(Object.values(SCREEN_CAPABILITY))] } } as Me;
+}
+
+/** The icons a page draws in its tiles, in order, as each tile's label and drawing. */
+function tileIcons(me: Me, page: ReactElement): { label: string; icon: string }[] {
+  const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
+  const html = renderToStaticMarkup(
+    <RouterContextProvider router={router}>
+      <QueryClientProvider client={new QueryClient()}>
+        <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? null }}>{page}</StaffContext.Provider>
+      </QueryClientProvider>
+    </RouterContextProvider>,
+  );
+  return [...html.matchAll(/<span class="icon-chip">(.*?<\/svg>)?<\/span><strong>(.*?)<\/strong>/g)].map((m) => ({ label: m[2] ?? '', icon: m[1] ?? '' }));
+}
+
 // The side menu: its items, the retail shortcuts under Retail, and the two section headings.
 function sideMenu(me: Me) {
   const shortcuts = Object.entries(SHORTCUTS).map(([screen, label]) => ({ label: `Retail ${label}`, icon: icons[screen as keyof typeof icons] }));
@@ -56,13 +85,16 @@ describe('menu icons (issue #483)', () => {
     expect(clashes(sideMenu(collateral))).toEqual([]);
   });
 
-  it('gives every retail tile its own icon', () => {
-    expect(clashes(SCREENS.map((s) => ({ label: s.label, icon: icons[s.screen as keyof typeof icons] })))).toEqual([]);
+  it('gives every retail tile its own icon, as the Retail page draws them', () => {
+    const tiles = tileIcons(wholeShop(), <RetailHome />);
+    expect(tiles.map((t) => t.label)).toEqual(SCREENS.map((s) => s.label));
+    expect(clashes(tiles)).toEqual([]);
   });
 
-  it('gives every catalogue tile its own icon, the import tile among them', () => {
-    const tiles = [...CATALOGUE_LINKS.filter((l) => l.screen !== 'importer'), { screen: 'importer' as const, label: 'Import items' }];
-    expect(clashes(tiles.map((l) => ({ label: l.label, icon: icons[TILE_ICONS[l.screen] ?? 'catalogue'] })))).toEqual([]);
+  it('gives every catalogue tile its own icon, as the Catalogue page draws them, the import tile among them', () => {
+    const tiles = tileIcons(wholeShop(), <CatalogueLinks />);
+    expect(tiles.map((t) => t.label)).toEqual([...CATALOGUE_LINKS.map((l) => l.label), 'Import items']);
+    expect(clashes(tiles)).toEqual([]);
   });
 
   it('gives every area of the operator portal its own icon', () => {

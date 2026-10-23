@@ -199,15 +199,28 @@ describe('the set-up hints and module wording', () => {
 });
 
 // Issue #483: no two items of the set-up menu draw the same picture. The page draws none today; any it gains must differ.
+const repeated = (root: ParentNode) => {
+  const drawings = [...root.querySelectorAll('svg')].map((svg) => svg.outerHTML);
+  return drawings.filter((svg, i) => drawings.indexOf(svg) !== i);
+};
+
 describe('the set-up menu icons', () => {
+  it('catches one picture drawn twice', () => {
+    const page = document.createElement('main');
+    page.innerHTML = '<svg><path d="M1 1"/></svg><svg><path d="M2 2"/></svg><svg><path d="M1 1"/></svg>';
+    expect(repeated(page)).toEqual(['<svg><path d="M1 1"></path></svg>']);
+  });
+
   it('draws no picture twice', async () => {
     settings.setup_dismissed = false;
     try {
       show({ modules: ['lending', 'retail'], permissions: ['core.settings.manage', 'core.branches.read', 'core.users.read', 'core.referrals.read'] });
       await screen.findByRole('link', { name: 'Referrals' });
       await screen.findByRole('heading', { name: 'Checklist' });
-      const drawings = [...document.querySelectorAll('main svg')].map((svg) => svg.outerHTML);
-      expect(drawings.filter((svg, i) => drawings.indexOf(svg) !== i)).toEqual([]);
+      // The page draws its own <main>, so the pictures looked at are the page's.
+      const page = document.querySelector('main');
+      expect(page?.querySelector('h1')?.textContent).toBe('Business set-up');
+      expect(repeated(page as HTMLElement)).toEqual([]);
     } finally {
       settings.setup_dismissed = true;
     }

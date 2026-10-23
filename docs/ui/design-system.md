@@ -126,7 +126,7 @@ changes, at the design system's phone width, `(max-width: 719px)`, read in code 
 the retail screens re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media
 query, so the number is the token.
 
-- **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/route.tsx`, `AREAS` in
+- **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/menu.tsx`, `AREAS` in
   `areas/platform/operator-state.ts`) with the permission checks, and both the sidebar and the drawer draw that list with the same
   component (`MenuLinks`, one `MenuItemLink` per item): the same items, icons (inline SVG in `currentColor`), groups and the
   current item marked `aria-current="page"` (tinted, with an accent edge). The retail shortcuts are a group under Retail
@@ -308,8 +308,9 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
   `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
   button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
 - `npm test` runs `src/areas/staff/menu-icons.test.tsx` (#483): two items of the staff side menu (its full list asserted), the
-  retail tiles, the catalogue tiles, the operator portal or the member portal cards that draw the same picture fail it,
-  compared by the drawing itself. `home-cards.dom.test.tsx` checks each Home card draws its side menu heading's icon, and
+  retail tiles and catalogue tiles (both as their pages draw them), the operator portal or the member portal cards that draw
+  the same picture fail it, compared by the drawing itself. `home-cards.dom.test.tsx` checks the Home cards draw their side
+  menu headings' icons, no two alike, and
   `setup.dom.test.tsx` that the rendered Business set-up page draws no picture twice.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
