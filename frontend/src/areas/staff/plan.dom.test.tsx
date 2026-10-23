@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The Plan and modules card (issue #472, ADR-073): the Owner stops a module or cancels only after a plain-words confirm and their own
+// The Plan and modules card (issue #472, ADR-073): the Owner adds or stops a module or cancels only after a plain-words confirm and their own
 // password; an administrator sees the plan and no buttons; every member of staff sees the end date, then the read-only notice.
 // Fabricated business, dates and password.
 
@@ -69,6 +69,22 @@ describe('the plan card', () => {
     fireEvent.click(yes);
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ path: '/api/v1/plan/modules/{module}/stop', body: { password: 'Fabricated-Pass-2026' } });
+  });
+
+  it('lets the Owner add a module only after the confirm and the password', async () => {
+    base(true);
+    plan.modules = ['lending'];
+    plan.modules_available = ['retail'];
+    show(<PlanCard mfaEnabled={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Shop' }));
+    expect(posts).toHaveLength(0);
+    expect(screen.getByText(/Shop is switched on at once: your plan includes it/)).toBeTruthy();
+    const yes = screen.getByRole('button', { name: 'Yes, add Shop' }) as HTMLButtonElement;
+    expect(yes.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Your own password'), { target: { value: 'Fabricated-Pass-2026' } });
+    fireEvent.click(yes);
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({ path: '/api/v1/plan/module-requests', body: { module: 'retail', password: 'Fabricated-Pass-2026' } });
   });
 
   it('asks for the authenticator code instead when the Owner has two-step sign-in', async () => {

@@ -6459,9 +6459,20 @@
         }
       },
       "PlanModuleAsk" : {
+        "description" : "The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password",
         "properties" : {
           "module" : {
             "pattern" : "^[a-z]{2,30}$",
+            "type" : "string"
+          },
+          "password" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "maxLength" : 20,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -28995,7 +29006,7 @@
             "description" : "OK"
           }
         },
-        "summary" : "Owner only: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073)",
+        "summary" : "Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073)",
         "tags" : [ "plan" ]
       }
     },

@@ -6,9 +6,9 @@ import type { components } from '../../api/schema';
 import { resetProofProblem } from './users/state';
 
 // The Plan and modules card of Business set-up and the end-date notices (issue #472, ADR-073). Administrators see the card;
-// only the Owner (ADR-062) asks for a module, stops one, cancels or undoes. Stopping and cancelling say plainly what happens and
-// when, then ask the Owner to prove it is still them (the authenticator code with two-step sign-in, else the password), as
-// Transfer ownership does. Every member of staff sees the end date while a cancellation waits, and the read-only notice after it.
+// only the Owner (ADR-062) asks for a module, stops one, cancels or undoes. Adding, stopping and cancelling say plainly what
+// happens and when, then ask the Owner to prove it is still them (the authenticator code with two-step sign-in, else the
+// password), as Transfer ownership does. Every member of staff sees the end date while a cancellation waits, and the read-only notice after it.
 
 type Plan = components['schemas']['BusinessPlan'];
 type Change = components['schemas']['PlanScheduledChange'];
@@ -51,6 +51,14 @@ export function stopSentence(module: string, plan: When): string {
     `${name} stops ${whenWords(plan)}. Its records are kept but hidden: nobody can open them while it is off, and they all come back ` +
     `if ${name} is switched on again. Until then everything works as now.`
   );
+}
+
+/** The plain sentence of the confirm for adding a module: at once when the plan includes it, else Rincol Tech answers first. */
+export function addSentence(module: string, inPlan: boolean): string {
+  const name = moduleName(module);
+  return inPlan
+    ? `${name} is switched on at once: your plan includes it, so the price does not change.`
+    : `Your request for ${name} goes to Rincol Tech, who answer first; the price may change. You are emailed the answer.`;
 }
 
 /** The plain sentence of the confirm for cancelling. */
@@ -111,7 +119,7 @@ export function PlanNotice() {
   );
 }
 
-type Confirm = { kind: 'stop'; module: string } | { kind: 'cancel' };
+type Confirm = { kind: 'add'; module: string } | { kind: 'stop'; module: string } | { kind: 'cancel' };
 
 /** The Plan and modules card of Business set-up. */
 export function PlanCard({ mfaEnabled }: { mfaEnabled: boolean }) {
@@ -176,14 +184,13 @@ export function PlanCard({ mfaEnabled }: { mfaEnabled: boolean }) {
     }
   }
 
-  function ask(module: string) {
-    void run(() => api.POST('/api/v1/plan/module-requests', { body: { module } }), `${moduleName(module)}: your request is sent.`);
-  }
-
   function send() {
     if (!confirm || resetProofProblem(mfaEnabled, typed) !== null) return;
     const body = mfaEnabled ? { totp_code: typed.trim() } : { password: typed };
-    if (confirm.kind === 'stop') {
+    if (confirm.kind === 'add') {
+      const module = confirm.module;
+      void run(() => api.POST('/api/v1/plan/module-requests', { body: { module, ...body } }), `${moduleName(module)}: your request is sent.`);
+    } else if (confirm.kind === 'stop') {
       void run(
         () => api.POST('/api/v1/plan/modules/{module}/stop', { params: { path: { module: confirm.module } }, body }),
         `${moduleName(confirm.module)} will stop as described.`,
@@ -236,9 +243,9 @@ export function PlanCard({ mfaEnabled }: { mfaEnabled: boolean }) {
                 {pending.has(m) ? (
                   '(asked for)'
                 ) : (
-                  <BusyButton type="button" busy={busy} onClick={() => ask(m)}>
+                  <button type="button" /* busy-exempt: opens the confirm, sends nothing */ disabled={busy} onClick={() => { setConfirm({ kind: 'add', module: m }); setError(null); }}>
                     Add {moduleName(m)}
-                  </BusyButton>
+                  </button>
                 )}
                 {!pending.has(m) && !(p.modules_in_plan ?? []).includes(m) && <span> Rincol Tech answers first; the price may change.</span>}
               </li>
@@ -257,14 +264,20 @@ export function PlanCard({ mfaEnabled }: { mfaEnabled: boolean }) {
       {confirm && (
         <form
           className="alert alert-warning stack"
-          aria-label={confirm.kind === 'cancel' ? 'Cancel the subscription' : `Stop using ${moduleName(confirm.module)}`}
+          aria-label={confirm.kind === 'cancel' ? 'Cancel the subscription' : confirm.kind === 'add' ? `Add ${moduleName(confirm.module)}` : `Stop using ${moduleName(confirm.module)}`}
           autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault();
             send();
           }}
         >
-          <p>{confirm.kind === 'cancel' ? cancelSentence(p) : stopSentence(confirm.module, p)}</p>
+          <p>
+            {confirm.kind === 'cancel'
+              ? cancelSentence(p)
+              : confirm.kind === 'add'
+                ? addSentence(confirm.module, (p.modules_in_plan ?? []).includes(confirm.module))
+                : stopSentence(confirm.module, p)}
+          </p>
           {mfaEnabled ? (
             <>
               <label htmlFor="plan-proof">Code from your authenticator app</label>
@@ -278,8 +291,12 @@ export function PlanCard({ mfaEnabled }: { mfaEnabled: boolean }) {
           )}
           {proofProblem && <p role="alert" className="field-error">{proofProblem}</p>}
           <p className="cluster">
-            <BusyButton type="submit" className="btn-danger" busy={busy} disabled={resetProofProblem(mfaEnabled, typed) !== null}>
-              {confirm.kind === 'cancel' ? 'Yes, cancel the subscription' : `Yes, stop using ${moduleName(confirm.module)}`}
+            <BusyButton type="submit" className={confirm.kind === 'add' ? undefined : 'btn-danger'} busy={busy} disabled={resetProofProblem(mfaEnabled, typed) !== null}>
+              {confirm.kind === 'cancel'
+                ? 'Yes, cancel the subscription'
+                : confirm.kind === 'add'
+                  ? `Yes, add ${moduleName(confirm.module)}`
+                  : `Yes, stop using ${moduleName(confirm.module)}`}
             </BusyButton>
             <button type="button" /* busy-exempt: closes the confirm, sends nothing */ className="btn-ghost" disabled={busy} onClick={() => { setConfirm(null); setTyped(''); }}>
               Keep it

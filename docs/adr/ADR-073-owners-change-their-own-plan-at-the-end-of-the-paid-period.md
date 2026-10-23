@@ -24,7 +24,9 @@ month does. It is generic for every business and the Owner's alone: administrato
    one, ADR-062 decision 5). No permission is added: the owner rule rides on `core.settings.manage`, as the owner rules of
    ADR-062 ride on the user permissions.
 2. **Adding a module is a request the operator decides, unless the plan already includes it.** `POST /plan/module-requests`
-   writes a `subscription_module_requests` row. When the business's plan already allows the module there is no price change,
+   writes a `subscription_module_requests` row, after the Owner's step-up of ADR-062 (the authenticator code when two-step
+   sign-in is on, else the password), because a module the plan includes is switched on at once and a stolen session must not
+   do that. When the business's plan already allows the module there is no price change,
    so the request is approved at once by the system (`decided_automatically`) and the module is switched on through the
    existing `platform_set_tenant_modules` (data kept, the chart seeded); this is how "the operator approves automatically"
    is read: the operator agreed to it when they put the module in the plan. Otherwise the request waits; the operator lists
@@ -38,7 +40,7 @@ month does. It is generic for every business and the Owner's alone: administrato
    `subscriptions.current_period_end` while that is today or later, otherwise today, and then it is applied at once. That
    one rule covers a free month and a pilot (nothing paid ahead, so a stop is at once, as the issue asks for a free trial)
    and a late business. Both need the Owner's step-up of ADR-062 (the authenticator code when two-step sign-in is on, else
-   the password; 422 `totp_required`, `password_required`) because both take something away. Stopping says plainly that the
+   the password; 422 `totp_required`, `password_required`), as asking for a module does (decision 2). Stopping says plainly that the
    records are kept but hidden and come back when the module is switched on again (FR-TEN-03: data kept). A business keeps
    at least one module, counting the stops already scheduled (422 `last_module`; to stop everything, cancel). The Owner may
    undo a change still to come before its day (`POST /plan/changes/{id}/undo`); on its day it is being applied and can no

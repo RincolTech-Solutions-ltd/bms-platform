@@ -142,21 +142,24 @@ class PlanService {
     }
 
     /**
-     * The Owner asks for a module. A module the plan already includes is switched on at once (approved by the system, the
-     * operator told); any other waits for the operator. One pending request per module.
+     * The Owner asks for a module, after the step-up. A module the plan already includes is switched on at once (approved
+     * by the system, the operator told); any other waits for the operator. One pending request per module.
      */
-    ModuleRequestResponse requestModule(String module) {
+    ModuleRequestResponse requestModule(String module, String totpCode, String password) {
         requireKnown(module);
         UUID actor = requireOwner();
+        transactions.execute(status -> {
+            checkAsk(subscription(), module);
+            return null;
+        });
+        proof.requireProof(totpCode, password);
         return transactions.execute(status -> {
             // The module list is read under the subscription's lock, so a stop applied at once, the job or the
             // operator's
             // decision cannot switch the modules in between and have one write undo the other.
             lockSubscription(tenant.profile().id());
             Sub sub = subscription();
-            if (sub.modules().contains(module)) {
-                throw ApiException.rule("module_already_on", "The business already uses " + label(module) + ".");
-            }
+            checkAsk(sub, module);
             UUID id = UUID.randomUUID();
             try {
                 jdbc.sql("""
@@ -219,6 +222,12 @@ class PlanService {
         });
         proof.requireProof(totpCode, password);
         return schedule("cancel", null);
+    }
+
+    private void checkAsk(Sub sub, String module) {
+        if (sub.modules().contains(module)) {
+            throw ApiException.rule("module_already_on", "The business already uses " + label(module) + ".");
+        }
     }
 
     /**

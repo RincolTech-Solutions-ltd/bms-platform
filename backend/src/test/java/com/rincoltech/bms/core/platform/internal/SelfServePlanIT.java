@@ -221,7 +221,7 @@ class SelfServePlanIT extends IntegrationTest {
         ResponseEntity<JsonNode> asked = b.api()
                 .post(
                         "/api/v1/plan/module-requests",
-                        Map.of("module", "retail"),
+                        Map.of("module", "retail", "password", Api.PASSWORD),
                         b.ownerSession().accessToken());
 
         assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
@@ -236,7 +236,7 @@ class SelfServePlanIT extends IntegrationTest {
                 b.api()
                         .post(
                                 "/api/v1/plan/module-requests",
-                                Map.of("module", "retail"),
+                                Map.of("module", "retail", "password", Api.PASSWORD),
                                 b.ownerSession().accessToken()),
                 HttpStatus.UNPROCESSABLE_CONTENT,
                 "module_already_on");
@@ -254,7 +254,7 @@ class SelfServePlanIT extends IntegrationTest {
         ResponseEntity<JsonNode> asked = b.api()
                 .post(
                         "/api/v1/plan/module-requests",
-                        Map.of("module", "retail"),
+                        Map.of("module", "retail", "password", Api.PASSWORD),
                         b.ownerSession().accessToken());
         assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
         assertThat(asked.getBody().get("status").asString()).isEqualTo("pending");
@@ -263,7 +263,7 @@ class SelfServePlanIT extends IntegrationTest {
                 b.api()
                         .post(
                                 "/api/v1/plan/module-requests",
-                                Map.of("module", "retail"),
+                                Map.of("module", "retail", "password", Api.PASSWORD),
                                 b.ownerSession().accessToken()),
                 HttpStatus.CONFLICT,
                 "module_request_pending");
@@ -329,7 +329,7 @@ class SelfServePlanIT extends IntegrationTest {
         String otherId = other.api()
                 .post(
                         "/api/v1/plan/module-requests",
-                        Map.of("module", "retail"),
+                        Map.of("module", "retail", "password", Api.PASSWORD),
                         other.ownerSession().accessToken())
                 .getBody()
                 .get("id")
@@ -504,7 +504,7 @@ class SelfServePlanIT extends IntegrationTest {
                     () -> b.api()
                             .post(
                                     "/api/v1/plan/module-requests",
-                                    Map.of("module", "retail"),
+                                    Map.of("module", "retail", "password", Api.PASSWORD),
                                     b.ownerSession().accessToken()),
                     () -> withPassword(b.api(), "/api/v1/plan/modules/lending/stop", b.ownerSession()));
             ResponseEntity<JsonNode> asked = both.get(0);
@@ -668,9 +668,33 @@ class SelfServePlanIT extends IntegrationTest {
      * a current code, the password alone being refused with {@code totp_required}.
      */
     @Test
-    void stopAndCancelNeedTheOwnersStepUp() {
+    void askStopAndCancelNeedTheOwnersStepUp() {
         Business b = business(bothPlan, true, today.plusDays(10));
         Map<String, Object> wrong = Map.of("password", "Not-The-Password-1");
+        Business asking = business(bothPlan, false, today.plusDays(10));
+        assertRefused(
+                asking.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail", "password", "Not-The-Password-1"),
+                                asking.ownerSession().accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "invalid_password");
+        assertRefused(
+                asking.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail"),
+                                asking.ownerSession().accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "password_required");
+        assertThat(modules(asking.t().tenantId())).containsExactly("lending");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM subscription_module_requests WHERE tenant_id = ?")
+                        .param(asking.t().tenantId())
+                        .query(Long.class)
+                        .single())
+                .isZero();
         assertRefused(
                 b.api()
                         .post(
@@ -690,6 +714,43 @@ class SelfServePlanIT extends IntegrationTest {
 
         Business c = business(bothPlan, true, today.plusDays(10), true);
         Session owner = c.ownerSession();
+        assertRefused(
+                c.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail", "totp_code", "000000"),
+                                owner.accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "module_already_on");
+        Business d = business(bothPlan, false, today.plusDays(10), true);
+        assertRefused(
+                d.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail", "password", Api.PASSWORD),
+                                d.ownerSession().accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "totp_required");
+        assertRefused(
+                d.api()
+                        .post(
+                                "/api/v1/plan/module-requests",
+                                Map.of("module", "retail", "totp_code", "000000"),
+                                d.ownerSession().accessToken()),
+                HttpStatus.UNPROCESSABLE_CONTENT,
+                "invalid_mfa_code");
+        Api.allowTotpReuse(d.owner());
+        ResponseEntity<JsonNode> asked = d.api()
+                .post(
+                        "/api/v1/plan/module-requests",
+                        Map.of(
+                                "module",
+                                "retail",
+                                "totp_code",
+                                Api.totp(d.ownerSession().totpSecret(), Instant.now())),
+                        d.ownerSession().accessToken());
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(modules(d.t().tenantId())).containsExactly("lending", "retail");
         assertRefused(
                 withPassword(c.api(), "/api/v1/plan/modules/retail/stop", owner),
                 HttpStatus.UNPROCESSABLE_CONTENT,
@@ -793,7 +854,7 @@ class SelfServePlanIT extends IntegrationTest {
         a.api()
                 .post(
                         "/api/v1/plan/module-requests",
-                        Map.of("module", "retail"),
+                        Map.of("module", "retail", "password", Api.PASSWORD),
                         a.ownerSession().accessToken());
         String cancelId = withPassword(a.api(), "/api/v1/plan/cancel", a.ownerSession())
                 .getBody()

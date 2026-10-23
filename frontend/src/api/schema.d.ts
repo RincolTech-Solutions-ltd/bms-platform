@@ -2529,7 +2529,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Owner only: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073) */
+        /** Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073) */
         post: operations["requestPlanModule"];
         delete?: never;
         options?: never;
@@ -9738,8 +9738,11 @@ export interface components {
         PlanList: {
             items?: components["schemas"]["Plan"][];
         };
+        /** @description The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password */
         PlanModuleAsk: {
             module?: string;
+            password?: string;
+            totp_code?: string;
         };
         /** @description A module the Owner asked for, and the operator's decision */
         PlanModuleRequest: {

@@ -133,8 +133,14 @@ class PlanController {
             @Schema(description = "When the subscription has ended: the day it ended; the business is read only")
             LocalDate endedOn) {}
 
-    @Schema(name = "PlanModuleAsk")
-    record AskRequest(@Pattern(regexp = "^[a-z]{2,30}$") String module) {}
+    @Schema(
+            name = "PlanModuleAsk",
+            description =
+                    "The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password")
+    record AskRequest(
+            @Pattern(regexp = "^[a-z]{2,30}$") String module,
+            @Size(max = 20) String totpCode,
+            @Size(max = 200) String password) {}
 
     @Schema(
             name = "PlanStepUp",
@@ -197,10 +203,11 @@ class PlanController {
     @RequiresPermission("core.settings.manage")
     @Operation(
             summary =
-                    "Owner only: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073)",
+                    "Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073)",
             operationId = "requestPlanModule")
     ResponseEntity<ModuleRequestResponse> ask(@Valid @RequestBody AskRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(plans.requestModule(request.module()));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(plans.requestModule(request.module(), request.totpCode(), request.password()));
     }
 
     @PostMapping(path = "/modules/{module}/stop", consumes = MediaType.APPLICATION_JSON_VALUE)
