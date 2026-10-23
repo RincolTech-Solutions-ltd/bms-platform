@@ -1,6 +1,7 @@
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { Field } from '../../../app/ui/Field';
+import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
 import { Stepper } from '../../../app/ui/Stepper';
 import { isAdmin } from '../../../offline/offline-context';
@@ -31,6 +32,7 @@ function KitPage() {
   const [show, setShow] = useState<string>('all');
   const [qty, setQty] = useState('2');
   const [phone, setPhone] = useState('');
+  const [paid, setPaid] = useState<number | null>(null);
   if (!isAdmin(me)) {
     return (
       <main>
@@ -62,6 +64,10 @@ function KitPage() {
           onChange={(e) => setPhone(e.target.value)}
           error={/^0\d{9}$/.test(phone) ? null : 'Type the 10 digits of the number, starting with 0.'}
         />
+      </Example>
+
+      <Example title="MoneyInput" about="Whole shillings on the number keypad, with the commas drawn as you type.">
+        <MoneyInput label="Amount paid" hint="What the buyer handed over." valueMinor={paid} onChange={setPaid} error={paid === null ? 'Type the amount paid.' : null} />
       </Example>
     </main>
   );

@@ -69,6 +69,40 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Field: the label above, the control 6px under it, then one line of hint or error. */
+.field {
+  margin-bottom: var(--space-4);
+}
+
+.field > input,
+.field > select,
+.field > textarea,
+.field > .money-input {
+  margin-top: 6px;
+}
+
+/* MoneyInput: UGX sits inside the field's left edge, the figures in tabular digits at the body size and semibold. */
+.money-input {
+  position: relative;
+  display: block;
+}
+
+.money-input-currency {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+  pointer-events: none;
+}
+
+.money-input > input {
+  padding-left: 52px;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The kit page (/staff/kit): one example under another, each under its heading. */
 .kit-example {
   margin-bottom: var(--space-6);
