@@ -84,8 +84,10 @@ class StockSummaryRepository {
             sql.append(" AND ")
                     .append(
                             perRow
-                                    ? LowStockRule.atBranchSql(low, "p.id", "br.id", "coalesce(b.qty, 0)", ":low")
-                                    : LowStockRule.overBranchesSql(low, "p.id", "lb.id IN (:branchIds)", held, ":low"));
+                                    ? LowStockRule.atBranchSql(
+                                            low, "p.tenant_id", "p.id", "br.id", "coalesce(b.qty, 0)", ":low")
+                                    : LowStockRule.overBranchesSql(
+                                            low, "p.tenant_id", "p.id", "lb.id IN (:branchIds)", held, ":low"));
             params.put("low", StockService.lowStock());
         }
         sql.append(" GROUP BY 1");

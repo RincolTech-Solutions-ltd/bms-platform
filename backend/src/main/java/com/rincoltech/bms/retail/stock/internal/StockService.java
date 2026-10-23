@@ -462,7 +462,7 @@ class StockService {
 
     /**
      * The level filter, {@code out} or {@code low}; null for none (#145). Either keeps only the items a branch has held, low at
-     * or below the branch's minimum, else the fixed threshold (issue #490, {@link com.rincoltech.bms.retail.stock.LowStockRule#lowAtSql}).
+     * or below the branch's minimum, else the fixed threshold (issue #490, {@link com.rincoltech.bms.retail.stock.LowStockRule#atBranchSql}).
      */
     static String levelOf(String level) {
         if (level == null || level.isBlank()) {

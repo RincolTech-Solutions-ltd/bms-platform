@@ -376,13 +376,15 @@ class RetailParityIT extends IntegrationTest {
     }
 
     @Test
-    void allBranchesJudgesTheLevelOnTheTotalAcrossBranches() {
+    void allBranchesJudgesOutOnTheTotalAndLowAtAnyBranch() {
         stockLevels();
         api.stockUp(t.secondBranch(), cable, "1");
         api.stockUp(t.secondBranch(), bulb, "3");
-        // Bulb totals 7 across branches and is no longer low; five stays at 5; cable stays at 11.
+        // Low at any branch that holds it (issue #490): bulb is low at both, cable at branch two (11 in all); out stays
+        // on
+        // the total.
         JsonNode low = ok(api.get("/stock/all-branches?stock_level=low", ADMIN));
-        assertThat(codes(low)).containsExactly("PAR-FIVE", "PAR-OWED", "PAR-ZERO");
+        assertThat(codes(low)).containsExactly("PAR-BULB", "PAR-CABLE", "PAR-FIVE", "PAR-OWED", "PAR-ZERO");
         assertThat(low.get("low_stock_threshold").asString()).isEqualTo("5.000");
         assertThat(codes(ok(api.get("/stock/all-branches?stock_level=out", ADMIN))))
                 .containsExactly("PAR-OWED", "PAR-ZERO");

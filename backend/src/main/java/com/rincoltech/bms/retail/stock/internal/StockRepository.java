@@ -83,7 +83,12 @@ class StockRepository {
         if (level != null) {
             sql.append(" AND ")
                     .append(LowStockRule.atBranchSql(
-                            level.equals(StockService.LEVEL_LOW), "p.id", ":branch", "coalesce(b.qty, 0)", ":low"));
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            ":branch",
+                            "coalesce(b.qty, 0)",
+                            ":low"));
             params.put("low", StockService.lowStock());
         }
         String statement;
@@ -188,17 +193,15 @@ class StockRepository {
             sql.append(" AND coalesce(t.negs, 0) > 0");
         }
         if (level != null) {
-            // One branch is judged as its own list judges it; several on their summed balance (issue #490).
-            boolean low = level.equals(StockService.LEVEL_LOW);
-            if (branchIds.size() == 1) {
-                sql.append(" AND ")
-                        .append(LowStockRule.atBranchSql(low, "p.id", ":onlyBranch", "coalesce(t.total, 0)", ":low"));
-                params.put("onlyBranch", branchIds.getFirst());
-            } else {
-                sql.append(" AND ")
-                        .append(LowStockRule.overBranchesSql(
-                                low, "p.id", "lb.id IN (:branchIds)", "coalesce(t.total, 0)", ":low"));
-            }
+            // Over the listed branches together: out on the summed balance, low at any one of them (issue #490).
+            sql.append(" AND ")
+                    .append(LowStockRule.overBranchesSql(
+                            level.equals(StockService.LEVEL_LOW),
+                            "p.tenant_id",
+                            "p.id",
+                            "lb.id IN (:branchIds)",
+                            "coalesce(t.total, 0)",
+                            ":low"));
             params.put("low", StockService.lowStock());
         }
         String statement;

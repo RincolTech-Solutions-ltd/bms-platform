@@ -262,7 +262,8 @@ from Town to Second Shop. A Playwright script drove Chromium at 360px and 390px;
 - **Out of stock and Low stock.** Tabs on Stock (`stock_level=out|low`): out is zero or less, low is at or below
   the item's minimum (the branch's own, else the one for every branch) or 5 or fewer without one, and so includes
   out of stock. Both keep only items the branch has held (issue #490, ADR-077). The threshold is a constant in the
-  API (`StockService.LOW_STOCK_MILLI`, ADR-029); in All branches the level is judged on the total. The hints say
+  API (`StockService.LOW_STOCK_MILLI`, ADR-029); in All branches an item is low when it is low at any listed branch and out
+  when its total is zero or less. The hints say
   "Items you have stocked with none left, or less than none." and "Items you have stocked that are at or below their
   minimum, or 5 or fewer without one, including those out of stock."; the dashboard's Low stock figure says "at their
   minimum, or 5 or fewer without one".
