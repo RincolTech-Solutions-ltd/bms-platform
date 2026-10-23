@@ -5,9 +5,9 @@
 Accepted (issue #334, step 1; 22 Oct 2026). Builds on ADR-003 (row-level security), ADR-038 (the report runs: queued, one
 read-only snapshot, a disk spool, files kept 30 days, the streaming workbook writer), ADR-024 (the platform outbox), ADR-054
 (branded HTML emails) and ADR-062 (the Owner of a business). Migration `V91`, an ordered claim (AGENTS.md): `V80` to
-`V87` are merged (`V85` shop logos, `V86` offline sales, `V87` barcodes), `V88` (referrals), `V89` (existing loans) and `V90`
-(the self-serve plan) are claimed before it and `V92` (billing) after it. Flyway runs with `outOfOrder` off, so it merges after
-those claims, or is renumbered to the next free number if it must merge sooner. Step 2 of the issue, a copy kept in the Owner's Google Drive, is a later decision and is not built.
+`V90` are merged (`V85` shop logos, `V86` offline sales, `V87` barcodes, `V88` referrals, `V89` existing loans, `V90` the
+self-serve plan), `V91` is this pull request (#478) and `V92` (billing, #482) is claimed after it. Flyway runs with
+`outOfOrder` off, so if the order changes it is renumbered to the next free number at merge time. Step 2 of the issue, a copy kept in the Owner's Google Drive, is a later decision and is not built.
 
 ## Context
 
@@ -78,10 +78,13 @@ never change data, never show one business another's rows, and never hold a larg
 7. **Read only, and served to a business whose subscription has ended.** Making the workbook writes only the run's own rows and
    file. "Ended" means only a business that ended by its Owner's cancellation, the predicate of ADR-073 and V90
    (`subscriptions.status = 'cancelled'` with `ended_on`): it answers 423 to every write except the exports, among them two
-   reads that are a `POST`: asking for the workbook and the signed address of its file. Only the file of a data export run gets
-   that address (`EndedTenantDownloads`, decided by the reporting module); every other document, member ID images and loan
-   papers among them, stays refused with 423 `subscription_ended`, and the audit CSV and report-run routes of ADR-073 are
-   unchanged. A business the operator suspended is not
+   reads that are a `POST`: asking for the workbook and the signed address of its file. An ended business may sign the
+   download address only of the data export's own report documents (a report document whose run is the `core.data_export`
+   report); every other document, a member's KYC upload, a receipt and another report's file among them, answers 423
+   `subscription_ended`. The access layer decides, not a path rule: the tenancy interceptor passes
+   `POST /documents/{id}/download-url` on, marked as asked by an ended business, and the documents module signs it only when
+   the subject's `DocumentAccess` allows it (`downloadableWhenEnded`, which only `ReportDocumentAccess` answers yes, for a
+   data export run). The audit CSV and report-run routes of ADR-073 are unchanged. A business the operator suspended is not
    ended, whatever cancellation it has scheduled: it gets neither, and the runner's three definer functions (V49, as V90 left
    them) take none of its runs. The nightly expiry of report
    files no longer walks the active tenants only: `app_tenants_with_expired_report_files` lists every tenant with a file past

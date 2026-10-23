@@ -437,8 +437,10 @@ Notes:
   only the Owner (`users.is_owner`) turns it on or off (audited, `core.data_export.settings_changed`; anyone else 403
   `owner_only`). It is offered whatever `reports_enabled` says; the file
   is fetched by the person it was made for while they hold the permission, every refusal 404. A business ended by its Owner's
-  cancellation (ADR-073) may still ask for it and fetch the signed address of a file, the two reads that are a `POST`; every other
-  write stays 423. A business the operator suspended (FR-TEN-06) is refused both, 423 `tenant_suspended`.
+  cancellation (ADR-073) may still ask for it and fetch the signed address of its file, the two reads that are a `POST`; it may
+  sign the download address only of the data export's own report documents (a report document whose run is `core.data_export`,
+  decided by `DocumentAccess.downloadableWhenEnded` in the documents layer), and a KYC upload, a receipt or any other document
+  answers 423 `subscription_ended`, as does every other write. A business the operator suspended (FR-TEN-06) is refused both, 423 `tenant_suspended`.
   The weekly copy emailed to the Owner leaves out the columns of personal data (members' phones, ID numbers, dates of birth
   and villages, the arrears phone, customers' and suppliers' contacts); they are only in the full workbook downloaded after
   sign-in (ADR-074 decision 6).
