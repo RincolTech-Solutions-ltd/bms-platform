@@ -31,6 +31,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -336,6 +339,77 @@ class BillingAutomationIT extends IntegrationTest {
                         .single())
                 .isEqualTo(LocalDate.of(2026, 11, 8));
         assertThat(audits("platform.tenant.subscription_overdue", b.id())).isZero();
+    }
+
+    /**
+     * FR-SUB-08, FR-SUB-11: a deactivated Owner gets no reminder and no receipt. V79's {@code users_owner_is_staff} forbids
+     * such a row, so the test drops it, deactivates the Owner and puts it back NOT VALID in one transaction (no other session
+     * ever sees the table without it), then validates it again once the Owner is active.
+     * JUSTIFICATION-A3: two new test cases for the review; the anchor is only the insertion point.
+     */
+    @Test
+    void frSub08_aDeactivatedOwnerGetsNoReminderAndNoReceipt() {
+        Business b = business("active", null, LocalDate.of(2026, 11, 8), false);
+        var ds = TestDatabase.ownerDataSource();
+        var db = JdbcClient.create(ds);
+        var tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
+        tx.executeWithoutResult(s -> {
+            db.sql("ALTER TABLE users DROP CONSTRAINT users_owner_is_staff").update();
+            db.sql("UPDATE users SET status = 'deactivated' WHERE id = ?")
+                    .param(b.ownerId())
+                    .update();
+            db.sql("""
+                            ALTER TABLE users ADD CONSTRAINT users_owner_is_staff
+                                CHECK (NOT is_owner OR (kind = 'staff' AND status <> 'deactivated')) NOT VALID
+                            """).update();
+        });
+        try {
+            assertThat(run(b).remindersQueued()).isZero();
+            assertThat(reminders(b)).containsExactly("due_in_7");
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT channels::text FROM subscription_reminders WHERE tenant_id = ?")
+                            .param(b.id())
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("{}");
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("amount_minor", 10000);
+            body.put("method", "mtn_momo");
+            body.put("reference", "TEST-REF-480-D");
+            body.put("paid_on", "2026-11-01");
+            body.put("months", 1);
+            body.put("reason", "Test: seen on the statement");
+            ResponseEntity<JsonNode> paid = platform.call(
+                    HttpMethod.POST,
+                    "/api/v1/platform/tenants/" + b.id() + "/payments",
+                    body,
+                    operator.accessToken(),
+                    Map.of("Idempotency-Key", "pay-" + UUID.randomUUID()));
+            assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT count(*) FROM subscription_receipts WHERE tenant_id = ?")
+                            .param(b.id())
+                            .query(Long.class)
+                            .single())
+                    .as("the receipt is still numbered, on the page only")
+                    .isEqualTo(1);
+            assertThat(TestDatabase.owner()
+                            .sql(
+                                    "SELECT count(*) FROM notification_outbox WHERE tenant_id = ? AND template_key LIKE 'billing.%'")
+                            .param(b.id())
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+        } finally {
+            tx.executeWithoutResult(s -> {
+                db.sql("UPDATE users SET status = 'active' WHERE id = ?")
+                        .param(b.ownerId())
+                        .update();
+                db.sql("ALTER TABLE users VALIDATE CONSTRAINT users_owner_is_staff")
+                        .update();
+            });
+        }
     }
 
     List<String> listed() {

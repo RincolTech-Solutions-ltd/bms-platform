@@ -287,14 +287,27 @@ class BillingService {
 
     record Owner(String fullName, String email, String phone) {}
 
-    /** The Owner of the bound business (ADR-062; invited or active, never deactivated), or empty while it has none. */
+    /**
+     * The Owner of the bound business (ADR-062; invited or active, never deactivated), or empty while it has none. V79 allows
+     * one Owner only; should two ever be flagged, the earliest is taken and the rest logged, so one business never fails the
+     * whole run.
+     */
     private Optional<Owner> owner() {
-        return jdbc.sql("""
-                        SELECT full_name, email, phone_e164 FROM users WHERE is_owner AND kind = 'staff'
+        List<Owner> owners = jdbc.sql("""
+                        SELECT full_name, email, phone_e164 FROM users
+                         WHERE is_owner AND kind = 'staff' AND status IN ('invited', 'active')
+                         ORDER BY created_at, id
                         """)
                 .query((rs, n) ->
                         new Owner(rs.getString("full_name"), rs.getString("email"), rs.getString("phone_e164")))
-                .optional();
+                .list();
+        if (owners.size() > 1) {
+            log.warn(
+                    "tenant {} has {} Owners; billing writes to the earliest",
+                    TenantContext.current().orElse(null),
+                    owners.size());
+        }
+        return owners.stream().findFirst();
     }
 
     /**
