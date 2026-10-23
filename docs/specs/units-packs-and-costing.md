@@ -18,7 +18,7 @@ The `units` capability, switched off by default (ADR-033, V39), already gives:
 - one smallest unit per item. Stock is always counted in it.
 - packs on an item (carton = 12 pieces, dozen = 12). There is one fixed size per pack type, used when buying, selling and scanning.
 - a pack's selling price defaults to the piece price times the pack size. A different pack price needs a price list, and a walk-in sale does not use price lists.
-- the buying price per piece is the carton cost divided by the pieces. The last delivery overwrites the item's cost; there is no average yet (ADR-021 is pending).
+- the buying price per piece is the carton cost divided by the pieces. The last delivery overwrites the item's cost; there is no average yet (pending ADR-021).
 - barcodes per pack, so scanning a carton barcode sells a carton.
 
 The gaps:
@@ -62,7 +62,7 @@ The gaps:
 - The app never assumes one from the other, except to suggest a starting selling price.
 
 **Profit is per piece, using the average buying price.**
-- Each delivery updates the item's average cost per piece. The formula is (pieces already in stock × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (it is what ADR-021 was waiting for).
+- Each delivery updates the item's average cost per piece. The formula is (pieces already in stock × old average + pieces received × this delivery's cost per piece) ÷ the new number of pieces. This is the moving weighted average, the usual method for shops (the method pending ADR-021 was waiting for).
 - Each sale line keeps a copy of the average cost per piece at the moment of sale. Profit on the line is its price minus the pieces sold times that cost.
 - Reports add up the lines, so the profit is right whether the goods were sold as cartons, dozens or pieces.
 - The last buying price is still shown ("last paid 750 a piece"), because owners use it to set prices.
@@ -142,7 +142,7 @@ Rule: every label is a word a shop attendant in Kampala uses. There is a glossar
 
 ## 9. Build order (after Hillary's decisions)
 
-1. **Average cost per piece** (moving weighted average), with sale lines keeping their cost. This needs a migration and an ADR replacing the pending ADR-021. Everything else depends on profit being right.
+1. **Average cost per piece** (moving weighted average), with sale lines keeping their cost. This needs a migration and a decision record that settles pending ADR-021. Everything else depends on profit being right.
 2. **Pack size per delivery on Buy stock.** The restock line keeps its own size. Includes "use this size from now on".
 3. **Selling packs with their own prices**, including half carton and dozen. Walk-in sales use them, the below-cost warning applies, and price lists still win.
 4. **Stock shown in packs and pieces** on Stock, Count stock and Move stock.
