@@ -83,7 +83,7 @@ export function ProductCard({ product, showCost, canPrice, onEdit, onPrice, extr
       <VariantNote product={product} />
       <p>
         Sells at <strong>{money(product.sell_minor ?? 0)}</strong>
-        {showCost && product.cost_minor !== undefined && <>, cost {money(product.cost_minor)}</>}
+        {showCost && product.cost_minor !== undefined && <>, bought at {money(product.cost_minor)}</>}
       </p>
       <p className="cluster">
         <button type="button" className="btn-sm" onClick={onEdit} aria-label={`Edit ${product.description}`}>Edit</button>
@@ -238,17 +238,17 @@ export function ProductForm({ product, onSaved, onCancel, onOpen }: { product?: 
         </>
       ) : (
         <>
-          <label htmlFor="item-sell">Selling price ({RETAIL_CURRENCY})</label>
-          <input id="item-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sell.trim() !== '' && sellMinor === null} autoComplete="off" />
           {profit ? (
             <>
-              <label htmlFor="item-cost">Cost price ({RETAIL_CURRENCY})</label>
+              <label htmlFor="item-cost">Buying price ({RETAIL_CURRENCY})</label>
               <input id="item-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
-              <p className="hint">Leave 0 if you do not know it yet. A restock sets the cost.</p>
+              <p className="hint">What you pay the supplier for one. Leave 0 if you do not know it yet; a restock sets it.</p>
             </>
           ) : (
             <p className="hint">The cost is set when you record a restock.</p>
           )}
+          <label htmlFor="item-sell">Selling price ({RETAIL_CURRENCY})</label>
+          <input id="item-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sell.trim() !== '' && sellMinor === null} autoComplete="off" />
         </>
       )}
       {exists && (
@@ -314,15 +314,15 @@ export function PriceForm({ product, onSaved, onCancel }: { product: Product; on
     <>
       <form onSubmit={(e) => { e.preventDefault(); if (valid) save.mutate(); }}>
         <h2>Change the price of {product.description}</h2>
-        <p>Now sells at <strong>{money(product.sell_minor ?? 0)}</strong>{profit && product.cost_minor !== undefined && <>, cost {money(product.cost_minor)}</>}.</p>
-        <label htmlFor="price-sell">New selling price ({RETAIL_CURRENCY})</label>
-        <input id="price-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sellMinor === null} autoComplete="off" />
+        <p>Now sells at <strong>{money(product.sell_minor ?? 0)}</strong>{profit && product.cost_minor !== undefined && <>, bought at {money(product.cost_minor)}</>}.</p>
         {profit && (
           <>
-            <label htmlFor="price-cost">New cost price ({RETAIL_CURRENCY})</label>
+            <label htmlFor="price-cost">New buying price ({RETAIL_CURRENCY})</label>
             <input id="price-cost" inputMode="numeric" value={cost} onChange={(e) => setCost(e.target.value)} aria-invalid={costMinor === null} autoComplete="off" />
           </>
         )}
+        <label htmlFor="price-sell">New selling price ({RETAIL_CURRENCY})</label>
+        <input id="price-sell" inputMode="numeric" value={sell} onChange={(e) => setSell(e.target.value)} aria-invalid={sellMinor === null} autoComplete="off" />
         {hint && <p role="note" className="alert alert-warning">{hint}</p>}
         <label htmlFor="price-reason">Why is the price changing?</label>
         <input id="price-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} autoComplete="off" />
