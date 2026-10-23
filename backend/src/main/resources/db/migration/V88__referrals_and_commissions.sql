@@ -170,13 +170,21 @@ BEGIN
 END
 $$;
 
--- The referrer of one application for the operator, or no row.
+-- The referrer of one application for the operator, or no row. It reads the closed onboarding_applications table and another
+-- business's slug and name, so a tenant-bound call is refused.
 CREATE FUNCTION onboarding_application_referrer(p_id uuid)
 RETURNS TABLE (code text, tenant_id uuid, tenant_slug text, tenant_name text)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+    IF nullif(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'the referrer of an application is read by the platform operator only'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN QUERY
     SELECT a.referral_code::text, t.id, t.slug::text, t.name
       FROM onboarding_applications a JOIN tenants t ON t.id = a.referrer_tenant_id
-     WHERE a.id = p_id
+     WHERE a.id = p_id;
+END
 $$;
 
 -- ---------------------------------------------------------------------------------------------

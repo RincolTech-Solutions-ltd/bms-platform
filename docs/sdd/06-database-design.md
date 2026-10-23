@@ -278,7 +278,8 @@ punctuation, without Ltd, Limited, Co, Company, SMC, Enterprise(s), The), `conta
 gmail.com), `contact_phone_e164 varchar(20)`, `country char(2)`,
 `modules text[]`, `term` [`monthly`, `annual`], `way_in` [`trial`, `paid`], `agent_code` (recorded,
 unused until agents), `referral_code varchar(10)` and `referrer_tenant_id uuid` (FK `tenants`; the code the applicant
-brought and its business, resolved at the sign-up, made the referral at Activate; `V88`, ADR-069), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
+brought and its business, resolved at the sign-up, made the referral at Activate; `V88`, ADR-069; the operator reads it through
+`onboarding_application_referrer`, which refuses a tenant-bound transaction), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
 `link_token_expires_at` (the applicant link: SHA-256 of 256 random bits, 7 days; replaced by every
 email to the applicant), `email_verified_at` (in the operator queue once set), `operator_note`,
 `applicant_reply`, `reject_reason`, `decided_by` and `decided_at` (FK `platform_users`),

@@ -1078,6 +1078,7 @@ class RlsIsolationIT {
                 "SELECT count(*) FROM (SELECT onboarding_application_set_referrer(gen_random_uuid(), ?, 'TESTRF22')) x",
                 "SELECT count(platform_referral_of_line(?))",
                 "SELECT count(platform_referral_mark_payment_refunded(?, NULL, now()))",
+                "SELECT count(*) FROM onboarding_application_referrer(?)",
                 "SELECT count(*) FROM platform_referral_from_application(gen_random_uuid(), ?, NULL)")) {
             assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, call, b.tenantId())))
                     .as(call)
