@@ -342,6 +342,7 @@ platform API and holds no tenant permissions.
 | `retail.sale.read` | Y | | | | | | | Y | | | | Y |
 | `retail.sale.void` | Y | | | | | | | | | | | |
 | `retail.sale.all_sellers` | Y | | | | | | | | | | | Y |
+| `retail.offline.resolve` | Y | | | | | | | | | | | Y |
 | `retail.till.close` | Y | | | | | | | | | | Y | |
 | `retail.stock.read` | Y | | | | | | | Y | Y | Y | | Y |
 | `retail.stock.transfer` | Y | | | | | | | | Y | | | |
@@ -509,6 +510,21 @@ Notes:
   the printed receipt is signed "Issued by" the seller who made the sale, read as stored, though ADR-055 hides the maker from a
   caller without `retail.profit.read`. The name appears only in that printed signature of a receipt the caller may already fetch,
   never in any API field; the owner may reverse it. Tests: `SaleReceiptPdfIT`.
+- Retail sales offline (issue #458, ADR-067, migration `V86`): `retail.offline.resolve` (administrators and the Supervisor, scoped
+  by branch) lists and resolves the clashes of sales recorded offline and lists, resends or discards the sales the server refused
+  (`/retail/sale-clashes`, `/retail/offline-failures`); a discard needs a reason and is audited (`retail.offline_sale.discarded`). Nobody decides a refused
+  sale they made themselves (403 `own_offline_sale`), except that a `tenant_admin` may discard their own with a second written
+  reason, audited `retail.offline_sale.self_discard` (ADR-067 decision 11 d).
+  Recording a sale offline adds no permission: it is `retail.sale.create`, and the device reports its own refused sales under it
+  (`/retail/offline-failures/mine` shows only the caller's). A sale sent with `recorded_offline` is not refused for short stock, an
+  item switched off, a saved price that changed since, or a price not above cost (no `retail.price.below_cost` check): each is
+  recorded as a clash. The price rules are those of an online sale (ADR-067 decision 11): a price other than the one saved on
+  the phone stands without a clash only for a holder of `retail.price.override` at the branch with a reason; any other is
+  recorded as charged with a `price_typed` clash and told to the holders of `retail.offline.resolve` at the branch, which is the control on a
+  seller who sets the flag by hand. A clash's words never carry a cost. A phone
+  tells the server, under `retail.sale.create`, which sales other people left queued on it (`/retail/offline-waiting`: ids,
+  branch, total, time and seller only, never posted), which only holders of `retail.offline.resolve` read. The device keeps the
+  catalogue and the outbox per business host and per person in IndexedDB and clears the catalogue on sign-out; lending data is never cached. Tests: `RetailOfflineSalesIT`.
 - Retail cash book (ADR-022, FR-RET-32, migration V34): the ten `retail.cashbook.*`,
   `retail.savings.*`, `retail.banking.record`, `retail.expense.*`, `retail.withdrawal.record` and
   `retail.advance.*` permissions are rows of the matrix above, seeded by the cash book migration.
@@ -579,6 +595,12 @@ Notes:
   `retail.catalogue.manage` (add, change), a pack sale uses `retail.sale.create` and a pack restock `retail.purchase.create`, each with the
   branch scope it had. A pack line is judged against `retail.price.below_cost` on its line total. A restock line's pack cost and the
   purchase response's `unit_cost_minor` are as sensitive as the existing `cost_minor` and are shown to the same callers.
+- Barcodes (issue #345, ADR-070, FR-RET-68, migration V87) add no permission, so the matrix is unchanged. Scanning and the lookup
+  `GET /retail/products/by-barcode/{code}` need `retail.stock.read` (sellers, storekeepers, administrators, in their branch scope for
+  `branch_id`). Adding and removing a barcode, making label codes and the Barcode labels page need `retail.catalogue.manage`
+  (administrators): a barcode decides which item a scan sells, so it is a catalogue change like a code or a pack. A seller who scans an
+  unknown code sees the message without "Add this barcode to a product". The label shows the selling price, which an administrator may
+  see. The camera stays under `Permissions-Policy: camera=(self)`; no CSP change (the fallback decoder is pure JavaScript, no WebAssembly).
 - Corrections of entry mistakes (issues #351 and #352, ADR-044, FR-RET-44 to FR-RET-46) add no permission, so the matrix is unchanged. Voiding a
   restock (`POST /retail/purchases/{id}/void`) and reading one restock need `retail.purchase.create`; the void needs it at **every** branch the
   restock added stock to (403 `permission_denied` when one is outside the caller's scope), because it takes stock out of all of them. Correcting a
@@ -868,6 +890,11 @@ GitHub Actions deploy secrets live in the `staging` and `production` environment
   the documents module offers a separate `publicAssetMeta` and `publicAssetBytes` that return a
   document only when its subject type is `core.tenant` and its subject is the current tenant, and an
   architecture test allows only `core.tenancy` to call them.
+- A shop's own logo (FR-BR-09, ADR-068) is set and removed with `core.branches.manage` (the owner and the administrators, in
+  their branch scope) and stored like the business logo, as a `core.tenant` document of the tenant, so the public route reads it
+  through the same `publicAssetMeta` and `publicAssetBytes`. `GET /branches/{branch_id}/logo` is public for the reason the business
+  logo is (an image tag sends no token) and answers with exactly the headers of `GET /branding/logo` below; the branch is read under
+  row-level security for the tenant of the host, so a branch of another business is a 404.
 - Public endpoints for branding (`GET /branding`, `GET /branding/logo`) serve data that is public
   by design, resolved from the host only (never a parameter or a header in production; an unknown
   host is 404 `unknown_tenant`, so no tenant is revealed or confused). The logo route never

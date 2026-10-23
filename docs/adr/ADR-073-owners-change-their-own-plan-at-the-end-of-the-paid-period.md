@@ -4,8 +4,9 @@
 
 Proposed until #474 merges (owner decision of 22 Oct 2026, issue #472, FR-SUB-03 to FR-SUB-07). Builds on ADR-024 (per-module subscriptions and
 manual payments), ADR-056 (the operator's Business page, the paid-until date, a reason on every operator change), ADR-062 (the
-Owner of a business and the owner step-up) and ADR-016 (platform operations through definer functions). Migration `V93`
-(the number claimed for this work; `V80` to `V84` are merged and `V85` to `V91` are claimed by open pull requests; renumbered at merge if needed).
+Owner of a business and the owner step-up) and ADR-016 (platform operations through definer functions). Migration `V90`
+(this work's place in the agreed merge order; `V80` to `V87` are merged, `V88` and `V89` merge before it and `V91` and `V92` after it;
+renumbered at merge if the order changes).
 
 ## Context
 

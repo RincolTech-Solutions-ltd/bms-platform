@@ -4,7 +4,10 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api, fetchMe, fetchSettings, type Me } from '../../api/client';
 import { loadRetailMock, retailMockEnabled } from '../../api/retail';
 import { BusyButton } from '../../app/ui/BusyButton';
-import { getAccessToken, refreshSession, setAccessToken, subscribe } from '../../auth/session';
+import { endPendingLogout, getAccessToken, logoutPending, markLogoutPending, refreshFailedOffline, refreshSession, setAccessToken, subscribe } from '../../auth/session';
+import { OfflineProvider, lastProfile, useOfflineSupport, waitingNow } from '../../offline/offline-context';
+import { SignOutWarning } from '../../offline/sign-out-warning';
+import { OthersWaitingNote, SyncStatus } from '../../offline/sync-status';
 import { InstallPrompt } from '../../install/InstallPrompt';
 import { NewLogoCard } from '../../install/NewIcon';
 import { createPush } from '../../push/push';
@@ -12,10 +15,10 @@ import { TurnOnCard } from '../../push/TurnOnCard';
 import { HelpMenu, TourProvider } from '../../tour/host';
 import { CrumbProvider, StaffBreadcrumbs } from '../../components/breadcrumbs';
 import { icons } from '../../components/icons';
-import { type MenuLink, SideMenu, SideNav, useIsPhone } from '../../components/side-menu';
+import { type MenuLink, type MenuSection, SideMenu, SideNav, useIsPhone } from '../../components/side-menu';
 import { BrandLoader } from '../../components/states';
-import { BranchPicker, useActiveBranch } from './branch-picker';
-import { StaffContext } from './context';
+import { BranchPicker, CurrentShop, useActiveBranch } from './branch-picker';
+import { StaffContext, useOptionalStaff } from './context';
 import { PlanNotice } from './plan';
 import { canConfigureAdvisor, showInsights } from './insights/permissions';
 import { showInvestments } from './lending/investment-state';
@@ -54,21 +57,45 @@ function StaffLayout() {
   // VITE_RETAIL_MOCK=1: a fake session so the retail screens run without a backend.
   const mock = retailMockEnabled();
   const [restoring, setRestoring] = useState(token === null && !mock);
+  // ADR-067: opened with no network, the last person's saved profile lets them sell; the session is restored when online.
+  const [offlineMe, setOfflineMe] = useState<Me | null>(null);
+  const [askSignOut, setAskSignOut] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
 
   useEffect(() => {
     if (token !== null || mock) return;
-    void refreshSession().then((ok) => {
+    if (logoutPending()) {
+      // ADR-067 decision 9: an offline sign-out ends its server session first; the app stays on sign-in until it has.
+      void endPendingLogout().then(() => navigate({ to: '/sign-in' }));
+      return;
+    }
+    void refreshSession().then(async (ok) => {
+      const saved = !ok && refreshFailedOffline() ? await lastProfile() : null;
+      setOfflineMe(saved);
       setRestoring(false);
-      if (!ok) void navigate({ to: '/sign-in' });
+      if (!ok && !saved) void navigate({ to: '/sign-in' });
     });
   }, [token, navigate, mock]);
 
   const me = useQuery({ queryKey: ['me', token], queryFn: (): Promise<Me> => (mock ? loadRetailMock().then((m) => m.mockMe(import.meta.env.VITE_RETAIL_MOCK_ROLE)) : fetchMe()),
     enabled: token !== null || mock,
   });
-  const { branch, choose, ready } = useActiveBranch(me.data);
+  const profileNow = me.data ?? offlineMe ?? undefined;
+  const { branch, choose, ready } = useActiveBranch(profileNow);
   const signedIn = me.data !== undefined;
+  const offline = useOfflineSupport(mock ? undefined : profileNow, signedIn);
+  useEffect(() => {
+    // Back online after opening offline: restore the session, or ask for a sign-in.
+    if (!offline || !offlineMe || token !== null) return;
+    return offline.connectivity.subscribe(() => {
+      if (!offline.connectivity.online()) return;
+      void refreshSession().then((ok) => {
+        if (ok) setOfflineMe(null);
+        else if (!refreshFailedOffline()) void navigate({ to: '/sign-in' });
+      });
+    });
+  }, [offline, offlineMe, token, navigate]);
   useEffect(() => {
     if (signedIn && !mock) void push.sync();
   }, [signedIn, mock]);
@@ -85,18 +112,38 @@ function StaffLayout() {
     void navigate({ to: '/staff/setup', replace: true });
   }, [pathname, settings.data, navigate]);
 
-  if (restoring || !me.data || !ready) {
+  if (restoring || !profileNow || !ready) {
     return me.isError ? <p role="alert" className="alert alert-danger">Could not load your profile.</p> : <BrandLoader />;
   }
 
-  const profile = me.data;
+  const profile = profileNow;
   if (mock) void loadRetailMock().then((m) => m.setMockProfitAccess(canSeeProfit(profile)));
-  async function signOut() {
+  async function signOut(confirmed = false) {
+    // ADR-067 decision 9: sales still on this phone are never signed out of without asking.
+    if (!confirmed && waitingNow(offline) > 0) {
+      setAskSignOut((n) => n + 1);
+      return;
+    }
     setSigningOut(true);
+    setSignOutError(null);
     try {
       // This device stops hearing this person's notifications before the session ends (it needs the session to say so).
-      if (!mock) await push.forget();
-      await api.POST('/api/v1/auth/logout');
+      let ended: boolean;
+      try {
+        if (!mock) await push.forget();
+        ended = (await api.POST('/api/v1/auth/logout')).response.ok;
+      } catch {
+        ended = false;
+      }
+      // No answer: the server session (its HttpOnly cookie) is still alive. It is ended on the next start before anything
+      // restores it; without a place to note that, this person stays signed in (ADR-067 decision 9).
+      if (!ended && !mock && !markLogoutPending()) {
+        setSignOutError('Connect to the internet to sign out.');
+        return;
+      }
+      await offline?.forget();
+      offline?.engine.stop();
+      setOfflineMe(null);
       setAccessToken(null);
       queryClient.clear();
       await navigate({ to: '/sign-in' });
@@ -109,6 +156,7 @@ function StaffLayout() {
 
   return (
     <StaffContext.Provider value={{ me: profile, branch, chooseBranch: choose }}>
+      <OfflineProvider value={offline}>
       <TourProvider me={profile} saveProgress={!mock}>
         <CrumbProvider>
           <div className="nav-layout">
@@ -116,6 +164,7 @@ function StaffLayout() {
             <div className="nav-layout-main">
               <StaffBar me={profile} branch={branch} onBranch={choose} busy={signingOut} onSignOut={() => void signOut()} />
               <InstallPrompt />
+              <OthersWaitingNote />
               {!mock && <NewLogoCard />}
               {!mock && <TurnOnCard push={push} />}
               {profile.mfa_enabled && recoveryCodesLeft <= 2 && (
@@ -123,21 +172,37 @@ function StaffLayout() {
                   You have {recoveryCodesLeft} recovery codes left. Ask an admin to reset your MFA if you run out.
                 </p>
               )}
+              {signOutError && (
+                <p role="alert" className="alert alert-danger">
+                  {signOutError}
+                </p>
+              )}
               <TwoStepNotices me={profile} pathname={pathname} />
               {!mock && <PlanNotice />}
               <StaffBreadcrumbs />
               {mustSetUp(profile) ? <OwnTwoStep blocking /> : <Outlet />}
+              <SignOutWarning ask={askSignOut} onSignOut={() => void signOut(true)} />
             </div>
           </div>
         </CrumbProvider>
       </TourProvider>
+      </OfflineProvider>
     </StaffContext.Provider>
   );
 }
 
 /**
+ * The two headed parts of the menu for a business with both modules (issue #471). A business with one of them gets no heading: the
+ * side menu draws sections only when the links name two.
+ */
+export const STAFF_SECTIONS: MenuSection[] = [
+  { id: 'shop', label: 'Shop', icon: icons.stock, tours: ['retail-nav'] },
+  { id: 'lending', label: 'Lending', icon: icons.lending },
+];
+
+/**
  * The areas the session may open, in menu order; Retail carries its shortcuts as a group (`sells` from useSells decides Sale). The
- * sidebar and the drawer both list these.
+ * sidebar and the drawer both list these, the lending and retail areas marked with their STAFF_SECTIONS id.
  */
 export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
   const permissions = me.permissions ?? [];
@@ -145,13 +210,13 @@ export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
   const areas: (MenuLink | false)[] = [
     { to: '/staff', label: 'Home', icon: icons.home, exact: true },
     permissions.includes('core.approvals.read') && { to: '/staff/approvals', label: 'Approvals', icon: icons.approve, tour: 'nav-approvals' },
-    showLending(me) && { to: '/staff/lending', label: 'Loans', icon: icons.calendar, exact: true, tour: 'nav-lending' },
-    showMembers(me) && { to: '/staff/lending/members', label: 'Members', icon: icons.people, tour: 'nav-members' },
-    !showMembers(me) && showCollateral(me) && { to: '/staff/lending/collateral', label: 'Collateral', icon: icons.lock },
-    showSavings(me) && { to: '/staff/lending/savings', label: 'Savings', icon: icons.savings },
-    showInvestments(me) && { to: '/staff/lending/investments', label: 'Investments', icon: icons.valuation },
-    showInsights(me) && { to: '/staff/insights', label: 'Insights', icon: icons.salesAnalysis, tour: 'nav-insights' },
-    canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.evaluation },
+    showLending(me) && { to: '/staff/lending', label: 'Loans', icon: icons.calendar, exact: true, tour: 'nav-lending', section: 'lending' },
+    showMembers(me) && { to: '/staff/lending/members', label: 'Members', icon: icons.people, tour: 'nav-members', section: 'lending' },
+    !showMembers(me) && showCollateral(me) && { to: '/staff/lending/collateral', label: 'Collateral', icon: icons.lock, section: 'lending' },
+    showSavings(me) && { to: '/staff/lending/savings', label: 'Savings', icon: icons.savings, section: 'lending' },
+    showInvestments(me) && { to: '/staff/lending/investments', label: 'Investments', icon: icons.valuation, section: 'lending' },
+    showInsights(me) && { to: '/staff/insights', label: 'Insights', icon: icons.salesAnalysis, tour: 'nav-insights', section: 'lending' },
+    canConfigureAdvisor(me) && { to: '/staff/assistant', label: 'AI assistant', icon: icons.evaluation, section: 'lending' },
     showReports(me) && { to: '/staff/reports', label: 'Reports', icon: icons.documents },
     showRetail(me) && {
       to: '/staff/retail',
@@ -160,6 +225,7 @@ export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
       tour: 'nav-retail',
       group: <RetailMenuGroup shortcuts={shortcuts} />,
       groupPaths: shortcuts.map((s) => s.path),
+      section: 'shop',
     },
     showSms(me) && { to: '/staff/sms', label: 'SMS', icon: icons.phone },
     showReceivePayments(me) && { to: '/staff/payments', label: 'Receive payments', icon: icons.banking },
@@ -171,17 +237,22 @@ export function staffAreas(me: Me, { sells }: { sells: boolean }): MenuLink[] {
   return areas.filter((a): a is MenuLink => a !== false);
 }
 
-/** The sidebar at the left from 720px (issue #455); nothing on a phone, where the staff bar's menu button opens the same list. */
+/**
+ * The sidebar at the left from 720px (issue #455), the shop in use above it (issue #461); nothing on a phone, where the staff bar's
+ * menu button opens the same list.
+ */
 export function StaffSideNav({ me }: { me: Me }) {
   const phone = useIsPhone();
   const sells = useSells(me);
+  const branch = useOptionalStaff()?.branch ?? null;
   if (phone) return null;
-  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} />;
+  return <SideNav label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} sections={STAFF_SECTIONS} person={me.user_id} head={<CurrentShop me={me} branch={branch} />} />;
 }
 
 /**
  * Who is signed in, Help, the branch switcher and Sign out; below 720px also the menu button of the side menu, which then holds
- * Sign out, and a one-tap Sell for anyone who can sell (issue #455). With StaffSideNav it carries the data-tour anchors the
+ * Sign out, and a one-tap Sell for anyone who can sell (issue #455), only while the business has retail; with Lending too the Sale
+ * shortcut also stays in the menu's Shop section (issue #471). With StaffSideNav it carries the data-tour anchors the
  * first-run tours light up (tour/tours.ts).
  */
 export function StaffBar({
@@ -203,7 +274,20 @@ export function StaffBar({
   return (
     <header className="staff-bar">
       <div className="staff-bar-top">
-        {phone && <SideMenu label="Staff areas" tour="nav-areas" links={staffAreas(me, { sells })} tours={['retail-nav']} name={me.full_name} busy={busy} onSignOut={onSignOut} />}
+        {phone && (
+          <SideMenu
+            label="Staff areas"
+            tour="nav-areas"
+            links={staffAreas(me, { sells })}
+            tours={['retail-nav']}
+            name={me.full_name}
+            busy={busy}
+            onSignOut={onSignOut}
+            sections={STAFF_SECTIONS}
+            person={me.user_id}
+            head={<CurrentShop me={me} branch={branch} />}
+          />
+        )}
         {phone && sells && (
           <Link to="/staff/retail/sale" className="btn btn-primary btn-sm staff-sell">
             {icons.sale}
@@ -214,6 +298,7 @@ export function StaffBar({
           <span className="avatar">{icons.user}</span>
           <span className="staff-user-name">{me.full_name}</span>
         </span>
+        <SyncStatus />
         <HelpMenu feedback />
         <BranchPicker me={me} branch={branch} onChoose={onBranch} />
         {!phone && (

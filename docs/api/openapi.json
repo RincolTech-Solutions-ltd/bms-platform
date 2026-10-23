@@ -946,6 +946,10 @@
           "location" : {
             "type" : "string"
           },
+          "logo_url" : {
+            "description" : "Same-origin URL of the shop's own logo, versioned by its document id, or null: the shop shows the business logo (issue #461, ADR-068)",
+            "type" : "string"
+          },
           "name" : {
             "type" : "string"
           },
@@ -4693,6 +4697,39 @@
         },
         "required" : [ "guaranteed_amount_minor", "member_id" ]
       },
+      "LoanHomeSummary" : {
+        "description" : "The Lending card on Home (issue #471, ADR-072): active loans in the caller's lending.loans.read scope and in the business's currency, read live from the schedule, not from the nightly arrears run",
+        "properties" : {
+          "currency" : {
+            "type" : "string"
+          },
+          "date" : {
+            "description" : "The business date the figures are for",
+            "format" : "date",
+            "type" : "string"
+          },
+          "due_today_count" : {
+            "description" : "Loans with an instalment due today that is not fully paid",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "due_today_minor" : {
+            "description" : "What is still owed on the instalments due today",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "in_arrears_count" : {
+            "description" : "Loans with an instalment due before today that is not fully paid",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "in_arrears_minor" : {
+            "description" : "What is still owed on the instalments due before today",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "LoanListItem" : {
         "properties" : {
           "approved_principal_minor" : {
@@ -5546,6 +5583,10 @@
           },
           "is_head_office" : {
             "type" : "boolean"
+          },
+          "logo_url" : {
+            "description" : "Same-origin URL of the shop's own logo, or null: show the business logo (#461, ADR-068)",
+            "type" : "string"
           },
           "name" : {
             "type" : "string"
@@ -8136,6 +8177,103 @@
           }
         },
         "required" : [ "amount_minor" ]
+      },
+      "RetailBarcode" : {
+        "description" : "Issue #345: one barcode of a product, for its base unit or one pack size",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "format" : {
+            "description" : "ean13, ean8, upca or code128",
+            "type" : "string"
+          },
+          "generated" : {
+            "description" : "True for a Code 128 code the system made for the product's labels",
+            "type" : "boolean"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "unit" : {
+            "description" : "The name of that pack's unit",
+            "type" : "string"
+          },
+          "unit_id" : {
+            "description" : "The pack size this barcode is on; absent for the product's own unit",
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailBarcodeGenerateRequest" : {
+        "description" : "Issue #345: the items to make a label code for",
+        "properties" : {
+          "product_ids" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "maxItems" : 200,
+            "minItems" : 1,
+            "type" : "array"
+          }
+        },
+        "required" : [ "product_ids" ]
+      },
+      "RetailBarcodeList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailBarcode"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "RetailBarcodeMatch" : {
+        "description" : "Issue #345: the active product a scanned barcode belongs to",
+        "properties" : {
+          "barcode" : {
+            "$ref" : "#/components/schemas/RetailBarcode"
+          },
+          "product" : {
+            "$ref" : "#/components/schemas/RetailProduct"
+          },
+          "unit_id" : {
+            "description" : "The pack size the barcode is on, to add the line in that unit; absent for the base unit",
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailBarcodeRequest" : {
+        "description" : "Issue #345: add a barcode to a product",
+        "properties" : {
+          "code" : {
+            "description" : "As printed or scanned; EAN-13, EAN-8 and UPC-A check digits are checked",
+            "maxLength" : 48,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "format" : {
+            "description" : "ean13, ean8, upca or code128; by default read from the code (13, 12 or 8 digits, else Code 128)",
+            "maxLength" : 10,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "unit_id" : {
+            "description" : "A pack size of the product (the units capability); absent for the product's own unit",
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "code" ]
       },
       "RetailBranchBalance" : {
         "description" : "One entry per branch of the page, in the page's branch order",
@@ -12036,6 +12174,247 @@
           }
         }
       },
+      "RetailOfflineFailure" : {
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "client_sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "discard_reason" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "made_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "made_by_name" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "occurred_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "payment_method" : {
+            "type" : "string"
+          },
+          "request" : {
+            "additionalProperties" : {
+              "type" : "object"
+            },
+            "type" : "object"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "description" : "open, retry, discarded or recorded",
+            "type" : "string"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailOfflineFailureDiscard" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "self_discard_reason" : {
+            "description" : "A second written reason, needed when an administrator (or the Owner) discards a sale they made themselves (ADR-067 decision 11 d); audited as self_discard",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "RetailOfflineFailurePage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailOfflineFailure"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "RetailOfflineFailureRequest" : {
+        "description" : "A sale made offline that the server refused (ADR-067)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "client_sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "maxLength" : 60,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "message" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "occurred_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "payment_method" : {
+            "pattern" : "cash|mobile_money|bank|credit",
+            "type" : "string"
+          },
+          "request" : {
+            "additionalProperties" : {
+              "description" : "The sale request exactly as the device holds it; at most 64 KB as JSON (413)",
+              "type" : "object"
+            },
+            "description" : "The sale request exactly as the device holds it; at most 64 KB as JSON (413)",
+            "type" : "object"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "branch_id", "client_sale_id", "code", "message", "occurred_at", "payment_method", "request", "total_minor" ]
+      },
+      "RetailOfflineWaiting" : {
+        "description" : "A sale waiting on a phone (ADR-067)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "client_sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "made_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "made_by_name" : {
+            "type" : "string"
+          },
+          "occurred_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "reported_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "reported_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reported_by_name" : {
+            "type" : "string"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailOfflineWaitingAccepted" : {
+        "properties" : {
+          "accepted" : {
+            "description" : "How many were kept; a sale already recorded or reported as refused is skipped",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailOfflineWaitingPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailOfflineWaiting"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "RetailOfflineWaitingRequest" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailOfflineWaitingSale"
+            },
+            "maxItems" : 200,
+            "minItems" : 0,
+            "type" : "array"
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "RetailOfflineWaitingSale" : {
+        "description" : "ADR-067: a sale queued on a phone by a person who is not signed in there now, in short",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "client_sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "made_by" : {
+            "description" : "The person who made the sale (the seller)",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "occurred_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "maximum" : 10000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "branch_id", "client_sale_id", "made_by", "occurred_at", "total_minor" ]
+      },
       "RetailOpenSale" : {
         "properties" : {
           "balance_minor" : {
@@ -13430,6 +13809,13 @@
         "properties" : {
           "active" : {
             "type" : "boolean"
+          },
+          "barcodes" : {
+            "description" : "Issue #345: the barcodes of this product and of its pack sizes, sent by the list, the get and the barcode lookup; scan any of them to find the product",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailBarcode"
+            },
+            "type" : "array"
           },
           "category" : {
             "type" : "string"
@@ -14924,6 +15310,9 @@
             "format" : "int64",
             "type" : "integer"
           },
+          "device" : {
+            "$ref" : "#/components/schemas/RetailSaleDevice"
+          },
           "due_date" : {
             "format" : "date",
             "type" : "string"
@@ -14992,6 +15381,101 @@
           },
           "write_off" : {
             "$ref" : "#/components/schemas/RetailSaleWriteOffInfo"
+          }
+        }
+      },
+      "RetailSaleClash" : {
+        "description" : "Something that changed while a sale was offline (ADR-067)",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "description" : "stock_short, item_inactive, pack_inactive, price_changed, price_typed, below_cost, clock_ahead or clock_behind",
+            "type" : "string"
+          },
+          "line_no" : {
+            "description" : "The sale line; absent for clock_ahead and clock_behind",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "resolution_note" : {
+            "type" : "string"
+          },
+          "resolved_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "resolved_by" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sale_no" : {
+            "type" : "string"
+          },
+          "words" : {
+            "description" : "What happened, in plain words; never a cost",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailSaleClashPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSaleClash"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "RetailSaleClashResolve" : {
+        "properties" : {
+          "note" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "note" ]
+      },
+      "RetailSaleDevice" : {
+        "description" : "How a sale came from a device (ADR-067)",
+        "properties" : {
+          "clashes" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailSaleClash"
+            },
+            "type" : "array"
+          },
+          "client_sale_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "occurred_at" : {
+            "description" : "When the sale happened on the device, as recorded",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "recorded_offline" : {
+            "type" : "boolean"
           }
         }
       },
@@ -15232,6 +15716,11 @@
             "minLength" : 0,
             "type" : "string"
           },
+          "client_sale_id" : {
+            "description" : "ADR-067: the id the device made for this sale, unique per business. A second request with it, by the same person, answers the sale already recorded (Idempotent-Replayed), after the Idempotency-Key has expired too; by another person it is 422 client_sale_id_reused; with a different request (apart from occurred_at, recorded_offline and prices_as_of) 422 client_sale_conflict; the id of a refused offline sale a manager discarded 422 offline_sale_discarded",
+            "format" : "uuid",
+            "type" : "string"
+          },
           "credit_override_reason" : {
             "description" : "Why a credit sale above the buyer's credit limit goes ahead; needed (at least five characters) from a user who holds retail.credit.override, ignored when the sale is within the limit or the customer_accounts capability is off",
             "maxLength" : 300,
@@ -15255,6 +15744,11 @@
             "minItems" : 0,
             "type" : "array"
           },
+          "occurred_at" : {
+            "description" : "ADR-067: when the sale happened on the device; the sale is dated that day in the business's time zone. Up to five minutes ahead is recorded as now; further ahead is 422 occurred_at_in_future, or for a sale recorded offline now with a clock_ahead clash",
+            "format" : "date-time",
+            "type" : "string"
+          },
           "payment_method" : {
             "pattern" : "cash|mobile_money|bank|credit",
             "type" : "string"
@@ -15263,6 +15757,15 @@
             "description" : "Price the sale from this list instead of the customer's own or the customer group's; needs retail.pricelist.use unless it is one of those (price_lists capability)",
             "format" : "uuid",
             "type" : "string"
+          },
+          "prices_as_of" : {
+            "description" : "ADR-067: the server's time when the device last refreshed its prices. A device price equal to the catalogue or pack price in force then stands; an occurred_at before it means the phone clock was behind (clock_behind)",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "recorded_offline" : {
+            "description" : "ADR-067: the sale was taken with no network and its money is already in hand. Needs client_sale_id and occurred_at; never a credit sale. A short stock, an item or a pack switched off, a saved price that changed, a typed price the online rules would not take (price_typed), a price not above cost or a phone clock ahead or behind then records the sale with a clash instead of refusing it",
+            "type" : "boolean"
           },
           "sale_date" : {
             "description" : "Defaults to today; not in the future",
@@ -22353,6 +22856,190 @@
         "tags" : [ "branches" ]
       }
     },
+    "/api/v1/branches/{branch_id}/logo" : {
+      "delete" : {
+        "operationId" : "removeBranchLogo",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "No such branch in the caller's scope"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "The branch is closed (invalid_status_transition)"
+          }
+        },
+        "summary" : "Remove a shop's own logo; it shows the business logo again and the file is kept (issue #461)",
+        "tags" : [ "branches" ]
+      },
+      "get" : {
+        "operationId" : "getBranchLogo",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "v",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "304" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "The ETag still matches"
+          },
+          "404" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "No such branch, no logo of its own, or an unknown host"
+          },
+          "503" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "format" : "byte",
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "Storage cannot be read (logo_unavailable)"
+          }
+        },
+        "summary" : "A shop's own logo image (public, cacheable)",
+        "tags" : [ "branches" ]
+      },
+      "put" : {
+        "operationId" : "uploadBranchLogo",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "branch_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "multipart/form-data" : {
+              "schema" : {
+                "properties" : {
+                  "file" : {
+                    "format" : "binary",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "file" ],
+                "type" : "object"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "404" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "No such branch in the caller's scope"
+          },
+          "409" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "The branch is closed (invalid_status_transition)"
+          },
+          "413" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "Over 1 MB (file_too_large)"
+          },
+          "415" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "Not PNG, JPEG or WebP, or not decodable (unsupported_file_type)"
+          },
+          "422" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Branch"
+                }
+              }
+            },
+            "description" : "svg_not_allowed, image_too_small, image_too_large (over 4 megapixels)"
+          }
+        },
+        "summary" : "Upload or replace a shop's own logo: the rules of the business logo, PNG, JPEG or WebP, 1 MB, 128 px or more (issue #461, ADR-068)",
+        "tags" : [ "branches" ]
+      }
+    },
     "/api/v1/branches/{branch_id}/reopen" : {
       "post" : {
         "operationId" : "reopenBranch",
@@ -25186,6 +25873,37 @@
           }
         },
         "summary" : "Create a draft application (FR-ORG-01)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/loans/summary" : {
+      "get" : {
+        "operationId" : "getLoanHomeSummary",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LoanHomeSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Home's Lending card: loans due today and in arrears, with what is owed (issue #471)",
         "tags" : [ "lending-loans" ]
       }
     },
@@ -32973,6 +33691,229 @@
         "tags" : [ "retail-payables" ]
       }
     },
+    "/api/v1/retail/offline-failures" : {
+      "get" : {
+        "operationId" : "listRetailOfflineFailures",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }, {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineFailurePage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Reported offline sales in the caller's branch scope, open and retry by default (ADR-067)",
+        "tags" : [ "retail-sales" ]
+      },
+      "post" : {
+        "operationId" : "reportRetailOfflineFailure",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailOfflineFailureRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineFailure"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Report a sale made offline that the server refused, for a manager to decide (ADR-067); idempotent on the client sale id",
+        "tags" : [ "retail-sales" ]
+      }
+    },
+    "/api/v1/retail/offline-failures/mine" : {
+      "get" : {
+        "operationId" : "listMyRetailOfflineFailures",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "client_sale_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineFailurePage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The caller's own reported offline sales: these client sale ids, or every one open or waiting to be sent again (ADR-067)",
+        "tags" : [ "retail-sales" ]
+      }
+    },
+    "/api/v1/retail/offline-failures/{failure_id}/discard" : {
+      "post" : {
+        "operationId" : "discardRetailOfflineFailure",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "failure_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailOfflineFailureDiscard"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineFailure"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Discard a refused offline sale with a reason; it is never recorded; audited (ADR-067). The caller's own sale only by an administrator, with self_discard_reason",
+        "tags" : [ "retail-sales" ]
+      }
+    },
+    "/api/v1/retail/offline-failures/{failure_id}/retry" : {
+      "post" : {
+        "operationId" : "retryRetailOfflineFailure",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "failure_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineFailure"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Ask the device that reported it to send the sale again (ADR-067); audited",
+        "tags" : [ "retail-sales" ]
+      }
+    },
+    "/api/v1/retail/offline-waiting" : {
+      "get" : {
+        "operationId" : "listRetailOfflineWaiting",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineWaitingPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Sales waiting on a phone in the caller's branch scope, oldest first (ADR-067)",
+        "tags" : [ "retail-sales" ]
+      },
+      "post" : {
+        "operationId" : "reportRetailOfflineWaiting",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailOfflineWaitingRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailOfflineWaitingAccepted"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "A phone tells which sales other people left queued on it, in short, so managers see them waiting (ADR-067); upserted on the client sale id",
+        "tags" : [ "retail-sales" ]
+      }
+    },
     "/api/v1/retail/orders" : {
       "get" : {
         "operationId" : "listRetailOrders",
@@ -34265,6 +35206,70 @@
         "tags" : [ "retail-catalogue" ]
       }
     },
+    "/api/v1/retail/products/barcodes/generate" : {
+      "post" : {
+        "operationId" : "generateRetailBarcodes",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailBarcodeGenerateRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBarcodeList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Make a Code 128 label code for each item that has no made code yet; idempotent (#345)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/products/by-barcode/{code}" : {
+      "get" : {
+        "operationId" : "findRetailProductByBarcode",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "code",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBarcodeMatch"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The active item a scanned barcode belongs to; with branch_id, with that branch's balance (#345)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
     "/api/v1/retail/products/import" : {
       "post" : {
         "operationId" : "importRetailProducts",
@@ -34414,6 +35419,99 @@
           }
         },
         "summary" : "Edit a product's non-price fields",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/products/{product_id}/barcodes" : {
+      "get" : {
+        "operationId" : "listRetailProductBarcodes",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBarcodeList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The barcodes of an item (#345)",
+        "tags" : [ "retail-catalogue" ]
+      },
+      "post" : {
+        "operationId" : "addRetailProductBarcode",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailBarcodeRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailBarcode"
+                }
+              }
+            },
+            "description" : "The barcode added"
+          }
+        },
+        "summary" : "Add a barcode to an item or one of its pack sizes; check digits are checked (#345)",
+        "tags" : [ "retail-catalogue" ]
+      }
+    },
+    "/api/v1/retail/products/{product_id}/barcodes/{barcode_id}" : {
+      "delete" : {
+        "operationId" : "removeRetailProductBarcode",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "product_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "barcode_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "The barcode was removed"
+          }
+        },
+        "summary" : "Remove a barcode from an item (#345)",
         "tags" : [ "retail-catalogue" ]
       }
     },
@@ -36719,6 +37817,82 @@
         },
         "summary" : "Void a return as a whole by reversal (issue #201); M. 200 when voided, 202 when it waits for a checker",
         "tags" : [ "retail-returns" ]
+      }
+    },
+    "/api/v1/retail/sale-clashes" : {
+      "get" : {
+        "operationId" : "listRetailSaleClashes",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSaleClashPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Clashes of sales recorded offline in the caller's branch scope, newest first (ADR-067)",
+        "tags" : [ "retail-sales" ]
+      }
+    },
+    "/api/v1/retail/sale-clashes/{clash_id}/resolve" : {
+      "post" : {
+        "operationId" : "resolveRetailSaleClash",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "clash_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RetailSaleClashResolve"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailSaleClash"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Resolve a clash with a note, once; audited (ADR-067). Nothing else changes",
+        "tags" : [ "retail-sales" ]
       }
     },
     "/api/v1/retail/sales" : {
