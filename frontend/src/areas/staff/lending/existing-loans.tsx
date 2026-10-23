@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState, type FormEvent } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { ExistingLoanError, existingLoans, type ExistingLoan, type ExistingLoansApi, type ExistingLoanSummary } from '../../../api/existing-loans';
 import { PAYMENT_METHODS } from '../../../api/lending';
 import { useStaff } from '../context';
@@ -179,12 +180,12 @@ export function ExistingLoanForm({ api = existingLoans }: { api?: ExistingLoansA
       <button type="button" className="btn-sm" onClick={() => set('repayments', [...draft.repayments, emptyRepayment()])}>Add a repayment</button>
       {Object.keys(problems).length > 0 && <p role="alert" className="alert alert-danger">Some entries need a look. They are marked above.</p>}
       <Problem error={Object.keys(problems).length === 0 ? (check.error ?? record.error) : null} />
-      <button type="submit" className="rt-primary" data-tour="existing-check" disabled={check.isPending}>{check.isPending ? 'Checking' : 'Check'}</button>
+      <BusyButton busy={check.isPending} type="submit" className="rt-primary" data-tour="existing-check">Check</BusyButton>
       {current && <ExistingLoanView loan={current} />}
       {current && (
-        <button type="button" className="rt-primary" disabled={record.isPending} onClick={() => record.mutate()}>
-          {record.isPending ? 'Recording' : 'Record and send for approval'}
-        </button>
+        <BusyButton busy={record.isPending} type="button" className="rt-primary" onClick={() => record.mutate()}>
+          Record and send for approval
+        </BusyButton>
       )}
       {recorded && (
         <Success>
@@ -209,11 +210,11 @@ function WaitingRow({ loan, api }: { loan: ExistingLoanSummary; api: ExistingLoa
       </p>
       <p>{loan.approval_request_id ? 'Waiting for a second person in the approvals inbox.' : 'Not sent for approval: the last request was rejected, expired or changed.'}</p>
       {!loan.approval_request_id && (
-        <button type="button" className="btn-sm" disabled={again.isPending} onClick={() => again.mutate()}>Ask for approval again</button>
+        <BusyButton busy={again.isPending} type="button" className="btn-sm" onClick={() => again.mutate()}>Ask for approval again</BusyButton>
       )}
       <label htmlFor={`el-why-${loan.loan_id}`}>Why withdraw it</label>
       <input id={`el-why-${loan.loan_id}`} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      <button type="button" className="btn-sm btn-danger" disabled={cancel.isPending || reason.trim() === ''} onClick={() => cancel.mutate()}>Withdraw</button>
+      <BusyButton busy={cancel.isPending} type="button" className="btn-sm btn-danger" disabled={reason.trim() === ''} onClick={() => cancel.mutate()}>Withdraw</BusyButton>
       <Problem error={cancel.error ?? again.error} />
     </li>
   );
