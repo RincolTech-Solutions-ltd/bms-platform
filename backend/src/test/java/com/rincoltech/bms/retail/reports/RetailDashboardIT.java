@@ -20,15 +20,15 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The owner dashboard (issue #149, step 6). The data of {@link AnalyticsData} plus, today: head office sells
- * 2 ANA-2 for cash (600, cost 400) and 1 ANA-1 on credit (1,500, cost 1,000); branch two sold 1 ANA-1 for
- * cash (1,500, cost 1,000). Today: 3,600, of which cash 2,100 and credit 1,500; profit 1,200. Yesterday 3,000;
- * ten days ago 900. Stock: head office 17 ANA-1, 15 ANA-2, 4 ANA-3 and 5 ANA-5 (cost 100, price 150): 33,550
- * at price, 22,100 at cost; branch two 9 ANA-1 and 0 ANA-4: 13,500 and 9,000. The counts follow the stock list
- * rule: an item counts only at a branch that has held it (issue #490), low includes out of stock, and All branches judges
- * out on each item's summed balance and low at any branch. Head office: ANA-4 never stocked there so not counted, ANA-3
- * and ANA-5 low, so 0 out and 2 low; branch two: ANA-4 stocked and counted down to 0, ANA-2 and ANA-3 never carried, so 1
- * out and 1 low; all branches: ANA-4 totals 0, ANA-3 4 and ANA-5 5, so 1 out and 3 low.
+ * The owner dashboard (issue #149, step 6). The data of {@link AnalyticsData} plus, today: head office sells 2 ANA-2
+ * for cash (600, cost 400) and 1 ANA-1 on credit (1,500, cost 1,000); branch two sold 1 ANA-1 for cash (1,500, cost
+ * 1,000). Today: 3,600, of which cash 2,100 and credit 1,500; profit 1,200. Yesterday 3,000; ten days ago 900. Stock:
+ * head office 17 ANA-1, 15 ANA-2, 4 ANA-3 and 5 ANA-5 (cost 100, price 150): 33,550 at price, 22,100 at cost; branch
+ * two 9 ANA-1 and 0 ANA-4: 13,500 and 9,000. The counts follow the stock list rule: an item counts only at a branch
+ * that has held it (issue #490), low includes out of stock, and All branches judges out on each item's summed balance
+ * and low at any branch. Head office: ANA-4 never stocked there so not counted, ANA-3 and ANA-5 low, so 0 out and 2
+ * low; branch two: ANA-4 stocked and counted down to 0, ANA-2 and ANA-3 never carried, so 1 out and 1 low; all
+ * branches: ANA-4 totals 0, ANA-3 4 and ANA-5 5, so 1 out and 3 low.
  */
 class RetailDashboardIT extends IntegrationTest {
 
@@ -231,9 +231,9 @@ class RetailDashboardIT extends IntegrationTest {
     }
 
     /**
-     * Issue #342, ADR-045: an item switched off leaves the dashboard's stock value and its out of stock and low stock counts, as
-     * it leaves the stock list. The item holds 3 at head office and is 2 below zero at branch two, so while it is active it is low
-     * at head office, out and low at branch two, and low over all branches.
+     * Issue #342, ADR-045: an item switched off leaves the dashboard's stock value and its out of stock and low stock
+     * counts, as it leaves the stock list. The item holds 3 at head office and is 2 below zero at branch two, so while
+     * it is active it is low at head office, out and low at branch two, and low over all branches.
      */
     @Test
     void anInactiveItemLeavesTheStockValueAndTheCountsAsItLeavesTheStockList() {

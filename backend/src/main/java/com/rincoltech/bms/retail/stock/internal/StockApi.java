@@ -57,8 +57,8 @@ final class StockApi {
             List<StockRow> items,
 
             @Schema(
-                    description =
-                            "A quantity at or below this is low stock (FR-RET-03) for an item with no minimum set; the same for every branch")
+                    description = "A quantity at or below this is low stock (FR-RET-03) for an item with no "
+                            + "minimum set; the same for every branch")
             String lowStockThreshold,
 
             String nextCursor) {}
@@ -111,8 +111,8 @@ final class StockApi {
             List<AllBranchesRow> items,
 
             @Schema(
-                    description =
-                            "A balance at or below this is low stock for an item with no minimum set; the same for every branch")
+                    description = "A balance at or below this is low stock for an item with no minimum set; the "
+                            + "same for every branch")
             String lowStockThreshold,
 
             @Schema(
@@ -173,8 +173,8 @@ final class StockApi {
             @Schema(
                     type = "string",
                     example = "12.5",
-                    description =
-                            "The quantity the form showed when it was opened; 409 stock_moved when it has changed since")
+                    description = "The quantity the form showed when it was opened; 409 stock_moved when it has "
+                            + "changed since")
             BigDecimal expectedQty,
 
             @NotNull
@@ -227,8 +227,8 @@ final class StockApi {
             @Schema(description = "counted less expected") String varianceQty,
 
             @Schema(
-                    description =
-                            "The adjustment written at commit: counted less expected, the variance measured when the count was taken; null for a draft")
+                    description = "The adjustment written at commit: counted less expected, the variance "
+                            + "measured when the count was taken; null for a draft")
             String committedVarianceQty,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = COST_ONLY)
