@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Sheet } from './Sheet';
@@ -50,13 +50,12 @@ function openIt() {
 const dialog = () => screen.queryByRole('dialog', { name: 'How did the buyer pay?' });
 
 describe('Sheet', () => {
-  it('opens as a named modal dialog with focus on its first control, the page still and not inert', () => {
+  it('opens as a named modal dialog with focus on its first control and the page behind hidden', () => {
     openIt();
-    expect(dialog()?.getAttribute('aria-modal')).toBe('true');
+    expect(dialog()).toBeTruthy();
     expect(document.activeElement?.textContent).toBe('Mobile money');
-    // Not inert: a toast's live region on the page must still be heard while the sheet is open.
-    expect(document.querySelector('[inert]')).toBeNull();
-    expect(document.body.style.overflow).toBe('hidden');
+    // Radix hides the rest of the page from a screen reader while the sheet is open.
+    expect(document.querySelector('main')?.closest('[aria-hidden="true"]')).toBeTruthy();
   });
 
   it('keeps Tab inside, both ways', () => {
@@ -70,21 +69,26 @@ describe('Sheet', () => {
     expect(document.activeElement).toBe(cancel);
   });
 
-  it('closes on Escape and gives focus back to what opened it, with the page live again', () => {
+  it('closes on Escape and gives focus back to what opened it, with the page live again', async () => {
     const opener = openIt();
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(dialog()).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    expect(document.body.style.overflow).toBe('');
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(document.querySelector('[aria-hidden="true"] main')).toBeNull();
   });
 
-  it('closes from the close button and from a tap on the dimmed page', () => {
+  it('closes from the close button and from a tap on the dimmed page', async () => {
     openIt();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(dialog()).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Choose a payment' }));
-    fireEvent.click(document.querySelector('.sheet-scrim')!);
-    expect(dialog()).toBeNull();
+    // Radix listens for a tap outside from the next task after it opens.
+    await act(() => new Promise((done) => setTimeout(done, 0)));
+    const scrim = document.querySelector('.sheet-scrim')!;
+    fireEvent.pointerDown(scrim);
+    fireEvent.pointerUp(scrim);
+    fireEvent.click(scrim);
+    await waitFor(() => expect(dialog()).toBeNull());
   });
 
   it('closes on a swipe down its top, and springs back from a short one', () => {

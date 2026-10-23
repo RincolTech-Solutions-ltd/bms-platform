@@ -1,13 +1,13 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import * as Dialog from '@radix-ui/react-dialog';
+import { useRef, type PointerEvent, type ReactNode } from 'react';
 import { icons } from '../../components/icons';
 
-// The one sheet (#520): pickers and confirmations open in it. On a phone (under 720px) it rises from the bottom edge and a
-// swipe down on its top (by touch or pen, never a mouse) closes it; on a wider screen it is a centred dialog. Either way it is
-// modal: aria-modal, the dimmed layer takes every tap on the page behind, the page does not scroll, focus starts inside and Tab
-// stays inside, Escape, the close button and a tap on the dimmed page close it, and focus goes back
-// to what opened it. The screen owns `open` and closes it in `onClose`. Drawn in a portal so no parent's overflow clips it. The
-// look is .sheet-layer in src/app/ui/kit.css.
+// The one sheet (#520): pickers and confirmations open in it. It is a Radix Dialog styled by our own tokens. On a phone (under
+// 720px) it rises from the bottom edge and a swipe down on its top, by touch or pen and never a mouse, closes it; on a wider
+// screen it is a centred dialog. Radix makes it modal: focus is trapped inside, Escape, a tap on the dimmed page and the close
+// button close it, the page does not scroll, and focus goes back to what opened it. Focus starts on the first control of the
+// content (not the close button). The screen owns `open` and closes it in `onClose`. The look is .sheet-layer in
+// src/app/ui/kit.css.
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 // How far down the top must be dragged, in px, to close the sheet rather than spring back.
@@ -21,50 +21,13 @@ export function Sheet({ open, onClose, title, children, actions }: {
   /** The buttons at the foot, the primary one first. */
   actions?: ReactNode;
 }) {
-  const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const layer = useRef<HTMLDivElement>(null);
+  // What had focus when the sheet opened, given it back on close (Radix gives it back only to a Dialog.Trigger).
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) opener.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
   const drag = useRef<{ from: number; by: number } | null>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement as HTMLElement | null;
-    // The page behind is not made inert: a toast's live region lives there and must still be heard.
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    // The first control of the content, then of the actions; the sheet itself when there is none.
-    const parts = [...(panel.current?.querySelectorAll('.sheet-body, .sheet-actions') ?? [])];
-    const first = parts.map((part) => part.querySelector<HTMLElement>(FOCUSABLE)).find(Boolean);
-    (first ?? panel.current)?.focus();
-    return () => {
-      document.body.style.overflow = overflow;
-      opener?.focus?.();
-    };
-  }, [open]);
-
-  if (!open) return null;
-
-  const keys = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      close.current();
-      return;
-    }
-    if (e.key !== 'Tab' || !panel.current) return;
-    const stops = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-    const first = stops[0];
-    const last = stops[stops.length - 1];
-    if (!first || !last) return;
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
 
   const grab = (e: PointerEvent<HTMLElement>) => {
     if (e.pointerType === 'mouse' || (e.target as HTMLElement).closest('button')) return;
@@ -81,24 +44,42 @@ export function Sheet({ open, onClose, title, children, actions }: {
     const far = drag.current.by >= SWIPE_CLOSE;
     drag.current = null;
     panel.current.style.transform = '';
-    if (far) close.current();
+    if (far) onClose();
   };
 
-  return createPortal(
-    <div ref={layer} className="sheet-layer">
-      <div className="sheet-scrim" aria-hidden="true" onClick={() => close.current()} />
-      <div ref={panel} className="sheet-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={keys}>
-        <header className="sheet-head" onPointerDown={grab} onPointerMove={pull} onPointerUp={release} onPointerCancel={release}>
-          <span className="sheet-grab" aria-hidden="true" />
-          <h2 id={titleId}>{title}</h2>
-          <button type="button" className="sheet-close" aria-label="Close" onClick={() => close.current()}>
-            {icons.close}
-          </button>
-        </header>
-        <div className="sheet-body">{children}</div>
-        {actions && <div className="sheet-actions">{actions}</div>}
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => next || onClose()}>
+      <Dialog.Portal>
+        <div className="sheet-layer">
+          <Dialog.Overlay className="sheet-scrim" />
+          <Dialog.Content
+            ref={panel}
+            className="sheet-panel"
+            aria-describedby={undefined}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              opener.current?.focus?.();
+            }}
+            onOpenAutoFocus={(e) => {
+              // The first control of the content, then of the actions; the sheet itself when there is none.
+              const parts = [...(panel.current?.querySelectorAll('.sheet-body, .sheet-actions') ?? [])];
+              const first = parts.map((part) => part.querySelector<HTMLElement>(FOCUSABLE)).find(Boolean);
+              e.preventDefault();
+              (first ?? panel.current)?.focus();
+            }}
+          >
+            <header className="sheet-head" onPointerDown={grab} onPointerMove={pull} onPointerUp={release} onPointerCancel={release}>
+              <span className="sheet-grab" aria-hidden="true" />
+              <Dialog.Title>{title}</Dialog.Title>
+              <Dialog.Close className="sheet-close" aria-label="Close">
+                {icons.close}
+              </Dialog.Close>
+            </header>
+            <div className="sheet-body">{children}</div>
+            {actions && <div className="sheet-actions">{actions}</div>}
+          </Dialog.Content>
+        </div>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
