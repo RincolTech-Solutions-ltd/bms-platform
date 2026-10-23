@@ -87,7 +87,9 @@ class ProductImportService {
                         "The file needs a column called "
                                 + shown(required)
                                 + ". The columns are: code, description, category, unit, "
-                                + (principal.hasPermission("retail.profit.read") ? "buying price (if you wish) and " : "")
+                                + (principal.hasPermission("retail.profit.read")
+                                        ? "buying price (if you wish) and "
+                                        : "")
                                 + "selling price.");
             }
         }
