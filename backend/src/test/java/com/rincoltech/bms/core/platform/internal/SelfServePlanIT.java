@@ -8,6 +8,9 @@ import com.rincoltech.bms.kernel.TenantContext;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Role;
 import com.rincoltech.bms.testsupport.Api.Session;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -499,33 +502,179 @@ class SelfServePlanIT extends IntegrationTest {
     }
 
     /**
-     * In a free month an ask for a module the plan includes (switched on at once) and a stop applied at once, sent together,
-     * are made one after the other under the subscription's lock: whichever goes first, the modules on are exactly what the
-     * two answers say, so neither switch overwrites the other.
+     * The operator's approval takes the subscription's lock before it reads the modules. While another change holds the lock,
+     * the approval waits and switches nothing. When the lock is released, the Owner's immediate stop of the other module is
+     * sent at the same moment; the two run one after the other, so the modules on are exactly what the two answers say. With
+     * the lock removed from {@code decideRequest} the approval does not wait, and this test fails.
      */
     @Test
-    void anAskSwitchedOnAtOnceAndAStopAppliedAtOnceNeverUndoEachOther() throws Exception {
-        for (int i = 0; i < 3; i++) {
-            Business b = business(bothPlan, false, null);
-            List<ResponseEntity<JsonNode>> both = atOnce(
-                    () -> b.api()
+    void theOperatorsApprovalWaitsForTheLockAndAnImmediateStopNeverUndoesIt() throws Exception {
+        Business b = business(lendingPlan, false, null);
+        UUID tenantId = b.t().tenantId();
+        ResponseEntity<JsonNode> asked = b.api()
+                .post(
+                        "/api/v1/plan/module-requests",
+                        Map.of("module", "retail", "password", Api.PASSWORD),
+                        b.ownerSession().accessToken());
+        assertThat(asked.getBody().get("status").asString())
+                .as("%s", asked.getBody())
+                .isEqualTo("pending");
+        String requestId = asked.getBody().get("id").asString();
+        // The operator widened the plan meanwhile, so the approval needs no plan move.
+        JdbcCall.run("UPDATE plans SET allowed_modules = '{lending,retail}' WHERE code = ?", lendingPlan);
+        Operator op = operator();
+        Api.allowTotpReuse(op.id());
+        Map<String, Object> approve = Map.of(
+                "totp_code",
+                Api.totp(op.session().totpSecret(), Instant.now()),
+                "reason",
+                "Test: the plan includes it now");
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch released = new CountDownLatch(1);
+            Future<ResponseEntity<JsonNode>> approved;
+            Future<ResponseEntity<JsonNode>> stopped;
+            try (SubscriptionLock held = new SubscriptionLock(tenantId)) {
+                approved = pool.submit(() -> op.api()
+                        .post(
+                                "/api/v1/platform/module-requests/" + requestId + "/approve",
+                                approve,
+                                op.session().accessToken()));
+                assertThat(lockWaiters(1))
+                        .as("the approval waits for the subscription's lock")
+                        .isTrue();
+                assertThat(approved.isDone()).isFalse();
+                assertThat(modules(tenantId)).containsExactly("lending");
+                stopped = pool.submit(() -> {
+                    released.await();
+                    return withPassword(b.api(), "/api/v1/plan/modules/lending/stop", b.ownerSession());
+                });
+                released.countDown();
+            }
+            ResponseEntity<JsonNode> a = approved.get(60, TimeUnit.SECONDS);
+            ResponseEntity<JsonNode> s = stopped.get(60, TimeUnit.SECONDS);
+            assertThat(a.getStatusCode()).as("%s", a.getBody()).isEqualTo(HttpStatus.OK);
+            assertThat(a.getBody().get("status").asString()).isEqualTo("approved");
+            if (s.getStatusCode() == HttpStatus.CREATED) {
+                assertThat(s.getBody().get("status").asString()).isEqualTo("applied");
+                assertThat(modules(tenantId)).containsExactly("retail");
+            } else {
+                assertRefused(s, HttpStatus.UNPROCESSABLE_CONTENT, "last_module");
+                assertThat(modules(tenantId)).containsExactly("lending", "retail");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * The nightly job and the Owner's ask switched on at once both take the subscription's lock first. While another change
+     * holds it, neither switches anything. When the lock is released they run one after the other: the job's stop of
+     * lending applies only if retail came on first, and is otherwise closed as undone (it would leave no module). Either
+     * way the modules on match the two answers. With the lock removed from {@code applyDue} or {@code requestModule} that
+     * change does not wait, and this test fails.
+     */
+    @Test
+    void theJobAndAnAskSwitchedOnAtOnceWaitForTheLockAndNeverUndoEachOther() throws Exception {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        UUID tenantId = b.t().tenantId();
+        ResponseEntity<JsonNode> scheduled =
+                withPassword(b.api(), "/api/v1/plan/modules/lending/stop", b.ownerSession());
+        assertThat(scheduled.getStatusCode()).as("%s", scheduled.getBody()).isEqualTo(HttpStatus.CREATED);
+        UUID stopId = UUID.fromString(scheduled.getBody().get("id").asString());
+        Operator op = operator();
+        ResponseEntity<JsonNode> switched = op.api()
+                .call(
+                        HttpMethod.PUT,
+                        "/api/v1/platform/tenants/" + tenantId + "/modules",
+                        Map.of("modules", List.of("lending"), "reason", "Test: retail switched off by the operator"),
+                        op.session().accessToken());
+        assertThat(switched.getStatusCode()).as("%s", switched.getBody()).isEqualTo(HttpStatus.OK);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            Future<Integer> job;
+            Future<ResponseEntity<JsonNode>> asked;
+            try (SubscriptionLock held = new SubscriptionLock(tenantId)) {
+                job = pool.submit(() -> {
+                    start.await();
+                    return TenantContext.callAs(tenantId, () -> plans.applyDue(paidUntil.plusDays(1)));
+                });
+                asked = pool.submit(() -> {
+                    start.await();
+                    return b.api()
                             .post(
                                     "/api/v1/plan/module-requests",
                                     Map.of("module", "retail", "password", Api.PASSWORD),
-                                    b.ownerSession().accessToken()),
-                    () -> withPassword(b.api(), "/api/v1/plan/modules/lending/stop", b.ownerSession()));
-            ResponseEntity<JsonNode> asked = both.get(0);
-            ResponseEntity<JsonNode> stopped = both.get(1);
-            assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.CREATED);
-            assertThat(asked.getBody().get("status").asString()).isEqualTo("approved");
-            if (stopped.getStatusCode() == HttpStatus.CREATED) {
-                assertThat(stopped.getBody().get("status").asString()).isEqualTo("applied");
-                assertThat(modules(b.t().tenantId())).containsExactly("retail");
+                                    b.ownerSession().accessToken());
+                });
+                start.countDown();
+                assertThat(lockWaiters(2))
+                        .as("the job and the ask wait for the subscription's lock")
+                        .isTrue();
+                assertThat(job.isDone()).isFalse();
+                assertThat(asked.isDone()).isFalse();
+                assertThat(modules(tenantId)).containsExactly("lending");
+            }
+            int applied = job.get(60, TimeUnit.SECONDS);
+            ResponseEntity<JsonNode> a = asked.get(60, TimeUnit.SECONDS);
+            assertThat(a.getStatusCode()).as("%s", a.getBody()).isEqualTo(HttpStatus.CREATED);
+            assertThat(a.getBody().get("status").asString()).isEqualTo("approved");
+            String stop = TestDatabase.owner()
+                    .sql("SELECT status FROM subscription_scheduled_changes WHERE id = ?")
+                    .param(stopId)
+                    .query(String.class)
+                    .single();
+            if (applied == 1) {
+                assertThat(stop).isEqualTo("applied");
+                assertThat(modules(tenantId)).containsExactly("retail");
             } else {
-                assertRefused(stopped, HttpStatus.UNPROCESSABLE_CONTENT, "last_module");
-                assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
+                assertThat(stop).isEqualTo("undone");
+                assertThat(modules(tenantId)).containsExactly("lending", "retail");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** Holds the subscription's row lock in a transaction of its own, as another plan change would, until closed. */
+    static final class SubscriptionLock implements AutoCloseable {
+        final Connection connection;
+
+        SubscriptionLock(UUID tenantId) throws SQLException {
+            connection = TestDatabase.ownerDataSource().getConnection();
+            connection.setAutoCommit(false);
+            try (PreparedStatement select =
+                    connection.prepareStatement("SELECT 1 FROM subscriptions WHERE tenant_id = ? FOR UPDATE")) {
+                select.setObject(1, tenantId);
+                select.executeQuery().close();
             }
         }
+
+        @Override
+        public void close() throws SQLException {
+            connection.commit();
+            connection.close();
+        }
+    }
+
+    /** Whether at least n sessions wait on a lock within ten seconds (pg_locks, which every role may read in full). */
+    static boolean lockWaiters(int n) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < until) {
+            long waiting = TestDatabase.owner()
+                    .sql("SELECT count(DISTINCT pid) FROM pg_locks WHERE NOT granted")
+                    .query(Long.class)
+                    .single();
+            if (waiting >= n) {
+                return true;
+            }
+            Thread.sleep(50);
+        }
+        return false;
     }
 
     @SafeVarargs
