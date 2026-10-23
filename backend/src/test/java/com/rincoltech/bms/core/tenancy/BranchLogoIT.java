@@ -412,6 +412,10 @@ class BranchLogoIT extends IntegrationTest {
         assertThat(shopReceipt).hasSize(1);
         assertThat(near(shopReceipt.get(0), SHOP)).isTrue();
 
+        // The receipt on the screen gives the same logo by its cacheable URL, never its bytes (issue #500).
+        assertThat(printedLogo(admin, atShop)).startsWith("/api/v1/branches/" + t.secondBranch() + "/logo?v=");
+        assertThat(printedLogo(admin, atHeadOffice)).startsWith("/api/v1/branding/logo?v=");
+
         // The head office has none of its own, so it falls back to the business logo.
         List<Color> headOfficeReceipt = images(receipt(admin, atHeadOffice));
         assertThat(headOfficeReceipt).hasSize(1);
@@ -422,6 +426,14 @@ class BranchLogoIT extends IntegrationTest {
         List<Color> after = images(receipt(admin, atShop));
         assertThat(after).hasSize(1);
         assertThat(near(after.get(0), BUSINESS)).isTrue();
+    }
+
+    static String printedLogo(RetailTestSupport who, UUID sale) {
+        return who.get("/sales/" + sale + "/receipt/printed", RetailTestSupport.ADMIN)
+                .getBody()
+                .get("printed")
+                .get("logo_url")
+                .asString();
     }
 
     @Test

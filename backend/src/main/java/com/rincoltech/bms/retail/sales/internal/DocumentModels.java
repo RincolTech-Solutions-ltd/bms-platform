@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -118,6 +119,11 @@ class DocumentModels {
         return letterheads.current().displayName();
     }
 
+    /** The servable path of the business logo, versioned, when one is set (issue #500): the receipt preview's fallback. */
+    Optional<String> businessLogoPath() {
+        return letterheads.logoPath();
+    }
+
     /**
      * The model of the receipt a seller shares (issue #439, ADR-061): the invoice of the snapshot, titled RECEIPT, signed by
      * the seller who made the sale, with the money the buyer actually paid ({@code paidMinor}: a return taken off the balance
@@ -177,34 +183,42 @@ class DocumentModels {
         return m;
     }
 
-    /** What the receipt PDF prints, read from its model (issue #500): the screen's preview shows the same values. */
-    @SuppressWarnings("unchecked")
-    DocumentsApi.ReceiptPrint printed(Map<String, Object> m) {
-        Map<String, Object> lh = (Map<String, Object>) m.get("lh");
-        Map<String, Object> branch = (Map<String, Object>) m.get("branch");
-        Map<String, Object> doc = (Map<String, Object>) m.get("doc");
-        Map<String, Object> buyer = (Map<String, Object>) m.get("buyer");
-        Map<String, Object> ref = (Map<String, Object>) m.get("ref");
-        Map<String, Object> totals = (Map<String, Object>) m.get("totals");
-        Map<String, Object> signs = (Map<String, Object>) m.get("signs");
-        Map<String, Object> returns = (Map<String, Object>) m.get("returns");
+    /**
+     * What the receipt PDF prints, read from its model (issue #500): the screen's preview shows the same values, every one
+     * the invoice template and its letterhead print. Read defensively, as the template does: a missing map or value is
+     * blank, never an error. The logo is given by its URL ({@code logoUrl}), which the browser caches, not its bytes.
+     */
+    DocumentsApi.ReceiptPrint printed(Map<String, Object> m, String logoUrl) {
+        Map<String, Object> lh = map(m.get("lh"));
+        Map<String, Object> branch = map(m.get("branch"));
+        Map<String, Object> doc = map(m.get("doc"));
+        Map<String, Object> buyer = map(m.get("buyer"));
+        Map<String, Object> ref = map(m.get("ref"));
+        Map<String, Object> totals = map(m.get("totals"));
+        Map<String, Object> signs = map(m.get("signs"));
+        Map<String, Object> returns = map(m.get("returns"));
         List<DocumentsApi.ReceiptPrintLine> lines = new ArrayList<>();
-        for (Map<String, Object> l : (List<Map<String, Object>>) m.get("lines")) {
+        for (Object o : list(m.get("lines"))) {
+            Map<String, Object> l = map(o);
             lines.add(new DocumentsApi.ReceiptPrintLine(
-                    (Integer) l.get("no"),
+                    l.get("no") instanceof Number n ? n.intValue() : lines.size() + 1,
                     text(l.get("code")),
                     text(l.get("description")),
-                    l.get("qty") + " " + text(l.get("unit")),
+                    text(l.get("quantity")),
                     blank(l.get("pack")),
                     blank(l.get("priceList")),
                     text(l.get("unitPrice")),
                     text(l.get("total"))));
         }
+        List<String> returned = new ArrayList<>();
+        for (Object o : list(returns.get("lines"))) {
+            returned.add(text(o));
+        }
         return new DocumentsApi.ReceiptPrint(
                 text(doc.get("title")),
                 text(doc.get("number")),
                 text(doc.get("date")),
-                blank(lh.get("logo")),
+                logoUrl,
                 text(lh.get("name")),
                 blank(branch.get("name")),
                 blank(branch.get("location")),
@@ -215,17 +229,28 @@ class DocumentModels {
                 text(ref.get("payment")),
                 blank(ref.get("dueDate")),
                 blank(ref.get("priceList")),
+                blank(ref.get("quotation")),
                 text(m.get("currency")),
                 lines,
                 text(totals.get("total")),
                 text(totals.get("words")),
-                text(totals.get("status")),
+                blank(totals.get("status")),
                 blank(totals.get("due")),
-                returns == null ? List.of() : (List<String>) returns.get("lines"),
-                returns == null ? null : text(returns.get("net")),
+                returned,
+                returns.isEmpty() ? null : blank(returns.get("net")),
+                blank(m.get("notes")),
                 text(signs.get("issuedBy")),
                 text(signs.get("issuedOn")),
                 blank(lh.get("footer")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object o) {
+        return o instanceof Map<?, ?> found ? (Map<String, Object>) found : Map.of();
+    }
+
+    private static List<?> list(Object o) {
+        return o instanceof List<?> found ? found : List.of();
     }
 
     private static String text(Object o) {
@@ -296,6 +321,7 @@ class DocumentModels {
             m.put("description", l.description());
             m.put("qty", plain(l.qty()));
             m.put("unit", l.unit());
+            m.put("quantity", quantity(l.qty(), l.unit()));
             m.put("pack", l.baseQty() == null ? null : "= " + plain(l.baseQty()) + " " + l.baseUnit());
             m.put("unitPrice", l.unitPriceMinor() == null ? "" : money(l.unitPriceMinor(), s.currency()));
             m.put("total", money(l.totalMinor(), s.currency()));
@@ -436,6 +462,12 @@ class DocumentModels {
     /** A quantity without trailing zeros: 5.000 prints as 5 and 2.500 as 2.5. */
     static String plain(String qty) {
         return qty == null ? "" : new BigDecimal(qty).stripTrailingZeros().toPlainString();
+    }
+
+    /** A quantity as a document prints it, with its unit when it has one: 5 carton, or 5 alone. */
+    static String quantity(String qty, String unit) {
+        String q = plain(qty);
+        return unit == null || unit.isBlank() ? q : q + " " + unit;
     }
 
     /** A pale tint of the brand colour for alternate table rows: 88% white over it. */

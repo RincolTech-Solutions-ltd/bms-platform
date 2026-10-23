@@ -297,11 +297,24 @@ final class DocumentsApi {
             List<String> creditNotes,
 
             @Schema(description = "The sale's version; it changes with a payment or a return")
+            int saleVersion) {}
+
+    /**
+     * The printed receipt for the screen's preview (issue #500), asked for only when View receipt is tapped, so the facts
+     * above stay a cheap read for Share and WhatsApp. Without {@code printed} the receipt could not be laid out for the
+     * screen, and the screen offers the PDF instead.
+     */
+    @Schema(name = "RetailReceiptPreview")
+    record ReceiptPreview(
+            UUID saleId,
+
+            @Schema(description = "The sale's version the receipt was laid out at")
             int saleVersion,
 
+            @JsonInclude(JsonInclude.Include.NON_NULL)
             @Schema(
-                    description =
-                            "What the receipt PDF prints, in its order and already formatted, for the screen's preview")
+                    description = "What the receipt PDF prints, in its order and already formatted; absent when it"
+                            + " could not be laid out, and the screen then offers the PDF")
             ReceiptPrint printed) {}
 
     /**
@@ -320,8 +333,10 @@ final class DocumentsApi {
             String date,
 
             @JsonInclude(JsonInclude.Include.NON_NULL)
-            @Schema(description = "The shop's logo, else the business logo, as a data URI")
-            String logo,
+            @Schema(
+                    description = "The same-origin URL of the shop's logo, else the business logo, versioned so the"
+                            + " browser caches it")
+            String logoUrl,
 
             String businessName,
             @JsonInclude(JsonInclude.Include.NON_NULL) String branchName,
@@ -333,11 +348,12 @@ final class DocumentsApi {
             String payment,
             @JsonInclude(JsonInclude.Include.NON_NULL) String dueDate,
             @JsonInclude(JsonInclude.Include.NON_NULL) String priceList,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String quotation,
             String currency,
             List<ReceiptPrintLine> lines,
             String total,
             String totalWords,
-            String status,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String status,
             @JsonInclude(JsonInclude.Include.NON_NULL) String due,
 
             @Schema(description = "One line for each credit note, oldest first")
@@ -345,6 +361,8 @@ final class DocumentsApi {
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "The net after returns")
             String net,
+
+            @JsonInclude(JsonInclude.Include.NON_NULL) String notes,
 
             String issuedBy,
             String issuedOn,
@@ -358,7 +376,7 @@ final class DocumentsApi {
             String code,
             String description,
 
-            @Schema(description = "The quantity and unit as sold, such as 5 carton")
+            @Schema(description = "The quantity and unit as sold, such as 5 carton, or 5 alone without a unit")
             String quantity,
 
             @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(description = "A pack in base units, such as = 60 piece")

@@ -39,7 +39,7 @@
       <tr th:each="l : ${lines}">
         <td th:text="${l.no}">1</td>
         <td><span th:text="${l.description}">Item</span><br/><span class="muted" th:text="${l.code}">CODE</span><span class="muted" th:if="${l.priceList != null}" th:text="${'  |  ' + l.priceList}"></span></td>
-        <td class="num"><span th:text="${l.qty + ' ' + l.unit}">5 carton</span><br th:if="${l.pack != null}"/><span class="muted" th:if="${l.pack != null}" th:text="${l.pack}">60 pieces</span></td>
+        <td class="num"><span th:text="${l.quantity}">5 carton</span><br th:if="${l.pack != null}"/><span class="muted" th:if="${l.pack != null}" th:text="${l.pack}">60 pieces</span></td>
         <td class="num" th:text="${l.unitPrice}">1,000</td>
         <td class="num" th:text="${l.total}">5,000</td>
       </tr>
