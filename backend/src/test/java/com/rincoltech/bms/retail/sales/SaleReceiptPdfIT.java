@@ -204,6 +204,25 @@ class SaleReceiptPdfIT extends IntegrationTest {
         assertThat(f.get("balance_minor").asLong()).isZero();
         assertThat(f.get("returned_minor").asLong()).isZero();
         assertThat(f.get("buyer_name")).isNull();
+        // The preview on the screen prints what the PDF prints (issue #500).
+        JsonNode printed = f.get("printed");
+        assertThat(printed.get("title").asString()).isEqualTo("RECEIPT");
+        assertThat(printed.get("number").asString())
+                .isEqualTo(f.get("receipt_no").asString());
+        assertThat(printed.get("buyer_name").asString()).isEqualTo("Cash customer");
+        assertThat(printed.get("payment").asString()).isEqualTo("Cash");
+        assertThat(printed.get("total").asString()).isEqualTo("10,000");
+        assertThat(printed.get("status").asString()).isEqualTo("Paid in full by Cash.");
+        assertThat(printed.get("lines")).isNotEmpty();
+        JsonNode line = printed.get("lines").get(0);
+        assertThat(text)
+                .contains(line.get("description").asString())
+                .contains(line.get("amount").asString());
+        assertThat(text)
+                .contains(printed.get("issued_by").asString())
+                .contains(printed.get("total_words").asString());
+        assertThat(printed.get("returns")).isEmpty();
+        assertThat(printed.get("net")).isNull();
     }
 
     @Test
@@ -307,7 +326,14 @@ class SaleReceiptPdfIT extends IntegrationTest {
         assertThat(f.get("net_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("balance_minor").asLong()).isEqualTo(5_000);
         assertThat(f.get("credit_notes")).hasSize(1);
+        assertThat(f.get("printed").get("title").asString()).isEqualTo("RECEIPT AFTER RETURNS");
+        assertThat(f.get("printed").get("returns")).hasSize(1);
+        assertThat(f.get("printed").get("net").asString()).isEqualTo("5,000");
+        assertThat(f.get("printed").get("status").asString()).isEqualTo("Sold on credit.");
         String text = text(receipt(sellerA, sale, SALES));
+        assertThat(f.get("printed").get("returns").get(0).asString())
+                .startsWith("Credit note " + f.get("credit_notes").get(0).asString())
+                .endsWith("5,000 taken off the balance.");
         assertThat(text)
                 .contains("RECEIPT AFTER RETURNS")
                 .contains("Credit note " + f.get("credit_notes").get(0).asString())

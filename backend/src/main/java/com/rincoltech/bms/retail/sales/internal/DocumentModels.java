@@ -177,6 +177,65 @@ class DocumentModels {
         return m;
     }
 
+    /** What the receipt PDF prints, read from its model (issue #500): the screen's preview shows the same values. */
+    @SuppressWarnings("unchecked")
+    DocumentsApi.ReceiptPrint printed(Map<String, Object> m) {
+        Map<String, Object> lh = (Map<String, Object>) m.get("lh");
+        Map<String, Object> branch = (Map<String, Object>) m.get("branch");
+        Map<String, Object> doc = (Map<String, Object>) m.get("doc");
+        Map<String, Object> buyer = (Map<String, Object>) m.get("buyer");
+        Map<String, Object> ref = (Map<String, Object>) m.get("ref");
+        Map<String, Object> totals = (Map<String, Object>) m.get("totals");
+        Map<String, Object> signs = (Map<String, Object>) m.get("signs");
+        Map<String, Object> returns = (Map<String, Object>) m.get("returns");
+        List<DocumentsApi.ReceiptPrintLine> lines = new ArrayList<>();
+        for (Map<String, Object> l : (List<Map<String, Object>>) m.get("lines")) {
+            lines.add(new DocumentsApi.ReceiptPrintLine(
+                    (Integer) l.get("no"),
+                    text(l.get("code")),
+                    text(l.get("description")),
+                    l.get("qty") + " " + text(l.get("unit")),
+                    blank(l.get("pack")),
+                    blank(l.get("priceList")),
+                    text(l.get("unitPrice")),
+                    text(l.get("total"))));
+        }
+        return new DocumentsApi.ReceiptPrint(
+                text(doc.get("title")),
+                text(doc.get("number")),
+                text(doc.get("date")),
+                blank(lh.get("logo")),
+                text(lh.get("name")),
+                blank(branch.get("name")),
+                blank(branch.get("location")),
+                text(buyer.get("name")),
+                blank(buyer.get("contact")),
+                text(ref.get("saleNo")),
+                text(ref.get("saleDate")),
+                text(ref.get("payment")),
+                blank(ref.get("dueDate")),
+                blank(ref.get("priceList")),
+                text(m.get("currency")),
+                lines,
+                text(totals.get("total")),
+                text(totals.get("words")),
+                text(totals.get("status")),
+                blank(totals.get("due")),
+                returns == null ? List.of() : (List<String>) returns.get("lines"),
+                returns == null ? null : text(returns.get("net")),
+                text(signs.get("issuedBy")),
+                text(signs.get("issuedOn")),
+                blank(lh.get("footer")));
+    }
+
+    private static String text(Object o) {
+        return o == null ? "" : o.toString();
+    }
+
+    private static String blank(Object o) {
+        return o == null || o.toString().isBlank() ? null : o.toString();
+    }
+
     private void deliveryNote(DocumentSnapshot s, Map<String, Object> m) {
         Map<String, Object> ref = new LinkedHashMap<>();
         Map<String, Object> to = new LinkedHashMap<>();

@@ -771,8 +771,22 @@ class DocumentsService {
                     r.returned().stream()
                             .map(ReturnsRepository.Row::creditNoteNo)
                             .toList(),
-                    sale.version());
+                    sale.version(),
+                    models.printed(receiptModel(r)));
         });
+    }
+
+    /** The model of the receipt PDF, which the screen's preview reads too (issue #500). */
+    private Map<String, Object> receiptModel(Receipt r) {
+        Sale sale = r.sale();
+        DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
+        return models.receipt(
+                snapshot,
+                repo.userName(r.madeBy()),
+                r.paidMinor(),
+                sale.balanceMinor(),
+                r.returned(),
+                sale.totalMinor() - r.returnedMinor());
     }
 
     /**
@@ -785,20 +799,7 @@ class DocumentsService {
      */
     byte[] receiptPdf(UUID saleId) {
         reading.executeWithoutResult(status -> receipt(saleId));
-        return documents.renderSharedPdf(
-                "invoice",
-                () -> reading.execute(status -> {
-                    Receipt r = receipt(saleId);
-                    Sale sale = r.sale();
-                    DocumentSnapshot snapshot = saleSnapshot(sale, "invoice", sale.saleNo(), today(), true, null);
-                    return models.receipt(
-                            snapshot,
-                            repo.userName(r.madeBy()),
-                            r.paidMinor(),
-                            sale.balanceMinor(),
-                            r.returned(),
-                            sale.totalMinor() - r.returnedMinor());
-                }));
+        return documents.renderSharedPdf("invoice", () -> reading.execute(status -> receiptModel(receipt(saleId))));
     }
 
     LocalDate today() {
