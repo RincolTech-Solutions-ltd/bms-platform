@@ -1,6 +1,7 @@
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
+import { EmptyState } from '../../../app/ui/EmptyState';
 import { Field } from '../../../app/ui/Field';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
@@ -111,6 +112,12 @@ function KitPage() {
             ))}
           </RowList>
         </Sheet>
+      </Example>
+
+      <Example title="EmptyState" about="One line and one action, where the list would be.">
+        <Card>
+          <EmptyState text="No sales today yet." action={{ label: 'Record a sale', to: '/staff/retail/sale' }} />
+        </Card>
       </Example>
     </main>
   );
