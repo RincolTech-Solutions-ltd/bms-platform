@@ -75,14 +75,36 @@
 }
 
 /* Field: the label above, the control 6px under it, then one line of hint or error (.field-hint and .field-error in
-   forms.css). "(needed)" after the label is muted. */
+   forms.css), the error led by its icon. A needed field has a red asterisk; "(optional)" is muted. */
 .field {
   margin-bottom: var(--space-4);
 }
 
-.field-needed {
+.field-star {
+  color: var(--color-danger);
+}
+
+.field-optional {
   color: var(--color-text-muted);
   font-weight: var(--weight-regular);
+}
+
+.fields-needed {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.field > .field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.field > .field-error > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
 }
 
 .field > input,

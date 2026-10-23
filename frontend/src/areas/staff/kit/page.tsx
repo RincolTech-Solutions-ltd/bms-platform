@@ -2,7 +2,7 @@ import { createLazyRoute } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { EmptyState } from '../../../app/ui/EmptyState';
-import { Field } from '../../../app/ui/Field';
+import { Field, FieldsNeededNote, focusFirstMissing } from '../../../app/ui/Field';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
 import { Sheet } from '../../../app/ui/Sheet';
@@ -80,6 +80,8 @@ export function KitPage() {
   const [show, setShow] = useState<string>('all');
   const [qty, setQty] = useState('2');
   const [phone, setPhone] = useState('');
+  const [buyer, setBuyer] = useState('');
+  const [sent, setSent] = useState(false);
   const [paid, setPaid] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   const [method, setMethod] = useState('Cash');
@@ -105,16 +107,32 @@ export function KitPage() {
         <Stepper id="kit-qty" label="Quantity (piece)" name="Sample soap" value={qty} onChange={setQty} min={1} max={99} />
       </Example>
 
-      <Example title="Field" about="The label above, a hint under it, and the error only once you leave the field.">
-        <Field
-          label="Buyer's phone number"
-          hint="The receipt is sent here."
-          inputMode="tel"
-          autoComplete="tel"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          error={/^0\d{9}$/.test(phone) ? null : 'Type the 10 digits of the number, starting with 0.'}
-        />
+      <Example title="Field" about="The label above, a hint under it, and the error only once you leave the field. Save stays on and takes you to what is missing.">
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSent(true);
+            focusFirstMissing(e.currentTarget);
+          }}
+        >
+          <FieldsNeededNote />
+          <Field label="Buyer's name" required autoComplete="name" value={buyer} onChange={(e) => setBuyer(e.target.value)} error={buyer.trim() ? null : "Type the buyer's name."} showError={sent} />
+          <Field
+            label="Buyer's phone number"
+            required
+            hint="The receipt is sent here."
+            inputMode="tel"
+            autoComplete="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            error={/^0\d{9}$/.test(phone) ? null : 'Type the 10 digits of the number, starting with 0.'}
+            showError={sent}
+          />
+          <button type="submit" className="btn-primary">
+            Save the buyer
+          </button>
+        </form>
       </Example>
 
       <Example title="MoneyInput" about="Whole shillings on the number keypad, with the commas drawn as you type.">

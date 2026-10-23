@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Field } from './Field';
+import { Field, FieldsNeededNote, focusFirstMissing } from './Field';
 
 // The one form field (#520): label above, hint, the error only once the field is left, described and marked invalid.
 
@@ -46,12 +46,42 @@ describe('Field', () => {
     expect(screen.getByText(/Type the 10 digits/).className).toBe('field-error');
   });
 
-  it('says (needed) after the label of a required field and marks it aria-required, without the browser bubble', () => {
+  it('puts a red asterisk, hidden from a screen reader, after the label of a required field and marks it aria-required', () => {
     render(<Field label="Buyer's name" required value="" onChange={() => undefined} />);
     const input = screen.getByLabelText(/Buyer's name/) as HTMLInputElement;
-    expect(input.closest('.field')?.querySelector('label')?.textContent).toBe("Buyer's name (needed)");
+    const star = input.closest('.field')?.querySelector('label .field-star');
+    expect(star?.textContent).toBe(' *');
+    expect(star?.getAttribute('aria-hidden')).toBe('true');
     expect(input.getAttribute('aria-required')).toBe('true');
     expect(input.required).toBe(false);
+  });
+
+  it('marks an optional field "(optional)" instead, on a form where most are needed', () => {
+    render(<Field label="Note" optional value="" onChange={() => undefined} />);
+    expect(screen.getByText('(optional)', { exact: false }).className).toBe('field-optional');
+    expect(screen.getByLabelText(/Note/).hasAttribute('aria-required')).toBe(false);
+  });
+
+  it('leads the error with the error icon', () => {
+    render(<Phone showError />);
+    expect(document.querySelector('.field-error svg')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('gives a form the line "Fields marked * are needed." and focuses the first missing or wrong field on a send', () => {
+    render(
+      <form>
+        <FieldsNeededNote />
+        <Field label="Name" required defaultValue="Sample Buyer" />
+        <Field label="Phone" required defaultValue="" />
+        <Field label="Town" required defaultValue="" />
+      </form>,
+    );
+    expect(document.querySelector('.fields-needed')?.textContent).toBe('Fields marked * are needed.');
+    expect(focusFirstMissing(document.querySelector('form')!)).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText(/^Phone/));
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '0700000001' } });
+    fireEvent.change(screen.getByLabelText(/^Town/), { target: { value: 'Sample Town' } });
+    expect(focusFirstMissing(document.querySelector('form')!)).toBe(false);
   });
 
   it('wires another control through control', () => {
