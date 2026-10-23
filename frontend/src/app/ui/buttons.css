@@ -203,3 +203,32 @@ button[aria-disabled='true'],
     animation: rt-busy-pulse 1.6s var(--ease-out) infinite !important;
   }
 }
+
+/* A row of "pick one" buttons (Flat list or Grouped; All items, Out of stock, Low stock) is a segmented switch:
+   one tray, the chosen one raised, and room between one switch and the next (Hillary, 24 Oct 2026: two rows
+   of separate buttons touched each other). */
+.cluster.filters[role='group'] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 var(--space-3) var(--space-4) 0;
+  border-radius: var(--radius);
+  background: var(--color-neutral-tint);
+}
+
+.cluster.filters[role='group'] > button {
+  min-height: 40px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+.cluster.filters[role='group'] > button[aria-pressed='true'] {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+  box-shadow: var(--shadow-sm);
+}
