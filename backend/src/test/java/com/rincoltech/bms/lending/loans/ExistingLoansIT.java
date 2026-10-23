@@ -524,6 +524,49 @@ class ExistingLoansIT extends LoanFixtures {
         assertThat(errorCodes(over)).containsExactly("repayments[1].amount_minor:repayments_exceed_balance");
     }
 
+    /** A bring-in that came in closed is reversed like an open one: cancelled, nothing owed, no entry to mirror. */
+    @Test
+    void frExl08_aClosedBringInIsReversed() {
+        String product = product("EXL16", Map.of("default_term_count", 1));
+        assertThat(setGoLive(today.minusDays(1)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        LocalDate disbursed = today.minusMonths(2);
+        JsonNode loan = recorded(request(
+                borrower(30),
+                product,
+                500_000,
+                disbursed,
+                List.of(repayment(disbursed.plusMonths(1), 550_000, "bank", null))));
+        approve(loan);
+        String id = loan.get("loan_id").asString();
+        assertThat(loan(id).get("status").asString()).isEqualTo("closed");
+        ResponseEntity<JsonNode> asked = askReversal(id);
+        assertThat(asked.getStatusCode()).as("%s", asked.getBody()).isEqualTo(HttpStatus.ACCEPTED);
+        ResponseEntity<JsonNode> decided =
+                decide(asked.getBody().get("approval_request_id").asString(), manager, managerPerms);
+        assertThat(decided.getStatusCode()).as("%s", decided.getBody()).isEqualTo(HttpStatus.OK);
+        assertThat(loan(id).get("status").asString()).isEqualTo("cancelled");
+        assertThat(receivableOf(id)).isZero();
+    }
+
+    /** A member made inactive while the request waits is not brought in: the checker is told, the request stays pending. */
+    @Test
+    void frExl04_theApprovalChecksTheMemberAgain() {
+        String product = product("EXL17", Map.of());
+        String member = borrower(31);
+        assertThat(setGoLive(today.minusDays(5)).getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode loan = recorded(request(member, product, 600_000, today.minusDays(40), List.of()));
+        TestDatabase.owner()
+                .sql("UPDATE lending_members SET status = 'inactive' WHERE id = ?::uuid")
+                .param(member)
+                .update();
+        ResponseEntity<JsonNode> d = decide(loan.get("approval_request_id").asString(), manager, managerPerms);
+        assertThat(d.getStatusCode()).as("%s", d.getBody()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(code(d)).as("the request stays pending").isEqualTo("approval_execution_failed");
+        assertThat(d.getBody().toString()).contains("Only an active member's loan comes in");
+        assertThat(loan(loan.get("loan_id").asString()).get("status").asString())
+                .isEqualTo("brought_in");
+    }
+
     /** A past repayment dated before the disbursement is refused on its line, in the check as in the recording. */
     @Test
     void frExl02_aPastRepaymentBeforeTheDisbursementIsRefused() {

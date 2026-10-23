@@ -383,8 +383,18 @@ class ExistingLoanService {
                             + " the loan against the new date.",
                     Map.of());
         }
-        LocalDate today = today();
+        // The member or the product may have changed while the request waited: the form's checks hold at approval too.
+        if (!members.find(loan.memberId()).map(MemberSummary::status).orElse("").equals("active")) {
+            throw ApiException.rule("member_not_active", "Only an active member's loan comes in; reject the request.");
+        }
         ProductTerms product = products.version(loan.productVersionId()).orElseThrow();
+        if (!products.current(product.productId())
+                .map(ProductTerms::productStatus)
+                .orElse("")
+                .equals("active")) {
+            throw ApiException.rule("product_archived", "The product is archived; reject the request.");
+        }
+        LocalDate today = today();
         long principal = loan.approvedPrincipalMinor();
         List<ScheduleCalculator.Item> schedule =
                 schedule(termsOf(loan), principal, f.agreedTotalMinor(), loan.productVersionId(), f.disbursementDate());

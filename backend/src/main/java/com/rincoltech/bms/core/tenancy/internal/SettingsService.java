@@ -451,8 +451,8 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
         next.put("go_live_date", day.toString());
         next.put("go_live_source", "first_admin_sign_in");
         // The version stays: no administrator's edit of the settings is made stale by a sign-in.
-        jdbc.sql("UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now()")
-                .param(mapper.writeValueAsString(next))
+        jdbc.sql("UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now() WHERE tenant_id = ?")
+                .params(mapper.writeValueAsString(next), tenant.profile().id())
                 .update();
         audit.record(
                 AuditLog.Entry.created(
@@ -504,8 +504,9 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
         Map<String, Object> next = new TreeMap<>(stored.values());
         next.put("go_live_date", date.toString());
         next.put("go_live_source", "set");
-        jdbc.sql("UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now(), version = version + 1")
-                .param(mapper.writeValueAsString(next))
+        jdbc.sql(
+                        "UPDATE tenant_settings SET settings = CAST(? AS jsonb), updated_at = now(), version = version + 1 WHERE tenant_id = ?")
+                .params(mapper.writeValueAsString(next), tenant.profile().id())
                 .update();
         Map<String, Object> was = new LinkedHashMap<>();
         was.put("go_live_date", before);

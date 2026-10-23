@@ -184,7 +184,7 @@ class LoanDocuments {
                     "No document",
                     "A " + txn.txnType() + " has no receipt or voucher; it shows on the loan statement.");
         }
-        if (txn.receiptNo() == null) {
+        if (txn.historic()) {
             // ADR-071: brought in from the paper register, its receipt is the paper one.
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_CONTENT,

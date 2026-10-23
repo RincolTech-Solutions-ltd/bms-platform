@@ -384,6 +384,14 @@ class ServicingRepository {
                 > 0;
     }
 
+    /** True for a transaction brought in from the paper register (ADR-071). */
+    boolean historic(UUID txnId) {
+        return jdbc.sql("SELECT is_historic FROM lending_loan_transactions WHERE id = ?")
+                .param(txnId)
+                .query(Boolean.class)
+                .single();
+    }
+
     /** Repayments not reversed, in the order R-ALLOC applies them: value date, then recording order. */
     List<Txn> activeRepayments(UUID loanId) {
         return jdbc.sql("""
