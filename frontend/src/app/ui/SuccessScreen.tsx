@@ -8,16 +8,20 @@ import { useEffect, useRef, type ReactNode } from 'react';
 
 export type SuccessAction = { label: string; to: string } | { label: string; onClick: () => void };
 
-export function SuccessScreen({ title, amount, detail, actions }: {
+export function SuccessScreen({ title, amount, detail, actions, focus = true }: {
   title: string;
   /** Already formatted with money(), so the one formatter draws it. */
   amount?: string;
   detail?: ReactNode;
   /** The next steps, the primary one first. */
   actions: SuccessAction[];
+  /** Off only where the screen is one example among others, as on /staff/kit. */
+  focus?: boolean;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
+  useEffect(() => {
+    if (focus) heading.current?.focus();
+  }, [focus]);
   return (
     <section className="success-screen" aria-labelledby="success-title">
       <span className="success-mark" aria-hidden="true">

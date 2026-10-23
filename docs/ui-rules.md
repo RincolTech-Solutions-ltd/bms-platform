@@ -5,6 +5,10 @@ who said it looked generated and did not feel smooth. The aim is the calm, quick
 that carry them live in `frontend/src/app/theme.css`; `frontend/src/app/ui/design-guard.test.ts` checks the ones a test can
 check. The fuller design system is `docs/ui/design-system.md`.
 
+The component kit (issue #520) carries these rules: `Segmented`, `Stepper`, `Field`, `MoneyInput`, `ListRow` and `Card`,
+`Sheet`, `EmptyState`, `Skeleton` and `SuccessScreen` in `frontend/src/app/ui`, styled in `kit.css` and shown together on
+`/staff/kit` (administrators only). A new screen is built from them.
+
 ## Look
 
 1. No coloured stripe on any edge of a card, alert, toast or tile.
@@ -40,6 +44,7 @@ check. The fuller design system is `docs/ui/design-system.md`.
     (so animates all), and `ease-in` or `ease-in-out`. Its short exception list names each colour or background fade with
     its reason: a button's fill and edge, a field's and a link card's edge, and the skeleton shimmer. So the tour spotlight
     glides by `transform`, the side menu folds without animating its width, and shadows and focus rings change at once.
+    The one longer motion is the success check, drawn in 400ms (issue #520), still by `transform` only.
 
 ## Feedback
 

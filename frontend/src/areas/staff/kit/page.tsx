@@ -175,6 +175,7 @@ function KitPage() {
         <Card>
           <SuccessScreen
             key={done}
+            focus={done > 0}
             title="Sale recorded"
             amount={ugx(57500)}
             detail="Paid by mobile money. Receipt S-000105."
