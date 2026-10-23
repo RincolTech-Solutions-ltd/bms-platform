@@ -1,6 +1,7 @@
 package com.rincoltech.bms.core.referrals;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
@@ -1839,5 +1840,213 @@ class ReferralsIT extends IntegrationTest {
                 .query()
                 .singleRow()
                 .get("referrer_tenant_id");
+    }
+
+    // ---- Adversarial (test review of #467) ----------------------------------------------------
+
+    ResponseEntity<JsonNode> markPaid(UUID lineId, Object confirm) {
+        Map<String, Object> paid = new LinkedHashMap<>();
+        paid.put("paid_on", LocalDate.now(KAMPALA).toString());
+        paid.put("method", "cash");
+        paid.put("reason", "Test: handed over");
+        if (confirm != null) {
+            paid.put("confirm_referrer_inactive", confirm);
+        }
+        return platform.post(
+                "/api/v1/platform/referrals/commissions/" + lineId + "/paid", paid, operator.accessToken());
+    }
+
+    static JsonNode total(JsonNode detail) {
+        return detail.get("referral").get("totals").get(0);
+    }
+
+    /**
+     * A year paid upfront earns once and its line is paid; the year is refunded: the line is reversed once (a second reversal,
+     * a reversal of the reversal and a second refund are all refused), the reversal is owed back until it is settled, and the
+     * twelve months are freed once, so the next twelve monthly payments earn and the thirteenth does not.
+     */
+    @Test
+    void aPaidYearUpfrontRefundedIsClawedBackOnceAndFreesTheMonthsOnce() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refadvy", false);
+        Business x = business("ref-adv-year");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        UUID year = UUID.fromString(pay(x.id(), 720000, 12).getBody().get("id").asString());
+        JsonNode line = detail(rx).get("lines").get(0);
+        assertThat(line.get("amount_minor").asLong()).isEqualTo(72000L);
+        assertThat(line.get("months_counted").asInt()).isEqualTo(12);
+        UUID lineId = UUID.fromString(line.get("id").asString());
+        assertThat(markPaid(lineId, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(total(detail(rx)).get("due_minor").asLong()).isZero();
+
+        long reversals = audits("platform.referral.commission_reversed");
+        ResponseEntity<JsonNode> reversed = reverse(lineId, "Test: the year was refunded", true);
+        assertThat(reversed.getStatusCode()).as("%s", reversed.getBody()).isEqualTo(HttpStatus.OK);
+        UUID reversal =
+                UUID.fromString(reversed.getBody().get("lines").get(1).get("id").asString());
+        JsonNode t = total(detail(rx));
+        assertThat(t.get("earned_minor").asLong()).isZero();
+        assertThat(t.get("paid_minor").asLong()).isEqualTo(72000L);
+        assertThat(t.get("due_minor").asLong()).isEqualTo(-72000L);
+
+        ResponseEntity<JsonNode> again = reverse(lineId, "Test: refunded twice", true);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(again.getBody().get("code").asString()).isEqualTo("commission_line_already_reversed");
+        ResponseEntity<JsonNode> ofReversal = reverse(reversal, "Test: undo the refund", null);
+        assertThat(ofReversal.getStatusCode().value()).isEqualTo(422);
+        assertThat(ofReversal.getBody().get("code").asString()).isEqualTo("commission_line_is_reversal");
+        ResponseEntity<JsonNode> refundedAgain = platform.post(
+                "/api/v1/platform/referrals/payments/" + year + "/refunded",
+                Map.of("reason", "Test: the year was sent back"),
+                operator.accessToken());
+        assertThat(refundedAgain.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(refundedAgain.getBody().get("code").asString()).isEqualTo("payment_already_refunded");
+        assertThat(audits("platform.referral.commission_reversed")).isEqualTo(reversals + 1);
+        assertThat(amounts(detail(rx))).containsExactly(72000L, -72000L);
+
+        assertThat(markPaid(reversal, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> paidTwice = markPaid(lineId, null);
+        assertThat(paidTwice.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(paidTwice.getBody().get("code").asString()).isEqualTo("commission_already_paid");
+        t = total(detail(rx));
+        assertThat(t.get("paid_minor").asLong()).isZero();
+        assertThat(t.get("due_minor").asLong()).isZero();
+
+        for (int month = 1; month <= 13; month++) {
+            pay(x.id(), 60000, 1);
+        }
+        List<Long> amounts = amounts(detail(rx));
+        assertThat(amounts.subList(0, 2)).containsExactly(72000L, -72000L);
+        assertThat(amounts.subList(2, amounts.size())).hasSize(12).containsOnly(6000L);
+        assertThat(outcomes(rx)).hasSize(14).startsWith("added").endsWith("months_used");
+        assertThat(total(detail(rx)).get("due_minor").asLong()).isEqualTo(72000L);
+    }
+
+    /**
+     * An override changed twice after lines exist: every earlier line keeps its amount and its snapshot, the paid line stays
+     * paid, the months already counted carry on under the new rule, and no statement, not even the owner's, rewrites a line's
+     * amount or an existing rule.
+     */
+    @Test
+    void anOverrideChangedAfterLinesExistNeverChangesThem() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refadvo", false);
+        Business x = business("ref-adv-over");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        pay(x.id(), 60000, 1);
+        UUID first = UUID.fromString(detail(rx).get("lines").get(0).get("id").asString());
+        assertThat(markPaid(first, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(rule("/api/v1/platform/referrals/" + rx + "/rule", percent(2000, 12), "Test: twenty percent")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        pay(x.id(), 60000, 1);
+        JsonNode before = detail(rx).get("lines");
+        assertThat(amounts(detail(rx))).containsExactly(6000L, 12000L);
+
+        Map<String, Object> perMonth = new LinkedHashMap<>();
+        perMonth.put("kind", "fixed_per_month");
+        perMonth.put("amount_minor", 500);
+        perMonth.put("currency", "UGX");
+        perMonth.put("months", 3);
+        assertThat(rule("/api/v1/platform/referrals/" + rx + "/rule", perMonth, "Test: three months fixed")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        pay(x.id(), 60000, 1);
+        pay(x.id(), 60000, 1);
+
+        JsonNode lines = detail(rx).get("lines");
+        assertThat(amounts(detail(rx))).containsExactly(6000L, 12000L, 500L);
+        assertThat(lines.get(0)).isEqualTo(before.get(0));
+        assertThat(lines.get(1)).isEqualTo(before.get(1));
+        assertThat(lines.get(0).get("paid_on").isNull()).isFalse();
+        assertThat(lines.get(0).get("rule_snapshot").get("source").asString()).isEqualTo("default");
+        assertThat(lines.get(1).get("rule_snapshot").get("percent_bp").asInt()).isEqualTo(2000);
+        assertThat(lines.get(2).get("rule_snapshot").get("paid_months_before").asInt())
+                .isEqualTo(2);
+        assertThat(outcomes(rx)).containsExactly("added", "added", "added", "months_used");
+
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE referral_commission_lines SET amount_minor = 1 WHERE id = ?")
+                        .param(first)
+                        .update())
+                .hasStackTraceContaining("only marked paid, once");
+        UUID override =
+                UUID.fromString(lines.get(1).get("rule_snapshot").get("rule_id").asString());
+        assertThatThrownBy(() -> TestDatabase.owner()
+                        .sql("UPDATE referral_commission_rules SET percent_bp = 5000 WHERE id = ?")
+                        .param(override)
+                        .update())
+                .hasStackTraceContaining("append-only");
+        assertThat(amounts(detail(rx))).containsExactly(6000L, 12000L, 500L);
+    }
+
+    /**
+     * A paid mark while the referrer is inactive is refused unless confirmed, however the confirmation is left out: missing,
+     * false, null, the text "false" or not a boolean. Nothing is marked and nothing audited; the reversal of a paid line is held back the same
+     * way; a confirmed mark goes through once.
+     */
+    @Test
+    void aPaidMarkForAnInactiveReferrerIsRefusedUnlessConfirmed() {
+        Business referrer = business("ref-adv-inact");
+        Business x = business("ref-adv-inact-x");
+        setReferrer(x.id(), code(referrer.id()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        rule("/api/v1/platform/referrals/" + rx + "/rule", percent(1000, null), "Test: ten percent, no end");
+        pay(x.id(), 10000, 1);
+        pay(x.id(), 10000, 1);
+        UUID line = UUID.fromString(detail(rx).get("lines").get(0).get("id").asString());
+        UUID other = UUID.fromString(detail(rx).get("lines").get(1).get("id").asString());
+        assertThat(markPaid(other, null).getStatusCode()).isEqualTo(HttpStatus.OK);
+        UUID reversal = UUID.fromString(reverse(other, "Test: paid by mistake", null)
+                .getBody()
+                .get("lines")
+                .get(2)
+                .get("id")
+                .asString());
+
+        // The business is suspended while its subscription stays active.
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET status = 'suspended' WHERE id = ?")
+                .param(referrer.id())
+                .update();
+        long paidBefore = audits("platform.referral.commission_paid");
+        for (Object confirm : java.util.Arrays.asList(null, false)) {
+            for (UUID target : List.of(line, reversal)) {
+                ResponseEntity<JsonNode> refused = markPaid(target, confirm);
+                assertThat(refused.getStatusCode())
+                        .as("%s %s", confirm, refused.getBody())
+                        .isEqualTo(HttpStatus.CONFLICT);
+                assertThat(refused.getBody().get("code").asString()).isEqualTo("referrer_inactive");
+            }
+        }
+        Map<String, Object> nullConfirm = new LinkedHashMap<>();
+        nullConfirm.put("paid_on", LocalDate.now(KAMPALA).toString());
+        nullConfirm.put("method", "cash");
+        nullConfirm.put("reason", "Test: handed over");
+        nullConfirm.put("confirm_referrer_inactive", null);
+        assertThat(platform.post(
+                                "/api/v1/platform/referrals/commissions/" + line + "/paid",
+                                nullConfirm,
+                                operator.accessToken())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(markPaid(line, "yes").getStatusCode().is2xxSuccessful()).isFalse();
+        assertThat(markPaid(line, "false").getStatusCode().is2xxSuccessful()).isFalse();
+        assertThat(audits("platform.referral.commission_paid")).isEqualTo(paidBefore);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM referral_commission_lines WHERE id IN (?, ?) AND paid_on IS NOT NULL")
+                        .params(line, reversal)
+                        .query(Long.class)
+                        .single())
+                .isZero();
+
+        assertThat(markPaid(line, true).getStatusCode()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> twice = markPaid(line, true);
+        assertThat(twice.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(twice.getBody().get("code").asString()).isEqualTo("commission_already_paid");
+        assertThat(audits("platform.referral.commission_paid")).isEqualTo(paidBefore + 1);
     }
 }
