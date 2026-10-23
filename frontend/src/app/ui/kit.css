@@ -282,6 +282,11 @@ button.list-row:focus-visible {
   overscroll-behavior: contain;
 }
 
+/* A list in a sheet runs to its edges, as in a card. */
+.sheet-body > .row-list {
+  margin: 0 calc(var(--space-5) * -1);
+}
+
 .sheet-actions {
   display: flex;
   flex-wrap: wrap;
@@ -522,4 +527,9 @@ button.list-row:focus-visible {
 
 .kit-example > h2 {
   margin-bottom: var(--space-1);
+}
+
+.kit-example > .cluster,
+.kit-example > button {
+  margin-bottom: var(--space-3);
 }
