@@ -811,8 +811,10 @@ BEGIN
                 RETURN NEXT;
                 RETURN;
             END IF;
+            -- Like the months, the cap counts every referral of the referred business, so a correction never restarts it.
             SELECT coalesce(sum(l.amount_minor), 0) INTO v_earned FROM referral_commission_lines l
-             WHERE l.referral_id = v_ref.id AND l.currency = v_pay.currency;
+             WHERE l.currency = v_pay.currency
+               AND l.referral_id IN (SELECT r.id FROM tenant_referrals r WHERE r.referred_tenant_id = v_tenant);
             v_amount := least(v_amount, v_rule.cap_minor - v_earned);
             IF v_amount <= 0 THEN
                 outcome := 'cap_reached';

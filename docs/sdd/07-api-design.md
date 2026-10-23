@@ -440,7 +440,9 @@ Feedback from every business (issue #447, ADR-065, FR-FBK-03), served by `core.p
 
 Referrals and their commissions across every business (issue #464, ADR-069, FR-REF-03 to FR-REF-06 and FR-REF-08), served by
 `core.platform` through the `Referrals` port of `core.referrals`. Every change takes a `reason` (5 to 300 characters) kept in the
-platform audit log; none takes an authenticator code (they record money moved outside the app, as a subscription payment does).
+platform audit log. Setting or correcting the referrer, the default rule and a referral's rule also take `totp_code`, a current code
+from the operator's own authenticator (they decide who is owed money on every later payment); the line writes (typed line,
+reversal, refund, paid) take no code, as recording a subscription payment does.
 The app never pays a commission; amounts are minor units.
 
 | Method | Path | Permission | Notes |

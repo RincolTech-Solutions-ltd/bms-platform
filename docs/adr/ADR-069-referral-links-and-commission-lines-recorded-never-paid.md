@@ -39,7 +39,7 @@ data, and a business must not be able to refer itself.
    and the new referral earns only the paid months left (decision 9). The same referrer again changes nothing.
 4. **The commission rule is configuration the operator types; nothing is built in.** A rule is one of: `percent_of_payment`
    (basis points of each subscription payment, for the first N paid months of the referred business, N empty for no end, with an
-   optional cap on the referral's total), `fixed_first_payment` (a fixed amount once, on the referred business's first payment)
+   optional cap on the total of every referral of the referred business), `fixed_first_payment` (a fixed amount once, on the referred business's first payment)
    and `fixed_per_month` (a fixed amount per paid month for the first N paid months). The operator sets a platform default rule
    and may override it on any one referral at any time, each with a reason, audited. Rules are append-only: a change is a new rule
    and the pointer moves (`referral_settings.default_rule_id`, `tenant_referrals.rule_id`). `V88` seeds the platform default
@@ -109,8 +109,8 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     payments recorded at the same moment are counted one after the other and never both as the first. A payment recorded
     while the operator changes the referrer waits for the change: the change locks the business's tenant row, and the
     commission takes a share lock on that row before it reads the current referral, so the payment always lands on the
-    referral the change left current and never ends with no outcome. The cap stays per
-    referral row. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered
+    referral the change left current and never ends with no outcome. Like the months, a percent rule's cap counts the lines of every referral of the referred business, so a
+    correction never restarts it. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered
     late counts from the day it was entered. (The review of 22 Oct 2026, FAIL, replaced the earlier count from this referral's
     own start, which let a correction or a clear-and-reset pay a second N months.)
 10. **A business is not referred by its own people.** At the sign-up, after the code resolves, the applicant's email (compared as

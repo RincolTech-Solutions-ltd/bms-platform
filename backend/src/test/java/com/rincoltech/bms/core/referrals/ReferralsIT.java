@@ -1595,6 +1595,31 @@ class ReferralsIT extends IntegrationTest {
         assertThat(total.get("due_minor").asLong()).isZero();
     }
 
+    /** Like the months, a percent rule's cap counts every referral of the referred business: a correction never restarts it. */
+    @Test
+    void aCorrectionDoesNotRestartTheCap() {
+        TestDatabase.Fixture a = TestDatabase.tenant("refcapa", false);
+        TestDatabase.Fixture b = TestDatabase.tenant("refcapb", false);
+        Business x = business("ref-cap-fix");
+        Map<String, Object> capped = new LinkedHashMap<>();
+        capped.put("kind", "percent_of_payment");
+        capped.put("percent_bp", 5000);
+        capped.put("currency", "UGX");
+        capped.put("cap_minor", 7000);
+        assertThat(rule("/api/v1/platform/referrals/default-rule", capped, "Test: half, at most 7,000")
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by A");
+        UUID ra = currentReferral(x.id());
+        pay(x.id(), 10000, 1);
+        setReferrer(x.id(), code(b.tenantId()), "Test: it was B");
+        UUID rb = currentReferral(x.id());
+        pay(x.id(), 10000, 1);
+        pay(x.id(), 10000, 1);
+        assertThat(amounts(detail(ra))).containsExactly(5000L);
+        assertThat(amounts(detail(rb))).containsExactly(2000L);
+    }
+
     /** An unpaid line that was reversed is never marked paid (decision 11). */
     @Test
     void aReversedLineIsNeverMarkedPaid() {
