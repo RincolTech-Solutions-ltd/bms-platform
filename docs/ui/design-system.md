@@ -143,7 +143,7 @@ query, so the number is the token.
   page, so Tab reaches the menu before the content. Sign out stays in the staff bar.
 - **Sections for a business with Shop and Lending (#471, FR-UXN-04):** each item of `staffAreas` names its module with
   `section` (`shop` for Retail, `lending` for Loans, Members, Collateral, Savings, Investments, Insights and the AI assistant),
-  and the layout passes `STAFF_SECTIONS` (Shop with the `stock` icon, Lending with its own `lending` icon, a coin on an open hand, since `banking` is Receive payments'). When the links name two
+  and the layout passes `STAFF_SECTIONS` (Shop with the `shop` icon, a shop front, which also heads the Shop card on Home; Lending with its own `lending` icon, a coin on an open hand). When the links name two
   sections, `MenuLinks` draws the shared items before the first sectioned one (Home, Approvals), then each section, then the
   other shared items (Reports, SMS, Receive payments, Users, Notifications, Feedback, Business set-up). A section is a
   `.side-menu-block` with a rule above it and a heading button (`.side-menu-heading`: small muted capitals, its icon, a caret,
@@ -190,6 +190,17 @@ query, so the number is the token.
   and without taking focus from the tour card, or unfolds a folded sidebar; both return when the step moves on. A tour that
   starts while the drawer is open closes it first. The tour copy says "the menu", and "on a phone, open the menu at the top
   left".
+- **One icon per item (#483):** no two items of one menu draw the same picture, counting the Retail shortcuts and the section
+  headings as items of the side menu, and each retail tile and catalogue tile as an item of its page. The same item keeps its
+  icon wherever it shows: a retail shortcut and its tile both read `icons[screen]`, and the Shop heading and the Shop card on
+  Home both use `shop`. A new item gets a new drawing in `components/icons.tsx` chosen for its meaning, never another item's.
+  The side menu: Home `home`, Approvals `approve`, Loans `calendar`, Members `people`, Collateral `lock`, Savings `coins`,
+  Investments `investments` (a seedling), Insights `insights` (a light bulb), AI assistant `assistant` (a sparkle), Reports
+  `reports` (a page with bars), Retail `retail` (a shopping bag) with Sale `sale` (a cart), Orders `orders` (a delivery
+  motorbike), Banked `banking` (a bank building), Savings `savings` (a safe), Expenses `expenses` (a wallet), Advances
+  `advances`, Stock `stock`, Restock `restock`, Count `stocktake` and Usage `usage`, SMS `phone`, Receive payments
+  `receivePayments` (an arrow coming in to a coin), Users `user`, Notifications `bell`, Feedback `chat`, Business set-up
+  `settings`; the headings Shop `shop` and Lending `lending`.
 - **Where it applies:** the staff area and the operator portal. The member area has no area list and keeps its layout.
 
 ## Light and dark theme (#429, #452)
@@ -294,6 +305,8 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
 - `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every mutation a press sends, including
   `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
   button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
+- `npm test` runs `src/areas/staff/menu-icons.test.tsx` (#483): two items of the staff side menu, the retail tiles, the catalogue
+  tiles or the operator portal that draw the same picture fail it, compared by the drawing itself.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the
