@@ -408,7 +408,8 @@ class ReferralService implements Referrals {
 
     /**
      * Not {@code @Transactional}: it runs bound to the referrer (the platform console binds it), so its Idempotency-Key row is
-     * that business's, as a payment's is the paying business's.
+     * that business's, as a payment's is the paying business's. The line itself is written unbound in the same transaction:
+     * {@code platform_referral_add_manual_line} refuses a tenant-bound call, as every other line writer does.
      */
     @Override
     public LineAdded addLine(
@@ -429,10 +430,21 @@ class ReferralService implements Referrals {
         Idempotency.Outcome<AddedLine> outcome = transactions.execute(status ->
                 idempotency.once(idempotencyKey, "POST", path, request, AddedLine.class, () -> {
                     UUID id = UUID.randomUUID();
+                    String bound = jdbc.sql("SELECT current_setting('app.tenant_id', true)")
+                            .query(String.class)
+                            .single();
+                    jdbc.sql("SELECT set_config('app.tenant_id', '', true)")
+                            .query()
+                            .singleValue();
                     jdbc.sql("SELECT platform_referral_add_manual_line(?, ?, ?, ?, ?, ?)")
                             .params(id, referralId, amountMinor, cur, request.reason(), operatorId)
                             .query()
                             .singleRow();
+                    // Bound again, so the key row is completed as the referrer's.
+                    jdbc.sql("SELECT set_config('app.tenant_id', ?, true)")
+                            .param(bound == null ? "" : bound)
+                            .query()
+                            .singleValue();
                     Map<String, Object> data = new LinkedHashMap<>();
                     data.put("line_id", id);
                     data.put("referral_id", referralId);

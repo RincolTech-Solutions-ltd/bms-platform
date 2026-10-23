@@ -662,7 +662,9 @@ referrer could read: `platform_referral_lines` adds it for the operator only), `
 `paid_reference varchar(100)`, `paid_note varchar(500)`, `paid_at`, `paid_by_platform_user_id`, `created_by_platform_user_id`,
 `created_at`. `UNIQUE (tenant_id, id)`. A trigger refuses a delete and any update except setting the paid columns once. Written only by
 the definer functions `platform_referral_commission_for_payment` (in the payment's transaction, bound to the paying business, which
-must own the payment), `platform_referral_add_manual_line`, `platform_referral_reverse_line` and `platform_referral_mark_paid`; read
+must own the payment), `platform_referral_add_manual_line`, `platform_referral_reverse_line` and `platform_referral_mark_paid` (each
+refusing a tenant-bound transaction; the typed line's Idempotency-Key row is written bound to the referrer and the line unbound,
+in one transaction); read
 across businesses by `platform_referrals_list` and `platform_referral_lines` (each refusing a tenant-bound transaction) and, for the
 bound business only, by `tenant_referrals_mine()`.
 

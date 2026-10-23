@@ -1085,6 +1085,38 @@ class RlsIsolationIT {
                             e -> assertThat(e).hasStackTraceContaining(" only"),
                             e -> assertThat(e).hasStackTraceContaining("platform operator's"));
         }
+        // A typed commission line refuses a tenant-bound call even bound to the referrer itself, with a real referral
+        // of
+        // that referrer and an active operator: the beneficiary never writes commission to itself (review of #467).
+        UUID operator = UUID.randomUUID();
+        TestDatabase.owner()
+                .sql("INSERT INTO platform_users (id, email, full_name) VALUES (?, ?, 'Test Operator 12')")
+                .params(operator, "rls-ref-op-" + operator.toString().substring(0, 8) + "@example.test")
+                .update();
+        UUID referralOfA = TestDatabase.owner()
+                .sql("SELECT id FROM tenant_referrals WHERE tenant_id = ? LIMIT 1")
+                .param(a.tenantId())
+                .query(UUID.class)
+                .single();
+        long linesOfA = TestDatabase.owner()
+                .sql("SELECT count(*) FROM referral_commission_lines WHERE tenant_id = ?")
+                .param(a.tenantId())
+                .query(Long.class)
+                .single();
+        assertThatThrownBy(() -> asApp(
+                        a.tenantId(),
+                        c -> count(
+                                c,
+                                "SELECT count(platform_referral_add_manual_line(gen_random_uuid(), ?, 1000, 'UGX', 'Test', ?))",
+                                referralOfA,
+                                operator)))
+                .hasStackTraceContaining("typed by the platform operator only");
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT count(*) FROM referral_commission_lines WHERE tenant_id = ?")
+                        .param(a.tenantId())
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(linesOfA);
         for (String table : List.of("referral_commission_rules", "referral_settings", "referral_payment_outcomes")) {
             assertThatThrownBy(() -> asApp(a.tenantId(), c -> count(c, "SELECT count(*) FROM " + table)))
                     .as("SELECT on %s", table)

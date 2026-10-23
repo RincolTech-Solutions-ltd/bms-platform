@@ -59,7 +59,10 @@ data, and a business must not be able to refer itself.
    `cap_reached`, `zero`) is never an error: the payment is recorded whatever it says.
 6. **Lines are recorded and marked paid, never paid by the app and never deleted.** The operator can add a line with an amount
    worked out by hand (kind `manual`, with a reason, behind the Idempotency-Key protocol: the key row is the referrer's, as a
-   payment's is the paying business's, so a double submit adds one line), reverse a line once with a reason (kind `reversal`, the exact opposite
+   payment's is the paying business's, so a double submit adds one line; the line itself is written by
+   `platform_referral_add_manual_line` in an unbound call in the same transaction, since that function, like every other
+   line writer, refuses a tenant-bound call and so no tenant context, the referrer's included, can write commission to
+   itself), reverse a line once with a reason (kind `reversal`, the exact opposite
    amount; a reversal is not reversed), and mark a line paid once (date, method `mtn_momo`, `airtel_money`, `bank_transfer`,
    `cash` or `other`, reference, note, reason). A trigger refuses any delete and any update other than setting the paid columns
    once. Every write is audited in `platform_audit_log` with the operator and the reason. These line writes take a reason and
