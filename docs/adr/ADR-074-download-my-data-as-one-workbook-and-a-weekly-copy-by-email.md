@@ -66,12 +66,15 @@ never change data, never show one business another's rows, and never hold a larg
    workbook attached when it is at most `bms.data-export.attach-max-bytes` (5 MiB), otherwise the email has no file and a link
    to Business set-up on the business's own sign-in page (decision 9). The attachment is named in the outbox row as a
    reference, never as bytes; the sender reads it through the `EmailAttachments` port of `core.notifications`, for the row's
-   tenant, only while the run is ready and unexpired. A week with no active Owner who has an email address is recorded as
+   tenant, only while the run is ready and unexpired, and only for a weekly run (`copy = weekly`), so an emailed file never
+   holds the personal columns whatever the row names. Free text a person typed is kept as typed (a repayment's reference, a
+   sale's buyer, a cash book line's detail), so it can carry a phone number into the emailed copy; the business writes that
+   text, and leaving it out would leave out what the rows mean. A week with no active Owner who has an email address is recorded as
    skipped; a run that failed, timed out or was cancelled ends the week as failed with its code, and the Owner gets a short
    email (`core.data_export_weekly_failed`) saying this week's copy could not be made and that they can download one from
    Business set-up. A run of the whole business may take 30 minutes (`ReportDefinition.timeout`, `bms.data-export.timeout`),
-   against the runner's 10 for any other report. Turning the switch off stops the next week; turning it on
-   mid-week sends that week's.
+   against the runner's 10 for any other report. Turning the switch off stops the next week, and a week already queued whose
+   email is not yet written ends as skipped (`switched_off`) and sends nothing; turning it on mid-week sends that week's.
 7. **Read only, and served to a business whose subscription has ended.** Making the workbook writes only the run's own rows and
    file. A suspended tenant answers 423 to every write except two reads that are a `POST`: asking for the workbook and the signed
    address of a file; the runner's three definer functions (V49) now include suspended tenants. The nightly expiry of report
@@ -80,7 +83,8 @@ never change data, never show one business another's rows, and never hold a larg
    "Download my data" and also keeps the weekly email, with the same attachment rules (decision 6) and the same sign-in link
    (decision 9), for 90 days after the end, then it stops: a business that is leaving gets its copies while it decides, and
    the Owner of one that left long ago is not emailed its data for ever. The end is the last move of the subscription into
-   suspended or cancelled in the operator's audit (`app_data_export_weekly_tenants`).
+   suspended or cancelled in the operator's audit (`app_data_export_weekly_tenants`). The switch is a write, so while the
+   business is ended its Owner cannot turn the weekly email off (423 like any other write); the 90 days are the bound.
 8. **The card.** Business set-up shows "Download my data" to holders of the permission: when the business's data was last
    exported (by anyone) and last emailed, the caller's newest full workbook (preparing, ready to save until its expiry, or why it
    failed) and the weekly switch. The welcome tour has a step for it.
@@ -99,13 +103,18 @@ the weekly email means a copy exists without anyone remembering; nothing new run
 the 30 day expiry, the RLS and the memory bound are the ones already tested.
 
 **Worse:** the workbook is a copy, not a backup that can be restored; a business with years of sales gets many sheets; an
-attachment of up to 5 MiB goes through the mail server every week for each business with the switch on.
+attachment of up to 5 MiB goes through the mail server every week for each business with the switch on. The workbook is bound
+by the runner's limits like any report (200,000 rows a sheet, which the split keeps under, 128 MB of spool and 64 MB of file);
+a business past them gets `report_too_large` and no fallback yet. The run holds one `REPEATABLE READ` snapshot on the primary
+for as long as it takes, up to 30 minutes, which holds back vacuum for that time; the runbook should carry the measured
+ceiling once a large business is measured.
 
 **Tests:** `DataExportIT` (the shop and lender sheets and columns, business time and whole shillings, formula injection, one
 business never sees another's rows or file, the permission, a suspended business still downloads and changes nothing, an ended
 business's file is deleted after its 30 days, the weekly
-job queues once and emails once and stops when switched off, the emailed copy leaves out the personal columns that the full
-copy keeps, a week with no Owner is skipped once) and `DataExportSheetsTest`
+job queues once and emails once and stops when switched off, a week queued before the switch went off is skipped, the emailed copy leaves out the personal columns that the full
+copy keeps, a week with no Owner is skipped once), `RetailDataExportPlanIT` (the Restocks branch of 4,000 lines is read through
+the movements index by the line's purchase, not by a scan per line) and `DataExportSheetsTest`
 (the year split and its numbered parts, the business date and time of a moment, the personal columns left out of the emailed
 copy); `DataExportLinkIT` (over the attachment limit the email is the sign-in link with no file, and the documents module
 refuses to read a report object larger than asked); `EmailLayoutTest` (a missing attachment fails the send as

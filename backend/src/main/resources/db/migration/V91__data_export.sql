@@ -37,8 +37,8 @@ SELECT bms_grant_app('data_export_settings', 'SELECT, INSERT, UPDATE');
 -- it queues that week's workbook for the Owner, so a job that runs twice, or on two instances, queues one workbook and sends
 -- one email (the unique key). A week while the switch is off gets no row, so turning it on mid-week sends that week's copy.
 -- status: preparing (the run is being made), queued (the email is written to the outbox), emailed (the outbox recorded it
--- sent), skipped (no active Owner with an email address), failed (the run did not finish ready, or the outbox gave the email
--- up). reason is a stable code, never a message.
+-- sent), skipped (no active Owner with an email address, so no run; or the email switched off after the week was queued),
+-- failed (the run did not finish ready, or the outbox gave the email up). reason is a stable code, never a message.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE data_export_weekly (
@@ -56,7 +56,7 @@ CREATE TABLE data_export_weekly (
     UNIQUE (tenant_id, week_of),
     FOREIGN KEY (tenant_id, run_id) REFERENCES report_runs (tenant_id, id),
     FOREIGN KEY (tenant_id, recipient_user_id) REFERENCES users (tenant_id, id),
-    CHECK ((status = 'skipped') = (run_id IS NULL)),
+    CHECK (status = 'skipped' OR run_id IS NOT NULL),
     CHECK ((status IN ('preparing', 'queued')) = (finished_at IS NULL))
 );
 CREATE INDEX data_export_weekly_open ON data_export_weekly (tenant_id) WHERE status IN ('preparing', 'queued');

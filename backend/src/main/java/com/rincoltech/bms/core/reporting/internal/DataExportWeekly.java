@@ -46,7 +46,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       {@code bms.data-export.attach-max-bytes}, else the email links to Business set-up, where the signed-in Owner
  *       downloads the full copy. A run that failed or was cancelled
  *       ends the week as failed with its code, and the Owner gets a short email saying this week's copy could not be made and
- *       that they can download one from Business set-up.
+ *       that they can download one from Business set-up. A week the Owner switched the email off for after it was queued,
+ *       and before its email was written, ends as skipped ({@code switched_off}) and sends nothing.
  * </ol>
  *
  * The runs themselves are made by the report runner like any other (one at a time per business, read only).
@@ -227,6 +228,12 @@ class DataExportWeekly {
         for (Week w : open) {
             if (w.status().equals("queued")) {
                 outcome(w);
+                continue;
+            }
+            if (!exports.weeklyEmail()) {
+                // Switched off after the week was queued: no email at all. The run stays an ordinary one of its 30
+                // days.
+                close(w.id(), "skipped", null, "switched_off");
                 continue;
             }
             switch (w.runStatus()) {

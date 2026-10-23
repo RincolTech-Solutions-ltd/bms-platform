@@ -13,7 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The workbook a weekly data export email carries (ADR-074), read when the email is sent: only a ready run of
+ * The workbook a weekly data export email carries (ADR-074), read when the email is sent: only a ready weekly run of
  * {@code core.data_export} of the row's own business whose file has not expired, and only up to the attachment limit, so the
  * sender never holds a large file in memory.
  */
@@ -63,6 +63,8 @@ class DataExportAttachments implements EmailAttachments {
         return tenantJobs.callAs(tenantId, () -> {
             Optional<Run> run = tx.execute(s -> store.find(runId))
                     .filter(r -> r.reportKey().equals(KIND) && r.status().equals("ready"))
+                    // Only the weekly copy, which leaves out personal data (ADR-074 decision 6), is ever attached.
+                    .filter(r -> DataExportReport.isWeekly(r.params()))
                     .filter(r -> r.filesDeletedAt() == null
                             && r.expiresAt() != null
                             && clock.now().isBefore(r.expiresAt()));

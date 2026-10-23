@@ -785,9 +785,9 @@ Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `week_of 
 checked), `run_id uuid` (the week's `core.data_export` run, composite foreign key to `report_runs`), `recipient_user_id uuid` (the
 Owner it was made for, composite foreign key to `users`), `status text NOT NULL` [`preparing` (the run is being made),
 `queued` (the email is in the outbox), `emailed` (the outbox recorded it sent), `skipped`, `failed`],
-`attached boolean` (the workbook was attached rather than linked), `reason text` (a stable code: `no_owner_email`, `cancelled`,
-`email_failed` or the run's error code), `finished_at timestamptz`. Unique `(tenant_id, week_of)`: one row per business and week, so the job
-queues one workbook and one email however often it runs. Checks: a `skipped` week has no run and every other one has; only a
+`attached boolean` (the workbook was attached rather than linked), `reason text` (a stable code: `no_owner_email`, `switched_off`
+(the email was switched off after the week was queued), `cancelled`, `email_failed` or the run's error code), `finished_at timestamptz`. Unique `(tenant_id, week_of)`: one row per business and week, so the job
+queues one workbook and one email however often it runs. Checks: every week but a `skipped` one has a run (a week skipped as `switched_off` keeps the run queued before the switch); only a
 `preparing` or `queued` week has no `finished_at`. Partial index on those open weeks. The definer function
 `app_data_export_weekly_email_status(week_id)` returns the outbox status of the week's own email for the bound tenant, so the
 week becomes `emailed` only when it was sent; `app_data_export_weekly_tenants(now)` lists the businesses the weekly job visits:

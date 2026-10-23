@@ -104,6 +104,9 @@ class DataExportIT extends LendingBookSupport {
     @Autowired
     DataExportReport report;
 
+    @Autowired
+    DataExportAttachments attachments;
+
     // ---- helpers -----------------------------------------------------------------------------------
 
     ResponseEntity<JsonNode> card(TestDatabase.Fixture t, UUID user, String permissions) {
@@ -782,6 +785,38 @@ class DataExportIT extends LendingBookSupport {
                         "SELECT count(*) FROM data_export_weekly WHERE tenant_id = ?",
                         recent.t().tenantId()))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void aWeekQueuedBeforeTheEmailWasSwitchedOffSendsNothingAndOnlyAWeeklyCopyIsEverAttached() throws Exception {
+        Shop s = shop("DXS");
+        UUID tenantId = s.t().tenantId();
+        UUID owner = owner(s.t());
+        weekly.tick();
+        drain();
+        String weeklyRun = TestDatabase.owner()
+                .sql("SELECT run_id::text FROM data_export_weekly WHERE tenant_id = ?")
+                .param(tenantId)
+                .query(String.class)
+                .single();
+        assertThat(attachments.read(tenantId, weeklyRun)).isPresent();
+        JsonNode full = export(s.t(), owner);
+        assertThat(attachments.read(tenantId, full.get("id").asString()))
+                .as("the full copy, with the personal columns, is never attached")
+                .isEmpty();
+
+        // The run is ready but its email not yet written when the Owner switches the email off.
+        assertThat(weeklyEmail(s.t(), owner, false).getStatusCode().value()).isEqualTo(200);
+        weekly.tick();
+        weekly.tick();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT status || ' ' || reason FROM data_export_weekly WHERE tenant_id = ?")
+                        .param(tenantId)
+                        .query(String.class)
+                        .list())
+                .containsExactly("skipped switched_off");
+        assertThat(count("SELECT count(*) FROM notification_outbox WHERE recipient = ?", ownerEmail(s.t())))
+                .isZero();
     }
 
     @Test
