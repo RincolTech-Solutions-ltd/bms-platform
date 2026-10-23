@@ -44,6 +44,32 @@ class RetailDataExport implements DataExportSection {
             + " FROM retail_customer_orders o WHERE o.tenant_id = s.tenant_id AND o.sale_id = s.id"
             + " AND o.fee_method = 'account' AND o.fee_paid_at IS NULL), 0))";
 
+    /**
+     * The Restocks sheet. The Branch column reads the line's purchase movements by their purchase ({@code source_id}) as well
+     * as their line, so the {@code retail_stock_movements_source} index finds them; by the line alone it scanned every
+     * purchase movement of the business once per line ({@code RetailDataExportPlanIT}).
+     */
+    static final String RESTOCKS = """
+            SELECT pu.purchased_on, pu.purchase_no,
+                   (SELECT string_agg(CASE WHEN x.branches = 1 THEN x.name
+                                           ELSE x.name || ' (' || trim_scale(x.qty)::text || ')' END,
+                                      ', ' ORDER BY x.code)
+                      FROM (SELECT b.name, b.code, sum(m.qty) AS qty, count(*) OVER () AS branches
+                              FROM retail_stock_movements m
+                              JOIN branches b ON b.tenant_id = m.tenant_id AND b.id = m.branch_id
+                             WHERE m.tenant_id = l.tenant_id AND m.source_type = 'retail.purchase'
+                               AND m.source_id = l.purchase_id AND m.kind = 'purchase' AND m.source_line_id = l.id
+                             GROUP BY b.name, b.code) x) AS branch,
+                   sup.name AS supplier, pu.payment_method, l.line_no, p.code,
+                   p.description, coalesce(l.unit_qty_total, l.qty_total) AS qty,
+                   coalesce(l.unit_cost_minor, l.cost_minor) AS cost, l.sell_minor, l.line_total_minor
+              FROM retail_purchase_lines l
+              JOIN retail_purchases pu ON pu.tenant_id = l.tenant_id AND pu.id = l.purchase_id
+              JOIN retail_products p ON p.tenant_id = l.tenant_id AND p.id = l.product_id
+              LEFT JOIN retail_suppliers sup ON sup.tenant_id = pu.tenant_id AND sup.id = pu.supplier_id
+             ORDER BY pu.purchased_on, pu.created_at, pu.id, l.line_no
+            """;
+
     /** Rows fetched from the server at a time: a table of any length is never held whole (ADR-038). */
     static final int FETCH = 2000;
 
@@ -416,26 +442,7 @@ class RetailDataExport implements DataExportSection {
                         new Column("line_total", "Line total", Kind.MONEY)),
                 count("SELECT count(*) FROM retail_purchase_lines"));
         each(
-                """
-                SELECT pu.purchased_on, pu.purchase_no,
-                       (SELECT string_agg(CASE WHEN x.branches = 1 THEN x.name
-                                               ELSE x.name || ' (' || trim_scale(x.qty)::text || ')' END,
-                                          ', ' ORDER BY x.code)
-                          FROM (SELECT b.name, b.code, sum(m.qty) AS qty, count(*) OVER () AS branches
-                                  FROM retail_stock_movements m
-                                  JOIN branches b ON b.tenant_id = m.tenant_id AND b.id = m.branch_id
-                                 WHERE m.tenant_id = l.tenant_id AND m.source_type = 'retail.purchase'
-                                   AND m.kind = 'purchase' AND m.source_line_id = l.id
-                                 GROUP BY b.name, b.code) x) AS branch,
-                       sup.name AS supplier, pu.payment_method, l.line_no, p.code,
-                       p.description, coalesce(l.unit_qty_total, l.qty_total) AS qty,
-                       coalesce(l.unit_cost_minor, l.cost_minor) AS cost, l.sell_minor, l.line_total_minor
-                  FROM retail_purchase_lines l
-                  JOIN retail_purchases pu ON pu.tenant_id = l.tenant_id AND pu.id = l.purchase_id
-                  JOIN retail_products p ON p.tenant_id = l.tenant_id AND p.id = l.product_id
-                  LEFT JOIN retail_suppliers sup ON sup.tenant_id = pu.tenant_id AND sup.id = pu.supplier_id
-                 ORDER BY pu.purchased_on, pu.created_at, pu.id, l.line_no
-                """,
+                RESTOCKS,
                 rs -> rows.row(
                         day(rs, "purchased_on"),
                         day(rs, "purchased_on"),
