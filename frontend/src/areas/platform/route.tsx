@@ -8,7 +8,7 @@ import { SideMenu, SideNav, useIsPhone } from '../../components/side-menu';
 import { getAccessToken, refreshSession, setAccessToken, setSessionScope, subscribe } from '../../auth/session';
 import { TourProvider } from '../../tour/host';
 import { OPERATOR } from '../../tour/tours-operator';
-import { AREAS } from './operator-state';
+import { AREAS } from './operator-areas';
 
 // The operator portal (ADR-024 decision 8, spec section 8) on the platform host: a protected area
 // for platform operators only. It restores the operator session from the platform refresh cookie

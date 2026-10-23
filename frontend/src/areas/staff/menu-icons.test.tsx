@@ -8,12 +8,12 @@ import { mockMe } from '../../api/retail-mock';
 import { router as appRouter } from '../../app/router';
 import { icons } from '../../components/icons';
 import { FEATURES } from '../member/features';
-import { AREAS } from '../platform/operator-state';
+import { AREAS } from '../platform/operator-areas';
 import { StaffContext } from './context';
 import { STAFF_SECTIONS, staffAreas } from './menu';
 import { CatalogueLinks } from './retail/catalogue';
 import { RetailHome } from './retail/home';
-import { SHORTCUTS } from './retail/nav';
+import { RetailMenuGroup, SHORTCUTS } from './retail/nav';
 import { CATALOGUE_LINKS, CATALOGUE_SCREENS, SCREENS, SCREEN_CAPABILITY, needsOf } from './retail/permissions';
 
 // Every item of a menu has its own icon (issue #483): two items of one menu never draw the same picture, compared by the drawing
@@ -39,7 +39,8 @@ function clashes(items: { label: string; icon: ReactNode }[]): string[] {
 }
 
 // A session that holds every permission, apart from those `without` names, in a business with both modules and report runs on.
-// The gates ask with includes or some; the full list of labels below fails if a gate reads them another way and drops an item.
+// The gates ask with includes or some; `without` reaches includes only, as some asks about a family of permissions and is always
+// true here. The full list of labels below fails if a gate reads the permissions another way and drops an item.
 function everything(without: string[] = []): Me {
   const permissions = Object.assign([] as string[], { includes: (p: string) => !without.includes(p), some: () => true });
   return { permissions, modules: ['retail', 'lending'], module_capabilities: [], branches: [], reports_enabled: true } as unknown as Me;
@@ -54,22 +55,34 @@ function wholeShop(): Me {
   return { ...admin, permissions, permission_scopes: Object.fromEntries(permissions.map((p) => [p, scope])), module_capabilities: { retail: [...new Set(Object.values(SCREEN_CAPABILITY))] } } as Me;
 }
 
-/** The icons a page draws in its tiles, in order, as each tile's label and drawing. */
-function tileIcons(me: Me, page: ReactElement): { label: string; icon: string }[] {
+// What a page draws, for the session, as static markup.
+function draw(me: Me, page: ReactElement): string {
   const router = createRouter({ routeTree: appRouter.routeTree, history: createMemoryHistory({ initialEntries: ['/staff'] }) });
-  const html = renderToStaticMarkup(
+  return renderToStaticMarkup(
     <RouterContextProvider router={router}>
       <QueryClientProvider client={new QueryClient()}>
         <StaffContext.Provider value={{ me, branch: me.branches?.[0]?.id ?? null }}>{page}</StaffContext.Provider>
       </QueryClientProvider>
     </RouterContextProvider>,
   );
-  return [...html.matchAll(/<span class="icon-chip">(.*?<\/svg>)?<\/span><strong>(.*?)<\/strong>/g)].map((m) => ({ label: m[2] ?? '', icon: m[1] ?? '' }));
 }
 
-// The side menu: its items, the retail shortcuts under Retail, and the two section headings.
+/** The icons a page draws in its tiles, in order, as each tile's label and drawing. */
+function tileIcons(me: Me, page: ReactElement): { label: string; icon: string }[] {
+  return [...draw(me, page).matchAll(/<span class="icon-chip">(.*?<\/svg>)?<\/span><strong>(.*?)<\/strong>/g)].map((m) => ({ label: m[2] ?? '', icon: m[1] ?? '' }));
+}
+
+/** Every retail shortcut as the side menu's Retail group draws it, as each link's label and drawing. */
+function shortcutIcons(): { label: string; icon: string }[] {
+  const all = SCREENS.filter((s) => s.screen in SHORTCUTS);
+  const html = draw(wholeShop(), <RetailMenuGroup shortcuts={all} />);
+  return [...html.matchAll(/<a [^>]*>(<svg.*?<\/svg>)?<span[^>]*>(.*?)<\/span><\/a>/g)].map((m) => ({ label: `Retail ${m[2] ?? ''}`, icon: m[1] ?? '' }));
+}
+
+// The side menu: its items, the retail shortcuts under Retail as their group draws them, and the two section headings.
 function sideMenu(me: Me) {
-  const shortcuts = Object.entries(SHORTCUTS).map(([screen, label]) => ({ label: `Retail ${label}`, icon: icons[screen as keyof typeof icons] }));
+  const shortcuts = shortcutIcons();
+  expect(shortcuts.map((s) => s.label).sort()).toEqual(Object.values(SHORTCUTS).map((l) => `Retail ${l}`).sort());
   return [...staffAreas(me, { sells: true }), ...shortcuts, ...STAFF_SECTIONS.map((s) => ({ label: `${s.label} heading`, icon: s.icon }))];
 }
 
