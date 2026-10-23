@@ -1,6 +1,7 @@
 import { createLazyRoute } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { Segmented } from '../../../app/ui/Segmented';
+import { Stepper } from '../../../app/ui/Stepper';
 import { isAdmin } from '../../../offline/offline-context';
 import { useStaff } from '../context';
 
@@ -27,6 +28,7 @@ const SHOW = [
 function KitPage() {
   const { me } = useStaff();
   const [show, setShow] = useState<string>('all');
+  const [qty, setQty] = useState('2');
   if (!isAdmin(me)) {
     return (
       <main>
@@ -42,6 +44,10 @@ function KitPage() {
 
       <Example title="Segmented" about="Pick one of 2 to 5. Replaces rows of separate buttons.">
         <Segmented label="Show" options={SHOW} value={show} onChange={setShow} />
+      </Example>
+
+      <Example title="Stepper" about="A quantity, from 1 to 99. Tap minus or plus, type a number, or use the arrow keys.">
+        <Stepper id="kit-qty" label="Quantity (piece)" name="Sample soap" value={qty} onChange={setQty} min={1} max={99} />
       </Example>
     </main>
   );

@@ -49,6 +49,26 @@
   }
 }
 
+/* Stepper: minus and plus as 48px squares either side of the number, which is centred and tabular so it does not jitter as
+   it changes. */
+.stepper {
+  display: inline-grid;
+  grid-template-columns: var(--tap) minmax(4.5rem, 7rem) var(--tap);
+  gap: var(--space-2);
+  margin-top: 6px;
+}
+
+.stepper > button {
+  width: var(--tap);
+  padding: 0;
+  box-shadow: none;
+}
+
+.stepper > input {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The kit page (/staff/kit): one example under another, each under its heading. */
 .kit-example {
   margin-bottom: var(--space-6);
