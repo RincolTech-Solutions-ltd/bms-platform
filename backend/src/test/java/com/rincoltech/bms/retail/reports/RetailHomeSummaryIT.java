@@ -322,18 +322,35 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
-    /** Switches returns on and gives back the first line of {@code sale}, refunded by {@code method} at head office. */
-    void giveBack(UUID sale, String method) {
+    void switchOn(String capability) {
         String settings = "core.settings.manage";
         String etag = api.get("/settings/capabilities", settings).getHeaders().getETag();
         ResponseEntity<JsonNode> on = api.call(
                 HttpMethod.PUT,
                 "/settings/capabilities",
-                Map.of("returns", true),
+                Map.of(capability, true),
                 settings,
                 "*",
                 etag == null ? Map.of() : Map.of("If-Match", etag));
         assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+    }
+
+    /** Cash takings of the cash summary on {@code day}, every shop added up. */
+    long cashSummaryIn(LocalDate day) {
+        ResponseEntity<JsonNode> daily = api.get("/reports/cash/daily?from=" + day + "&to=" + day, CASHBOOK);
+        assertThat(daily.getStatusCode()).as("%s", daily.getBody()).isEqualTo(HttpStatus.OK);
+        long in = 0;
+        for (JsonNode row : daily.getBody().get("items")) {
+            if (row.get("business_date").asString().equals(day.toString())) {
+                in += row.get("cash_takings_minor").asLong();
+            }
+        }
+        return in;
+    }
+
+    /** Switches returns on and gives back the first line of {@code sale}, refunded by {@code method} at head office. */
+    void giveBack(UUID sale, String method) {
+        switchOn("returns");
         String line = api.get("/sales/" + sale, ADMIN)
                 .getBody()
                 .get("lines")
@@ -399,6 +416,65 @@ class RetailHomeSummaryIT extends IntegrationTest {
                     .isEqualTo(m.get("method").asString().equals("cash") ? 1_500 : 0);
         }
         assertThat(method(takings, "cash").get("amount_minor").asLong()).isEqualTo(1_700);
+        assertCashIsTheCashSummarys(takings);
+    }
+
+    @Test
+    void aReceiptOnAccountReversedTodayTakesOutWhatItBroughtInOnItsOwnDay() {
+        switchOn("customer_accounts");
+        String perms = ADMIN + ",retail.credit.manage";
+        UUID buyer = RetailTestSupport.id(api.post("/customers", Map.of("name", "Test Buyer 03"), ADMIN));
+        for (String qty : new String[] {"2", "3"}) {
+            Map<String, Object> sale = new LinkedHashMap<>();
+            sale.put("branch_id", t.headOffice());
+            sale.put("payment_method", "credit");
+            sale.put("customer_id", buyer);
+            sale.put("sale_date", today().minusDays(2).toString());
+            sale.put("lines", List.of(Map.of("product_id", d.p2, "qty", qty)));
+            ResponseEntity<JsonNode> sold =
+                    api.postKeyed("/sales", sale, perms, "*", UUID.randomUUID().toString());
+            assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        }
+        // The buyer owes 600 + 900: a receipt cannot leave anything unallocated on the account, so none is partly so.
+        Map<String, Object> receipt = new LinkedHashMap<>();
+        receipt.put("branch_id", t.headOffice());
+        receipt.put("amount_minor", 1_501);
+        receipt.put("method", "cash");
+        receipt.put("paid_on", today().minusDays(1).toString());
+        ResponseEntity<JsonNode> tooMuch = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                receipt,
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(tooMuch.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(tooMuch.getBody().get("code").asString()).isEqualTo("payment_exceeds_allocatable");
+
+        // Yesterday 1,000 came in on the receipt, split over both sales; today it is reversed as a whole.
+        long yesterday = cashSummaryIn(today().minusDays(1));
+        receipt.put("amount_minor", 1_000);
+        ResponseEntity<JsonNode> paid = api.postKeyed(
+                "/customers/" + buyer + "/payments",
+                receipt,
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(paid.getStatusCode()).as("%s", paid.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(cashSummaryIn(today().minusDays(1)) - yesterday).isEqualTo(1_000);
+        ResponseEntity<JsonNode> reversed = api.postKeyed(
+                "/customers/" + buyer + "/payments/" + RetailTestSupport.id(paid) + "/reverse",
+                Map.of("reason", "Recorded against the wrong buyer"),
+                perms,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(reversed.getStatusCode()).as("%s", reversed.getBody()).isEqualTo(HttpStatus.OK);
+
+        JsonNode takings = home("", ADMIN, "*").get("takings");
+        JsonNode cash = method(takings, "cash");
+        assertThat(cash.get("payments_minor").asLong()).isEqualTo(200);
+        assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500 + 1_000);
+        assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700 - 1_000);
+        assertThat(takings.get("total_minor").asLong()).isEqualTo(2_400 - 1_000);
         assertCashIsTheCashSummarys(takings);
     }
 
