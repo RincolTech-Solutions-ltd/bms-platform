@@ -1353,8 +1353,9 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 - **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it moved money today, and the
   Total. Read as the cash book reads a day, so it agrees with the cash summary: sales paid at the sale, payments on credit sales and
   delivery fees in; cancelled sales, reversed payments on account and refunds on goods taken back (yesterday's sale refunded today
-  included) out. Nothing taken: "No money taken yet today." Link: Open the cash summary (for whoever may close the till),
-  otherwise See all sales.
+  included) out. Nothing taken: "No money taken yet today." Link: Open the cash summary. The card is drawn
+  only for a session that may read the cash summary (`retail.cashbook.read` in the branches covered and `retail.till.close`,
+  ADR-076 decision 3), so it never waits on a figure the server will leave out.
 - **Credit owed.** What customers owe, with "3 customers" as a hint, and Oldest due with the earliest due date of a sale still owing
   ("2 Oct 2026"). Nobody owes: "No customer owes you money." Link: Open credit control.
 - **Top items.** Today and This week (from Monday) as two buttons; the five items that sold the most by value, each with its

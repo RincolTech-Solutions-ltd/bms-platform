@@ -408,6 +408,15 @@ describe('the shop summary cards (issue #485)', () => {
     expect(card('Credit owed')).toBeNull();
   });
 
+  it('draws no Takings card for a session that sees everybody\'s sales but not the cash summary', async () => {
+    const supervisor = { ...admin, permissions: ['retail.sale.read', 'retail.sale.all_sellers', 'retail.stock.read'], permission_scopes: undefined } as unknown as Me;
+    calls.home.mockResolvedValue({ ...HOME, takings: undefined });
+    show(supervisor);
+    expect(card('Takings today')).toBeNull();
+    expect(await screen.findByRole('article', { name: 'Credit owed' })).toBeTruthy();
+    expect(card('Takings today')).toBeNull();
+  });
+
   it('does not say nothing was taken when money came in and went out again', async () => {
     calls.home.mockResolvedValue({
       ...HOME,

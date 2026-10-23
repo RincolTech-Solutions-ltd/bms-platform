@@ -52,6 +52,8 @@ export function homeParts(me: Me, branch: string | null = null) {
     orders: retail && canUse(me, 'orders'),
     // A line per shop is for a session that sees every seller's sales in more than one branch, over All branches.
     branches: sales && !one && branchesWhere(me, ALL_SELLERS).length > 1,
+    // The takings are the cash summary's figures, so they also need its permissions (ADR-076 decision 3).
+    takings: sales && canUse(me, 'cashSummary') && (one ? holdsAt(me, 'retail.cashbook.read', one) : holds(me, 'retail.cashbook.read')),
     loans: showLending(me),
     approvals: lendingOn && permissions.includes('core.approvals.read'),
   };
@@ -129,7 +131,6 @@ function SummaryCard({ id, title, home, tour, children, link }: { id: string; ti
 }
 
 function TakingsCard({ home }: { home: Summary }) {
-  const { me } = useStaff();
   const takings = home.data?.takings;
   return (
     <SummaryCard
@@ -137,7 +138,7 @@ function TakingsCard({ home }: { home: Summary }) {
       title="Takings today"
       home={home}
       tour="home-shop-today"
-      link={canUse(me, 'cashSummary') ? <Link to="/staff/retail/cash-summary">Open the cash summary</Link> : <Link to="/staff/retail/sales">See all sales</Link>}
+      link={<Link to="/staff/retail/cash-summary">Open the cash summary</Link>}
     >
       {() => (
         <>
@@ -254,7 +255,7 @@ function ShopCards({ parts }: { parts: Parts }) {
   return (
     <>
       <ShopCard parts={parts} home={home} />
-      {parts.sales && sent('takings') && <TakingsCard home={home} />}
+      {parts.takings && sent('takings') && <TakingsCard home={home} />}
       {parts.sales && sent('credit_owed') && <CreditCard home={home} />}
       {parts.sales && sent('top_items') && <TopItemsCard home={home} />}
       {parts.branches && sent('branches') && <BranchesCard home={home} />}
