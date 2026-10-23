@@ -32,6 +32,10 @@ export type DocumentsMock = Pick<
 
 const DEFAULT_PREFIX: Record<DocumentType, string> = { quotation: 'QT', invoice: 'INV', delivery_note: 'DN' };
 const TYPES: DocumentType[] = ['quotation', 'invoice', 'delivery_note'];
+const PAYMENT: Record<string, string> = { cash: 'Cash', mobile_money: 'Mobile money', bank: 'Bank', credit: 'Credit' };
+/** UGX as the PDF prints it, without decimals, and a day as d MMM yyyy (16 Mar 2026). */
+const money = (minor?: number) => (minor ?? 0).toLocaleString('en-US');
+const day = (iso?: string) => (iso ? new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '');
 
 export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
   const docs: (RetailDocument & { pdf?: string })[] = [];
@@ -256,13 +260,38 @@ export function createDocumentsMock(env: DocumentsEnv): DocumentsMock {
         };
       }),
 
-    // The printed receipt for the screen (issue #500): the mock lays out none, so the screen offers the PDF.
+    // The printed receipt for the screen (issue #500): a sample laid out from the mock sale in the server's shape and
+    // formats, so View receipt can be seen offline. No logo and no returns; the words line is a fabricated placeholder.
     saleReceiptPrinted: (saleId) =>
       env.run(() => {
         const sale = env.sales().find((x) => x.id === saleId);
         if (!sale) return env.refuse(404, 'not_found', 'Not found.');
         if (sale.status !== 'completed') return env.refuse(422, 'sale_voided', 'A cancelled sale has no receipt to share.');
-        return { sale_id: sale.id, sale_version: sale.version ?? 1 };
+        const buyer = (sale.customer_id ? env.customer(sale.customer_id)?.name : undefined) ?? sale.buyer_name ?? '';
+        const balance = sale.balance_minor ?? 0;
+        const credit = sale.payment_method === 'credit';
+        return {
+          sale_id: sale.id, sale_version: sale.version ?? 1,
+          printed: {
+            title: 'RECEIPT', number: sale.sale_no ?? '', date: day(env.today()), business_name: 'Demo Shop',
+            branch_name: env.branches().find((b) => b.id === sale.branch_id)?.name, buyer_name: buyer, sale_no: sale.sale_no ?? '',
+            sale_date: day(sale.sale_date), payment: PAYMENT[sale.payment_method ?? ''] ?? sale.payment_method ?? '', ...(sale.due_date ? { due_date: day(sale.due_date) } : {}),
+            currency: sale.currency ?? 'UGX',
+            lines: (sale.lines ?? []).map((l, i) => {
+              const priceList = l.price?.price_list;
+              const pack = l.sale_unit && l.unit_factor && l.unit_factor !== '1' ? `= ${Number(l.qty ?? 0)} ${env.product(l.product_id ?? '')?.unit ?? 'piece'}` : undefined;
+              return {
+                no: l.line_no ?? i + 1, code: l.code ?? '', description: l.description ?? '', detail: priceList ? `${l.code ?? ''}  |  ${priceList}` : l.code ?? '',
+                quantity: [Number(l.sale_qty ?? l.qty ?? 0), l.sale_unit].filter(Boolean).join(' '), ...(pack ? { pack } : {}), ...(priceList ? { price_list: priceList } : {}),
+                unit_price: money(l.sale_unit_price_minor), amount: money(l.line_total_minor),
+              };
+            }),
+            total: money(sale.total_minor), total_words: 'Demo receipt: the total in words is printed here',
+            status: credit ? (balance <= 0 ? 'Paid in full when issued.' : 'Sold on credit.') : `Paid in full by ${PAYMENT[sale.payment_method ?? ''] ?? 'Cash'}.`,
+            ...(credit && balance > 0 ? { due: `Balance due when issued: ${money(balance)} ${sale.currency ?? 'UGX'}` } : {}),
+            returns: [], issued_by: 'Demo Seller', issued_on: day(env.today()), received: `Received by ${buyer}`, footer: 'Thank you for shopping with us',
+          },
+        };
       }),
 
     // The receipt to share (issue #439): not gated by the documents capability, never stored.
