@@ -85,7 +85,7 @@ describe('suppliers and credit buyers', () => {
 describe('items and prices', () => {
   it('shows cost on an item card only when asked to', () => {
     const withCost = renderToString(<ul><ProductCard product={bulb} showCost canPrice onEdit={() => undefined} onPrice={() => undefined} /></ul>);
-    // ADR-078: the item's own buying price is the last one paid; profit uses each shop's average.
+    // ADR-079: the item's own buying price is the last one paid; profit uses each shop's average.
     expect(withCost).toContain('last paid UGX 3,500');
     expect(withCost).toContain('Change price');
     const without = renderToString(<ul><ProductCard product={{ ...bulb, cost_minor: undefined }} showCost={false} canPrice={false} onEdit={() => undefined} onPrice={() => undefined} /></ul>);

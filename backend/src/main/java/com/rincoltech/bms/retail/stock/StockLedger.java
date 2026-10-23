@@ -13,7 +13,7 @@ import java.util.UUID;
  * the sum of its movements. Balance rows are locked in branch and product order, so concurrent
  * multi-line events cannot deadlock.
  *
- * <p>Each balance row also holds the branch's moving weighted average cost per base unit (ADR-078). A movement whose cost is
+ * <p>Each balance row also holds the branch's moving weighted average cost per base unit (ADR-079). A movement whose cost is
  * the average leaves it as it is; any other movement re-averages it under the same lock: (on hand x average + quantity x
  * cost) / (on hand + quantity), in whole minor units. What the rounding leaves over is posted, per branch, to purchase
  * rounding against inventory (source {@code retail.average_cost}), so the ledger's inventory follows the valuation. A movement
@@ -86,7 +86,7 @@ public interface StockLedger {
     BigDecimal lock(UUID branchId, UUID productId);
 
     /**
-     * ADR-078: the moving weighted average cost of one base unit of the product at the branch, in minor units, the cost every
+     * ADR-079: the moving weighted average cost of one base unit of the product at the branch, in minor units, the cost every
      * movement out of the branch at the average (a sale, usage, damage, a stock correction or count, a transfer out) takes.
      * For a branch that has never held the product it is the product's last paid cost. Read without a lock; a caller that must
      * not see it change takes {@link #lock} first.
@@ -94,7 +94,7 @@ public interface StockLedger {
     long averageCost(UUID branchId, UUID productId);
 
     /**
-     * ADR-078: a change of value with no quantity (a landed cost or a supplier price credit spread over the units a branch
+     * ADR-079: a change of value with no quantity (a landed cost or a supplier price credit spread over the units a branch
      * holds) re-averages the branch's cost, under the balance row's lock, in the caller's transaction. The caller posts
      * {@code valueMinor} to inventory; what the new average does not carry is posted to purchase rounding. A change that would
      * take the average below zero is refused with 422 {@code average_cost_negative}.
@@ -109,7 +109,7 @@ public interface StockLedger {
      *     guarded like a sale); a transfer kind is linked to the transfer named by {@code sourceId}
      * @param qty signed: negative for stock leaving the branch
      * @param unitCostMinor the cost of one base unit the movement carries (valuation snapshot): for a movement out at the
-     *     average, {@link #averageCost}; for stock coming in, what it cost, which re-averages the branch (ADR-078); for the
+     *     average, {@link #averageCost}; for stock coming in, what it cost, which re-averages the branch (ADR-079); for the
      *     undoing of an earlier movement, that movement's cost, which re-averages what stays
      */
     record Movement(

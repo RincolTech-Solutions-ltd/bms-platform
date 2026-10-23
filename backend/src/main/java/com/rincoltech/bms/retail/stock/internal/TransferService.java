@@ -153,7 +153,7 @@ class TransferService {
         if (on.isAfter(today)) {
             problems.add(new FieldProblem("transfer_date", "invalid", "A transfer cannot be dated in the future."));
         }
-        // ADR-078: the balance rows of both branches are locked in branch and product order, the order the movements
+        // ADR-079: the balance rows of both branches are locked in branch and product order, the order the movements
         // take
         // them, before the source's average is read, so a delivery committing meanwhile cannot leave the transfer at
         // the
@@ -196,7 +196,7 @@ class TransferService {
                 problems.add(new FieldProblem("lines[" + i + "].qty", "invalid", "At most three decimal places."));
                 continue;
             }
-            // ADR-078: stock leaves at the source's average and that cost re-averages the destination when it arrives.
+            // ADR-079: stock leaves at the source's average and that cost re-averages the destination when it arrives.
             long cost = stock.averageCost(from, p.id());
             lines.add(new NewLine(UUID.randomUUID(), i + 1, p.id(), l.qty(), cost, Quantities.value(l.qty(), cost)));
         }

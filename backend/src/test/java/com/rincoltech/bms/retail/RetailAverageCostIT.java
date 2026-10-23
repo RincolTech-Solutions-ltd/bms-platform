@@ -24,7 +24,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Profit from the moving weighted average buying price per smallest unit, kept per branch (ADR-078, issue #523, owner decision
+ * Profit from the moving weighted average buying price per smallest unit, kept per branch (ADR-079, issue #523, owner decision
  * D22; docs/specs/units-packs-and-costing.md section 3): deliveries of different carton sizes and prices, sales in cartons and
  * pieces, a transfer that carries its cost, a void that re-averages or is refused, and two deliveries at once. Every name and
  * amount is fabricated.
@@ -120,7 +120,7 @@ class RetailAverageCostIT extends IntegrationTest {
                 .single();
     }
 
-    /** What a branch holds at its own average cost, over every product (the valuation ADR-078 decision 9 reads). */
+    /** What a branch holds at its own average cost, over every product (the valuation ADR-079 decision 9 reads). */
     long valuation(UUID branch) {
         return TestDatabase.owner()
                 .sql("""
@@ -238,7 +238,7 @@ class RetailAverageCostIT extends IntegrationTest {
         assertThat(account("inventory", hq)).isEqualTo(valuation(hq));
     }
 
-    /** ADR-078 decision 4: a transfer leaves the source at its average and that cost re-averages the destination. */
+    /** ADR-079 decision 4: a transfer leaves the source at its average and that cost re-averages the destination. */
     @Test
     void aTransferCarriesItsCostToTheDestinationsAverage() {
         UUID cable = api.product("AVG-CABLE", 1_000, 2_500);
@@ -266,7 +266,7 @@ class RetailAverageCostIT extends IntegrationTest {
     }
 
     /**
-     * ADR-078 decision 5: voiding a restock takes its units out at what they cost and re-averages what stays; one that would
+     * ADR-079 decision 5: voiding a restock takes its units out at what they cost and re-averages what stays; one that would
      * leave the rest at a cost below zero is refused in plain words and changes nothing.
      */
     @Test
@@ -313,7 +313,7 @@ class RetailAverageCostIT extends IntegrationTest {
         assertThat(account("inventory", hq)).isEqualTo(valuation(hq));
     }
 
-    /** ADR-078 decision 1: two deliveries at once are averaged one after the other under the balance row's lock. */
+    /** ADR-079 decision 1: two deliveries at once are averaged one after the other under the balance row's lock. */
     @Test
     void twoDeliveriesAtOnceAreBothAveraged() throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(2);

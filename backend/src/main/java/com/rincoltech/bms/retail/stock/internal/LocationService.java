@@ -157,7 +157,7 @@ class LocationService {
                 BigDecimal q = mine.getOrDefault(b.id(), BigDecimal.ZERO);
                 bySubtotal.merge(role.get(b.id()), q, BigDecimal::add);
                 boolean mayCost = principal.may(PROFIT_READ, b.id());
-                // ADR-078: each branch's stock at that branch's average cost.
+                // ADR-079: each branch's stock at that branch's average cost.
                 long average = averages.getOrDefault(p.id(), Map.of()).getOrDefault(b.id(), p.costMinor());
                 Long branchValue = mayCost ? Quantities.value(q, average) : null;
                 if (branchValue != null) {

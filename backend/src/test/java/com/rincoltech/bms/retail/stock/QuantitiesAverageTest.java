@@ -7,7 +7,7 @@ import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 /**
- * The moving weighted average of ADR-078 (issue #523): (on hand x average + value in) / (on hand + quantity), half up to the
+ * The moving weighted average of ADR-079 (issue #523): (on hand x average + value in) / (on hand + quantity), half up to the
  * minor unit, and a remainder that makes the value carried plus the remainder equal the value that came in. Amounts fabricated.
  */
 class QuantitiesAverageTest {

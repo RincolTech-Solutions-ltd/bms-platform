@@ -48,7 +48,7 @@ capabilities inside retail.
 8. **Optional purchasing sits beside plain restock and never replaces it.** Purchase order, goods
    received, supplier invoice, supplier credit and supplier payment post through goods received not
    invoiced; landed cost is allocated to receipt lines and sets the product cost by the existing
-   latest-receipt-wins rule (weighted average cost stays pending ADR-021; since settled by ADR-078, where the latest receipt
+   latest-receipt-wins rule (weighted average cost stays pending ADR-021; since settled by ADR-079, where the latest receipt
    sets only the last price paid and each branch's average is re-averaged).
 9. **Transfers stay atomic by default.** With `transfer_receipt` on they are dispatched and then
    received, and inter-branch clearing is the value in flight.

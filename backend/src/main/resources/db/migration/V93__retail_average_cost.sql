@@ -1,4 +1,4 @@
--- V93: the moving weighted average buying price per smallest unit (issue #523, owner decision D22, ADR-078, which settles
+-- V93: the moving weighted average buying price per smallest unit (issue #523, owner decision D22, ADR-079, which settles
 -- pending ADR-021; docs/specs/units-packs-and-costing.md section 3).
 --
 -- One column on retail_stock_balances: avg_cost_minor, the average cost of one base unit of the product at the branch, in whole
@@ -23,7 +23,7 @@ ALTER TABLE retail_stock_balances ADD CONSTRAINT retail_stock_balances_avg_cost_
     CHECK (avg_cost_minor >= 0 AND avg_cost_minor <= 10000000000000) NOT VALID;
 
 COMMENT ON COLUMN retail_stock_balances.avg_cost_minor IS
-    'Moving weighted average cost of one base unit at this branch, in minor units (ADR-078). Changed only by StockLedger.';
+    'Moving weighted average cost of one base unit at this branch, in minor units (ADR-079). Changed only by StockLedger.';
 
 -- Today's average from current stock and cost: until this migration every unit was valued at the product's one cost, so that
 -- cost is the average of what each branch holds now, and the valuation does not move on the day this is deployed.

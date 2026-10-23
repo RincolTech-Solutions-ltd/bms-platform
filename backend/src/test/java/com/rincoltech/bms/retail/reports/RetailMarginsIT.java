@@ -113,7 +113,7 @@ class RetailMarginsIT extends IntegrationTest {
         assertThat(c.get("units_before").asString()).isEqualTo("2.000");
         assertThat(c.get("units_after").asString()).isEqualTo("2.000");
         assertThat(c.get("margin_before_bp").asLong()).isEqualTo(3_333);
-        // ADR-078: the edited cost is the last price paid; the sale is costed at the branch's average, still 1,000.
+        // ADR-079: the edited cost is the last price paid; the sale is costed at the branch's average, still 1,000.
         // Sales 3,500, cost 1,000 + 1,000: profit 1,500 is 4,286 basis points.
         assertThat(c.get("sales_after_minor").asLong()).isEqualTo(3_500);
         assertThat(c.get("margin_after_bp").asLong()).isEqualTo(4_286);

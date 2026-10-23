@@ -124,7 +124,7 @@ class StockCorrectionService {
         String words = ("entry_mistake".equals(r.reasonCode()) ? "Entry mistake" : "Miscount")
                 + (note == null ? "" : ": " + note);
         LocalDate today = clock.today(tenant.profile().timezone());
-        // ADR-078: a correction moves stock at the branch's average, so the average stays as it is.
+        // ADR-079: a correction moves stock at the branch's average, so the average stays as it is.
         long cost = ledger.averageCost(branch, product.id());
         UUID movementId = ledger.record(
                         today,

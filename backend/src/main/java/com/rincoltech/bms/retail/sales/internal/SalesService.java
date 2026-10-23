@@ -339,7 +339,7 @@ class SalesService {
         LocalDate dueDate = r.dueDate() != null || account == null ? r.dueDate() : account.dueDate(saleDate);
         String currency = tenant.profile().currency();
         Principal principal = CurrentPrincipal.require();
-        // ADR-078: the balance rows are locked, in product order, before the lines read the branch's average cost, so a
+        // ADR-079: the balance rows are locked, in product order, before the lines read the branch's average cost, so a
         // delivery committing meanwhile cannot leave the sale costed at the average it replaced.
         r.lines().stream()
                 .map(SaleLineRequest::productId)
@@ -758,7 +758,7 @@ class SalesService {
                 linePricing =
                         new LinePricing(source, d.listId(), d.breakMinQty(), d.priceMinor(), reason, overriddenBy);
             }
-            // ADR-078: the line keeps the branch's average cost per base unit at the moment of sale.
+            // ADR-079: the line keeps the branch's average cost per base unit at the moment of sale.
             long cost = stock.averageCost(branch, p.id());
             if (pack != null) {
                 BigDecimal baseQty = unit.baseQty();

@@ -262,7 +262,7 @@ class StockRepository {
         return out;
     }
 
-    /** ADR-078: each branch's average cost per base unit of the products, by product and branch. */
+    /** ADR-079: each branch's average cost per base unit of the products, by product and branch. */
     Map<UUID, Map<UUID, Long>> averages(List<UUID> productIds, List<UUID> branchIds) {
         Map<UUID, Map<UUID, Long>> out = new LinkedHashMap<>();
         if (productIds.isEmpty()) {

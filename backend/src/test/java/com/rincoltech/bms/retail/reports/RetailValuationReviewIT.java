@@ -84,7 +84,7 @@ class RetailValuationReviewIT extends IntegrationTest {
 
     /**
      * F3: restock 10 at 100 at each branch (inventory 1,000 each), carry the stock at 50 (a manual cost edit did this
-     * before ADR-078; now only a valuation that drifted from the ledger, as imported history can, does) and sell all
+     * before ADR-079; now only a valuation that drifted from the ledger, as imported history can, does) and sell all
      * 10 at head office (cost relieved at 500). Head office holds nothing but its inventory account
      * still holds 500, so it is reported with value 0 and difference -500. A caller filtered to
      * branch two sees only branch two.

@@ -174,7 +174,7 @@ class ReceiptCosting {
     Effect apply(
             Lot lot, long share, boolean raise, UUID documentId, String documentNo, LocalDate on, String sourceType) {
         Effect e = estimate(lot, share, raise, documentId);
-        // ADR-078: the part each branch's inventory takes re-averages that branch's cost, whatever happens to the last
+        // ADR-079: the part each branch's inventory takes re-averages that branch's cost, whatever happens to the last
         // paid cost below.
         e.byBranch()
                 .forEach((branch, part) ->
@@ -223,7 +223,7 @@ class ReceiptCosting {
     }
 
     /**
-     * ADR-078: the void of a landed cost or a price credit takes its inventory part back out of the branches' averages, spread
+     * ADR-079: the void of a landed cost or a price credit takes its inventory part back out of the branches' averages, spread
      * as it was recorded, in proportion to what each branch holds now (the void is refused once the goods have moved on).
      *
      * @param raise as for {@link #apply}: true for the void of a landed cost, whose part leaves the averages

@@ -89,7 +89,7 @@ class UsageService {
         if (on.isAfter(today)) {
             problems.add(new FieldProblem("occurred_on", "invalid", "Usage cannot be dated in the future."));
         }
-        // ADR-078: the balance rows are locked in product order before the branch's average is read.
+        // ADR-079: the balance rows are locked in product order before the branch's average is read.
         r.lines().stream()
                 .map(UsageLineRequest::productId)
                 .filter(java.util.Objects::nonNull)
@@ -109,7 +109,7 @@ class UsageService {
                 problems.add(new FieldProblem("lines[" + i + "].qty", "invalid", "At most three decimal places."));
                 continue;
             }
-            // ADR-078: used or damaged goods leave at the branch's average cost.
+            // ADR-079: used or damaged goods leave at the branch's average cost.
             long cost = stock.averageCost(branch, p.id());
             lines.add(new UsageLine(
                     i + 1,

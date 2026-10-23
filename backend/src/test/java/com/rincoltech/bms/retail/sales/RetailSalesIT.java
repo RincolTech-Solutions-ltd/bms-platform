@@ -110,7 +110,7 @@ class RetailSalesIT extends IntegrationTest {
         assertThat(sale.get("lines").get(0).get("unit_price_minor").asLong()).isEqualTo(2_000);
         assertThat(sale.get("lines").get(0).get("unit_cost_minor").asLong()).isEqualTo(1_500);
         assertThat(sale.get("profit_minor").asLong()).isEqualTo(500);
-        // ADR-078: the edited cost is the last price paid; the next sale is costed at the branch's average, still
+        // ADR-079: the edited cost is the last price paid; the next sale is costed at the branch's average, still
         // 1,500.
         JsonNode next = api.sell(t.headOffice(), "cash", product, "1").getBody();
         assertThat(next.get("profit_minor").asLong()).isEqualTo(900);

@@ -37,7 +37,7 @@ class JdbcStockLedger implements StockLedger {
     /** Kinds that carry the transfer they belong to, the movement's source id (FR-RET-16). */
     static final Set<String> TRANSFER = Set.of("transfer_out", "transfer_in");
 
-    /** The source type of the entry that posts what an average does not carry (ADR-078). */
+    /** The source type of the entry that posts what an average does not carry (ADR-079). */
     static final String AVERAGE_COST = "retail.average_cost";
 
     private final JdbcClient jdbc;
@@ -173,7 +173,7 @@ class JdbcStockLedger implements StockLedger {
     }
 
     /**
-     * What the averages did not carry, by branch (ADR-078): one entry per branch, dated as the movements, between inventory and
+     * What the averages did not carry, by branch (ADR-079): one entry per branch, dated as the movements, between inventory and
      * purchase rounding. It is keyed by the first movement it covers, so it is posted once, and has its own source type, so a
      * void that reverses a document's entries never reverses it (the void's own movements re-average and post their own).
      */
@@ -290,7 +290,7 @@ class JdbcStockLedger implements StockLedger {
     }
 
     private Locked lockRow(UUID branchId, UUID productId) {
-        // A branch's first row starts at the product's last paid cost, the average of nothing yet (ADR-078).
+        // A branch's first row starts at the product's last paid cost, the average of nothing yet (ADR-079).
         jdbc.sql("""
                         INSERT INTO retail_stock_balances (tenant_id, branch_id, product_id, avg_cost_minor)
                         SELECT current_setting('app.tenant_id')::uuid, ?, p.id, p.cost_minor FROM retail_products p WHERE p.id = ?
@@ -469,7 +469,7 @@ class JdbcStockLedger implements StockLedger {
                     .param("sourceLineId", m.sourceLineId())
                     .param("note", m.note())
                     .update();
-            // ADR-078: history posts nothing, so it does not re-average; the opening balance of an import is valued at
+            // ADR-079: history posts nothing, so it does not re-average; the opening balance of an import is valued at
             // the
             // cost it carries, and that is the branch's average from then on.
             jdbc.sql("""

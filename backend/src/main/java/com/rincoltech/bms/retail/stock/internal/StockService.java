@@ -373,7 +373,7 @@ class StockService {
                 recount.add(line.code());
                 continue;
             }
-            // ADR-078: a count's difference is valued at the branch's average, read under the balance lock just taken.
+            // ADR-079: a count's difference is valued at the branch's average, read under the balance lock just taken.
             long cost = ledger.averageCost(s.branchId(), line.productId());
             repo.commitLine(id, line.productId(), variance, cost);
             if (variance.signum() == 0) {

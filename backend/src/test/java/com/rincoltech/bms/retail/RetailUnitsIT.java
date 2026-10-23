@@ -644,7 +644,7 @@ class RetailUnitsIT extends IntegrationTest {
                         .get("cost_minor")
                         .asLong())
                 .isEqualTo(84);
-        // 1,200 / 12 = 100 exactly: no rounding leg in the restock's entry. ADR-078: the branch's average becomes
+        // 1,200 / 12 = 100 exactly: no rounding leg in the restock's entry. ADR-079: the branch's average becomes
         // (3,024 + 2,400) / 60 = 90.4, carried as 90 (5,400), so the average's own entry puts 24 to purchase rounding.
         ResponseEntity<JsonNode> exact = restock(t.headOffice(), pen, carton, "2", 1_200);
         assertThat(journal(UUID.fromString(exact.getBody().get("id").asString())))
@@ -676,7 +676,7 @@ class RetailUnitsIT extends IntegrationTest {
                         "inventory 996 0",
                         "purchase_rounding 4 0",
                         "trade_creditors 0 1000",
-                        // ADR-078: (5,400 + 996) / 72 = 88.8, carried as 89 (6,408): 12 more than came in.
+                        // ADR-079: (5,400 + 996) / 72 = 88.8, carried as 89 (6,408): 12 more than came in.
                         "inventory 12 0",
                         "purchase_rounding 0 12");
     }

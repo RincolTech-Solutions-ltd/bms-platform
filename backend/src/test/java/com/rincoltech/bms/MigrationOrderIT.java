@@ -2217,7 +2217,7 @@ class MigrationOrderIT {
     }
 
     /**
-     * V93 (ADR-078, issue #523) on a database at the migration before it: every stock balance row of every business takes its
+     * V93 (ADR-079, issue #523) on a database at the migration before it: every stock balance row of every business takes its
      * product's cost as today's average, so the valuation does not move on the day of the deploy, and the quantity is kept.
      * JUSTIFICATION-A3: a new test case; no existing case migrates stock balances across the average cost migration.
      */

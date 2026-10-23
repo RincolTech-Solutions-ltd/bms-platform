@@ -1392,7 +1392,7 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   100,000, 5 sales; Test Shop Two, No sales yet), each with its link underneath. On a wide screen they sit side by side in columns
   of at least 280px.
 
-## Last paid and the average buying price (issue #523, ADR-078, FR-RET-69)
+## Last paid and the average buying price (issue #523, ADR-079, FR-RET-69)
 
 - The item's own buying price is the last one paid: the item card says "last paid UGX 750" and the Change price form calls the field
   **Last paid**, with a hint that profit uses the average buying price of the stock in each shop, which restocks keep up to date. The

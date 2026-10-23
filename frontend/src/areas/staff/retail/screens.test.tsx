@@ -96,7 +96,7 @@ describe('stock screen', () => {
 
   it('says Price and puts Cost before it (issue #330), and says only Price without the permission', () => {
     const admin = renderToString(<StockTable rows={rows} showCost />);
-    // ADR-078: the cost of stock is the shop's average buying price.
+    // ADR-079: the cost of stock is the shop's average buying price.
     expect(admin.indexOf('>Average cost<')).toBeGreaterThan(-1);
     expect(admin.indexOf('>Average cost<')).toBeLessThan(admin.indexOf('>Price<'));
     expect(admin.indexOf('UGX 3,500')).toBeLessThan(admin.indexOf('UGX 6,000'));

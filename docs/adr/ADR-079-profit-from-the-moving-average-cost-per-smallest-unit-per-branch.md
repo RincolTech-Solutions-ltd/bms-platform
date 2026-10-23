@@ -1,4 +1,4 @@
-# ADR-078: Profit from the moving weighted average cost per smallest unit, kept per branch
+# ADR-079: Profit from the moving weighted average cost per smallest unit, kept per branch
 
 ## Status
 

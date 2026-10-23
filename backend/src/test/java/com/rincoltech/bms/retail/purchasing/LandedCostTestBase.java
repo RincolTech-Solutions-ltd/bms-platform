@@ -291,7 +291,7 @@ abstract class LandedCostTestBase extends IntegrationTest {
         return 0;
     }
 
-    /** The stock valuation of a product in a branch: what it holds times its average cost there (ADR-078). */
+    /** The stock valuation of a product in a branch: what it holds times its average cost there (ADR-079). */
     long valuation(UUID branch, UUID prod) {
         return TestDatabase.owner()
                 .sql("""
