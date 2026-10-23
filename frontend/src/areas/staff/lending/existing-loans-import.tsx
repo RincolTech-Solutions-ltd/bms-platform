@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, createLazyRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { BusyButton } from '../../../app/ui/BusyButton';
 import { existingLoans, type ExistingLoanImportResult, type ExistingLoansApi } from '../../../api/existing-loans';
 import { useStaff } from '../context';
 import { NOT_UTF8, readCsvText } from '../retail/catalogue-import';
@@ -106,9 +107,9 @@ export function ExistingLoansImport({ api = existingLoans }: { api?: ExistingLoa
       <textarea id="exl-text" data-tour="existing-import-text" rows={8} value={text} spellCheck={false} onChange={(e) => { setText(e.target.value); setDone(null); setWarning(null); }} />
       {warning && <p role="alert" className="alert alert-warning">{warning}</p>}
       <Problem error={check.error} />
-      <button type="button" className="rt-primary" data-tour="existing-import-check" disabled={text.trim() === '' || check.isPending} onClick={() => check.mutate()}>
-        {check.isPending ? 'Checking' : 'Check the file'}
-      </button>
+      <BusyButton busy={check.isPending} type="button" className="rt-primary" data-tour="existing-import-check" disabled={text.trim() === ''} onClick={() => check.mutate()}>
+        Check the file
+      </BusyButton>
       {current && <LoanImportReport result={current} />}
       {current && (current.errors ?? 0) > 0 && (
         <p role="alert" className="alert alert-danger">Fix the rows with a problem in your file and check it again. Nothing is recorded while a row has a problem.</p>
@@ -116,9 +117,9 @@ export function ExistingLoansImport({ api = existingLoans }: { api?: ExistingLoa
       {current && current.errors === 0 && readyLoans === 0 && <p className="empty-state">There is nothing new to record.</p>}
       <Problem error={commit.error} />
       {current && current.errors === 0 && readyLoans > 0 && (
-        <button type="button" className="rt-primary" disabled={commit.isPending} onClick={() => commit.mutate()}>
-          {commit.isPending ? 'Recording' : `Record ${readyLoans} loans and send them for approval`}
-        </button>
+        <BusyButton busy={commit.isPending} type="button" className="rt-primary" onClick={() => commit.mutate()}>
+          {`Record ${readyLoans} loans and send them for approval`}
+        </BusyButton>
       )}
       {done && <Success>Recorded {done.added} loans and skipped {done.skipped} already in. Each waits for a second person's approval.</Success>}
       {done && <LoanImportReport result={done} />}
