@@ -1,6 +1,6 @@
--- V91: download my data (issue #334 step 1, ADR-074). V80 to V90 are merged; V92 (billing) is claimed after it (AGENTS.md).
--- Flyway runs with outOfOrder off, so if another number above V90 merges first this file is renumbered to the next free
--- number at merge time.
+-- V91: download my data (issue #334 step 1, ADR-074). An ordered claim (AGENTS.md): V80 to V90 are merged, this file is
+-- V91 (#478) and V92 (billing, #482) is claimed after it. Flyway runs with outOfOrder off, so if the order changes this file
+-- is renumbered to the next free number at merge time.
 --
 -- Expand only, safe on a populated database. One permission, two new tenant tables, and a new function so that the files
 -- of a business that is not active still expire. The runner's functions stay as V90 left them: a business ended by its
@@ -16,7 +16,8 @@ SET LOCAL lock_timeout = '5s';
 
 -- ---------------------------------------------------------------------------------------------
 -- data_export_settings (ADR-074): the business's choice about the weekly email of its workbook. No row means the default,
--- on. One row per business, changed in place by the Owner alone (ADR-074 decision 2); every change is audited.
+-- on. One row per business, changed in place by the Owner only (ADR-074 decision 2; another administrator is refused with
+-- 403 owner_only); every change is audited.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE data_export_settings (

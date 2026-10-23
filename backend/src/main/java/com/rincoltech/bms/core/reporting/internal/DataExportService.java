@@ -130,7 +130,7 @@ class DataExportService {
         return status();
     }
 
-    /** The switch: on until a holder turns it off. */
+    /** The switch: on until the Owner turns it off. */
     boolean weeklyEmail() {
         return jdbc.sql("SELECT weekly_email FROM data_export_settings")
                 .query(Boolean.class)

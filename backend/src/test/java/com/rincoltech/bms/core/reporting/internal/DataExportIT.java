@@ -475,6 +475,25 @@ class DataExportIT extends LendingBookSupport {
         assertThat(link.getStatusCode().value()).as("%s", link.getBody()).isEqualTo(200);
         XlsxReader x = workbook(s.t(), user, run);
         assertThat(x.sheet("Sales").text("C2")).isEqualTo("S-0001");
+        // Only the data export's own file gets a signed address: a member's upload or another report's file stays
+        // refused.
+        for (String[] doc :
+                List.of(new String[] {"upload", "lending.member"}, new String[] {"report", RunExecutor.SUBJECT})) {
+            UUID other = UUID.randomUUID();
+            TestDatabase.owner()
+                    .sql("""
+                            INSERT INTO documents (id, tenant_id, doc_type, subject_type, subject_id, object_key,
+                                content_type, size_bytes, sha256)
+                            VALUES (?, ?, ?, ?, gen_random_uuid(), 'tenants/' || ?::text || '/test/' || ?::text,
+                                'application/pdf', 10, repeat('a', 64))
+                            """)
+                    .params(other, s.t().tenantId(), doc[0], doc[1], s.t().tenantId(), other)
+                    .update();
+            ResponseEntity<JsonNode> refused =
+                    call(HttpMethod.POST, "/api/v1/documents/" + other + "/download-url", s.t(), user, PERM);
+            assertThat(refused.getStatusCode().value()).as(doc[1]).isEqualTo(423);
+            assertThat(refused.getBody().get("code").asString()).isEqualTo("subscription_ended");
+        }
         // Every other write stays refused while the business is read only, the weekly switch among them.
         ResponseEntity<JsonNode> settings = weeklyEmail(s.t(), user, false);
         assertThat(settings.getStatusCode().value()).isEqualTo(423);
