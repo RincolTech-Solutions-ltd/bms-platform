@@ -16,7 +16,8 @@ SET LOCAL lock_timeout = '5s';
 
 -- ---------------------------------------------------------------------------------------------
 -- data_export_settings (ADR-074): the business's choice about the weekly email of its workbook. No row means the default,
--- on. One row per business, changed in place by a holder of core.data_export.run; every change is audited.
+-- on. One row per business, changed in place by the Owner only (ADR-074 decision 2; another administrator is refused with
+-- 403 owner_only); every change is audited.
 -- ---------------------------------------------------------------------------------------------
 
 CREATE TABLE data_export_settings (
