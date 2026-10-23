@@ -218,19 +218,21 @@ button[aria-disabled='true'],
 }
 
 .cluster.filters[role='group'] > button {
-  min-height: calc(var(--tap) - 2 * var(--space-1));
+  min-height: var(--tap);
   border-color: transparent;
   background: transparent;
   color: var(--color-text);
   box-shadow: none;
 }
 
-.cluster.filters[role='group'] > button:hover:not([aria-pressed='true']):not(:disabled):not([aria-disabled='true']) {
-  background: var(--color-hover);
+@media (hover: hover) {
+  .cluster.filters[role='group'] > button:hover:not([aria-pressed='true']):not(:disabled):not([aria-disabled='true']) {
+    background: var(--color-hover);
+  }
 }
 
 .cluster.filters[role='group'] > button[aria-pressed='true'] {
-  border-color: var(--color-border);
+  border-color: var(--color-border-strong);
   background: var(--color-surface);
   color: var(--color-text);
   font-weight: var(--weight-semibold);
@@ -243,8 +245,12 @@ button[aria-disabled='true'],
   cursor: not-allowed;
 }
 
-/* The keyboard ring stays visible on every option, raised or not. */
+/* The keyboard ring is the global button ring (outline from button:focus-visible plus --focus-ring); the
+   box-shadow resets above would hide its shadow half, so it is put back here, raised or not. */
 .cluster.filters[role='group'] > button:focus-visible {
-  outline: 3px solid var(--color-focus);
-  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.cluster.filters[role='group'] > button[aria-pressed='true']:focus-visible {
+  box-shadow: var(--shadow-sm), var(--focus-ring);
 }
