@@ -205,6 +205,11 @@ body {
   --color-danger-fill: var(--color-danger); /* the destructive button; text on it is always white */
   --color-inverse: var(--rt-grey-900); /* toasts and chart read-outs, drawn the other way round */
   --color-on-inverse: #ffffff;
+  /* The toast (docs/ui-rules.md rule 15) stays a dark neutral pill in both themes; its icon takes a status colour lifted to read on it. */
+  --color-toast: var(--rt-grey-900);
+  --color-on-toast: #ffffff;
+  --color-toast-success: #47cd89;
+  --color-toast-error: #f97066;
   --color-logo-plate: transparent; /* a logo may be dark on transparent; the dark theme sets it light */
   --color-hover: var(--rt-grey-50);
   --viz-1-value: var(--rt-blue-strong);
@@ -316,6 +321,7 @@ body {
   --color-neutral-tint: #222c39;
   --color-inverse: #e8edf3;
   --color-on-inverse: #0e141b;
+  --color-toast: #2a3442;
   --color-logo-plate: #ffffff;
   --color-hover: #1b2430;
   --viz-1-value: var(--rt-viz-blue-dark);

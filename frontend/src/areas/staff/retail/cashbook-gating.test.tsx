@@ -63,7 +63,7 @@ describe('toast', () => {
   it('is a polite status message that goes away by itself', () => {
     const out = html(<Toast message="Savings recorded." />);
     expect(out).toContain('role="status"');
-    expect(out).toContain('class="toast"');
+    expect(out).toContain('class="toast toast-success"');
     expect(out).toContain('Savings recorded.');
     expect(TOAST_MS).toBeGreaterThan(1000);
     expect(TOAST_MS).toBeLessThanOrEqual(10000);
