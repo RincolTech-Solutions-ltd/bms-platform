@@ -162,7 +162,7 @@ describe('a sale line with price lists', () => {
     );
 
   it('flashes the line just added, and only that one (Hillary, 23 Oct 2026)', () => {
-    const fresh = renderToString(<SaleLineCard line={{ ...newLine(pen), price: '80' }} index={0} unitsOn={false} fresh onQty={() => undefined} onPrice={() => undefined} onUnit={() => undefined} onReason={() => undefined} onReset={() => undefined} onRemove={() => undefined} />);
+    const fresh = renderToString(<SaleLineCard line={{ ...newLine(pen), price: '80' }} index={0} unitsOn={false} fresh={1} onQty={() => undefined} onPrice={() => undefined} onUnit={() => undefined} onReason={() => undefined} onReset={() => undefined} onRemove={() => undefined} />);
     expect(fresh).toContain('line-added');
     expect(card(undefined)).not.toContain('line-added');
   });
