@@ -112,7 +112,7 @@ GRANT EXECUTE ON FUNCTION app_tenants_with_expired_report_files(timestamptz) TO 
 -- ---------------------------------------------------------------------------------------------
 
 INSERT INTO permissions (key, module, description, is_money_moving) VALUES
-    ('core.data_export.run', 'core', 'Business data: download the whole business as a workbook and choose the weekly email', false);
+    ('core.data_export.run', 'core', 'Business data: download the whole business as a workbook and see the weekly email', false);
 
 INSERT INTO role_permissions (role_key, permission_key) VALUES
     ('tenant_admin', 'core.data_export.run');
