@@ -4,6 +4,7 @@ import { Card, ListRow, RowList } from '../../../app/ui/ListRow';
 import { Field } from '../../../app/ui/Field';
 import { MoneyInput } from '../../../app/ui/MoneyInput';
 import { Segmented } from '../../../app/ui/Segmented';
+import { Sheet } from '../../../app/ui/Sheet';
 import { Stepper } from '../../../app/ui/Stepper';
 import { formatMinor } from '../../../components/money';
 import { isAdmin } from '../../../offline/offline-context';
@@ -37,6 +38,8 @@ function KitPage() {
   const [qty, setQty] = useState('2');
   const [phone, setPhone] = useState('');
   const [paid, setPaid] = useState<number | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [method, setMethod] = useState('Cash');
   if (!isAdmin(me)) {
     return (
       <main>
@@ -83,6 +86,31 @@ function KitPage() {
             <ListRow title="Sample Person" meta="Seller, Main shop" onClick={() => undefined} />
           </RowList>
         </Card>
+      </Example>
+
+      <Example title="Sheet" about="A bottom sheet on a phone, a dialog on a wider screen. Swipe it down, press Escape or tap outside to close.">
+        <p>
+          Paid by <strong>{method}</strong>
+        </p>
+        <button type="button" onClick={() => setPicking(true)}>
+          Change how the buyer paid
+        </button>
+        <Sheet
+          open={picking}
+          onClose={() => setPicking(false)}
+          title="How did the buyer pay?"
+          actions={
+            <button type="button" onClick={() => setPicking(false)}>
+              Cancel
+            </button>
+          }
+        >
+          <RowList label="Ways to pay">
+            {['Cash', 'Mobile money', 'Bank'].map((m) => (
+              <ListRow key={m} title={m} chevron={false} onClick={() => { setMethod(m); setPicking(false); }} />
+            ))}
+          </RowList>
+        </Sheet>
       </Example>
     </main>
   );
