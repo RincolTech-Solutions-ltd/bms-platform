@@ -57,7 +57,7 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   ADR-032) `V30`, the first-run preferences (issue #19, ADR-025) `V31`, and lending investments
   (issue #152, ADR-031) `V32`, and lending insights (issue #153, ADR-030) `V33`. Flyway runs with
   `outOfOrder` off, so a new migration takes a number above the highest one on any open branch
-  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241; `V41` is price lists, issue #195; `V42` is the loan reopen pledge guard, issue #176; `V43` is payment methods, issue #160; `V44` is customer accounts, issue #196; `V45` is returns, issue #201; `V46` is optional documents, issue #197; `V47` is optional purchasing, issue #198; `V48` is landed cost and supplier credit notes, issue #199; `V49` is report runs, issue #214; `V50` is the SMS channel core, issue #212; `V51` is the `core.ai` call log, issue #220; `V52` is the tenant SMS settings, issue #218; `V53` is the member event SMS cancel, issue #221; `V54` is the payment gateway core, issue #213; `V55` is the stored daily AI brief and the advisor permissions, issue #226; `V56` is the lenders' own payment accounts and `V57` their permission, issue #233; `V58` is the step-up failure counter; `V59` is the loan repayment by gateway and the unallocated receipts, issue #216; `V60` is the savings deposit by gateway, issue #219; `V62` is the staff forgot-password migration, issue #320; `V65` is the store branch flag, issue #366; `V67` is the two-step default, issue #348; `V69` is the items with sizes and colours, issue #384, the next number after `V68` (the push subscriptions); `V70` is customer orders with delivery, issue #385; `V71` is the item photos, issue #384 slice 2; `V72` is find your sign-in page, issue #383; `V73` is the retail Storekeeper and Purchasing roles, issue #399; `V74` is sellers who see only their own figures, issue #399 slice 2; `V75` is the operator screens, issue #407, directly after it; `V76` is the low-stock minimums and the daily notices, issue #412, directly after `V75`; `V77` is changing an order's items, issue #393, directly after `V76`; `V79` is the Owner of a business, issue #442, directly after `V78`; `V80` is in-app feedback, issue #447, directly after `V79`; `V81` is the lending arrears run and penalty charges, issue #264, then `V82` the penalty waivers, issue #265, `V83` the collection actions, issue #266, and `V84` the arrears notices' record, issue #227, in that merge order; `V80` to `V84` are all merged, and so are shop logos `V85` (#465), offline sales `V86` (#463) and barcodes `V87` (#470). The open pull requests hold these ordered claims and merge in this order: referrals `V88` (#467), existing loans `V89` (#475), the self-serve plan `V90` (#474), my data as a workbook `V91` (#478) and billing `V92` (#480); payments (#315 and #318) take the numbers after `V92`; the merger renumbers at merge time if the order changes). A migration takes the highest number on main plus one at merge time; a number above one that is still unmerged is allowed only as one of the ordered claims listed here; a placeholder `V99__` is refused by `placeholder-migration-guard` and by the first job of `deploy.yml`. The retail analytics pass (issue #149) is reports only on existing data: no migration; its
+  (`V34` is the retail cash book, issue #147; `V35` is claimed by lending, issue #176; `V36` is claimed by lending payment methods, issue #160; `V37` is retail branch roles, issue #191; `V38` is the retail two-step transfer, issue #193; `V39` is units of measure, issue #194; `V40` is search, issue #241; `V41` is price lists, issue #195; `V42` is the loan reopen pledge guard, issue #176; `V43` is payment methods, issue #160; `V44` is customer accounts, issue #196; `V45` is returns, issue #201; `V46` is optional documents, issue #197; `V47` is optional purchasing, issue #198; `V48` is landed cost and supplier credit notes, issue #199; `V49` is report runs, issue #214; `V50` is the SMS channel core, issue #212; `V51` is the `core.ai` call log, issue #220; `V52` is the tenant SMS settings, issue #218; `V53` is the member event SMS cancel, issue #221; `V54` is the payment gateway core, issue #213; `V55` is the stored daily AI brief and the advisor permissions, issue #226; `V56` is the lenders' own payment accounts and `V57` their permission, issue #233; `V58` is the step-up failure counter; `V59` is the loan repayment by gateway and the unallocated receipts, issue #216; `V60` is the savings deposit by gateway, issue #219; `V62` is the staff forgot-password migration, issue #320; `V65` is the store branch flag, issue #366; `V67` is the two-step default, issue #348; `V69` is the items with sizes and colours, issue #384, the next number after `V68` (the push subscriptions); `V70` is customer orders with delivery, issue #385; `V71` is the item photos, issue #384 slice 2; `V72` is find your sign-in page, issue #383; `V73` is the retail Storekeeper and Purchasing roles, issue #399; `V74` is sellers who see only their own figures, issue #399 slice 2; `V75` is the operator screens, issue #407, directly after it; `V76` is the low-stock minimums and the daily notices, issue #412, directly after `V75`; `V77` is changing an order's items, issue #393, directly after `V76`; `V79` is the Owner of a business, issue #442, directly after `V78`; `V80` is in-app feedback, issue #447, directly after `V79`; `V81` is the lending arrears run and penalty charges, issue #264, then `V82` the penalty waivers, issue #265, `V83` the collection actions, issue #266, and `V84` the arrears notices' record, issue #227, in that merge order; then `V85` shop logos, issue #461, pull request #465, `V86` offline sales, pull request #463, and `V87` barcodes, pull request #470; then `V88` referrals, pull request #467; `V80` to `V88` are all merged. The open pull requests hold these ordered claims and merge in this order: existing loans `V89` (#475), the self-serve plan `V90` (#474), my data as a workbook `V91` (#478) and billing `V92` (#482); payments (#315 and #318) take the numbers after `V92`; the merger renumbers at merge time if the order changes). A migration takes the highest number on main plus one at merge time; a number above one that is still unmerged is allowed only as one of the ordered claims listed here; a placeholder `V99__` is refused by `placeholder-migration-guard` and by the first job of `deploy.yml`. The retail analytics pass (issue #149) is reports only on existing data: no migration; its
   queries are in `scripts/db-bench/queries` (k01 to k15).
 - **Built (trade 1 of 10, issue #191, ADR-033):** migration `V37` (`retail_branch_roles`, the permission
   `retail.branch_role.manage`, a backfill of role `both`); the tenant settings group `retail.capabilities`
@@ -203,6 +203,30 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   and the five icon paths are the exact paths `TenantResolutionFilter` lets through without a tenant). `index.html` links both; vite-plugin-pwa runs with
   `manifest: false`; the shell sets `apple-mobile-web-app-title` to the same short name. An iPhone keeps the icon it took at Add to Home
   Screen. Tests: `AppManifestIT`, `AppManifestShortNameTest`, `app-manifest.test.ts`, `branding.test.ts`, `app-title.dom.test.tsx`.
+- **Built (referral links and commission tracking, issue #464, FR-REF-01 to FR-REF-08, ADR-069):** migration `V88` (directly after
+  shop logos `V85`, offline sales `V86` and barcodes `V87`, all merged): `referral_codes` (a code per business from a trigger on `tenants`, backfilled; letters of
+  the slug and two characters without 0, 1, I or O), `tenant_referrals` and `referral_commission_lines` (forced RLS on the
+  **referrer**, SELECT only for `bms_app`, never deleted, a line paid once), the closed platform tables `referral_commission_rules`
+  (append-only) and `referral_settings` (the default rule; `V88` seeds the product owner's default, 10% of each payment for the first 12 paid months, no cap, ADR-069 decision 14, only when none is set), two columns
+  on `onboarding_applications`, the definer functions, and the permission `core.referrals.read` (tenant admin, so the Owner). New
+  module `core.referrals` with the port `Referrals`. The sign-up takes `referral_code` (422 `referral_code_unknown`), Activate makes
+  the referral; `POST /platform/tenants/{id}/payments` adds the commission line from the rule in force (a percent for the first N
+  paid months with an optional cap, a fixed first payment amount, or a fixed amount per paid month for N months; the override of a
+  referral, else the default) with a snapshot of the rule. Operator routes: `GET /platform/referrals` (filters referrer, status,
+  commission due or paid), `/export` (CSV), `/{id}`, `PUT /platform/tenants/{id}/referrer` (422 `referral_self`), the default rule,
+  a referral's rule, manual lines, reversals and paid marks, each with a reason and audited; the app never pays. Tenant route
+  `GET /referrals`. The PWA: Referrals under Business set-up (`/staff/setup/referrals`: the link, Copy, Share on WhatsApp, the list
+  with status and money; tour `page-referrals`), and Referred by on the sign-up, filled from `?ref=`. The operator portal has no
+  referrals screen yet (the API is complete). After the review (ADR-069 decisions 9 to 13): the months used count the payments
+  since the business's first referral, one at a time under the subscription lock, leaving out `currency_differs` and refunded ones
+  (kept in the closed `referral_payment_outcomes`); a percent is rounded half up; a sign-up whose applicant is an Owner or administrator of the
+  referrer drops the code quietly with the usual 202 (checked again at Activate, audited `platform.referral.refused_self`); a typed line needs an
+  Idempotency-Key; the referrer and rule PUTs need the operator's `totp_code`; a reversed unpaid line is not paid (409
+  `commission_line_reversed`); statuses `suspended` and `cancelled`; the
+  referrer's status worked out at every read (`referrer_status`, `referrer_inactive` on every line) and a paid mark while it is
+  suspended or cancelled is 409 `referrer_inactive` unless confirmed; a returning applicant's code
+  goes on the open, still submitted application without a referrer. Tests: `ReferralsIT`, `ReferralServiceTest`,
+  `RlsIsolationIT`, `MigrationOrderIT`, `PermissionMatrixIT`, `referrals.dom.test.tsx`, `referral-code.dom.test.tsx`.
 - **Built (retail sales offline, issue #458, FR-RET-67, NFR-OFF-07, NFR-OFF-08, ADR-067):** migration `V86` (main has `V80` to `V84`
   merged; agreed order: `V85` shop logos #465, `V86` this, `V87` barcodes #470, `V88` referrals #467, `V89` existing loans
   #475, `V90` modules #474, `V91` the data download #478, payments #315 and #318 after `V91`): `client_sale_id` (unique per tenant),
@@ -504,24 +528,6 @@ The first customer is referred to only as **the pilot tenant**: a licensed money
   (`/platform/feedback`), the tours `page-feedback` and `page-operator-feedback`, and a Feedback step in `admin-welcome` v18,
   `retail-sales` v12 and `staff-welcome` v6. Tests: `FeedbackIT`, `RlsIsolationIT`, `ModularityTest`, `feedback-state.test.ts`,
   `feedback.dom.test.tsx`, `tours-operator.test.tsx`.
-- **Built (existing loans from a paper register, issue #466, FR-EXL-01 to FR-EXL-09, ADR-071):** migration `V89` (an ordered
-  claim after `V85` to `V87` on main and the claim `V88`): the loan status `brought_in`, the columns `go_live_on`, `brought_in_on`,
-  `register_ref`, `agreed_total_minor` and `opening_entry_id` on `lending_loans`, the append-only
-  `lending_brought_in_repayments`, and the permission `lending.loans.bring_in` (tenant admin, branch manager). Routes under
-  `/lending/existing-loans`: the go-live date, record with a check (`dry_run`) and an `Idempotency-Key`, list, get, cancel,
-  ask again, the reversal of an approved bring-in, and the CSV import (check, then commit). The maker-checker action `loan_bring_in` (checker
-  `lending.disbursements.authorise`, no threshold) writes the schedule from the real date, historic transactions with no
-  journal and one opening entry at go-live (debit loans receivable, credit opening balance equity). The arrears run charges
-  no penalty period that starts before `brought_in_on` (none on the bring-in day). `loan_bring_in_reversal` (same
-  maker and checker) takes back an approved bring-in while the loan has no transaction in the app and no penalty: the
-  opening entry mirrored, the historic rows marked reversed on their own dates, the loan cancelled. No arrears SMS goes
-  for a brought-in loan until seven days after `brought_in_on`, and a likely duplicate (same member, principal and date,
-  no register number) is a warning on the check and the waiting loan. The go-live date is the tenant setting `go_live_date` (`PATCH /settings`, Owner
-  only; `PUT /platform/tenants/{id}/go-live` for the operator), defaulting to the business date of the first administrator
-  sign-in, stored at that sign-in (`GoLiveDate.adminSignedIn`). The CSV reader of the retail item import moved to `kernel.CsvTable` so both imports
-  share it. The PWA: `/staff/lending/existing-loans` (the form, its check and the loans waiting) and
-  `/staff/lending/existing-loans/import`, linked from Loans, and an Open the loan link on a `loan_bring_in` or `loan_bring_in_reversal` approval. Tests:
-  `ExistingLoansIT`, `BringInTest`, `RlsIsolationIT`, `existing-loans-state.test.ts`, `existing-loans.dom.test.tsx`.
 - The isolation, boundary, ledger, API, actuator, route permission and contract tests run in
   `mvn verify`; CI runs them on every pull request. Staging runs on a shared ARM64 host behind a
   Cloudflare Tunnel and pulls every green build of `main` from a `staging` pointer tag; hosts are
@@ -598,7 +604,7 @@ package; `internal` is closed. Tables of a vertical are prefixed with its key (`
 | `lending.manifest` | The vertical's registration with the core | 5.4.3 | none | none |
 | `lending` members | Members, KYC, next of kin, relationships | MEM | 6.7 | 7.11.11 |
 | `lending` products | Loan products and versions | PRD | 6.7 | 7.11.12 |
-| `lending` loans | Origination, schedules, disbursement, repayments, arrears, closure; existing loans brought in from a paper register (ADR-071) | ORG, DIS, REP, ARR, LCL, EXL; 3.4 | 6.7 | 7.11.13 |
+| `lending` loans | Origination, schedules, disbursement, repayments, arrears, closure | ORG, DIS, REP, ARR, LCL; 3.4 | 6.7 | 7.11.13 |
 | `lending` collateral | Collateral register | COL | 6.7 | 7.11.14 |
 | `lending.seed` | The `seed-lending` command: fabricated loan book, savings and investments for one empty staging tenant (ADR-026, ADR-031, ADR-032) | none | none (writes 6.7 tables) | none (a command, `docs/runbooks/seed-lending.md`) |
 | `lending.savings` | Savings products, accounts, movements, end of day and interest, statements, savings reports (ADR-032) | SAV | 6.7 | 7.11.15 |
@@ -856,9 +862,6 @@ Accepted (this list is the ADR index):
 - ADR-066 The installed app uses the business's own logo and name as its icon: a per-host manifest and icons drawn from the logo by the
   API under `/api/v1/branding/app/`, the BMS icons as the fallback; an iPhone takes the icon only when the app is added again (proposed,
   #446; FR-TEN-08; amends ADR-050 decision 1; renumbered at merge if needed)
-- ADR-071 Existing loans are brought in with their real dates, past repayments as history (no journal) and one opening entry at
-  go-live, after a second person approves; only before the go-live date (a tenant setting the Owner or the operator sets);
-  no penalty for the time before the bring-in (accepted, #466; FR-EXL-01 to FR-EXL-09; migration `V89`)
 - ADR-067 Retail sales work offline: the sale catalogue and an outbox per business and person on the device, synced one at a
   time oldest first, sent once by the Idempotency-Key and a client sale id stored on the sale; dated when they happened; stock,
   price and item clashes recorded and flagged, other refusals kept on the device for a manager to resend or discard; a dot in
