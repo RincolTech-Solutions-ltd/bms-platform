@@ -389,6 +389,25 @@ describe('the shop summary cards (issue #485)', () => {
     expect(text('Top items')).toContain('Nothing sold yet this week.');
   });
 
+  it('takes a card away when the server leaves its part out, rather than saying there is nothing', async () => {
+    // The session's own view says it may see the money, yet the server answers without it (scopes changed since sign-in).
+    calls.home.mockResolvedValue(NO_MONEY);
+    show(both, 'all');
+    const shop = await screen.findByRole('article', { name: 'Shop' });
+    expect(await within(shop).findByText('3 items')).toBeTruthy();
+    expect(within(shop).queryByText('Sales today')).toBeNull();
+    for (const name of ['Takings today', 'Credit owed', 'Top items', 'Each shop today']) expect(card(name)).toBeNull();
+    expect(screen.queryByText('No money taken yet today.')).toBeNull();
+    expect(screen.queryByText('No customer owes you money.')).toBeNull();
+    cleanup();
+    // One part missing takes only its own card.
+    calls.home.mockResolvedValue({ ...HOME, credit_owed: undefined });
+    show(both);
+    expect(await screen.findByRole('article', { name: 'Takings today' })).toBeTruthy();
+    await screen.findByText('Cash');
+    expect(card('Credit owed')).toBeNull();
+  });
+
   it('says so in each card when the summary cannot be loaded', async () => {
     calls.home.mockRejectedValue(new Error('down'));
     show(both);

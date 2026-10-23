@@ -5,7 +5,6 @@ import com.rincoltech.bms.kernel.BusinessClock;
 import com.rincoltech.bms.kernel.CurrentPrincipal;
 import com.rincoltech.bms.kernel.Principal;
 import com.rincoltech.bms.retail.reports.internal.CreditRepository.BuyerRow;
-import com.rincoltech.bms.retail.reports.internal.CreditRepository.Payment;
 import com.rincoltech.bms.retail.reports.internal.DashboardRepository.DaySales;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.BranchLine;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.CreditOwed;
@@ -16,6 +15,7 @@ import com.rincoltech.bms.retail.reports.internal.HomeApi.Summary;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.Takings;
 import com.rincoltech.bms.retail.reports.internal.HomeApi.TopItems;
 import com.rincoltech.bms.retail.reports.internal.HomeRepository.Shop;
+import com.rincoltech.bms.retail.reports.internal.HomeRepository.Taking;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Dimension;
 import com.rincoltech.bms.retail.reports.internal.SalesAnalysisRepository.Order;
 import com.rincoltech.bms.retail.stock.Quantities;
@@ -75,7 +75,8 @@ class HomeService {
         // not
         // refused, for a caller who sees only their own sales somewhere in it.
         List<UUID> filter = AnalyticsSupport.everySellerScope(principal, branchIds);
-        boolean money = AnalyticsSupport.covers(principal, filter);
+        // A branch asked for outside the caller's scope leaves an empty filter: nothing of it is shown, not zeros.
+        boolean money = (filter == null || !filter.isEmpty()) && AnalyticsSupport.covers(principal, filter);
         Sales sales = null;
         Takings takings = null;
         CreditOwed owed = null;
@@ -90,10 +91,7 @@ class HomeService {
                 count += d.saleCount();
             }
             sales = new Sales(total, count);
-            takings = takings(
-                    rows,
-                    credit.payments(
-                            filter, today, today, today.atStartOfDay(zone).toInstant()));
+            takings = takings(repo.takings(filter, today, zone));
             BuyerRow b = credit.totals(filter, today);
             owed = new CreditOwed(b.buckets().owed(), b.buyers(), b.sales(), b.oldestDue());
             top = new TopItems(items(filter, today, today), items(filter, weekFrom, today));
@@ -101,39 +99,42 @@ class HomeService {
         }
 
         Integer lowStock = null;
-        if (principal.hasPermission(DashboardService.STOCK_READ)) {
-            lowStock = dashboard
-                    .counts(principal.branchFilter(DashboardService.STOCK_READ, branchIds), DashboardService.LOW_STOCK)[
-                    1];
+        List<UUID> stockFilter = principal.branchFilter(DashboardService.STOCK_READ, branchIds);
+        if (principal.hasPermission(DashboardService.STOCK_READ) && (stockFilter == null || !stockFilter.isEmpty())) {
+            lowStock = dashboard.counts(stockFilter, DashboardService.LOW_STOCK)[1];
         }
-        Integer openOrders = principal.hasPermission(ORDER_MANAGE)
-                ? repo.openOrders(principal.branchFilter(ORDER_MANAGE, branchIds))
-                : null;
+        Integer openOrders = null;
+        List<UUID> orderFilter = principal.branchFilter(ORDER_MANAGE, branchIds);
+        if (principal.hasPermission(ORDER_MANAGE) && (orderFilter == null || !orderFilter.isEmpty())) {
+            openOrders = repo.openOrders(orderFilter);
+        }
         return new Summary(
                 today, tenant.profile().currency(), weekFrom, sales, takings, owed, top, lines, lowStock, openOrders);
     }
 
-    /** Cash and mobile money always, then any other way that took money; sales paid at the sale and payments on credit sales. */
-    private static Takings takings(List<DaySales> rows, List<Payment> payments) {
-        Map<String, long[]> byMethod = new LinkedHashMap<>();
-        byMethod.put("cash", new long[2]);
-        byMethod.put("mobile_money", new long[2]);
-        for (DaySales d : rows) {
-            if (!d.credit()) {
-                byMethod.computeIfAbsent(d.method(), k -> new long[2])[0] += d.sales();
-            }
-        }
-        for (Payment p : payments) {
-            byMethod.computeIfAbsent(p.method(), k -> new long[2])[1] += p.amount();
+    /** Cash and mobile money always, then any other way that took or gave back money today, in, less out. */
+    private static Takings takings(List<Taking> rows) {
+        Map<String, long[]> byMethod = new LinkedHashMap<>(); // sales, payments, fees, out
+        byMethod.put("cash", new long[4]);
+        byMethod.put("mobile_money", new long[4]);
+        for (Taking t : rows) {
+            int kind = switch (t.kind()) {
+                case "sales" -> 0;
+                case "payments" -> 1;
+                case "fees" -> 2;
+                default -> 3;
+            };
+            long[] f = byMethod.computeIfAbsent(t.method(), k -> new long[4]);
+            f[kind] = Math.addExact(f[kind], t.amount());
         }
         List<Method> methods = new ArrayList<>();
         long total = 0;
         for (Map.Entry<String, long[]> e : byMethod.entrySet()) {
             long[] f = e.getValue();
-            long amount = Math.addExact(f[0], f[1]);
+            long amount = Math.subtractExact(Math.addExact(Math.addExact(f[0], f[1]), f[2]), f[3]);
             boolean always = e.getKey().equals("cash") || e.getKey().equals("mobile_money");
-            if (always || f[0] != 0 || f[1] != 0) {
-                methods.add(new Method(e.getKey(), amount, f[0], f[1]));
+            if (always || f[0] != 0 || f[1] != 0 || f[2] != 0 || f[3] != 0) {
+                methods.add(new Method(e.getKey(), amount, f[0], f[1], f[2], f[3]));
                 total = Math.addExact(total, amount);
             }
         }

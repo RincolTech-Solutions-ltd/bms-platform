@@ -9,6 +9,7 @@ import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.retail.RetailTestSupport;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,11 @@ class RetailHomeSummaryIT extends IntegrationTest {
         ResponseEntity<JsonNode> sale =
                 api.postKeyed("/sales", body, ADMIN, "*", UUID.randomUUID().toString());
         assertThat(sale.getStatusCode()).as("%s", sale.getBody()).isEqualTo(HttpStatus.CREATED);
+        order(0);
+    }
+
+    /** An order at head office for 1 ANA-3 (700), to deliver today, with this delivery fee. */
+    UUID order(long fee) {
         Map<String, Object> order = new LinkedHashMap<>();
         order.put("branch_id", t.headOffice());
         order.put("source", "whatsapp");
@@ -70,18 +76,19 @@ class RetailHomeSummaryIT extends IntegrationTest {
         order.put("customer_phone", "+256700000011");
         order.put("delivery_place", "Test Place, Plot 1");
         order.put("delivery_date", today().toString());
-        order.put("delivery_fee_minor", 0);
+        order.put("delivery_fee_minor", fee);
         order.put("lines", List.of(Map.of("product_id", d.p3, "qty", "1")));
         ResponseEntity<JsonNode> placed =
                 api.postKeyed("/orders", order, ORDERS, "*", UUID.randomUUID().toString());
         assertThat(placed.getStatusCode()).as("%s", placed.getBody()).isEqualTo(HttpStatus.CREATED);
+        return RetailTestSupport.id(placed);
     }
 
     static LocalDate today() {
         return AnalyticsData.today();
     }
 
-    void pay(UUID sale, long amount, String method) {
+    UUID pay(UUID sale, long amount, String method) {
         ResponseEntity<JsonNode> r = api.postKeyed(
                 "/sales/" + sale + "/payments",
                 Map.of("amount_minor", amount, "method", method),
@@ -89,6 +96,22 @@ class RetailHomeSummaryIT extends IntegrationTest {
                 "*",
                 UUID.randomUUID().toString());
         assertThat(r.getStatusCode()).as("%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
+        return UUID.fromString(r.getBody().get("payment").get("id").asString());
+    }
+
+    /** Dates a payment {@code paidOn} and moves the moment it was entered to {@code entered}, Kampala time, as the owner. */
+    static void entered(UUID payment, LocalDate paidOn, String entered) {
+        TestDatabase.owner()
+                .sql("DO $$ BEGIN PERFORM set_config('bms.allow_mutation', 'on', true);"
+                        + " UPDATE retail_sale_payments SET paid_on = DATE '" + paidOn + "', created_at = (TIMESTAMP '"
+                        + entered + "') AT TIME ZONE 'Africa/Kampala' WHERE id = '" + payment + "'; END $$")
+                .update();
+    }
+
+    long cash(String query, String branches) {
+        return method(home(query, ADMIN, branches).get("takings"), "cash")
+                .get("amount_minor")
+                .asLong();
     }
 
     JsonNode home(String query, String permissions, String branches) {
@@ -121,9 +144,12 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(takings.get("methods").get(0).get("method").asString()).isEqualTo("cash");
         assertThat(takings.get("methods").get(1).get("method").asString()).isEqualTo("mobile_money");
         JsonNode cash = method(takings, "cash");
+        // The cash book's reading: the cash sale at head office dated today counts in and, cancelled today, out.
         assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700);
-        assertThat(cash.get("sales_minor").asLong()).isEqualTo(1_500);
+        assertThat(cash.get("sales_minor").asLong()).isEqualTo(3_000);
         assertThat(cash.get("payments_minor").asLong()).isEqualTo(200);
+        assertThat(cash.get("fees_minor").asLong()).isZero();
+        assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500);
         assertThat(method(takings, "mobile_money").get("amount_minor").asLong()).isEqualTo(600);
         assertThat(method(takings, "bank").get("amount_minor").asLong()).isEqualTo(100);
         assertThat(method(takings, "bank").get("payments_minor").asLong()).isEqualTo(100);
@@ -220,11 +246,13 @@ class RetailHomeSummaryIT extends IntegrationTest {
         assertThat(r.get("open_orders").asInt()).isEqualTo(1);
         assertThat(AnalyticsData.figures(r)).doesNotContain("3600");
 
-        // Asking for a branch outside the scope gives nothing of it.
+        // Asking for a branch outside the scope shows nothing of it: no part, rather than zeros it cannot vouch for.
         JsonNode outside =
                 home("?branch_id=" + t.secondBranch(), ORDERS, t.headOffice().toString());
-        assertThat(outside.get("sales_today").get("sales_minor").asLong()).isZero();
-        assertThat(outside.get("open_orders").asInt()).isZero();
+        for (String part :
+                new String[] {"sales_today", "takings", "credit_owed", "top_items", "low_stock", "open_orders"}) {
+            assertThat(outside.has(part)).as(part).isFalse();
+        }
     }
 
     @Test
@@ -266,5 +294,159 @@ class RetailHomeSummaryIT extends IntegrationTest {
     void theRouteNeedsTheSalesRead() {
         ResponseEntity<JsonNode> denied = api.get("/reports/home", "retail.stock.read,retail.order.manage");
         assertThat(denied.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void aRefundTodayOfYesterdaysCashSaleComesOffTodaysCash() {
+        String settings = "core.settings.manage";
+        String etag = api.get("/settings/capabilities", settings).getHeaders().getETag();
+        ResponseEntity<JsonNode> on = api.call(
+                HttpMethod.PUT,
+                "/settings/capabilities",
+                Map.of("returns", true),
+                settings,
+                "*",
+                etag == null ? Map.of() : Map.of("If-Match", etag));
+        assertThat(on.getStatusCode()).as("%s", on.getBody()).isEqualTo(HttpStatus.OK);
+        UUID yesterday = d.sell(t.headOffice(), "cash", d.p2, "1", 1);
+        String line = api.get("/sales/" + yesterday, ADMIN)
+                .getBody()
+                .get("lines")
+                .get(0)
+                .get("id")
+                .asString();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put(
+                "lines",
+                List.of(Map.of("sale_line_id", line, "qty", "1", "reason", "defective", "disposition", "restock")));
+        body.put("refund_method", "cash");
+        body.put("refund_branch_id", t.headOffice());
+        ResponseEntity<JsonNode> returned = api.postKeyed(
+                "/sales/" + yesterday + "/returns",
+                body,
+                ADMIN + ",retail.sale.return",
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(returned.getStatusCode()).as("%s", returned.getBody()).isEqualTo(HttpStatus.CREATED);
+
+        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        assertThat(cash.get("out_minor").asLong()).isEqualTo(1_500 + 300);
+        assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700 - 300);
+        // Yesterday's sale is not today's money, and the head office till paid the refund.
+        assertThat(cash.get("sales_minor").asLong()).isEqualTo(3_000);
+        assertThat(cash("?branch_id=" + t.secondBranch(), "*")).isEqualTo(1_500);
+        // Sales today still agree with the dashboard, which takes the goods back on the day of the return.
+        assertThat(home("", ADMIN, "*").get("sales_today").get("sales_minor").asLong())
+                .isEqualTo(api.get("/reports/dashboard?period=today", ADMIN)
+                        .getBody()
+                        .get("today")
+                        .get("sales_minor")
+                        .asLong());
+    }
+
+    @Test
+    void aDeliveryFeeTakenInCashAtTheDoorIsCash() {
+        UUID id = order(500);
+        ResponseEntity<JsonNode> done = api.postKeyed(
+                "/orders/" + id + "/deliver",
+                Map.of("payment_method", "cash"),
+                ORDERS,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(done.getStatusCode().is2xxSuccessful())
+                .as("%s", done.getBody())
+                .isTrue();
+        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        assertThat(cash.get("sales_minor").asLong()).isEqualTo(3_000 + 700);
+        assertThat(cash.get("fees_minor").asLong()).isEqualTo(500);
+        assertThat(cash.get("amount_minor").asLong()).isEqualTo(1_700 + 700 + 500);
+    }
+
+    @Test
+    void aPaymentCountsOnItsOwnDateWhateverTheHourItWasEnteredInKampala() {
+        UUID sale = d.sell(t.headOffice(), "credit", d.p2, "4", 2);
+        // Entered at half past midnight today, dated today: today's money.
+        UUID early = pay(sale, 40, "cash");
+        entered(early, today(), today() + " 00:30:00");
+        // Entered at half past eleven last night, dated yesterday: yesterday's money.
+        UUID late = pay(sale, 50, "cash");
+        entered(late, today().minusDays(1), today().minusDays(1) + " 23:30:00");
+        JsonNode cash = method(home("", ADMIN, "*").get("takings"), "cash");
+        assertThat(cash.get("payments_minor").asLong()).isEqualTo(200 + 40);
+
+        // A payment dated after the day it is entered is refused, which is what lets the summary read payments from the
+        // start of today by the moment of entry.
+        ResponseEntity<JsonNode> future = api.postKeyed(
+                "/sales/" + sale + "/payments",
+                Map.of(
+                        "amount_minor",
+                        10,
+                        "method",
+                        "cash",
+                        "paid_on",
+                        today().plusDays(1).toString()),
+                ADMIN,
+                "*",
+                UUID.randomUUID().toString());
+        assertThat(future.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void thisWeekStartsOnMondaySoSundaysSalesAreLastWeeks() {
+        LocalDate monday = today().with(DayOfWeek.MONDAY);
+        int sunday = (int) ChronoUnit.DAYS.between(monday.minusDays(1), today());
+        int mondayAgo = (int) ChronoUnit.DAYS.between(monday, today());
+        d.sell(t.headOffice(), "cash", d.p3, "1", sunday);
+        d.sell(t.headOffice(), "cash", d.p3, "1", mondayAgo);
+        JsonNode week = home("", ADMIN, "*").get("top_items").get("week");
+        JsonNode ana3 = null;
+        for (JsonNode i : week) {
+            if (i.get("code").asString().equals("ANA-3")) {
+                ana3 = i;
+            }
+        }
+        assertThat(ana3).as("%s", week).isNotNull();
+        assertThat(ana3.get("sales_minor").asLong()).isEqualTo(700);
+    }
+
+    @Test
+    void aBranchThatSoldTodayKeepsItsLineAndAStoreWithNoSaleHasNone() {
+        // Branch two becomes a Store after selling today; a third branch, a Store, never sold.
+        TestDatabase.owner()
+                .sql("UPDATE branches SET sells_goods = false WHERE id = ?")
+                .param(t.secondBranch())
+                .update();
+        TestDatabase.owner()
+                .sql("INSERT INTO branches (id, tenant_id, code, name, sells_goods)"
+                        + " VALUES (?, ?, 'ST3', 'Test Store Three', false)")
+                .params(UUID.randomUUID(), t.tenantId())
+                .update();
+        JsonNode lines = home("", ADMIN, "*").get("branches");
+        assertThat(lines).hasSize(2);
+        assertThat(lines.get(1).get("branch_id").asString())
+                .isEqualTo(t.secondBranch().toString());
+        assertThat(lines.get(1).get("sales_minor").asLong()).isEqualTo(1_500);
+    }
+
+    @Test
+    void anotherBusinessesSalesNeverReachTheSummary() {
+        TestDatabase.Fixture other = TestDatabase.tenant("retail-home-other", false, true);
+        RetailTestSupport otherApi = new RetailTestSupport(http, other);
+        UUID item = otherApi.product("OTH-1", 100, 9_000);
+        otherApi.stockUp(other.headOffice(), item, "5");
+        assertThat(otherApi.sell(other.headOffice(), "mobile_money", item, "1").getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+
+        JsonNode mine = home("", ADMIN, "*");
+        assertThat(mine.get("sales_today").get("sales_minor").asLong()).isEqualTo(3_600);
+        assertThat(method(mine.get("takings"), "mobile_money")
+                        .get("amount_minor")
+                        .asLong())
+                .isEqualTo(600);
+        assertThat(AnalyticsData.figures(mine)).doesNotContain("9000");
+        JsonNode theirs = otherApi.call(HttpMethod.GET, "/reports/home", null, ADMIN, "*", Map.of())
+                .getBody();
+        assertThat(theirs.get("sales_today").get("sales_minor").asLong()).isEqualTo(9_000);
+        assertThat(theirs.get("credit_owed").get("owed_minor").asLong()).isZero();
     }
 }

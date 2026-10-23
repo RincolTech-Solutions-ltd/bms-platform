@@ -13101,28 +13101,41 @@ export interface components {
              */
             week_from?: string;
         };
-        /** @description Money taken today: sales paid at the sale dated today (net of goods taken back today) and payments on credit sales dated today, less payments on account reversed today, by way of paying */
+        /** @description Money taken today by way of paying, read the way the cash book reads a day for every way: sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken today, less sales cancelled today, payments on account reversed today and money refunded today on goods taken back */
         RetailHomeTakings: {
             methods?: components["schemas"]["RetailHomeTakingsMethod"][];
             /** Format: int64 */
             total_minor?: number;
         };
         RetailHomeTakingsMethod: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description sales_minor + payments_minor + fees_minor - out_minor
+             */
             amount_minor?: number;
             /**
-             * @description cash and mobile_money always, then any other way that took money today (bank)
+             * Format: int64
+             * @description Delivery fees taken at the door today, or paid today on an account
+             */
+            fees_minor?: number;
+            /**
+             * @description cash and mobile_money always, then any other way that took or gave back money today (bank)
              * @enum {string}
              */
             method?: "cash" | "mobile_money" | "bank";
             /**
              * Format: int64
-             * @description Of amount_minor, the payments on credit sales
+             * @description Money given back today: sales cancelled, payments on account reversed, refunds on goods taken back (a return cancelled today counts back in), door fees of cancelled orders
+             */
+            out_minor?: number;
+            /**
+             * Format: int64
+             * @description Payments on credit sales dated today, at the branch that took them
              */
             payments_minor?: number;
             /**
              * Format: int64
-             * @description Of amount_minor, the sales paid at the sale
+             * @description Sales paid at the sale dated today, cancelled later or not
              */
             sales_minor?: number;
         };

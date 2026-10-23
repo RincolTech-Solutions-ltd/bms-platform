@@ -1350,9 +1350,11 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 
 - **Where.** The staff Home (`/staff`), after the Shop card and before the Lending card. Every shop figure on Home, the Shop card's
   included, comes from one read, `GET /retail/reports/home`, under the branch chosen in the header (All branches sends none).
-- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it took money today, and the Total.
-  Sales paid at the sale today and payments on credit sales dated today, as the cash summary and credit control count them. Nothing
-  taken: "No money taken yet today." Link: Open the cash summary (for whoever may close the till), otherwise See all sales.
+- **Takings today.** A line each for Cash and Mobile money, then Bank or any other way only when it moved money today, and the
+  Total. Read as the cash book reads a day, so it agrees with the cash summary: sales paid at the sale, payments on credit sales and
+  delivery fees in; cancelled sales, reversed payments on account and refunds on goods taken back (yesterday's sale refunded today
+  included) out. Nothing taken: "No money taken yet today." Link: Open the cash summary (for whoever may close the till),
+  otherwise See all sales.
 - **Credit owed.** What customers owe, with "3 customers" as a hint, and Oldest due with the earliest due date of a sale still owing
   ("2 Oct 2026"). Nobody owes: "No customer owes you money." Link: Open credit control.
 - **Top items.** Today and This week (from Monday) as two buttons; the five items that sold the most by value, each with its
@@ -1364,7 +1366,9 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
 - **Who sees what.** The four cards and Sales today are money: they need `retail.sale.all_sellers` in the branches covered
   (ADR-055); a seller sees no money card, and now sees Low on stock (with `retail.stock.read`) and the open orders (with
   `retail.order.manage`) on the Shop card. A session with the orders permission and no sales read still reads the orders board.
-- **States.** "Loading" while the read is on its way, "Could not load" in each card when it fails, the other cards unchanged.
+- **States.** "Loading" while the read is on its way, "Could not load" in each card when it fails, the other cards unchanged. A
+  part the server leaves out (no money permission over the branches covered, a branch outside the session's scope) takes its card
+  or figure away instead of showing zeros. Recording a sale or moving an order refreshes the Home summary.
 - **Tour.** `page-staff-home` v2: the step Your shop today on the Takings card (`data-tour="home-shop-today"`), for whoever sees
   everybody's money.
 - **Screenshot description.** On a phone the cards stack: Shop (Sales today UGX 125,000, 7 sales; Low on stock 3 items; Open

@@ -1,6 +1,7 @@
--- DashboardRepository.sales: thirty days by branch, day and way of paying (issue #149) (net of customer returns, issue #201)
+-- DashboardRepository.sales: thirty days by branch, day and way of paying (issue #149) (net of customer returns, issue #201;
+-- grouped by the way of paying itself since issue #485, which the Home summary reads for one day)
 -- tenant: tenant
-SELECT s.branch_id, s.sale_date AS day, (s.payment_method = 'credit') AS credit, sum(l.line_total_minor) AS sales,
+SELECT s.branch_id, s.sale_date AS day, s.payment_method AS method, sum(l.line_total_minor) AS sales,
        sum(l.line_cost_minor) AS cost, count(DISTINCT s.id) AS sale_count
   FROM (SELECT s0.tenant_id, s0.id, s0.sale_date, s0.branch_id, s0.created_by, s0.status, s0.payment_method,
                       l0.product_id, l0.qty, l0.line_total_minor, l0.line_cost_minor
@@ -18,4 +19,4 @@ SELECT s.branch_id, s.sale_date AS day, (s.payment_method = 'credit') AS credit,
               JOIN LATERAL (VALUES (s.tenant_id, s.product_id, s.qty, s.line_total_minor, s.line_cost_minor))
                    AS l (tenant_id, product_id, qty, line_total_minor, line_cost_minor) ON true
  WHERE s.status = 'completed' AND s.sale_date BETWEEN '2026-09-01' AND '2026-09-30'
- GROUP BY s.branch_id, s.sale_date, (s.payment_method = 'credit')
+ GROUP BY s.branch_id, s.sale_date, s.payment_method
