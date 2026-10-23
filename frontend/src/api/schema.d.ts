@@ -5933,7 +5933,7 @@ export interface paths {
         };
         /**
          * Shop Home summary: today's sales and takings by way of paying, credit owed, top items, each shop, low stock and open orders (issue #485)
-         * @description One read for the Shop cards on Home (ADR-073). The money parts (sales_today, takings, credit_owed, top_items, branches) follow the dashboard's scope and need retail.sale.all_sellers in every branch they cover (ADR-055); without it they are left out, not refused. low_stock needs retail.stock.read and open_orders retail.order.manage, each in its own branch scope. branches is present only over two or more shops
+         * @description One read for the Shop cards on Home (ADR-076). The money parts (sales_today, takings, credit_owed, top_items, branches) follow the dashboard's scope and need retail.sale.all_sellers in every branch they cover (ADR-055); without it they are left out, not refused. low_stock needs retail.stock.read and open_orders retail.order.manage, each in its own branch scope. branches is present only over two or more shops
          */
         get: operations["getRetailHomeSummary"];
         put?: never;

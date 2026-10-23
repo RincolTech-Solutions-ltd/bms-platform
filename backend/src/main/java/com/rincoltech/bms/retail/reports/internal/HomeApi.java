@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Body of the shop Home summary (issue #485, ADR-073): everything the Shop cards on Home show, in one answer. Each part is
+ * Body of the shop Home summary (issue #485, ADR-076): everything the Shop cards on Home show, in one answer. Each part is
  * absent for a caller who may not see it.
  */
 final class HomeApi {

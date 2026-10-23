@@ -32,7 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The shop Home summary (issue #485, ADR-073): today's sales, the takings by way of paying, what buyers owe, the top five items
+ * The shop Home summary (issue #485, ADR-076): today's sales, the takings by way of paying, what buyers owe, the top five items
  * today and this week, a line per shop, the low stock count and the open orders, in one read-only transaction. Every figure is
  * read by a query an existing report runs, over today or this week only, so it agrees with the page the card links to.
  */

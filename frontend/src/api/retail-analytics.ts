@@ -87,7 +87,7 @@ export const retailAnalytics = {
   async dashboard({ branchId, period, from, to }: { branchId?: string; period?: 'today' | '7d' | '30d' | 'ytd' | '1y' | 'all' | 'custom'; from?: string; to?: string }): Promise<Dashboard> {
     return unwrap(await api.GET('/api/v1/retail/reports/dashboard', { params: { query: { branch_id: branchId ? [branchId] : undefined, period, from, to } } }));
   },
-  /** Everything the Shop cards on Home show, in one read (issue #485, ADR-073). */
+  /** Everything the Shop cards on Home show, in one read (issue #485, ADR-076). */
   async home(branchId: string | undefined, signal?: AbortSignal): Promise<HomeSummary> {
     return unwrap(await api.GET('/api/v1/retail/reports/home', { params: { query: { branch_id: branchId ? [branchId] : undefined } }, signal }));
   },

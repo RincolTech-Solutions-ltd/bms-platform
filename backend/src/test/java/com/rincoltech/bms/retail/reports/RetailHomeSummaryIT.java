@@ -23,7 +23,7 @@ import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
 
 /**
- * The shop Home summary (issue #485, ADR-073). The data of {@link AnalyticsData} (yesterday 2 ANA-1 cash at head office, 3,000;
+ * The shop Home summary (issue #485, ADR-076). The data of {@link AnalyticsData} (yesterday 2 ANA-1 cash at head office, 3,000;
  * ten days ago 3 ANA-2 on credit there, 900, due in 20 days; today a voided cash sale there and 1 ANA-1 cash at branch two,
  * 1,500) plus: five days ago 2 ANA-2 on credit at head office (600, due in 25 days), paid today 200 in cash and 100 by bank;
  * today 2 ANA-2 by mobile money at head office (600) and 1 ANA-1 on credit there to a second buyer (1,500, due in 3 days); and

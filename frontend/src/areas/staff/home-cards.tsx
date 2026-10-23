@@ -16,7 +16,7 @@ import { money as retailMoney } from './retail/ui';
 
 // Home's card per module the business uses (issue #471, ADR-072): Shop with today's sales, the items low on stock and the open
 // customer orders; Lending with the loans due today, those in arrears and the lending requests waiting for approval. A business with
-// one module sees only its card. Since issue #485 (ADR-073) the Shop card is followed by the shop's summary cards: today's takings
+// one module sees only its card. Since issue #485 (ADR-076) the Shop card is followed by the shop's summary cards: today's takings
 // by way of paying, what buyers owe, the top five items today or this week and a line per shop, each linking to its full page.
 // Every shop figure comes from one read, the Home summary (GET /retail/reports/home, retail.sale.read), which leaves out what the
 // session may not see: the money parts need retail.sale.all_sellers (ADR-055), the stock count retail.stock.read and the open
