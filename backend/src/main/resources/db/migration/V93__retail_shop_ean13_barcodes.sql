@@ -7,8 +7,11 @@
 -- service computes. The IN codes already made keep their rows, their lookup and their labels.
 --
 -- Flyway runs this file in one transaction; SET LOCAL lock_timeout makes it fail after 5 seconds, to be
--- retried, rather than queue the shop's barcode reads behind a long report. Flyway runs with outOfOrder off: V93 is the next number after
--- V92 on main; the payments pull requests (#315 and #318) take the numbers after it.
+-- retried, rather than queue the shop's barcode reads behind a long report.
+--
+-- Flyway runs with outOfOrder off: V93 is the next number after V92 on main. #529 (average cost) claims
+-- V93 too; whichever merges second renumbers to V94 before it merges (AGENTS.md ledger). The payments
+-- pull requests (#315 and #318) take the numbers after both.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -17,7 +20,9 @@ ALTER TABLE retail_product_barcodes
         CHECK (NOT generated OR format = 'code128' OR (format = 'ean13' AND code ~ '^2[0-9]{12}$')) NOT VALID;
 ALTER TABLE retail_product_barcodes VALIDATE CONSTRAINT retail_product_barcodes_generated_chk;
 -- V87's check was unnamed, so it is found by what it says rather than by the name PostgreSQL gave it,
--- and the migration stops if it is not there exactly once.
+-- and the migration stops if it is not there exactly once. The text is pg_get_constraintdef's for a
+-- text column; a database where it reads otherwise (a hand-patched check, a varchar column) aborts here
+-- on purpose, so the wrong check is never dropped.
 DO $$
 DECLARE
     old_check text;

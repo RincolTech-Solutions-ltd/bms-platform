@@ -53,7 +53,8 @@ function Ean13Svg({ code }: { code: string }) {
   );
   const digits = [...code].map((ch, i) => (i === 0 ? digit(ch, 5, i) : digit(ch, left + (i <= 6 ? 3 + (i - 1) * 7 : 50 + (i - 7) * 7) + 3.5, i)));
   return (
-    <svg viewBox="0 0 113 44" preserveAspectRatio="xMidYMid meet" shapeRendering="crispEdges" role="img" aria-label={`Barcode ${code}`} fill="currentColor" data-format="ean13">
+    <svg viewBox="0 0 113 44" preserveAspectRatio="xMidYMid meet" shapeRendering="crispEdges" role="img" aria-label={`Barcode ${code}`} style={{ fill: 'var(--rt-black)' }} data-format="ean13">
+      <rect x={0} y={0} width={113} height={44} style={{ fill: 'var(--rt-white)' }} />
       {bars}
       {digits}
     </svg>
