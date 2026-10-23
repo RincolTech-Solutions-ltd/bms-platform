@@ -152,9 +152,9 @@ class DashboardRepository {
     /**
      * Items out of stock and low over the given branches, as the stock list judges them (issue #490, {@link
      * LowStockRule}): an item counts only where it has been held; out when its balance summed over the branches is at
-     * zero or below, low when it is low at one of them. With null, the branches {@link #positions} reports (active, or
-     * closed and still holding stock), so a closed and emptied shop counts for nothing, as it has no shop line and no
-     * column in All branches. Returns {out, low}; low includes out.
+     * zero or below, low when it is low at one of them. Only the branches {@link #positions} reports are judged
+     * (active, or closed and still holding stock; every such branch when null), so a closed and emptied shop counts for
+     * nothing, as it has no shop line and no column in All branches. Returns {out, low}; low includes out.
      */
     int[] counts(List<UUID> branchIds, BigDecimal lowThreshold) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -167,7 +167,7 @@ class DashboardRepository {
         if (branchIds != null) {
             params.put("branchIds", branchIds);
             branch = " AND b.branch_id IN (:branchIds)";
-            scope = "lb.id IN (:branchIds)";
+            scope += " AND lb.id IN (:branchIds)";
         }
         return jdbc.sql("SELECT count(*) FILTER (WHERE "
                         + LowStockRule.overBranchesSql(false, "t.tenant_id", "t.id", scope, "t.total", ":low")
@@ -177,7 +177,8 @@ class DashboardRepository {
                         + ") AS low_stock"
                         + "  FROM (SELECT p.tenant_id, p.id, coalesce(sum(b.qty), 0) AS total"
                         + "          FROM retail_products p"
-                        + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
+                        + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id"
+                        + " AND b.product_id = p.id"
                         + branch
                         + "         WHERE p.active"
                         + "         GROUP BY p.tenant_id, p.id) t")
