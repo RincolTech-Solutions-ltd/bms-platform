@@ -65,6 +65,32 @@ describe('the sale bar', () => {
   });
 });
 
+describe('adding an item', () => {
+  it('slides the line in, pops the count beside Items and buzzes once', async () => {
+    const vibrate = vi.fn(() => true);
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { vibrate }));
+    open();
+    expect(document.querySelector('.count-badge')).toBeNull();
+    await addItem('Test Bulb 9W');
+    expect(vibrate).toHaveBeenCalledWith(10);
+    expect(document.querySelectorAll('.sale-line')).toHaveLength(1);
+    const first = document.querySelector('.count-badge');
+    expect(screen.getByRole('heading', { name: /^Items/ }).textContent).toBe('Items 1 on the sale');
+    await addItem('Test Lamp 15W');
+    const second = document.querySelector('.count-badge');
+    expect(second?.textContent).toBe('2 on the sale');
+    // A new element each time, so the pop runs again.
+    expect(second).not.toBe(first);
+  });
+
+  it('adds the item where the phone cannot vibrate', async () => {
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { vibrate: undefined }));
+    open();
+    await addItem('Test Bulb 9W');
+    expect(document.querySelectorAll('.sale-line')).toHaveLength(1);
+  });
+});
+
 describe('the sale screen stylesheet', () => {
   const css = (file: string) => readFileSync(join(process.cwd(), 'src/app/ui', file), 'utf8');
 
@@ -76,10 +102,15 @@ describe('the sale screen stylesheet', () => {
     expect(css('feedback.css')).toMatch(/\.toast \{[^}]*bottom: calc\([^;]*var\(--bottom-bar, 0px\)/);
   });
 
-  it('draws the total at the display size, and every amount in tabular figures', () => {
+  it('draws the total at the display size, every amount in tabular figures, and animates only transform and opacity', () => {
     const retail = css('retail.css');
     expect(retail).toMatch(/\.rt-total-amount \{[^}]*font-size: var\(--text-display\)/);
     const amounts = css('base.css').match(/((?:[.\w -]+,\s*)+[.\w -]+) \{\s*font-variant-numeric: tabular-nums;/)?.[1] ?? '';
     for (const cls of ['.num', '.rt-total', '.sale-bar-amount', '.an-stat-value', '.line-foot']) expect(amounts).toContain(cls);
+    for (const name of ['rt-line-in', 'rt-count-pop']) {
+      const frames = retail.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+      expect([...frames.matchAll(/([a-z-]+):/g)].map((m) => m[1]).every((p) => p === 'opacity' || p === 'transform')).toBe(true);
+    }
+    expect(retail).toMatch(/\.sale-line \{\s*animation: rt-line-in var\(--motion\) var\(--ease-out\);/);
   });
 });

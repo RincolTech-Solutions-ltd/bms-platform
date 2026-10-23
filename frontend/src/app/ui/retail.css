@@ -360,6 +360,31 @@
   }
 }
 
+/* An item going on the sale (#508): its line slides up 8px and fades in, and the count beside Items pops, without overshoot. */
+.sale-line {
+  animation: rt-line-in var(--motion) var(--ease-out);
+}
+
+.count-badge {
+  margin-left: var(--space-1);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  animation: rt-count-pop var(--motion) var(--ease-out);
+}
+
+@keyframes rt-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes rt-count-pop {
+  from {
+    transform: scale(0.8);
+  }
+}
+
 /*
  * Item lists grouped by category (retail/category-groups.tsx): the switch and Expand all / Collapse all
  * above the list, then one section per category whose header is a full-width button with the name on

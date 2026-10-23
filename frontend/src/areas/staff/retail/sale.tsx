@@ -101,6 +101,11 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
   );
 }
 
+/** A short buzz on a phone that has one when an item goes on the sale (#508); nothing elsewhere. */
+export function tapFeedback() {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(10);
+}
+
 /**
  * The sale's one primary action (#508, docs/ui-rules.md rule 6): on a phone a bar stuck full width to the bottom of the screen,
  * its button carrying the live total, so the amount and Record sale are always in reach; from 720px it sits under the total.
@@ -144,7 +149,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty,
   const noPrice = price ? hasNoPrice(price.resolved) : false;
   const changedOffline = offlinePrice !== undefined && f !== null && f.priceMinor !== defaultPrice(line.product, line.unitId);
   return (
-    <div className="rt-card">
+    <div className="rt-card sale-line">
       <strong>{line.product.description}</strong>
       {packs.length > 0 && (
         <div>
@@ -274,13 +279,16 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? withUnit(l, unitId) : l)) }));
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   // An item can be on the sale twice (cartons and loose pieces) only while it has pack sizes to choose from.
-  const add = (p: Product) =>
+  const add = (p: Product) => {
+    tapFeedback();
     setDraft((d) => (d.lines.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
+  };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
   // use is refused, never sold as one piece.
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
+    tapFeedback();
     setDraft((d) => ({ ...d, lines: scanInto(d.lines, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p))) }));
   };
 
@@ -347,7 +355,15 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       </div>
       <ScanBar id="sale-scan" branchId={branchId} onFound={scanAdd} autoFocus />
 
-      <h2>Items</h2>
+      <h2>
+        Items{' '}
+        {shown.lines.length > 0 && (
+          <span key={shown.lines.length} className="badge count-badge">
+            {shown.lines.length}
+            <span className="visually-hidden"> on the sale</span>
+          </span>
+        )}
+      </h2>
       {draft.lines.length === 0 && <EmptyState art="noSales" title="No items yet.">Search above and tap Add.</EmptyState>}
       {pricesOn && resolution.data?.price_list && !checking && (
         <p className="hint" data-tour="sale-price-list" data-testid="price-list-in-force">
