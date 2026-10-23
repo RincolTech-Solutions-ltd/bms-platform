@@ -109,8 +109,10 @@ class RetailLowStockCarriedIT extends IntegrationTest {
         JsonNode two = shop(dashboard, t.secondBranch());
         assertThat(two).isNotNull();
         assertThat(two.get("today_sales_minor").asLong()).isZero();
-        assertThat(two.has("out_of_stock")).isFalse();
-        assertThat(two.has("low_stock")).isFalse();
+        // Exactly the head office line's fields, sales figures included, less the two stock fields.
+        java.util.Set<String> expected = new java.util.TreeSet<>(hq.propertyNames());
+        expected.removeAll(java.util.Set.of("out_of_stock", "low_stock"));
+        assertThat(new java.util.TreeSet<>(two.propertyNames())).isEqualTo(expected);
     }
 
     @Test
