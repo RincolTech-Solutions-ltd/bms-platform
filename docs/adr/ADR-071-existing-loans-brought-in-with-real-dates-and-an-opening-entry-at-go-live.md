@@ -65,7 +65,11 @@ fit every lending business, not one register.
    403 `owner_only` for all of them, unlike the other Owner-only acts of ADR-062, and the operator sets it; until set, it is the business date of the first sign-in of
    an administrator, stored at that sign-in (`go_live_source` `first_admin_sign_in`, audited
    `core.settings.go_live_defaulted`) so that later sign-ins, removed roles or sessions never move it; V89 stores it for a
-   business whose administrators signed in before. The go-live date can only move earlier, otherwise operator only (the
+   business whose administrators signed in before, or that has a loan in the app. The default never lands later than
+   the real start, or a loan made in the app could come back as a paper loan: it is the earliest of that sign-in, the
+   first session of anyone ever an administrator, the earliest last sign-in of the staff, the day the business was
+   created, and the first loan made in the app (created or disbursed), since sessions are pruned and administrators
+   leave. The go-live date can only move earlier, otherwise operator only (the
    owner's agreed rule): once a date is stored, by default or by anyone, the Owner moves it only earlier (422
    `go_live_locked`), whether or not lending is in the app's books yet, since a later date would let a loan disbursed
    after go-live come in as if from paper. Only the platform operator moves it later (`PUT /platform/tenants/{tenant_id}/go-live`),

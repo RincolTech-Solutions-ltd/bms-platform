@@ -76,32 +76,41 @@ SELECT bms_grant_app('lending_brought_in_repayments', 'SELECT, INSERT');
 SELECT bms_make_append_only('lending_brought_in_repayments');
 
 -- ---------------------------------------------------------------------------------------------
--- The default go-live date (ADR-071 decision 5), stored rather than derived: the app stores the business date of the
--- first sign-in of an administrator in tenant_settings (go_live_date, go_live_source first_admin_sign_in) when nobody
--- has set one. A business whose administrators signed in before this migration gets the same date here, from its
--- earliest administrator session in its own time zone. Only rows without a go_live_date are touched.
+-- The default go-live date (ADR-071 decision 5), stored rather than derived: the app stores it in tenant_settings
+-- (go_live_date, go_live_source first_admin_sign_in) at the first sign-in of an administrator when nobody has set one.
+-- A business already working before this migration gets it here. The date must never land later than the real start,
+-- or a loan made in the app could come back as a "paper" loan: so it is the earliest, in the business's time zone, of
+-- the first session of anyone ever an administrator, the earliest last sign-in of its staff, the day the business was
+-- created, and the first loan made in the app (created or disbursed). Expired sessions are pruned and administrators
+-- leave, so the sessions alone may start too late. A business gets one when an administrator has signed in or a loan
+-- exists; only rows without a go_live_date are touched.
 -- ---------------------------------------------------------------------------------------------
 
-INSERT INTO tenant_settings (id, tenant_id)
-SELECT gen_random_uuid(), s.tenant_id
-  FROM auth_sessions s
- WHERE EXISTS (SELECT 1 FROM user_role_assignments a
-                WHERE a.user_id = s.user_id AND a.role_key = 'tenant_admin' AND a.revoked_at IS NULL)
- GROUP BY s.tenant_id
-ON CONFLICT (tenant_id) DO NOTHING;
-
-UPDATE tenant_settings ts
-   SET settings = ts.settings || jsonb_build_object('go_live_date', d.first_day::text,
-                                                    'go_live_source', 'first_admin_sign_in'),
-       updated_at = now()
-  FROM (SELECT s.tenant_id, (min(s.created_at) AT TIME ZONE t.timezone)::date AS first_day
-          FROM auth_sessions s
-          JOIN tenants t ON t.id = s.tenant_id
-         WHERE EXISTS (SELECT 1 FROM user_role_assignments a
-                        WHERE a.user_id = s.user_id AND a.role_key = 'tenant_admin' AND a.revoked_at IS NULL)
-         GROUP BY s.tenant_id, t.timezone) d
- WHERE ts.tenant_id = d.tenant_id
-   AND NOT (ts.settings ? 'go_live_date');
+INSERT INTO tenant_settings (id, tenant_id, settings)
+SELECT gen_random_uuid(), d.tenant_id,
+       jsonb_build_object('go_live_date', d.first_day::text, 'go_live_source', 'first_admin_sign_in')
+  FROM (SELECT t.id AS tenant_id,
+               LEAST((SELECT (min(s.created_at) AT TIME ZONE t.timezone)::date
+                        FROM auth_sessions s
+                       WHERE s.tenant_id = t.id
+                         AND EXISTS (SELECT 1 FROM user_role_assignments a
+                                      WHERE a.user_id = s.user_id AND a.role_key = 'tenant_admin')),
+                     (SELECT (min(u.last_login_at) AT TIME ZONE t.timezone)::date
+                        FROM users u WHERE u.tenant_id = t.id AND u.kind = 'staff'),
+                     (t.created_at AT TIME ZONE t.timezone)::date,
+                     (SELECT least((min(l.created_at) AT TIME ZONE t.timezone)::date, min(l.disbursed_on))
+                        FROM lending_loans l WHERE l.tenant_id = t.id)) AS first_day
+          FROM tenants t
+         WHERE EXISTS (SELECT 1 FROM auth_sessions s
+                         JOIN user_role_assignments a ON a.user_id = s.user_id AND a.role_key = 'tenant_admin'
+                        WHERE s.tenant_id = t.id)
+            OR EXISTS (SELECT 1 FROM users u
+                         JOIN user_role_assignments a ON a.user_id = u.id AND a.role_key = 'tenant_admin'
+                        WHERE u.tenant_id = t.id AND u.last_login_at IS NOT NULL)
+            OR EXISTS (SELECT 1 FROM lending_loans l WHERE l.tenant_id = t.id)) d
+ON CONFLICT (tenant_id) DO UPDATE
+   SET settings = tenant_settings.settings || EXCLUDED.settings, updated_at = now()
+ WHERE NOT (tenant_settings.settings ? 'go_live_date');
 
 -- ---------------------------------------------------------------------------------------------
 -- Permission (chapter 8 section 8.3.2): record an existing loan, by the form or the CSV import. Administrators and

@@ -1098,6 +1098,46 @@ class ExistingLoansIT extends LoanFixtures {
      * refused, whether or not lending is in the books yet, since a later date would let a loan disbursed after go-live
      * come in as if from paper. The platform operator moves it later, with a reason, audited.
      */
+    /**
+     * The default never lands later than the real start: the sessions are pruned, nobody has signed in yet and the
+     * business row is younger than its first loan made in the app; the first sign-in stores the day of that loan, so a
+     * loan made in the app since then cannot come back as a paper loan.
+     */
+    @Test
+    void frExl03_withTheSessionsPrunedTheFirstLoanInTheAppSetsTheDefault() {
+        String product = product("EXL14", Map.of());
+        String member = borrower(29);
+        ResponseEntity<JsonNode> applied = apply(member, product, 900_000, null);
+        assertThat(applied.getStatusCode()).as("%s", applied.getBody()).isEqualTo(HttpStatus.CREATED);
+        LocalDate firstLoan = today.minusDays(60);
+        TestDatabase.owner()
+                .sql("UPDATE lending_loans SET created_at = CAST(? AS date) + time '12:00' WHERE tenant_id = ?")
+                .params(firstLoan, t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE tenants SET created_at = now() - interval '20 days' WHERE id = ?")
+                .param(t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("UPDATE users SET last_login_at = NULL WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+        TestDatabase.owner()
+                .sql("DELETE FROM auth_sessions WHERE tenant_id = ?")
+                .param(t.tenantId())
+                .update();
+
+        String email = Api.email("exl-pruned");
+        UUID admin2 = Api.staff(t, email, new Api.Role("tenant_admin", null));
+        Api.tenant(http, t.slug()).signIn(admin2, email, Api.PASSWORD, null);
+        JsonNode live = send(HttpMethod.GET, EXISTING + "/go-live", as(admin, adminPerms, "*", null), null)
+                .getBody();
+        assertThat(live.get("source").asString()).isEqualTo("first_admin_sign_in");
+        assertThat(live.get("go_live_date").asString()).isEqualTo(firstLoan.toString());
+        ResponseEntity<JsonNode> inApp = check(request(member, product, 900_000, today.minusDays(30), List.of()));
+        assertThat(errorCodes(inApp)).containsExactly("disbursement_date:disbursement_not_before_go_live");
+    }
+
     @Test
     void frExl03_onceStoredTheOwnerMovesTheGoLiveDateOnlyEarlier() {
         assertThat(setGoLive(today.minusDays(10)).getStatusCode())

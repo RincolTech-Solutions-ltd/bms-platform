@@ -446,7 +446,7 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
         if (stored.values().get("go_live_date") != null) {
             return;
         }
-        LocalDate day = at.atZone(tenant.profile().timezone()).toLocalDate();
+        LocalDate day = firstDay(at.atZone(tenant.profile().timezone()).toLocalDate());
         Map<String, Object> next = new TreeMap<>(stored.values());
         next.put("go_live_date", day.toString());
         next.put("go_live_source", "first_admin_sign_in");
@@ -463,6 +463,33 @@ class SettingsService implements TenantSettings, ModuleSettings, GoLiveDate {
                         Map.of("go_live_date", day.toString(), "source", "first_admin_sign_in")),
                 userId,
                 "staff");
+    }
+
+    /**
+     * The default go-live date never lands later than the real start (ADR-071 decision 5), or a loan made in the app could
+     * come back as a "paper" loan: the earliest of this sign-in, the first session of anyone ever an administrator, the
+     * earliest last sign-in of the staff, the day the business was created, and the first loan made in the app (created
+     * or disbursed). Sessions are pruned and administrators leave, so this sign-in alone may come too late. V89 backfills
+     * the same date.
+     */
+    private LocalDate firstDay(LocalDate signedIn) {
+        return jdbc.sql("""
+                        SELECT LEAST(CAST(? AS date),
+                                     (SELECT (min(s.created_at) AT TIME ZONE t.timezone)::date
+                                        FROM auth_sessions s
+                                       WHERE s.tenant_id = t.id
+                                         AND EXISTS (SELECT 1 FROM user_role_assignments a
+                                                      WHERE a.user_id = s.user_id AND a.role_key = 'tenant_admin')),
+                                     (SELECT (min(u.last_login_at) AT TIME ZONE t.timezone)::date
+                                        FROM users u WHERE u.tenant_id = t.id AND u.kind = 'staff'),
+                                     (t.created_at AT TIME ZONE t.timezone)::date,
+                                     (SELECT least((min(l.created_at) AT TIME ZONE t.timezone)::date, min(l.disbursed_on))
+                                        FROM lending_loans l WHERE l.tenant_id = t.id AND l.go_live_on IS NULL))
+                          FROM tenants t WHERE t.id = ?
+                        """)
+                .params(signedIn, tenant.profile().id())
+                .query(LocalDate.class)
+                .single();
     }
 
     @Override

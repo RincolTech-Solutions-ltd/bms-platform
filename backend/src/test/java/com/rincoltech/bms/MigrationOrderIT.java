@@ -2053,6 +2053,77 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V89 (existing loans, #466, ADR-071) backfills the default go-live date no later than the real start: a business
+     * whose only surviving administrator session is from March, but which was created in January, goes live in January;
+     * a business nobody has signed in to gets none; a date already stored is kept.
+     */
+    @Test
+    void existingLoansMigrationDatesTheGoLiveNoLaterThanTheRealStart() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("89") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID pruned = UUID.randomUUID();
+            UUID quiet = UUID.randomUUID();
+            UUID kept = UUID.randomUUID();
+            int n = 0;
+            for (UUID tenant : List.of(pruned, quiet, kept)) {
+                n++;
+                owner.sql("""
+                                INSERT INTO tenants (id, slug, name, plan_id, created_at)
+                                VALUES (?, ?, 'Test Tenant V89', '00000000-0000-4000-8000-000000000001',
+                                        TIMESTAMPTZ '2026-01-05 09:00:00+03')
+                                """).params(tenant, "test-v89-" + n).update();
+            }
+            for (UUID tenant : List.of(pruned, kept)) {
+                UUID user = UUID.randomUUID();
+                owner.sql("""
+                                INSERT INTO users (id, tenant_id, kind, full_name, email, status, last_login_at)
+                                VALUES (?, ?, 'staff', 'Test Staff V89', ?, 'active', TIMESTAMPTZ '2026-03-20 09:00:00+03')
+                                """).params(user, tenant, user + "@example.test").update();
+                owner.sql("""
+                                INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)
+                                VALUES (gen_random_uuid(), ?, ?, 'tenant_admin', NULL, ?)
+                                """).params(tenant, user, user).update();
+                owner.sql("""
+                                INSERT INTO auth_sessions (id, tenant_id, created_at, user_id, family_id, refresh_token_hash,
+                                                           expires_at, idle_expires_at)
+                                VALUES (gen_random_uuid(), ?, TIMESTAMPTZ '2026-03-02 09:00:00+03', ?, gen_random_uuid(),
+                                        ?, now(), now())
+                                """)
+                        .params(tenant, user, "%064d".formatted(Math.abs(user.hashCode())))
+                        .update();
+            }
+            owner.sql("""
+                            INSERT INTO tenant_settings (id, tenant_id, settings)
+                            VALUES (gen_random_uuid(), ?, '{"go_live_date": "2025-12-01", "go_live_source": "set"}')
+                            """).param(kept).update();
+
+            DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(pruned)
+                            .query(String.class)
+                            .single())
+                    .as("the day the business was created, before the surviving session")
+                    .isEqualTo("2026-01-05");
+            assertThat(owner.sql("SELECT count(*) FROM tenant_settings WHERE tenant_id = ?"
+                                    + " AND settings->>'go_live_date' IS NOT NULL")
+                            .param(quiet)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(kept)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("2025-12-01");
+        }
+    }
+
     @Test
     void noTwoMigrationsShareAVersion() {
         try (PostgreSQLContainer postgres = database()) {
