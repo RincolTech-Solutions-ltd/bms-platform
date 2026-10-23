@@ -6,6 +6,9 @@ import com.rincoltech.bms.IntegrationTest;
 import com.rincoltech.bms.TestDatabase;
 import com.rincoltech.bms.testsupport.Api;
 import com.rincoltech.bms.testsupport.Api.Session;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -900,6 +903,67 @@ class ReferralsIT extends IntegrationTest {
             pool.shutdownNow();
         }
         assertThat(amounts(detail(rx))).containsExactly(2000L);
+    }
+
+    /**
+     * A payment recorded while the operator changes the referrer waits for the change and lands on the referral it left
+     * current: it is never left with no outcome row (review of #467). The change is held open in its own transaction until
+     * the payment is seen waiting on a lock (within the 5 second lock_timeout of the payment's Idempotency-Key), then
+     * committed.
+     */
+    @Test
+    void aPaymentRecordedDuringAChangeOfReferrerLandsOnTheNewReferral() throws Exception {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refchga", false);
+        TestDatabase.Fixture b = TestDatabase.tenant("refchgb", false);
+        Business x = business("ref-change-race");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID byA = currentReferral(x.id());
+
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try (Connection change = TestDatabase.ownerDataSource().getConnection()) {
+            change.setAutoCommit(false);
+            try (PreparedStatement ps =
+                    change.prepareStatement("SELECT * FROM platform_referral_set_referrer(?, ?, ?, ?)")) {
+                ps.setObject(1, x.id());
+                ps.setObject(2, b.tenantId());
+                ps.setObject(3, operatorId);
+                ps.setTimestamp(4, Timestamp.from(Instant.now()));
+                ps.executeQuery().close();
+            }
+            Future<ResponseEntity<JsonNode>> payment = pool.submit(() -> pay(x.id(), 60000, 1));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (waitingOnALock() == 0) {
+                if (payment.isDone()) {
+                    throw new AssertionError("the payment did not wait for the change: " + payment.get());
+                }
+                assertThat(System.nanoTime()).as("the payment is seen waiting").isLessThan(deadline);
+                Thread.sleep(50);
+            }
+            change.commit();
+            UUID paymentId = UUID.fromString(
+                    payment.get(60, TimeUnit.SECONDS).getBody().get("id").asString());
+            UUID byB = currentReferral(x.id());
+            assertThat(byB).isNotEqualTo(byA);
+            assertThat(TestDatabase.owner()
+                            .sql("SELECT referral_id FROM referral_payment_outcomes WHERE payment_id = ?")
+                            .param(paymentId)
+                            .query(UUID.class)
+                            .single())
+                    .isEqualTo(byB);
+            assertThat(amounts(detail(byB))).containsExactly(6000L);
+            assertThat(amounts(detail(byA))).isEmpty();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** pg_locks, not pg_stat_activity: the owner role is not shown the wait events of the application role's sessions. */
+    static long waitingOnALock() {
+        return TestDatabase.owner()
+                .sql("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                .query(Long.class)
+                .single();
     }
 
     /** A percent is rounded half up to whole minor units: ten percent of 333 is 33, and of 335 is 34 (decision 5). */

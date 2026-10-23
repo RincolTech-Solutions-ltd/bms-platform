@@ -710,7 +710,8 @@ $$;
 --    so a correction or a clear-and-reset never restarts the months: a new referrer earns only the months left. The payments
 --    whose outcome was currency_differs and the payments recorded as refunded are left out (each outcome is kept in
 --    referral_payment_outcomes). Recording a payment locks the business's subscription first (V75), so two payments recorded
---    at once are counted one after the other and never both as the first. Amounts are whole minor units, rounded half up. A line
+--    at once are counted one after the other and never both as the first; it then shares the lock on the business's tenant
+--    row that a change of referrer takes, so a payment recorded during a change sees the referral the change left current. Amounts are whole minor units, rounded half up. A line
 --    worked out while the referrer business is suspended or cancelled keeps referrer_inactive; the reads and marking paid look
 --    at the referrer's status now (bms_referrer_status). Outcomes: added,
 --    no_referral, no_rule, not_first_payment, months_used, currency_differs, cap_reached, zero.
@@ -737,6 +738,10 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'unknown payment' USING ERRCODE = 'no_data_found';
     END IF;
+    -- platform_referral_set_referrer locks the business's tenant row before it ends one referral and starts the next, so
+    -- waiting on that lock here means the read below, a new statement with its own snapshot, sees the referral the change
+    -- left current. Locking only the referral row would skip a row ended meanwhile and miss the one inserted with it.
+    PERFORM 1 FROM tenants t WHERE t.id = v_tenant FOR SHARE;
     SELECT * INTO v_ref FROM tenant_referrals r WHERE r.referred_tenant_id = v_tenant AND r.ended_at IS NULL FOR UPDATE;
     IF NOT FOUND THEN
         outcome := 'no_referral';

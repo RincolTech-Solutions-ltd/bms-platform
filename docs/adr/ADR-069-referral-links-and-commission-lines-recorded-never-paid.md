@@ -104,7 +104,10 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     whose `payment` line still stands: freeing the months while the line stays due would pay commission on the refunded
     payment and again on the next one, so such a refund goes through reversing the line with `refunded: true`. The
     count does not compare creation times: recording a payment locks the business's subscription row first (`V75`), so two
-    payments recorded at the same moment are counted one after the other and never both as the first. The cap stays per
+    payments recorded at the same moment are counted one after the other and never both as the first. A payment recorded
+    while the operator changes the referrer waits for the change: the change locks the business's tenant row, and the
+    commission takes a share lock on that row before it reads the current referral, so the payment always lands on the
+    referral the change left current and never ends with no outcome. The cap stays per
     referral row. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered
     late counts from the day it was entered. (The review of 22 Oct 2026, FAIL, replaced the earlier count from this referral's
     own start, which let a correction or a clear-and-reset pay a second N months.)
