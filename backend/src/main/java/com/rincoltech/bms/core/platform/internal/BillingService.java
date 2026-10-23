@@ -604,15 +604,15 @@ class BillingService {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * Every overdue business past its grace period, not a pilot and still active (a business suspended or closed at the
-     * tenant level is left off), with how many days it is overdue and the price of its next month; the most overdue first.
-     * The operator suspends from the Business page, by hand.
+     * Every overdue business past its grace period, not a pilot, still active (a business suspended or closed at the tenant
+     * level is left off) and with no status change scheduled by the operator, with how many days it is overdue and the price
+     * of its next month; the most overdue first. The operator suspends from the Business page, by hand.
      */
     DueForSuspension dueForSuspension() {
         Settings settings = settings();
         List<BillingAdminController.DueItem> items = new ArrayList<>();
         for (TenantResponse tenant : platform.tenants(null, List.of("past_due"), null)) {
-            if (tenant.pilot() || !"active".equals(tenant.status())) {
+            if (tenant.pilot() || !"active".equals(tenant.status()) || tenant.nextStatusChangeOn() != null) {
                 continue;
             }
             LocalDate today = clock.today(ZoneId.of(tenant.timezone()));

@@ -37,7 +37,8 @@ and not automatic suspension, an emailed receipt, and a Plan and billing page fo
    wins, and writes `platform.tenant.subscription_overdue` to the platform audit log with no operator. `past_due` changes nothing
    the business can do. A free month that ends unpaid becomes overdue the same way. A subscription with a status change the
    operator scheduled (`next_status_change_on`, for example an end chosen for the end of the period) is never moved, its
-   date is never touched, and it gets no reminder: a business that is leaving is not told to pay to keep using BMS.
+   date is never touched, it gets no reminder and it is never listed for suspension: a business that is leaving is not
+   told to pay to keep using BMS.
 3. **The grace period is a platform setting.** `platform_billing_settings.grace_days` (0 to 60, 7 at first) and `how_to_pay`, one
    row, changed by the operator with a reason (`platform.billing.settings_changed`). The grace period is read when it is needed,
    never stored per business, so a change applies to every overdue business at once. While a business is overdue and within it,
