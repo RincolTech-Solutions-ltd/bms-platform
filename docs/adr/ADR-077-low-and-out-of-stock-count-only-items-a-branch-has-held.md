@@ -48,7 +48,11 @@ counts use "at or below", as the threshold always did.
 **Watch for:** the held test reads `retail_stock_balances` and `retail_stock_movements` per item and branch through their
 `(tenant_id, branch_id, product_id ...)` indexes; with a catalogue of thousands of items and many branches the dashboard's per-shop
 count is items times branches probes. Bench queries k15 (positions), k18 (the counts) and c10 (the Low tab) measure it. At 25
-times the data (3000 items, 4 branches, 1.6 million movements, about 10000 minimums added to the seed) every probe is an index
-scan with `tenant_id` in its condition; medians were k15 162 ms, k18 190 ms and c10 17 ms. The positions query keeps its inner
-select behind `OFFSET 0`: flattened, the held and minimum probes ran once per aggregate and JIT optimisation took it to 1.4 s.
-If it grows, a held flag kept on the balance row is the fix and needs a migration.
+times the data (3000 items in the large tenant, 4 branches, 1.6 million movements, 8103 minimums in `seed.sql`, the VM profile)
+every held and minimum probe is an index scan with `tenant_id` in its condition: the balances through
+`retail_stock_balances_pkey`, the movements through `retail_stock_movements_position` and both minimums through
+`retail_stock_minimums_tenant_id_product_id_branch_id_key`; medians were k15 179 ms, k18 219 ms and c10 20 ms (pull request
+#517 has the plans). No index is added. The positions query keeps its per-row select in a `MATERIALIZED` CTE: flattened, the
+held and minimum probes ran once per aggregate and JIT optimisation took it to a median of 1456 ms (1193 ms of it JIT). With no
+branch chosen the counts cover the branches the positions report (active, or closed and still holding stock), so a closed and
+emptied shop adds nothing. If it grows, a held flag kept on the balance row is the fix and needs a migration.
