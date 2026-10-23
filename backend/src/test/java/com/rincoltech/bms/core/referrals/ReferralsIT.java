@@ -1386,6 +1386,47 @@ class ReferralsIT extends IntegrationTest {
     }
 
     /**
+     * A year paid upfront earns a line; marking that payment refunded while its line stands is refused, so its months stay
+     * used and the next monthly payment earns nothing. Reversing the line with refunded frees them: commission is never
+     * due both on the refunded year and on the payment after it.
+     */
+    @Test
+    void aRefundWhileItsLineStandsIsRefusedSoNoCommissionIsPaidTwice() {
+        seededDefault();
+        TestDatabase.Fixture a = TestDatabase.tenant("refrefund3", false);
+        Business x = business("ref-refund-line");
+        setReferrer(x.id(), code(a.tenantId()), "Test: referred by the shop");
+        UUID rx = currentReferral(x.id());
+        UUID year = UUID.fromString(pay(x.id(), 720000, 12).getBody().get("id").asString());
+        assertThat(amounts(detail(rx))).containsExactly(72000L);
+
+        long before = audits("platform.referral.payment_refunded");
+        ResponseEntity<JsonNode> refused = platform.post(
+                "/api/v1/platform/referrals/payments/" + year + "/refunded",
+                Map.of("reason", "Test: the year was sent back"),
+                operator.accessToken());
+        assertThat(refused.getStatusCode()).as("%s", refused.getBody()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(refused.getBody().get("code").asString()).isEqualTo("payment_line_not_reversed");
+        assertThat(audits("platform.referral.payment_refunded")).isEqualTo(before);
+        pay(x.id(), 60000, 1);
+        assertThat(amounts(detail(rx))).containsExactly(72000L);
+        assertThat(outcomes(rx)).containsExactly("added", "months_used");
+
+        UUID line = UUID.fromString(detail(rx).get("lines").get(0).get("id").asString());
+        assertThat(reverse(line, "Test: the year was refunded", true).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        pay(x.id(), 60000, 1);
+        assertThat(amounts(detail(rx))).containsExactly(72000L, -72000L, 6000L);
+        assertThat(detail(rx)
+                        .get("referral")
+                        .get("totals")
+                        .get(0)
+                        .get("due_minor")
+                        .asLong())
+                .isEqualTo(6000L);
+    }
+
+    /**
      * The reversal of a line that was never paid is never marked paid either: it would show money due that was never owed.
      * The reversal of a paid line is settled like any line.
      */

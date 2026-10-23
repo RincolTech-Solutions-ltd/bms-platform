@@ -318,9 +318,10 @@ class ReferralsAdminController {
     @RequiresPermission("platform.tenants.manage")
     @Operation(
             summary =
-                    "Record that a referred business's subscription payment was refunded, with a reason, whether or not it"
-                            + " earned a line: it no longer uses up the rule's months; 404 when the payment has no referral, 409"
-                            + " payment_already_refunded",
+                    "Record that a referred business's subscription payment was refunded, with a reason, when it has no"
+                            + " commission line left standing: it no longer uses up the rule's months; 404 when the payment has"
+                            + " no referral, 409 payment_already_refunded, 409 payment_line_not_reversed (reverse the line with"
+                            + " refunded instead)",
             operationId = "platformMarkReferralPaymentRefunded")
     ReferralDetail paymentRefunded(
             @PathVariable("payment_id") UUID paymentId, @Valid @RequestBody RefundedRequest request) {

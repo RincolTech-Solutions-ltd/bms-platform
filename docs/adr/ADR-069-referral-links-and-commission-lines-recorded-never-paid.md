@@ -97,7 +97,9 @@ The review of the pull request (NEEDS_CHANGES, 22 Oct 2026) added the decisions 
     used. A refunded payment that has no line to reverse (it gave `no_rule`, `months_used`, `cap_reached` or `zero`), or
     whose line was reversed without `refunded` by mistake, is recorded refunded on its own route
     (`POST /platform/referrals/payments/{payment_id}/refunded`, with a reason, audited `platform.referral.payment_refunded`;
-    `refunded_by_platform_user_id`), with the same effect. The
+    `refunded_by_platform_user_id`), with the same effect. That route refuses (409 `payment_line_not_reversed`) a payment
+    whose `payment` line still stands: freeing the months while the line stays due would pay commission on the refunded
+    payment and again on the next one, so such a refund goes through reversing the line with `refunded: true`. The
     count does not compare creation times: recording a payment locks the business's subscription row first (`V75`), so two
     payments recorded at the same moment are counted one after the other and never both as the first. The cap stays per
     referral row. Months are counted by when a payment was recorded (`created_at`), not by its `paid_on`, so a payment entered

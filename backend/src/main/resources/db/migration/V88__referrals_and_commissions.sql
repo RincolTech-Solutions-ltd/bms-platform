@@ -939,10 +939,12 @@ BEGIN
 END
 $$;
 
--- Records that a payment of a referred business was refunded, whether or not it earned a line (a payment that gave no_rule,
+-- Records that a payment of a referred business was refunded when it has no line left to reverse (a payment that gave no_rule,
 -- months_used, cap_reached or zero has none, and a line reversed without refunded by mistake cannot be reversed again), so it
--- no longer uses up the rule's months (ADR-069 decision 9). Returns 'not_found' (no referral outcome for that payment),
--- 'already_refunded', or the referral id as text.
+-- no longer uses up the rule's months (ADR-069 decision 9). A payment whose line still stands is refused: freeing its months
+-- while the line stays due would pay commission on a refunded payment and then again on the next one; the operator reverses
+-- that line with refunded instead. Returns 'not_found' (no referral outcome for that payment), 'already_refunded',
+-- 'line_not_reversed', or the referral id as text.
 CREATE FUNCTION platform_referral_mark_payment_refunded(p_payment_id uuid, p_platform_user_id uuid, p_now timestamptz)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -958,6 +960,12 @@ BEGIN
     END IF;
     IF v_outcome.refunded_at IS NOT NULL THEN
         RETURN 'already_refunded';
+    END IF;
+    -- No lock needed: a line is never un-reversed, and the payment's line commits with its outcome, locked above.
+    IF EXISTS (SELECT 1 FROM referral_commission_lines l
+                WHERE l.payment_id = p_payment_id AND l.kind = 'payment'
+                  AND NOT EXISTS (SELECT 1 FROM referral_commission_lines r WHERE r.reverses_line_id = l.id)) THEN
+        RETURN 'line_not_reversed';
     END IF;
     UPDATE referral_payment_outcomes SET refunded_at = p_now, refunded_by_platform_user_id = p_platform_user_id
      WHERE payment_id = p_payment_id;

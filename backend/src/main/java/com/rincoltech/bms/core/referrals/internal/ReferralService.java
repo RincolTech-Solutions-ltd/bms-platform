@@ -509,6 +509,13 @@ class ReferralService implements Referrals {
                     "Already refunded",
                     "This payment is already recorded as refunded.");
         }
+        if ("line_not_reversed".equals(result)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "payment_line_not_reversed",
+                    "Line not reversed",
+                    "This payment earned a commission line that still stands. Reverse that line with refunded instead.");
+        }
         UUID referralId = UUID.fromString(result);
         ReferralDetail detail = detail(referralId);
         Map<String, Object> data = new LinkedHashMap<>();

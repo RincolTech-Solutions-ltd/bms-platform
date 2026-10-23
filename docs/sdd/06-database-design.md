@@ -314,7 +314,7 @@ fixed id `00000000-0000-4000-8000-000000000890`), and points the default at it o
 `refunded_by_line_id uuid` (FK `referral_commission_lines`, the reversal that said so) and `refunded_by_platform_user_id uuid` (FK
 `platform_users`); both are null until `refunded_at` is set. Inserted only by `platform_referral_commission_for_payment`;
 `platform_referral_reverse_line` with `p_refunded`, or `platform_referral_mark_payment_refunded` for a payment with no line to
-reverse, sets the refund columns. A trigger
+reverse (it refuses one whose `payment` line has no reversal), sets the refund columns. A trigger
 refuses a delete and any update except setting the refund columns once. A payment whose outcome was `currency_differs`, or that
 was recorded as refunded, never uses up a rule's first N months (ADR-069 decision 9).
 

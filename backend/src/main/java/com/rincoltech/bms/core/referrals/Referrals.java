@@ -95,9 +95,9 @@ public interface Referrals {
     ReferralDetail reverseLine(UUID lineId, String reason, boolean refunded, UUID operatorId);
 
     /**
-     * Records that a subscription payment of a referred business was refunded, whether or not it earned a line, so it no
-     * longer uses up the rule's months; with a reason, audited. 404 when the payment has no referral outcome, 409
-     * {@code payment_already_refunded}.
+     * Records that a subscription payment of a referred business was refunded when it has no commission line left standing,
+     * so it no longer uses up the rule's months; with a reason, audited. 404 when the payment has no referral outcome, 409
+     * {@code payment_already_refunded}, 409 {@code payment_line_not_reversed} while its line stands.
      */
     ReferralDetail markPaymentRefunded(UUID paymentId, String reason, UUID operatorId);
 
