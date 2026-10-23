@@ -1162,6 +1162,13 @@ class RetailOfflineSalesIT extends IntegrationTest {
                         .query(String.class)
                         .single())
                 .isEqualTo("discarded:null");
+        // The sale already recorded under that client sale id stands as it was.
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT id::text FROM retail_sales WHERE client_sale_id = ?")
+                        .param(client)
+                        .query(String.class)
+                        .list())
+                .containsExactly(sold.getBody().get("id").asString());
     }
 
     /** A sale recorded under a client sale id, then a client_sale_conflict report of a different sale under it: its id. */
