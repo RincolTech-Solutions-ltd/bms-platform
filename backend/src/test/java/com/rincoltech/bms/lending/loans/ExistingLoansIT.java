@@ -1131,8 +1131,9 @@ class ExistingLoansIT extends LoanFixtures {
 
     /**
      * A check reports every row: an unknown member, a date that is not year-month-day, a repayment with no loan row, a
-     * repayment after go-live, a repayment before its disbursement. A commit of a file with errors records nothing; the corrected file is checked clean,
-     * committed (each loan waiting for its checker), and committed again it skips every loan.
+     * repayment after go-live, a repayment before its disbursement. A commit of a file with errors records nothing; the
+     * corrected file is checked clean, committed (each loan waiting for its checker), and committed again it skips every
+     * loan.
      */
     @Test
     void frExl06_theCsvImportChecksThenCommits() {
