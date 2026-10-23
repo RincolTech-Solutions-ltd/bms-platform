@@ -58,6 +58,29 @@ describe('a keyboard-wedge scanner', () => {
   });
 });
 
+describe('a keyboard-wedge scanner that stalls', () => {
+  it('joins an EAN-13 starting with 0 that stalls after its first key, though the rest is a UPC-A', () => {
+    const wedge = createWedge<number>();
+    [...'0036000291452'].forEach((ch, i) => wedge.key(ch, 1000 + i * 8 + (i > 0 ? 120 : 0), i));
+    expect(wedge.enter(1000 + 13 * 8 + 120)).toEqual({ code: '0036000291452', mark: 0 });
+  });
+
+  it('counts the idle time from the last key, so a long Code 128 that stalls late is still one code', () => {
+    const wedge = createWedge<number>();
+    let at = 1000;
+    [...'TEST-LAMP-123456789'].forEach((ch, i) => wedge.key(ch, (at += i === 17 ? 120 : 30), i));
+    expect(wedge.enter(at + 30)).toEqual({ code: 'TEST-LAMP-123456789', mark: 0 });
+  });
+
+  it('is not a person with two key rollovers around a pause, at either gap', () => {
+    for (const gap of [35, 80]) {
+      const wedge = createWedge(gap);
+      [1000, 1020, 1120, 1140].forEach((at, i) => wedge.key('1256'[i] ?? '', at));
+      expect(wedge.enter(1145).code).toBeNull();
+    }
+  });
+});
+
 const lamp: Product = { id: 'p1', code: 'L-1', description: 'Test Lamp', unit: 'piece', barcodes: [{ id: 'b1', code: '036000291452', format: 'upca', generated: false }] };
 const carton: Product = { id: 'p2', code: 'C-1', description: 'Test Carton', unit: 'piece', barcodes: [{ id: 'b2', code: 'TEST-CTN', format: 'code128', unit_id: 'u-ctn', generated: false }] };
 

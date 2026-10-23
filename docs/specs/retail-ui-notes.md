@@ -1312,16 +1312,17 @@ ADR-070, FR-RET-68, migration `V87`. Generic for every business; no capability s
   35 ms of each other (this device's **Scanner speed** in Notifications and app, up to 80 ms for a slow Bluetooth scanner, kept in
   this browser), at least four, closed by Enter (`createWedge` in `barcode-state.ts`); with the cursor in a text field the field gets
   back the value and selection it had before the burst, taken when the burst's first key starts a new run (so a scan right after
-  typing a quantity keeps the quantity typed). A run whose keys so far all came within the gap (at least two of them) looks like a
-  scanner: one stall in it, even after its second key, is the scanner pausing while the run is younger than 500 ms, and the keys
-  after the stall join the code, so the whole code is looked up, the field keeps the value from before the first key, and four keys
-  are still needed at Enter. A second stall ends the run, and so does a Tab, so a person whose keys only now and then come within
-  the gap (1000 typed at 70 to 120 ms a key with one key rollover, or 12, Tab, 50) keeps what was typed and their Enter reaches the
-  form. A stall right after the first key is taken as one code only when that key and the rest make an EAN-13, EAN-8 or UPC-A with a
-  right check digit, or one of the system's own label codes (`IN` and eight digits), and the rest alone do not. Any other Code 128
-  that stalls right after its first key is still split (a known limit). So a
-  single key typed just before a scan stays in the field, and an Enter at scanner speed after a run of scanner keys never reaches the form, even when the
-  keys after the stall are too few to be a code. On the sale screen the cursor waits in the scan box (on a device with a
+  typing a quantity keeps the quantity typed). Each key carries the field as it was before it, and the field is put back to
+  how it was before the code's first key. A run is the keys since the field was last quiet for 500 ms (counted from the last
+  key), Enter or a Tab. Enter at scanner speed takes a code when the keys from some key on are at least four and steady: at
+  most one gap in four is longer than the gap (the scanner pausing part way, even late in a long Code 128), the rest come
+  within it. The code starts at two keys within the gap, or at a single key before a stall when that key and the rest make an
+  EAN-13, EAN-8 or UPC-A with a right check digit, or one of the system's own label codes (`IN` and eight digits), so an
+  EAN-13 starting with 0 that stalls after its 0 is still one code and a single key typed just before a scan stays in the
+  field. A person's keys are not steady, even with key rollovers (1000 typed at 70 to 120 ms a key with one rollover, 1256
+  with two rollovers around a pause, or 12, Tab, 50): they keep what was typed and their Enter reaches the form. When no
+  code can be taken (a short Code 128 that stalls, a stall after the first key of another Code 128), nothing in the field is
+  touched and the Enter reaches the form (a known limit). On the sale screen the cursor waits in the scan box (on a device with a
   mouse or trackpad; "Keep the cursor in the scan box on the sale screen" in Notifications and app turns it off), so a scan too slow
   to be told from typing still lands there and its Enter never submits the sale. While a dialog is open over the form (a sheet, the help, a tour step, the menu drawer) the wedge takes no keys, so a scan cannot add a line behind it. A found item is added at 1 or its line gains one, in the pack the barcode is on (the sale and the restock,
   with pack sizes on); on the stock count it adds one to the count, or the pack factor, and clears the search so the counted line shows; an item not on the branch's count sheet is refused with "<item> is not on the count sheet of this branch." "Added <item>." is read out politely, with a

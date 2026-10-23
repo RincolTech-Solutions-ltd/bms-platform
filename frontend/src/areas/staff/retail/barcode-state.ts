@@ -140,79 +140,50 @@ function checked(code: string): boolean {
   return c.ok && c.format !== 'code128';
 }
 
+/** How many keys a run keeps: more than the longest code (48), so a person typing a long note never grows it. */
+const WEDGE_KEEP = 64;
+
 /**
- * Collects the keys of one scanner burst: `key` with a printable character and its time, `enter` at the end. Enter
- * gives the code when it closes a run of at least WEDGE_MIN characters that came within WEDGE_GAP_MS of each other.
- * A run whose keys so far all came within the gap (at least two of them) looks like a scanner: while it is younger than
- * WEDGE_IDLE_MS, one stall longer than the gap is the same scanner pausing and its keys join the run. A second stall
- * ends the run, as does `end` (a Tab), so a person whose keys only now and then come within the gap keeps what they
- * typed. A scanner that stalls after its first key leaves that key as a run of its own: `earlier` is true when Enter
- * takes the code from that key on, which happens only when that key and the run after it make a code with a right
- * check digit, or one of the system's IN label codes, and the run alone does not (a person who types one key just
- * before a scan keeps it). Another Code 128 that stalls after its first key is still split.
+ * Collects the keys of one scanner burst: `key` with a printable character, its time and a mark (the field as it was
+ * before that key), `enter` at the end, `end` on a Tab. A run is the keys since the field was last idle for
+ * WEDGE_IDLE_MS (counted from the last key), Enter, or a Tab. Enter gives a code when it follows the last key at
+ * scanner speed and the keys from some key on are at least WEDGE_MIN and steady: at most one gap in four is longer
+ * than the gap (a scanner pausing part way), the rest come within it. A person's keys are not steady, even with key
+ * rollovers around a pause (1, 2 at +20 ms, 5 at +100 ms, 6 at +20 ms). The code starts at its first two keys within
+ * the gap, or at a single key before a stall when that key and the rest make an EAN-13, EAN-8 or UPC-A with a right
+ * check digit, or one of the system's IN label codes (a person who types one key just before a scan keeps it). Of the
+ * steady codes, the first with a right check digit or the IN shape wins, else the longest. With no code, Enter is left
+ * to the form and nothing in the field is touched. `mark` is the mark of the code's first key, to put the field back.
  */
-export function createWedge(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
-  let buffer = '';
-  let last = 0;
-  let run = 0;
-  let started = false;
-  let pair = false;
-  let stall = false;
-  let burst = false;
-  let lone = '';
+export function createWedge<T = undefined>(gap = WEDGE_GAP_MS, min = WEDGE_MIN) {
+  let keys: { ch: string; at: number; mark: T | undefined }[] = [];
   return {
-    /**
-     * True when this key starts a new run of keys: the first key, one after the field was idle for WEDGE_IDLE_MS or
-     * after `end`, or one slower than the gap unless it is the first stall of a scanner-like run younger than
-     * WEDGE_IDLE_MS.
-     */
-    key(ch: string, at: number): boolean {
-      const idle = !started || at - last >= WEDGE_IDLE_MS;
-      if (idle) burst = false;
-      const slow = at - last > gap;
-      const held = pair && !stall && at - run < WEDGE_IDLE_MS;
-      const fresh = buffer === '' || idle || (slow && !held);
-      if (fresh) {
-        lone = !idle && buffer.length === 1 ? buffer : '';
-        buffer = ch;
-        run = at;
-        pair = false;
-        stall = false;
-      } else {
-        if (slow) stall = true;
-        else pair = true;
-        buffer += ch;
+    key(ch: string, at: number, mark?: T) {
+      const last = keys[keys.length - 1];
+      if (last && at - last.at >= WEDGE_IDLE_MS) keys = [];
+      keys.push({ ch, at, mark });
+      if (keys.length > WEDGE_KEEP) keys.shift();
+    },
+    enter(at: number): { code: string | null; mark: T | undefined } {
+      const run = keys;
+      keys = [];
+      const last = run[run.length - 1];
+      if (!last || at - last.at > gap * 3) return { code: null, mark: undefined };
+      const slow = run.map((k, i) => i > 0 && k.at - (run[i - 1]?.at ?? k.at) > gap);
+      let steady: number | null = null;
+      for (let s = 0; run.length - s >= min; s++) {
+        const stalls = slow.slice(s + 1).filter(Boolean).length;
+        if (stalls * 4 > run.length - 1 - s) continue;
+        const code = run.slice(s).map((k) => k.ch).join('');
+        if (checked(code)) return { code, mark: run[s]?.mark };
+        if (!slow[s + 1] && steady === null) steady = s;
       }
-      if (buffer.length >= min) burst = true;
-      started = true;
-      last = at;
-      return fresh;
+      if (steady === null) return { code: null, mark: undefined };
+      return { code: run.slice(steady).map((k) => k.ch).join(''), mark: run[steady]?.mark };
     },
-    /**
-     * True when Enter at `at` closes a scanner burst that stalled part way: a run of scanner keys came since the field
-     * was last idle and Enter follows at scanner speed, so the keys before Enter are a scanner's, not a person's.
-     */
-    scanner(at: number): boolean {
-      return burst && at - last <= gap * 3;
-    },
-    enter(at: number): { code: string | null; earlier: boolean } {
-      const quick = at - last <= gap * 3;
-      const earlier = quick && pair && lone !== '' && checked(lone + buffer) && !checked(buffer);
-      const code = earlier ? lone + buffer : quick && buffer.length >= min ? buffer : null;
-      buffer = '';
-      lone = '';
-      started = false;
-      pair = false;
-      burst = false;
-      return { code, earlier };
-    },
-    /** Ends the run (a Tab): the next key starts a new one, with no earlier key to join. */
+    /** Ends the run (a Tab, a dialog): the next key starts a new one. */
     end() {
-      buffer = '';
-      lone = '';
-      started = false;
-      pair = false;
-      burst = false;
+      keys = [];
     },
   };
 }

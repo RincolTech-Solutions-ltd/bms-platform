@@ -90,47 +90,31 @@ export function useWedgeScan(onScan: (code: string) => void, enabled = true) {
   handler.current = onScan;
   useEffect(() => {
     if (!enabled) return undefined;
-    const wedge = createWedge(wedgeGap());
-    let before: FieldSnapshot | null = null;
-    // The snapshot of the run before this one, for a scanner that stalled after its first key (see createWedge).
-    let prior: FieldSnapshot | null = null;
+    const wedge = createWedge<FieldSnapshot>(wedgeGap());
     const down = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (dialogOpen()) {
-        wedge.enter(0);
-        before = null;
-        prior = null;
+      // A modal over the form, or a Tab (a person moving to the next field): the keys after it are a new run.
+      if (dialogOpen() || e.key === 'Tab') {
+        wedge.end();
         return;
       }
-      if (e.key === 'Tab') {
-        // A person moving to the next field: the keys after it are a new run, never joined to the ones before.
-        wedge.end();
-        before = null;
-        prior = null;
-      } else if (e.key === 'Enter') {
-        const at = e.timeStamp || performance.now();
-        const scanner = wedge.scanner(at);
-        const { code, earlier } = wedge.enter(at);
-        if (earlier && prior) before = prior;
-        prior = null;
-        if (code === null && !scanner) return;
+      if (e.key === 'Enter') {
+        const { code, mark } = wedge.enter(e.timeStamp || performance.now());
+        // Not a scan: the field keeps what was typed and the Enter reaches the form.
+        if (code === null) return;
         // The scan box handles its own Enter.
         if (e.target instanceof HTMLElement && e.target.dataset.scanBox !== undefined) return;
-        // A scanner burst, even one that stalled part way and ended in a fragment too short to be a code: the field gets
-        // back what it had before the burst's first key and the Enter never reaches the form.
+        // A scan, even one that stalled part way: the field gets back what it had before the code's first key and the
+        // Enter never reaches the form.
         e.preventDefault();
         e.stopPropagation();
-        if (before && before.field === e.target) restore(before);
-        before = null;
-        if (code !== null) handler.current(code);
+        if (mark && mark.field === e.target) restore(mark);
+        handler.current(code);
       } else if (e.key.length === 1) {
         const t = e.target;
-        // The snapshot is taken when a new run of keys starts (a scan right after typing keeps what was typed), never
-        // inside a possible scan, so a mid-code pause cannot replace it with part of a code; a key in another field (after
-        // a Tab) snapshots that field, so the field the scan lands in is the one put back.
-        const fresh = wedge.key(e.key, e.timeStamp || performance.now());
-        if (fresh) prior = before?.field === t ? before : null;
-        if (fresh || t !== before?.field) before = editable(t) ? { field: t, value: t.value, start: t.selectionStart, end: t.selectionEnd } : null;
+        // Each key carries the field as it was before it, so the field is put back to how it was before the code's first
+        // key, whichever key that turns out to be (a scan right after typing keeps what was typed).
+        wedge.key(e.key, e.timeStamp || performance.now(), editable(t) ? { field: t, value: t.value, start: t.selectionStart, end: t.selectionEnd } : undefined);
       }
     };
     document.addEventListener('keydown', down, true);

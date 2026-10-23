@@ -228,6 +228,50 @@ describe('FR-RET-68 scanning on the sale form', () => {
     expect(submitted).not.toHaveBeenCalled();
   });
 
+  /** The sale with one line of the lamp, its quantity at 12 and the cursor at its end; returns the quantity and a submit spy. */
+  async function quantityAt12(code: string) {
+    screenOf(<SaleForm branchId={BRANCH} />);
+    wedge(code);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    const qty = document.getElementById('qty-0') as HTMLInputElement;
+    const submitted = vi.fn((e: Event) => e.preventDefault());
+    qty.form?.addEventListener('submit', submitted);
+    fireEvent.change(qty, { target: { value: '12' } });
+    qty.focus();
+    qty.setSelectionRange(2, 2);
+    return { qty, submitted, lookUp: vi.spyOn(retail, 'findByBarcode') };
+  }
+
+  it('looks up a whole EAN-13 starting with 0 and keeps the quantity when the scan stalls after its first key', async () => {
+    // The 12 digits after the 0 are a valid UPC-A of the same item, so a split here would leave the 0 in the quantity.
+    const zero = '0036000291452';
+    await retail.addBarcode(LAMP, { code: zero });
+    const { qty, submitted, lookUp } = await quantityAt12(zero);
+    expect(stalled(zero, 1, 120).defaultPrevented).toBe(true);
+    expect(qtyOf(0)).toBe('12');
+    expect(qty.selectionStart).toBe(2);
+    await waitFor(() => expect(qtyOf(0)).toBe('13'));
+    expect(lookUp).toHaveBeenCalledTimes(1);
+    expect(lookUp).toHaveBeenCalledWith(zero, BRANCH);
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
+  it('joins a long Code 128 that stalls late, more than the idle time after its first key', async () => {
+    // 19 characters at 30 ms a key, a stall after key 17: the stall starts 480 ms after the first key and ends past 500 ms.
+    const long = 'TEST-LAMP-123456789';
+    await retail.addBarcode(LAMP, { code: long, format: 'code128' });
+    const { qty, submitted, lookUp } = await quantityAt12(long);
+    let at = (clock += 10000);
+    [...long].forEach((ch, i) => press(ch, (at += i === 17 ? 120 : 30)));
+    expect(press('Enter', (clock = at + 30)).defaultPrevented).toBe(true);
+    expect(qtyOf(0)).toBe('12');
+    expect(qty.selectionStart).toBe(2);
+    await waitFor(() => expect(qtyOf(0)).toBe('13'));
+    expect(lookUp).toHaveBeenCalledWith(long, BRANCH);
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
   it('keeps a quantity typed just before a scan, even within the idle time', async () => {
     await retail.addBarcode(LAMP, { code: EAN });
     await retail.addBarcode(BULB15, { code: 'TEST-BULB15' });
@@ -489,6 +533,26 @@ describe('FR-RET-68 a person typing fast is not a scan', () => {
     PACES[gap].forEach((step) => press('0', (at += step)));
     expect(press('Enter', (clock = at + 5)).defaultPrevented).toBe(false);
     expect(field.value).toBe('1000');
+    expect(seen).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('scan-unknown')).toBeNull();
+  });
+
+  it.each(CASES)('keeps 1256 typed into %s with two key rollovers around a pause and a %i ms gap, and lets Enter through', async (where, gap) => {
+    if (gap !== 35) localStorage.setItem('bms.scanner.gap-ms', String(gap));
+    const [field] = await SCREENS[where]();
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    field.focus();
+    field.select();
+    const seen = reached(field);
+    let at = (clock += 10000);
+    press('1', at);
+    press('2', (at += 20));
+    press('5', (at += 100));
+    press('6', (at += 20));
+    expect(press('Enter', (clock = at + 5)).defaultPrevented).toBe(false);
+    expect(field.value).toBe('1256');
     expect(seen).toHaveBeenCalledTimes(1);
     await new Promise((r) => setTimeout(r, 50));
     expect(lookUp).not.toHaveBeenCalled();
