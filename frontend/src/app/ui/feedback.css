@@ -258,3 +258,26 @@
     display: inline;
   }
 }
+
+/* A line just added to a sale (or a restock, a move) flashes once, so the eye finds it (Hillary, 23 Oct 2026). */
+.line-added {
+  animation: rt-line-added 1.2s var(--ease-out);
+}
+
+@keyframes rt-line-added {
+  from {
+    background: var(--color-success-tint);
+    box-shadow: 0 0 0 2px var(--color-success-tint);
+  }
+  to {
+    background: inherit;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-added {
+    animation: none;
+    outline: 2px solid var(--color-success-tint);
+  }
+}

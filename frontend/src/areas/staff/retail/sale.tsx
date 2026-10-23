@@ -28,6 +28,7 @@ import { ChangePanel, ReceiptChange } from './sale-change';
 import { receivedFor, receivedProblem } from './sale-change-state';
 import { ScanBar } from './scan';
 import { PACK_UNUSABLE, plusOne, scanInto } from './barcode-state';
+import { useToast } from './toast';
 
 // Record a sale (FR-RET-04, FR-RET-05). One idempotency key per draft, kept with the draft in this
 // tab until the sale is saved or the draft is cleared: a double tap, a retry after a lost answer or a
@@ -105,7 +106,9 @@ export function Receipt({ sale, onNew, received }: { sale: Sale; onNew?: () => v
  * One line of the sale being made. The unit choice is drawn only while the tenant has the units capability
  * (`unitsOn`) and the item has active pack sizes; otherwise the line is exactly what it was before packs.
  */
-export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+  /** The line just added: it flashes once so the seller sees where it went (Hillary, 23 Oct 2026). */
+  fresh?: boolean;
   line: DraftLine;
   index: number;
   unitsOn: boolean;
@@ -132,7 +135,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, onQty,
   const noPrice = price ? hasNoPrice(price.resolved) : false;
   const changedOffline = offlinePrice !== undefined && f !== null && f.priceMinor !== defaultPrice(line.product, line.unitId);
   return (
-    <div className="rt-card">
+    <div className={fresh ? 'rt-card line-added' : 'rt-card'}>
       <strong>{line.product.description}</strong>
       {packs.length > 0 && (
         <div>
@@ -262,14 +265,28 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     setDraft((d) => ({ ...d, lines: d.lines.map((l, n) => (n === i ? withUnit(l, unitId) : l)) }));
   const unitsOn = capabilityOn(me, 'retail', UNITS);
   // An item can be on the sale twice (cartons and loose pieces) only while it has pack sizes to choose from.
-  const add = (p: Product) =>
-    setDraft((d) => (d.lines.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0) ? d : { ...d, lines: [...d.lines, newLine(p)] }));
+  // Every add says so on screen (Hillary, 23 Oct 2026): a short toast, and the new line flashes once.
+  const { show, toast } = useToast(2500);
+  const [fresh, setFresh] = useState<string | null>(null);
+  const add = (p: Product) => {
+    const twice = draft.lines.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0);
+    if (twice) {
+      show(`${p.description} is already on the sale. Change its quantity below.`);
+      return;
+    }
+    setDraft((d) => ({ ...d, lines: [...d.lines, newLine(p)] }));
+    setFresh(p.id ?? null);
+    show(`Added ${p.description}`);
+  };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
   // use is refused, never sold as one piece.
   const scanAdd = (p: Product, unitId?: string) => {
     const unit = unitsOn && activePacks(p).some((k) => k.unit_id === unitId) ? unitId : undefined;
     if (unitId && !unit) return PACK_UNUSABLE;
+    const more = draft.lines.some((l) => l.product.id === p.id);
     setDraft((d) => ({ ...d, lines: scanInto(d.lines, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p))) }));
+    setFresh(p.id ?? null);
+    show(more ? `One more ${p.description}` : `Added ${p.description}`);
   };
 
   const total = draftTotal(shown.lines);
@@ -349,6 +366,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           line={l}
           index={i}
           unitsOn={unitsOn}
+          fresh={fresh !== null && l.product.id === fresh && i === shown.lines.map((x) => x.product.id).lastIndexOf(fresh)}
           price={pricesOn ? { resolved: resolved?.[i], listName: resolution.data?.price_list, canOverride: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           offlinePrice={offlineMode ? { canType: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           onQty={(v) => setLine(i, { qty: v })}
@@ -524,6 +542,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           </div>
         </div>
       )}
+      {toast}
     </form>
   );
 }
