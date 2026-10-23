@@ -53,7 +53,11 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
                 "This tenant is suspended and read only. Contact the platform operator.");
     }
 
-    /** Asking for the data export and fetching a file change none of the business's data (ADR-074). */
+    /**
+     * Asking for the data export and the signed address of a file change none of the business's data (ADR-074 decision 7).
+     * The address may be of any document the caller may read, not only a report file: an ended business still reads
+     * everything, and each document's own access rule still decides who fetches it.
+     */
     static boolean exportPath(String path) {
         return path.equals("/api/v1/data-export/runs")
                 || DOWNLOAD_URL.matcher(path).matches();

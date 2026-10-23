@@ -78,7 +78,10 @@ never change data, never show one business another's rows, and never hold a larg
 7. **Read only, and served to a business whose subscription has ended.** Making the workbook writes only the run's own rows and
    file. "Ended" means only a business that ended by its Owner's cancellation, the predicate of ADR-073 and V90
    (`subscriptions.status = 'cancelled'` with `ended_on`): it answers 423 to every write except the exports, among them two
-   reads that are a `POST`: asking for the workbook and the signed address of a file. A business the operator suspended is not
+   reads that are a `POST`: asking for the workbook and the signed address of a file. The second is not limited to report
+   files: an ended business may sign the address of any document it may read (a member's KYC upload, a receipt PDF), because
+   it can still look at everything and a download changes nothing; each document's own access rule still decides who may
+   fetch it, exactly as while the business was active. A business the operator suspended is not
    ended, whatever cancellation it has scheduled: it gets neither, and the runner's three definer functions (V49, as V90 left
    them) take none of its runs. The nightly expiry of report
    files no longer walks the active tenants only: `app_tenants_with_expired_report_files` lists every tenant with a file past
