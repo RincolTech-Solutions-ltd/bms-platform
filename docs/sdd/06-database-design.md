@@ -627,7 +627,11 @@ the scheduled rows across businesses through `platform_scheduled_changes()`; the
 answers `ended` for such a business, and for one whose scheduled cancellation's day has come in its own time zone before the job
 applied it, so its writes are refused with `subscription_ended` from that day. V90 also replaces V49's report runner lists
 (`app_count_running_report_runs`, `app_tenants_with_queued_report_runs`, `app_tenants_with_stale_report_runs`) so they take an
-ended business as well as an active one: its report runs still finish and a dead run is still failed.
+ended business as well as an active one: its report runs still finish and a dead run is still failed. And it adds
+`app_tenant_takes_payments(tenant)` (active, or suspended with the subscription `cancelled` and `ended_on` set), which
+`TenantJobs.callForTenantTakingPayments` checks for the payment gateway's callback and the poller, and through which
+`app_tenants_with_due_payment_checks` (V54) now lists its businesses, so a payment made after the end still posts while a
+business the operator suspended stays left out.
 
 ### `auth_sessions` (RLS)
 

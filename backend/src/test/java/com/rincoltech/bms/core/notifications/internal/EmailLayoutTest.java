@@ -425,6 +425,11 @@ class EmailLayoutTest {
             public <T> T callForTenant(UUID tenantId, java.util.function.Supplier<T> work) {
                 return work.get();
             }
+
+            @Override
+            public <T> T callForTenantTakingPayments(UUID tenantId, java.util.function.Supplier<T> work) {
+                throw new UnsupportedOperationException();
+            }
         };
         SmtpEmailChannel channel = new SmtpEmailChannel(
                 new NotificationProperties(null, null, ""), templates, HOSTS, jobs, tenant, letterheads, "");

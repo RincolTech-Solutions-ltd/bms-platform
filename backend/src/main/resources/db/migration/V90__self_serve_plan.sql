@@ -221,6 +221,29 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
        AND (t.status = 'active' OR (t.status = 'suspended' AND s.status = 'cancelled' AND s.ended_on IS NOT NULL))
 $$;
 
+-- Whether a business's money still posts: active, or ended by its Owner's cancellation (ADR-073 decision 5). A gateway
+-- callback and the payment poller act for such a business, so a payment made after the end is recorded and receipted. A
+-- business suspended by the operator, or closed, is still left out.
+CREATE FUNCTION app_tenant_takes_payments(p_tenant_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT EXISTS (SELECT 1 FROM tenants t LEFT JOIN subscriptions s ON s.tenant_id = t.id
+                    WHERE t.id = p_tenant_id
+                      AND (t.status = 'active'
+                           OR (t.status = 'suspended' AND s.status = 'cancelled' AND s.ended_on IS NOT NULL)))
+$$;
+
+-- V54's poller list, now through app_tenant_takes_payments: an ended business's due checks still run.
+CREATE OR REPLACE FUNCTION app_tenants_with_due_payment_checks(p_now timestamptz, p_limit integer) RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT i.tenant_id
+      FROM payment_intents i
+     WHERE i.next_check_at IS NOT NULL AND i.next_check_at <= p_now
+     GROUP BY i.tenant_id
+    HAVING app_tenant_takes_payments(i.tenant_id)
+     ORDER BY min(i.next_check_at), i.tenant_id
+     LIMIT p_limit
+$$;
+
 -- ---------------------------------------------------------------------------------------------
 -- 4. The operator's reads across businesses and the nightly job's list (ADR-016). Each refuses a transaction bound to a
 --    tenant, so a tenant request can never call them to read another business.
@@ -305,12 +328,14 @@ $$;
 
 REVOKE ALL ON FUNCTION platform_end_subscription(uuid, date) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_lock_subscription(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_tenant_takes_payments(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_module_requests(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_module_request_tenant(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_scheduled_changes() FROM PUBLIC;
 REVOKE ALL ON FUNCTION platform_tenants_with_due_changes(date) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform_end_subscription(uuid, date) TO bms_app;
 GRANT EXECUTE ON FUNCTION app_lock_subscription(uuid) TO bms_app;
+GRANT EXECUTE ON FUNCTION app_tenant_takes_payments(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_module_requests(text) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_module_request_tenant(uuid) TO bms_app;
 GRANT EXECUTE ON FUNCTION platform_scheduled_changes() TO bms_app;
