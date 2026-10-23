@@ -259,16 +259,142 @@
   }
 }
 
-/* The receipt PDF shown before it is sent (Hillary, 23 Oct 2026). */
+/* View receipt (Hillary, 23 Oct 2026; issue #500): the receipt as the PDF prints it, drawn like a printed slip. */
 .receipt-preview {
   display: grid;
   gap: var(--space-2);
+  justify-items: center;
 }
 
-.receipt-preview iframe {
+.receipt-preview[hidden] {
+  display: none;
+}
+
+.receipt-paper {
+  display: grid;
+  gap: var(--space-3);
   width: 100%;
-  height: min(70vh, 720px);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  max-width: 380px;
+  padding: var(--space-4);
   background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+.receipt-paper p,
+.receipt-paper dl,
+.receipt-paper ol {
+  margin: 0;
+}
+
+.receipt-paper .num {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.receipt-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.receipt-logo {
+  max-width: 72px;
+  max-height: 48px;
+  object-fit: contain;
+}
+
+.receipt-business,
+.receipt-strong,
+.receipt-no {
+  font-weight: var(--weight-bold);
+}
+
+.receipt-docline {
+  text-align: end;
+}
+
+.receipt-title {
+  margin: 0;
+  padding-block: var(--space-2);
+  border-block: 1px solid var(--color-border-strong);
+  text-align: center;
+  font-size: var(--text-base);
+  letter-spacing: 0.08em;
+}
+
+.receipt-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+
+.receipt-facts dt {
+  color: var(--color-text-muted);
+}
+
+.receipt-facts dd {
+  margin: 0;
+  text-align: end;
+}
+
+.receipt-lines {
+  list-style: none;
+  padding: 0;
+  display: grid;
+}
+
+.receipt-lines li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--space-2);
+  padding-block: var(--space-2);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.receipt-qty {
+  grid-column: 1 / -1;
+}
+
+.receipt-total {
+  display: flex;
+  justify-content: space-between;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-base);
+}
+
+.receipt-words {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.receipt-box {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.receipt-footer {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.receipt-download {
+  background: none;
+  border: 0;
+  padding: var(--space-2);
+  color: var(--color-link);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
 }

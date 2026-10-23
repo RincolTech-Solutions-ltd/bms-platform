@@ -15278,6 +15278,53 @@ export interface components {
              */
             valid_until: string;
         };
+        /** @description What the receipt PDF prints, in its order and already formatted, for the screen's preview */
+        RetailReceiptPrint: {
+            branch_location?: string;
+            branch_name?: string;
+            business_name?: string;
+            buyer_contact?: string;
+            buyer_name?: string;
+            currency?: string;
+            /** @description The day the receipt was made, as printed */
+            date?: string;
+            due?: string;
+            due_date?: string;
+            /** @description The receipt footer */
+            footer?: string;
+            issued_by?: string;
+            issued_on?: string;
+            lines?: components["schemas"]["RetailReceiptPrintLine"][];
+            /** @description The shop's logo, else the business logo, as a data URI */
+            logo?: string;
+            /** @description The net after returns */
+            net?: string;
+            number?: string;
+            payment?: string;
+            price_list?: string;
+            /** @description One line for each credit note, oldest first */
+            returns?: string[];
+            sale_date?: string;
+            sale_no?: string;
+            status?: string;
+            /** @description RECEIPT, or RECEIPT AFTER RETURNS */
+            title?: string;
+            total?: string;
+            total_words?: string;
+        };
+        RetailReceiptPrintLine: {
+            amount?: string;
+            code?: string;
+            description?: string;
+            /** Format: int32 */
+            no?: number;
+            /** @description A pack in base units, such as = 60 piece */
+            pack?: string;
+            price_list?: string;
+            /** @description The quantity and unit as sold, such as 5 carton */
+            quantity?: string;
+            unit_price?: string;
+        };
         RetailRepayment: {
             /** Format: uuid */
             advance_id?: string;
@@ -15639,6 +15686,7 @@ export interface components {
              */
             paid_minor?: number;
             payment_method?: string;
+            printed?: components["schemas"]["RetailReceiptPrint"];
             /** @description The sale's number, which the receipt carries */
             receipt_no?: string;
             /**
