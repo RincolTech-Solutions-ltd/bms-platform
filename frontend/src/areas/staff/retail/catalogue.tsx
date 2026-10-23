@@ -52,7 +52,7 @@ export function CatalogueLinks() {
       {canUse(me, 'importer') && (
         <li>
           <Link className="rt-tile tile" to={'/staff/retail/catalogue/import' as never} data-tour="catalogue-importer">
-            <span className="icon-chip">{icons.importer}</span>
+            <span className="icon-chip">{icons[TILE_ICONS.importer ?? 'catalogue']}</span>
             <strong>Import items</strong>
             <span className="tile-hint">Add many items from a spreadsheet file</span>
           </Link>

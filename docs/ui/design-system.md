@@ -127,7 +127,7 @@ the retail screens re-export it) and in CSS by the `720px` media queries. CSS cu
 query, so the number is the token.
 
 - **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/route.tsx`, `AREAS` in
-  `areas/platform/route.tsx`) with the permission checks, and both the sidebar and the drawer draw that list with the same
+  `areas/platform/operator-state.ts`) with the permission checks, and both the sidebar and the drawer draw that list with the same
   component (`MenuLinks`, one `MenuItemLink` per item): the same items, icons (inline SVG in `currentColor`), groups and the
   current item marked `aria-current="page"` (tinted, with an accent edge). The retail shortcuts are a group under Retail
   (`RetailMenuGroup`, `data-tour="retail-nav"`), drawn with `MenuItemLink` too. Notifications and Feedback are always there.
