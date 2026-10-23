@@ -1997,6 +1997,84 @@ class MigrationOrderIT {
         }
     }
 
+    /**
+     * V92 (ADR-075) on a database at the migration before it, migrated by an owner without BYPASSRLS, so forced row security applies to it: every
+     * payment recorded before gets a receipt, numbered in the order the payments were recorded across businesses, the
+     * sequence continues after them, and the tables end with FORCE ROW LEVEL SECURITY again.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates subscription payments across the billing migration.
+     */
+    @Test
+    void billingMigrationNumbersEveryEarlierPaymentEvenUnderForcedRowSecurity() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            flyway(postgres, VERSIONS.get(VERSIONS.indexOf("92") - 1)).migrate();
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID operator = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO platform_users (id, email, full_name) VALUES (?, 'op-v92@example.test', 'Test Operator')")
+                    .param(operator)
+                    .update();
+            String plan = "00000000-0000-4000-8000-000000000001";
+            // Each payment: business, recorded at. The second business paid first.
+            UUID first = UUID.randomUUID();
+            UUID second = UUID.randomUUID();
+            Object[][] payments = {
+                {second, "2026-03-01 09:00:00+03", UUID.randomUUID()},
+                {first, "2026-05-01 09:00:00+03", UUID.randomUUID()},
+                {second, "2026-06-01 09:00:00+03", UUID.randomUUID()},
+            };
+            int n = 0;
+            for (UUID tenant : List.of(first, second)) {
+                n++;
+                owner.sql("INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, ?, ?::uuid)")
+                        .params(tenant, "test-v92-" + n, "Test Business V92 " + n, plan)
+                        .update();
+                owner.sql("INSERT INTO subscriptions (id, tenant_id, plan_id, status) VALUES (?, ?, ?::uuid, 'active')")
+                        .params(tenant, tenant, plan)
+                        .update();
+            }
+            for (Object[] p : payments) {
+                owner.sql("""
+                                INSERT INTO subscription_payments (id, tenant_id, subscription_id, plan_id, amount_minor,
+                                    currency, method, paid_on, months, period_start, period_end,
+                                    recorded_by_platform_user_id, created_at)
+                                VALUES (?, ?, ?, ?::uuid, 10000, 'UGX', 'mtn_momo', ?::timestamptz::date, 1,
+                                        ?::timestamptz::date, ?::timestamptz::date + 29, ?, ?::timestamptz)
+                                """)
+                        .params(p[2], p[0], p[0], plan, p[1], p[1], p[1], operator, p[1])
+                        .update();
+            }
+            JdbcClient superuser = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword()));
+            superuser.sql("ALTER ROLE bms_owner NOBYPASSRLS").update();
+
+            MigrateResult result =
+                    DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+            assertThat(result.success).isTrue();
+
+            for (int i = 0; i < payments.length; i++) {
+                assertThat(superuser
+                                .sql("SELECT receipt_no FROM subscription_receipts WHERE payment_id = ?")
+                                .param(payments[i][2])
+                                .query(String.class)
+                                .single())
+                        .isEqualTo("RT-2026-%06d".formatted(i + 1));
+            }
+            assertThat(superuser
+                            .sql("SELECT nextval('subscription_receipt_numbers')")
+                            .query(Long.class)
+                            .single())
+                    .isEqualTo(4);
+            assertThat(superuser.sql("""
+                                    SELECT bool_and(relforcerowsecurity) FROM pg_class
+                                     WHERE relname IN ('tenants', 'subscription_payments', 'subscription_receipts')
+                                    """).query(Boolean.class).single())
+                    .as("forced row security is back on every table")
+                    .isTrue();
+        }
+    }
+
     @Test
     void noTwoMigrationsShareAVersion() {
         try (PostgreSQLContainer postgres = database()) {

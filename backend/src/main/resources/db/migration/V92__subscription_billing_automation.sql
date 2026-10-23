@@ -12,7 +12,9 @@
 --
 -- Locks, said plainly. Flyway runs this file in one transaction. The new tables take SHARE ROW EXCLUSIVE on tenants,
 -- platform_users and subscription_payments (their foreign keys) until the commit; no existing table is altered or rewritten.
--- The receipt backfill reads subscription_payments, a small table. lock_timeout is five seconds as in V75 and V80.
+-- The receipt backfill reads subscription_payments, a small table; only where the migrating owner cannot bypass row
+-- security does it also take ACCESS EXCLUSIVE on tenants and subscription_payments (to lift FORCE for the backfill) until the
+-- commit. lock_timeout is five seconds as in V75 and V80.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -106,6 +108,22 @@ SELECT bms_make_append_only('subscription_receipts');
 -- Every payment recorded before this migration gets its receipt now, numbered in the order the payments were recorded and
 -- dated the day each was recorded in its business's time zone. No email is sent for them. The numbers come from
 -- row_number() over that order (nextval in a SELECT need not follow its ORDER BY); the sequence then continues after them.
+--
+-- tenants, subscription_payments and subscription_receipts have FORCE ROW LEVEL SECURITY and no app.tenant_id is bound
+-- here. bms_owner has BYPASSRLS (deploy/postgres/initdb/01-roles.sh), so it reads every business. row_security = off makes
+-- PostgreSQL raise instead of silently returning no rows should a policy still apply. When the migrating owner cannot bypass
+-- row security (an owner created without BYPASSRLS), the three tables drop FORCE for this transaction only, so their owner
+-- reads every business, and get it back before the commit; with BYPASSRLS nothing is altered and no table lock is taken.
+SET LOCAL row_security = off;
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE tenants NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE subscription_payments NO FORCE ROW LEVEL SECURITY;
+        ALTER TABLE subscription_receipts NO FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
 INSERT INTO subscription_receipts (id, tenant_id, payment_id, receipt_no, business_name, plan_name, issued_on, created_at)
 SELECT gen_random_uuid(), x.tenant_id, x.id,
        'RT-' || to_char(x.issued_on, 'YYYY') || '-' || lpad(x.n::text, 6, '0'),
@@ -118,6 +136,16 @@ SELECT gen_random_uuid(), x.tenant_id, x.id,
           JOIN plans p ON p.id = sp.plan_id
          WHERE sp.status = 'confirmed') x;
 SELECT setval('subscription_receipt_numbers', count(*)) FROM subscription_receipts HAVING count(*) > 0;
+DO $$
+BEGIN
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
+        ALTER TABLE subscription_payments FORCE ROW LEVEL SECURITY;
+        ALTER TABLE subscription_receipts FORCE ROW LEVEL SECURITY;
+    END IF;
+END
+$$;
+SET LOCAL row_security = on;
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. The one automatic status change (issue #480 point 2): a business in its free month or paid, not a pilot, whose last

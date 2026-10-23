@@ -429,14 +429,16 @@ the subscription move and the `Idempotency-Key` row. FR-SPM-01.
 `receipt_no varchar(20) NOT NULL UNIQUE` (`RT-<year>-<six digits or more>`, from the sequence `subscription_receipt_numbers`,
 across the platform; `bms_app` has USAGE on it), `business_name varchar(200) NOT NULL` and `plan_name varchar(200) NOT NULL` (as
 they were on the day, so the PDF never changes), `issued_on date NOT NULL`. Written in the payment's own transaction. The payments
-recorded before `V92` got theirs in the migration, numbered in the order they were recorded. FR-SUB-11.
+recorded before `V92` got theirs in the migration, numbered by `row_number()` over `(created_at, id)` across businesses, the
+sequence set after them. The backfill sets `row_security = off`, so a policy that still applied would fail the deploy rather than
+skip rows; an owner without BYPASSRLS lifts FORCE on the three tables for that transaction only. FR-SUB-11.
 
 ### `subscription_reminders` (RLS; `bms_app` SELECT, INSERT; append-only; `V92`, ADR-075)
 
 (std, no `version`, no `updated_at`) `kind text NOT NULL` [`due_in_7`, `due_in_1`, `due_today`, `trial_in_7`, `trial_in_1`,
 `trial_today`], `due_on date NOT NULL` (the last day paid for, or of the free month), `amount_minor bigint` and `currency char(3)`
 (the plan's monthly price the day after, both or neither), `channels text[] NOT NULL` (what was queued: `email`, `sms`, or none
-when the business has no Owner). `UNIQUE (tenant_id, kind, due_on)`: a reminder is written with its outbox rows in one transaction,
+when the business has no invited or active Owner). `UNIQUE (tenant_id, kind, due_on)`: a reminder is written with its outbox rows in one transaction,
 so it goes once. FR-SUB-08.
 
 ### `platform_billing_settings` (platform, no RLS, `bms_app` SELECT only; `V92`, ADR-075)
