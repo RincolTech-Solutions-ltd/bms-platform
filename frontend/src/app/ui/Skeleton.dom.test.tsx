@@ -46,6 +46,16 @@ describe('Skeleton', () => {
     expect(screen.getByText('Content')).toBeTruthy();
   });
 
+  it('starts again for a different list, which is not content already shown', () => {
+    const { rerender } = render(<Skeleton loading={false} of="all">All items</Skeleton>);
+    rerender(<Skeleton loading of="low">All items</Skeleton>);
+    expect(screen.queryByText('All items')).toBeNull();
+    act(() => vi.advanceTimersByTime(SKELETON_DELAY));
+    expect(rows()).toBe(3);
+    rerender(<Skeleton loading={false} of="low">Low stock</Skeleton>);
+    expect(screen.getByText('Low stock')).toBeTruthy();
+  });
+
   it('shows nothing when the load ends inside the second', () => {
     const { rerender } = render(<Skeleton loading>Content</Skeleton>);
     act(() => vi.advanceTimersByTime(400));

@@ -222,17 +222,26 @@ describe('design guard, the rules the kit holds every screen to', () => {
     expect(rule('.success-amount')).toMatch(/font-size: var\(--text-display\)/);
   });
 
-  // Rule 13: under reduced motion every animation, the kit's included, runs once for 1ms and stops.
+  // Rule 13: under reduced motion every animation stops: base.css ends them all, and kit.css names each of its own.
   it('stops every animation under reduced motion', () => {
     const reduce = code('app/ui/base.css').match(/prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
     expect(reduce).toMatch(/animation-duration: 1ms !important/);
     expect(reduce).toMatch(/animation-iteration-count: 1 !important/);
+    const still = kit.match(/prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    expect(still).toMatch(/animation: none/);
+    const animated = [...kit.matchAll(/\n([^\n{}]+)\{[^}]*animation(?:-name)?: (?!none)/g)].map(([, sel]) => (sel as string).trim());
+    expect(animated.length).toBeGreaterThanOrEqual(6);
+    for (const selector of animated) expect(still, `${selector} still moves under reduced motion`).toContain(selector);
   });
 
-  // Rule 13: the kit moves on the motion tokens, and only the success check takes longer, 400 ms, as issue #520 asks.
-  it('times every kit motion with the tokens, bar the 400 ms check', () => {
+  // Rule 13 (owner rule, 24 Oct 2026): the kit moves on the motion tokens, 300ms at most, never in a loop; only the sale-complete
+  // check takes 400ms.
+  it('times every kit motion with the tokens, never loops, and only the check takes 400 ms', () => {
     const times = [...kit.matchAll(/animation:\s*[\w-]+\s+([^\s;]+)/g)].map(([, t]) => t);
-    expect(new Set(times)).toEqual(new Set(['var(--motion)', '400ms', '1.2s']));
+    expect(new Set(times)).toEqual(new Set(['var(--motion)', '400ms']));
+    expect(kit).not.toMatch(/infinite/);
+    expect(rule('.success-tick')).toMatch(/400ms/);
+    expect(rule('.success-tick-inner')).toMatch(/400ms/);
     expect([...kit.matchAll(/animation:\s*[\w-]+\s+400ms/g)]).toHaveLength(2);
   });
 });

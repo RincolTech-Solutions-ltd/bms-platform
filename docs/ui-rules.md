@@ -31,7 +31,10 @@ The component kit (issue #520) carries these rules: `Segmented`, `Stepper`, `Fie
 
 ## Forms
 
-10. Every input has a visible label. Validation runs on blur, not on every key.
+10. Every input has a visible label. Validation runs on blur, not on every key, and the error shows under the field with an
+    icon. A required field has a red asterisk after its label and the form starts with "Fields marked * are needed."; on a
+    form where most fields are needed, the few others say "(optional)" instead, never both. The send button stays enabled
+    and takes the person to the first missing field.
 11. Amounts open the numeric keypad (`inputmode="numeric"`), quantities use steppers, and a choice of 2 to 4 options is a
     segmented control.
 12. Touch targets are at least 48px.
@@ -44,7 +47,8 @@ The component kit (issue #520) carries these rules: `Segmented`, `Stepper`, `Fie
     (so animates all), and `ease-in` or `ease-in-out`. Its short exception list names each colour or background fade with
     its reason: a button's fill and edge, a field's and a link card's edge, and the skeleton shimmer. So the tour spotlight
     glides by `transform`, the side menu folds without animating its width, and shadows and focus rings change at once.
-    The one longer motion is the success check, drawn in 400ms (issue #520), still by `transform` only.
+    The one longer motion is the sale-complete check, drawn in 400ms (issue #520), still by `transform` only. Nothing
+    loops: a skeleton is still. `frontend/src/app/ui/kit.css` also stops each of its animations under reduced motion.
 
 ## Feedback
 

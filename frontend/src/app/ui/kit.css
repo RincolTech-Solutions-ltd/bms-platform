@@ -413,8 +413,12 @@ button.list-row:focus-visible {
   color: var(--color-text-muted);
 }
 
-/* Skeleton: rows in the shape of a list that breathe by opacity. Under reduced motion base.css ends every animation after
-   one 1ms run, so they hold still, and so do the sheet, the ring and the check. */
+/* Skeleton: still grey rows in the shape of a list, faded in once over 200ms. No loop: motion on this page stays short (owner
+   rule, 24 Oct 2026). */
+.skeleton-rows {
+  animation: kit-fade var(--motion) var(--ease-out);
+}
+
 .skeleton-row {
   display: grid;
   gap: var(--space-2);
@@ -431,20 +435,10 @@ button.list-row:focus-visible {
   height: 14px;
   border-radius: var(--radius);
   background: var(--color-neutral-tint);
-  animation: kit-breathe 1.2s var(--ease-out) infinite alternate;
 }
 
 .skeleton-bar-short {
   width: 35%;
-}
-
-@keyframes kit-breathe {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0.5;
-  }
 }
 
 /* SuccessScreen: centred, the ring arriving in 200ms and the check drawn left to right in 400ms (a wipe of two opposite
@@ -551,6 +545,19 @@ button.list-row:focus-visible {
   }
   to {
     transform: none;
+  }
+}
+
+/* Reduced motion: nothing in the kit moves. base.css already ends every animation after 1ms; this names the kit's own so the
+   sheet does not slide, the ring does not pop, the check is not wiped in and the skeleton does not fade. */
+@media (prefers-reduced-motion: reduce) {
+  .sheet-scrim,
+  .sheet-panel,
+  .skeleton-rows,
+  .success-ring,
+  .success-tick,
+  .success-tick-inner {
+    animation: none;
   }
 }
 
