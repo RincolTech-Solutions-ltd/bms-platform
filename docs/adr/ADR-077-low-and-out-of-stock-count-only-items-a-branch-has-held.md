@@ -25,7 +25,8 @@ threshold of 5 (ADR-029). The per-branch minimums of ADR-057 were used by the pu
    when it is low at one of them by decision 2, so a branch's own minimum counts on Home with no branch chosen as on that branch's
    line; it is out when its balance summed over them is zero or less, as before, and one of them has held it. Low still includes
    out: a sum at zero or below leaves a held branch at zero or below. This replaces the earlier rule that judged low on the summed
-   balance against one threshold (an item at 4 in each of two shops was not low over both).
+   balance against one threshold (an item at 4 in each of two shops was not low over both). This is issue #490's own rule (at or below the branch minimum, else the threshold) applied to each held branch in
+   scope, so the Home total agrees with the per-branch lines; it adds no requirement.
 4. **One rule in one place.** The SQL of these predicates lives in `retail.stock.LowStockRule` and is used by the stock lists, the
    grouped stock summary, the dashboard (counts and the line per shop) and so Home, so the figures equal the filtered lists. Every
    probe is correlated on the outer row's `tenant_id` as well as the branch and the item, so it seeks the
