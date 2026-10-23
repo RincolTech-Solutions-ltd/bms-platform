@@ -1,8 +1,6 @@
 package com.rincoltech.bms.retail.reports.internal;
 
 import java.sql.Date;
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -230,15 +228,6 @@ class CreditRepository {
      * cancel is left out.
      */
     List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to) {
-        return payments(branchIds, from, to, null);
-    }
-
-    /**
-     * As above, reading only the payments entered from {@code enteredFrom} on, through the index on the moment of entry
-     * (V64): no payment is dated after the day it was entered, so the start of {@code from} in the tenant's zone leaves the
-     * answer unchanged and spares a scan of every payment for a short window (the Home summary, issue #485).
-     */
-    List<Payment> payments(List<UUID> branchIds, LocalDate from, LocalDate to, Instant enteredFrom) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
@@ -248,11 +237,6 @@ class CreditRepository {
         if (branchIds != null) {
             params.put("branchIds", branchIds);
         }
-        String entered = "";
-        if (enteredFrom != null) {
-            params.put("enteredFrom", Timestamp.from(enteredFrom));
-            entered = " AND p.created_at >= :enteredFrom";
-        }
         String receivedIn = branchIds == null ? "" : " AND coalesce(ap.branch_id, s.branch_id) IN (:branchIds)";
         String reversedIn = branchIds == null ? "" : " AND ap.branch_id IN (:branchIds)";
         return jdbc.sql("SELECT m.d AS paid_on, m.method, sum(m.n) AS payments, sum(m.amt) AS amount FROM ("
@@ -260,7 +244,7 @@ class CreditRepository {
                         + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
                         + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
                         + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
-                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + entered + receivedIn
+                        + " WHERE p.paid_on BETWEEN :from AND :to AND s.status = 'completed'" + receivedIn
                         + " UNION ALL"
                         + " SELECT ap.reversed_on, p.method, -1, -p.amount_minor"
                         + " FROM retail_account_payments ap"
