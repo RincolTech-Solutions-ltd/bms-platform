@@ -145,65 +145,6 @@
   font-size: var(--text-sm);
 }
 
-/* Retail home: big touch tiles, two per row on a phone. */
-.tile-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
-  gap: var(--space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  height: 100%;
-  min-height: 132px;
-  padding: var(--space-4);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  color: var(--color-text);
-  text-decoration: none;
-  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
-}
-
-.tile:hover {
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-lg);
-  text-decoration: none;
-}
-
-.tile:active {
-  transform: scale(0.98);
-}
-
-.tile strong {
-  font-size: var(--text-base);
-  line-height: 1.3;
-}
-
-.tile .tile-hint {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-
-@media (min-width: 720px) {
-  .tile-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: var(--space-4);
-  }
-
-  .tile {
-    min-height: 160px;
-    padding: var(--space-5);
-  }
-}
-
 /* A line's total with its Remove action on the right. */
 .line-foot {
   display: flex;

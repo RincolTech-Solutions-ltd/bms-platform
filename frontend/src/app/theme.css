@@ -259,7 +259,7 @@ body {
   --z-toast: 400;
 
   /* Interaction */
-  --tap: 44px;
+  --tap: 48px; /* docs/ui-rules.md rule 12 */
   --focus-ring: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
   --content-width: 1120px;
   --transition: var(--motion-fast) var(--ease-out);

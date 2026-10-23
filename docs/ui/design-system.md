@@ -18,11 +18,11 @@ placeholder. Screens use class names from this catalogue and never write a raw c
 | `ui/forms.css` | Labels, inputs, selects, choice rows, fieldsets, `.form-stack`, `.form-actions`, `.field-hint`, `.field-error`, `.input-code`, `.secret-box`, `.codes-box` |
 | `ui/surfaces.css` | `.card`, `.card-muted`, `<dialog>` and `.sheet` |
 | `ui/tables.css` | Tables and `.table-wrap` |
-| `ui/feedback.css` | `.alert-*`, `.badge-*`, `.empty-state`, `.loading`, `.spinner`, `.skeleton`, `.toast`, `.toast-success`, `.toast-danger`, the header refresh button (`.refresh`, `.refresh-status` readable by assistive tech but off screen below 720px, `.refresh-problem` visible at every width) |
+| `ui/feedback.css` | `.alert-*`, `.badge-*`, `.empty-state`, `.loading`, `.spinner`, `.skeleton`, `.toast`, `.toast-success`, `.toast-error`, `.toast-info`, `.toast-icon`, the header refresh button (`.refresh`, `.refresh-status` readable by assistive tech but off screen below 720px, `.refresh-problem` visible at every width) |
 | `ui/illustrations.css` | The paint classes of the illustrations (`.ill-*`), the state components (`.empty-state-art`, `.status-panel`, `.brand-loader`, `.skeleton-list`) and the shared keyframes |
 | `ui/navigation.css` | The staff bar, the side menu: the sidebar from 720px (`.nav-layout`, `.side-nav`) and the phone drawer (`.menu-button`, `.side-menu`) |
 | `ui/pages.css` | The landing page (hero, trust line, module cards), `.auth-card` and `.auth-art`, the portal cards, the approvals decision cell, the style page |
-| `ui/retail.css` | The retail classes (`.rt`, `.rt-card`, `.rt-row`, `.rt-total`, `.rt-flag`, `.rt-primary`), `.tile-grid`, `.tile`, `.line-foot` |
+| `ui/retail.css` | The retail classes (`.rt`, `.rt-card`, `.rt-row`, `.rt-total`, `.rt-flag`, `.rt-primary`), `.line-foot` |
 | `ui/search.css` | The shared search box (#241): `.sb`, `.sb-field`, `.sb-clear`, `.sb-status`, `.sb-searching`, `.sb-results` (dimmed while `aria-busy`), `.sb-mark` |
 | `ui/onboarding.css` | The sign-up, applicant and operator portal additions (ADR-024): `.facts` (a definition list that stacks on a phone), `.filters` (the pressed status filter), `.pre-line`, `.wrap-anywhere`; those screens otherwise use `.auth-card`, `.form-stack`, `.alert`, `.table-wrap` and `.cluster` |
 | `frontend/src/components/icons.tsx` | Inline SVG line icons (decorative, `aria-hidden`), so no image is fetched |
@@ -64,8 +64,9 @@ The platform host and a tenant without a colour show the Rincol blue.
 - Shadows are soft: `--shadow-sm` on controls, `--shadow` on cards, `--shadow-lg` on hover and dialogs.
 - Elevation has three steps: flat (`.card-muted`), resting (`.card`), raised (`.card-raised`, the one card a
   page leads with, such as the landing hero and the sign-in card).
-- Motion (#106): `--motion-fast` 150ms (hover, press), `--motion` 200ms (dialogs, toasts), `--motion-slow`
-  250ms (a card or state rising in), all on `--ease-out`. Under `prefers-reduced-motion` every animation
+- Motion (#106, #508, `docs/ui-rules.md`): `--motion-fast` 120ms (hover, press), `--motion` 200ms (dialogs, toasts), `--motion-slow`
+  250ms (a card or state rising in), all on `--ease-out`, `cubic-bezier(0.2, 0, 0, 1)`; never ease-in, never a bounce, never `transition: all` (the design guard checks).
+  Under `prefers-reduced-motion` the motion tokens are 0ms, `--press-scale` is 1, and every animation
   and transition runs once in 1ms (`base.css`), so a spinner stands still.
 
 ## Components
@@ -91,7 +92,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Home cards | `HomeCards` (`areas/staff/home-cards.tsx`), `.home-cards`, `.home-card`, `.home-figures` | Home's card per module the business uses (#471, FR-UXN-05, ADR-072): a `.card` headed with the module's menu icon and name, its figures as a `dl` (label muted, value large and semibold, a count as a hint), and a link to the module; a grid of columns at least 280px wide, so one column on a phone |
 | Shop summary cards | `TakingsCard`, `CreditCard`, `TopItemsCard`, `BranchesCard` (`areas/staff/home-cards.tsx`), `.home-summary`, `.home-summary-body`, `.home-list` | The shop's cards after the Shop card on Home (#485, FR-UXN-06, ADR-076): a `.card` headed by its name without an icon (the icons stay the modules'), figures as a `dl` or a `.home-list` (a name, then its figure at the end of the line, semibold), Today and This week as two `aria-pressed` buttons, a plain sentence when there is nothing to show, and a link to the full page |
 | Retail shortcuts | `RetailMenuGroup` (`areas/staff/retail/nav.tsx`) | Up to five retail shortcuts the user may use, as a group under Retail in the side menu on every size (#455, which removed the retail bottom bar) |
-| Tile | `.tile-grid` of `.tile` | Retail home: icon, label, hint; two per row on a phone |
+| Tile | `<TileGrid label><Tile to icon label hint /></TileGrid>` (`app/ui/Tile.tsx`, `.tile-grid`, `.tile`, `.tile-label`, `.tile-hint` in `ui/navigation.css`; #508) | Every hub page (Retail home, Catalogue, Business set-up): an icon above the label and a one-line hint under it, two per row on a phone. The link is named by its label and described by its hint. A press shrinks it to 98% over 120ms; hover changes the edge and background; focus adds a 3px ring; the shadow never grows |
 | Stat tile | `.an-stats` of `.an-stat` (`.an-stat-label`, `.an-stat-value`, a `.hint`) | The retail dashboard: a figure with its label, two per row on a phone and four from 720px; `.an-placeholder` (dashed) marks a slot for a figure that does not exist yet and shows no number |
 | Bars | `Bars` (`areas/staff/retail/analytics-ui.tsx`): an `<ol class="bars">` of a name, a figure and an inline `<svg class="bar">` | A ranking drawn as bars scaled to the largest. The figure is text; the SVG is `aria-hidden` and is colour from `.bar-fill` and `.bar-track`, never an attribute |
 | Sparkline | `Sparkline` (same file): `<svg class="spark" role="img" aria-label>` with a `<polyline class="spark-line">` | A trend line from zero to the largest value, with the total in text beside it and the label saying what it shows |
@@ -104,7 +105,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Success, error | `<StatusPanel tone="success" title="...">` | `role="status"` or `"alert"`; the title in the status colour |
 | Loading | `<BrandLoader />` for a page, `<SkeletonList />` for a list, `.loading` for a line of text, `.spinner`, `.skeleton` | Every loader names what loads in words; motion stops with `prefers-reduced-motion` |
 | Dialog | `<dialog>`, `<dialog className="sheet">`, `.dialog-actions` | Rises in over 200ms with a fading backdrop; a bottom sheet that slides up below 560px, actions full width |
-| Toast | `.toast`, `.toast-success`, `.toast-danger` with `role="status"` | At the bottom of the screen, centred on the content column beside the sidebar, rises in; no screen raises one yet |
+| Toast | `<Toast message tone />` and `useToast()` (`areas/staff/retail/toast.tsx`), `.toast`, `.toast-success`, `.toast-error`, `.toast-info` | A dark neutral pill (`--color-toast`, dark in both themes) with a leading check, error or info icon and no coloured edge; at the bottom of the screen, centred on the content column beside the sidebar and above the sticky sale bar, rises in, gone after 4 seconds. A status for success and info, an alert for an error, hidden where the screen already says the same |
 | Illustration | `illustrations.hero`, `.shopfront`, `.secure`, `.success`, `.error`, and the four empty ones | Decorative (`aria-hidden`), under 2 KB each, no colour attribute: `.ill-tint`, `.ill-tint-strong`, `.ill-accent`, `.ill-primary` follow the tenant colour; `.ill-surface`, `.ill-line` are neutral; `.ill-success-*`, `.ill-danger-*` stay status colours. `shopfront` is the sign-up hero for the onboarding pages of #97 to adopt |
 | iPhone install pictures | `IosSteps` in `frontend/src/install/InstallPrompt.tsx`, drawings in `src/install/ios-pictures.tsx` (#448) | One drawing of the part of Safari beside each of the four install steps (a normal tab, Share in the toolbar, Add to Home Screen and View More in the share sheet, Add at the top right): our own simple shapes, never screenshots or Apple artwork; unlike the decorative illustrations each is `role="img"` with a short `aria-label` that describes the drawing ("Picture: ..."), so a screen reader does not read the step twice; a 100 unit viewBox drawn at 104px with 11 unit labels, so they read at about 11px on a 360px phone; under 2 KB each; painted by the `.ill-*` classes plus `.ill-accent-ring` (what to tap), `.ill-thin` (the Share icon), `.ill-dashed` and `.ill-text*`; View More sits in a frame of its own under the Add to Home Screen row, since it is a second place to look, not a row seen beside it; step 2 says that on an iPad Share is at the top right; `.ios-step` keeps the words first and moves the picture under them on a narrow phone |
 | New logo on the home screen | `NewIconNote` and `NewLogoCard` in `frontend/src/install/NewIcon.tsx` (#453, ADR-066) | The note sits in the Logo fieldset of set-up after a logo or colour save while a logo is set: plain words with the home screen name, no `role="status"` (the save message already is one), and a Show me how on an iPhone button that reveals `IosSteps`. The card is a `.card` headed Your app has a new icon, in the staff area, only in the installed app on an iPhone or iPad, once per new icon version, with the business's address, `IosSteps` and a Done button; never on the first run, nor on the device that made the save. Neither names an iOS menu item: press and hold the icon, then remove it |
@@ -284,7 +285,7 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
    colour outside `theme.css`; a new illustration uses the `.ill-*` classes. Add anything new to the
    style page.
 2. Phone first: one column at 360px, nothing scrolls sideways except inside a `.table-wrap`, every tap
-   target at least 44px, the main action last and full width.
+   target at least 48px (`--tap`), the main action last and full width.
 3. State in words as well as colour; errors in `role="alert"` with `.alert-danger`.
 4. Money through `formatMinor` (`src/components/money.ts`), in `.num` cells.
 5. A tenant colour is applied for you; never write a brand colour. Draw with the colour roles, never a palette token, so
