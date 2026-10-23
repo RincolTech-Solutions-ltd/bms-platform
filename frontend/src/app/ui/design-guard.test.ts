@@ -62,6 +62,29 @@ describe('design guard', () => {
     expect(css).not.toMatch(HEX);
   });
 
+  // Motion (#508, docs/ui-rules.md rule 13): everything eases out on the one curve. Ease-in feels slow to answer, a curve whose
+  // y goes past 0..1 bounces, and `transition: all` animates layout and colour the rule keeps still.
+  // JUSTIFICATION-A3: two new guard rules asked for by #508; no existing test checks motion.
+  it.each([...stylesheets.map((f) => relative(SRC, f)), 'app/theme.css'])('%s eases out without bounce and never transitions all', (file) => {
+    const css = code(file);
+    expect(css).not.toMatch(/\bease-in\b(?!-out)/);
+    expect(css).not.toMatch(/\bbounce\b|\belastic\b/);
+    expect(css).not.toMatch(/transition(-property)?\s*:\s*all\b/);
+    for (const [, curve] of css.matchAll(/cubic-bezier\(([^)]*)\)/g)) {
+      const [, y1, , y2] = (curve as string).split(',').map(Number);
+      expect([y1, y2].every((y) => (y as number) >= 0 && (y as number) <= 1), `${file}: cubic-bezier(${curve}) overshoots`).toBe(true);
+    }
+  });
+
+  it('the motion tokens are 120 and 200 ms on the ease-out curve, with a display size for the key amount', () => {
+    const theme = code('app/theme.css');
+    expect(theme).toMatch(/--motion-fast:\s*120ms/);
+    expect(theme).toMatch(/--motion:\s*200ms/);
+    expect(theme).toMatch(/--ease-out:\s*cubic-bezier\(0\.2,\s*0,\s*0,\s*1\)/);
+    expect(theme).toMatch(/--text-display:/);
+    expect(code('app/ui/base.css')).toMatch(/prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{[^}]*--motion:\s*0ms/);
+  });
+
   // The palette tokens do not change with the theme (#429), so a stylesheet draws with the colour roles, which do. The only
   // palette colours left are white text on a strong fill, black for a darker mix, and the QR code's fixed pair.
   it.each(stylesheets.map((f) => relative(SRC, f)))('%s draws with theme roles, not palette tokens', (file) => {

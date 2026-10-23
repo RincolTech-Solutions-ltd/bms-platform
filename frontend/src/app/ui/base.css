@@ -139,7 +139,16 @@ hr {
   white-space: nowrap;
 }
 
+/* Reduced motion (docs/ui-rules.md rule 13): the tokens go to zero and a press no longer shrinks, and anything that still animates
+   ends at once. */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion: 0ms;
+    --motion-slow: 0ms;
+    --press-scale: 1;
+  }
+
   *,
   *::before,
   *::after {

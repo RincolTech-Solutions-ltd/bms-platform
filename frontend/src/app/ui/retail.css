@@ -412,7 +412,7 @@
   border: 5px solid transparent;
   border-left-color: var(--color-text-muted);
   border-right-width: 0;
-  transition: transform 120ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .cat-head[aria-expanded='true']::before {

@@ -143,11 +143,11 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .tour-hole {
-    transition: top 180ms ease, left 180ms ease, width 180ms ease, height 180ms ease;
+    transition: top var(--motion) var(--ease-out), left var(--motion) var(--ease-out), width var(--motion) var(--ease-out), height var(--motion) var(--ease-out);
   }
 
   .tour-card {
-    animation: tour-in 160ms ease-out;
+    animation: tour-in var(--motion) var(--ease-out);
   }
 }
 
