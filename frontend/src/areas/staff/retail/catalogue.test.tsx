@@ -116,7 +116,7 @@ describe('items and prices', () => {
     const html = page('admin', <PriceForm product={{ ...bulb, cost_minor: undefined }} onSaved={() => undefined} onCancel={() => undefined} />, noCost);
     expect(html).toContain('New selling price');
     expect(html).not.toContain('New buying price');
-    expect(html).not.toMatch(/cost/i);
+    expect(html).not.toMatch(/cost|buying price|bought at/i);
     // The real server sends null where there is no earlier price (the first price) and no reason.
     const first = { id: 'h0', at: '2026-10-01T05:00:00Z', source: 'initial', old_sell_minor: null, new_sell_minor: 5000, old_cost_minor: null, new_cost_minor: 3500, reason: null } as unknown as PriceChange;
     expect(renderToString(<PriceHistory changes={[first]} />)).toContain('Selling price UGX 5,000, buying price UGX 3,500');
@@ -124,7 +124,7 @@ describe('items and prices', () => {
     expect(list).toContain('Selling price UGX 5,000 to UGX 6,000');
     expect(list).toContain('Changed by hand');
     expect(list).toContain('Reason: Test supplier increase');
-    expect(list).not.toMatch(/cost/i);
+    expect(list).not.toMatch(/cost|buying price|bought at/i);
     expect(page('admin', <PriceForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />)).toContain('New buying price');
     expect(html).not.toContain('bought at');
     const priced = page('admin', <PriceForm product={bulb} onSaved={() => undefined} onCancel={() => undefined} />);

@@ -85,8 +85,8 @@ class ProductImportService {
                 throw problem(
                         "csv",
                         "The file needs a column called "
-                                + required.replace('_', ' ')
-                                + ". The columns are: code, description, category, unit, selling price and, optionally, buying price.");
+                                + ("sell_price".equals(required) ? "selling price" : required)
+                                + ". The columns are: code, description, category, unit, buying price (if you wish) and selling price.");
             }
         }
         boolean withCost = columns.containsKey("cost_price");
