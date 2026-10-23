@@ -55,4 +55,9 @@ every held and minimum probe is an index scan with `tenant_id` in its condition:
 #517 has the plans). No index is added. The positions query keeps its per-row select in a `MATERIALIZED` CTE: flattened, the
 held and minimum probes ran once per aggregate and JIT optimisation took it to a median of 1456 ms (1193 ms of it JIT). With no
 branch chosen the counts cover the branches the positions report (active, or closed and still holding stock), so a closed and
-emptied shop adds nothing. If it grows, a held flag kept on the balance row is the fix and needs a migration.
+emptied shop adds nothing. Measured again on the SQL of pull request #517's final head with the default profile: k15 144 ms, k18
+172 ms, c10 15 ms, the same indexes. If it grows, a held flag kept on the balance row is the fix and needs a migration. A movement
+makes an item held at its branch: a movement never has a quantity of zero (the check on `retail_stock_movements`), but an import
+that wrote an opening movement of every catalogue item at every branch would make them all held again, so an importer writes
+movements only for what a branch carries. With a closed branch that still holds stock, the overall counts include it while All
+branches shows its column only with `include_closed=true`.
