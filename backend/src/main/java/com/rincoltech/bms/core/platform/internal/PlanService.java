@@ -421,6 +421,12 @@ class PlanService {
             data.put("after", "cancelled");
             data.put("ended_on", change.effectiveOn().toString());
             audit.record("platform.tenant.subscription_ended", null, tenantId, data);
+            // Stops due after the end change nothing for a read-only business, and must not switch modules off after a
+            // resume: they are closed as undone with the cancellation.
+            jdbc.sql("""
+                            UPDATE subscription_scheduled_changes SET status = 'undone', undone_at = now()
+                             WHERE tenant_id = ? AND status = 'scheduled' AND kind = 'stop_module'
+                            """).param(tenantId).update();
         }
         jdbc.sql("UPDATE subscription_scheduled_changes SET status = 'applied', applied_at = now() WHERE id = ?")
                 .param(id)
@@ -485,6 +491,12 @@ class PlanService {
                     data.put("plan_after", planAfter);
                     data.put("reason", reason.trim());
                     audit.record("platform.tenant.module_request_decided", operator, tenantId, data);
+                    // In the business's own log too, so its administrators see the decision in their audit view.
+                    tenantAudit.record(
+                            AuditLog.Entry.created(
+                                    "core.plan.module_request_decided", "core.plan", requestId, null, data),
+                            null,
+                            "platform");
                     tellOwner(requestId, request.moduleKey(), approve, reason.trim());
                     return request(requestId);
                 }));

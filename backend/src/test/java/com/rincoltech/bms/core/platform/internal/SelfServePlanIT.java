@@ -303,6 +303,13 @@ class SelfServePlanIT extends IntegrationTest {
                 .isEqualTo(bothPlan);
         assertThat(platformAudits("platform.tenant.module_request_decided", b.t().tenantId()))
                 .isEqualTo(1);
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT count(*) FROM audit_log WHERE tenant_id = ? AND action = ? AND actor_kind = 'platform'")
+                        .params(b.t().tenantId(), "core.plan.module_request_decided")
+                        .query(Long.class)
+                        .single())
+                .isEqualTo(1);
         assertThat(platformAudits("platform.tenant.plan_changed", b.t().tenantId()))
                 .isEqualTo(1);
         assertThat(TestDatabase.owner()
@@ -566,6 +573,40 @@ class SelfServePlanIT extends IntegrationTest {
         assertThat(modules(b.t().tenantId())).containsExactly("lending");
         assertThat(platformAudits("platform.tenant.plan_change_applied", b.t().tenantId()))
                 .isZero();
+    }
+
+    /**
+     * A stop due after the cancellation's day (the operator recorded a payment after the Owner cancelled, so the stop asked
+     * then falls later) is closed as undone when the cancellation applies, so it never switches a module off after a resume.
+     */
+    @Test
+    void aStopDueAfterTheEndIsClosedWhenTheCancellationApplies() {
+        LocalDate paidUntil = today.plusDays(5);
+        Business b = business(bothPlan, true, paidUntil);
+        assertThat(withPassword(b.api(), "/api/v1/plan/cancel", b.ownerSession())
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.CREATED);
+        JdbcCall.run(
+                "UPDATE subscriptions SET current_period_end = ? WHERE tenant_id = ?",
+                paidUntil.plusMonths(1),
+                b.t().tenantId());
+        ResponseEntity<JsonNode> stop = withPassword(b.api(), "/api/v1/plan/modules/retail/stop", b.ownerSession());
+        assertThat(stop.getStatusCode()).as("%s", stop.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(stop.getBody().get("effective_on").asString())
+                .isEqualTo(paidUntil.plusMonths(1).plusDays(1).toString());
+
+        assertThat(applyDue(b.t().tenantId(), paidUntil.plusDays(1))).isEqualTo(1);
+
+        assertThat(TestDatabase.owner()
+                        .sql(
+                                "SELECT status FROM subscription_scheduled_changes WHERE tenant_id = ? AND kind = 'stop_module'")
+                        .param(b.t().tenantId())
+                        .query(String.class)
+                        .single())
+                .isEqualTo("undone");
+        assertThat(applyDue(b.t().tenantId(), paidUntil.plusMonths(1).plusDays(1)))
+                .isZero();
+        assertThat(modules(b.t().tenantId())).containsExactly("lending", "retail");
     }
 
     /**

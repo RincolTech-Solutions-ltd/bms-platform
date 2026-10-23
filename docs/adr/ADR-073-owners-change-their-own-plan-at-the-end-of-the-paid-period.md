@@ -44,7 +44,9 @@ month does. It is generic for every business and the Owner's alone: administrato
    records are kept but hidden and come back when the module is switched on again (FR-TEN-03: data kept). A business keeps
    at least one module, counting the stops already scheduled (422 `last_module`; to stop everything, cancel). The Owner may
    undo a change still to come before its day (`POST /plan/changes/{id}/undo`); on its day it is being applied and can no
-   longer be undone (422 `change_already_due`).
+   longer be undone (422 `change_already_due`). A change's `effective_on` is fixed when it is asked for: a payment the
+   operator records afterwards does not move a scheduled cancellation or stop; the Owner undoes it and asks again if they
+   want the later date.
 4. **A nightly job applies what is due, once.** `core.platform.plan-scheduled-changes` runs every quarter hour on
    db-scheduler (ADR-008), lists the businesses with a change due through `platform_tenants_with_due_changes`, and for each,
    in a transaction bound to that business, applies every scheduled row whose day has come in the business's own time zone:
@@ -55,6 +57,11 @@ month does. It is generic for every business and the Owner's alone: administrato
    because switching the modules replaces the whole set: two changes at once are made one after the other and neither
    overwrites the other. It is switched off by
    `bms.platform.plan-changes-job-enabled=false`, which the integration tests set; they call the same work themselves.
+   When a cancellation applies, the stops still scheduled for a later day are closed as `undone` with it: they would change
+   nothing for a read-only business and must not switch a module off after the operator's resume. Between the business's
+   midnight and the job's next run (up to a quarter hour) the resolver already answers `ended` while `tenants.status` is still
+   `active`, so a background job may still run for the business in that window; that is harmless, since the nightly jobs run
+   later in the night.
 5. **After the end date the business is read only, and its data is kept.** A cancellation applied sets the subscription to
    `cancelled` with `subscriptions.ended_on` and the tenant to `suspended`, so every scheduled job already skips it and nothing
    further is billed (no billing is automatic in this release; the operator records payments by hand, ADR-056). The tenant
@@ -78,7 +85,8 @@ month does. It is generic for every business and the Owner's alone: administrato
    lists the pending module requests and the scheduled changes across businesses (`GET /platform/scheduled-changes`), read
    through definer functions that refuse a tenant-bound transaction.
 7. **Everything is audited.** The Owner's acts are written in the business's own log (`core.plan.module_requested`,
-   `core.plan.change_scheduled`, `core.plan.change_undone`, `core.plan.change_applied` by the system) and in
+   `core.plan.change_scheduled`, `core.plan.change_undone`, `core.plan.change_applied` by the system,
+   `core.plan.module_request_decided` by the platform operator, so the business's administrators see the decision) and in
    `platform_audit_log` (`platform.tenant.module_requested`, `platform.tenant.plan_change_scheduled`,
    `platform.tenant.plan_change_undone`, `platform.tenant.plan_change_applied`, `platform.tenant.module_request_decided`,
    `platform.tenant.subscription_ended`, and the existing `platform.tenant.modules_changed` with no operator when the Owner or

@@ -29,6 +29,9 @@ class SuspendedTenantInterceptor implements HandlerInterceptor {
             return true;
         }
         if ("ended".equals(status)) {
+            // When member portal sign-in (FR-IAM-09) is built, its routes must be let through here, for an ended
+            // business
+            // only (ADR-073 decision 5): its members still sign in to read. A suspension by the operator refuses them.
             if (exportPath(request.getRequestURI())) {
                 return true;
             }
