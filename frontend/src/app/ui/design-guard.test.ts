@@ -21,6 +21,8 @@ function files(dir: string, ext: RegExp): string[] {
 const components = files(SRC, /\.tsx$/);
 const stylesheets = files(join(SRC, 'app/ui'), /\.css$/);
 const HEX = /#[0-9a-fA-F]{3,8}\b/;
+// A layout property, the ones rule 13 keeps still: animating them lays the page out on every frame.
+const LAYOUT = /(?<![\w-])(?:top|left|right|bottom|(?:min-|max-)?(?:width|height)|margin(?:-[a-z]+)?|padding(?:-[a-z]+)?)(?![\w-])/;
 
 /** The source with its comments blanked: comments cite issues (#95) and name what was removed. */
 function code(file: string): string {
@@ -65,11 +67,20 @@ describe('design guard', () => {
   // Motion (#508, docs/ui-rules.md rule 13): everything eases out on the one curve. Ease-in feels slow to answer, a curve whose
   // y goes past 0..1 bounces, and `transition: all` animates layout and colour the rule keeps still.
   // JUSTIFICATION-A3: two new guard rules asked for by #508; no existing test checks motion.
-  it.each([...stylesheets.map((f) => relative(SRC, f)), 'app/theme.css'])('%s eases out without bounce and never transitions all', (file) => {
+  it.each([...stylesheets.map((f) => relative(SRC, f)), 'app/theme.css'])('%s eases out without bounce, never transitions all and moves only transform and opacity', (file) => {
     const css = code(file);
     expect(css).not.toMatch(/\bease-in\b(?!-out)/);
     expect(css).not.toMatch(/\bbounce\b|\belastic\b/);
     expect(css).not.toMatch(/transition(-property)?\s*:\s*all\b/);
+    // Only transform and opacity move (rule 13): a transition or a keyframe on a layout property lays out every frame.
+    for (const [, value] of css.matchAll(/\btransition(?:-property)?\s*:\s*([^;}]+)/g)) {
+      expect((value as string).match(LAYOUT), `${file}: transition: ${value}`).toBeNull();
+    }
+    for (const [, name, frames] of css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*\s*)\}/g)) {
+      for (const [, prop] of (frames as string).matchAll(/([a-z-]+)\s*:/g)) {
+        expect(LAYOUT.test(prop as string) ? prop : null, `${file}: @keyframes ${name} animates ${prop}`).toBeNull();
+      }
+    }
     for (const [, curve] of css.matchAll(/cubic-bezier\(([^)]*)\)/g)) {
       const [, y1, , y2] = (curve as string).split(',').map(Number);
       expect([y1, y2].every((y) => (y as number) >= 0 && (y as number) <= 1), `${file}: cubic-bezier(${curve}) overshoots`).toBe(true);
