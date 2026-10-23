@@ -40,9 +40,8 @@ class MigrationOrderIT {
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
      * came before V42 (the loan pledge guard, #176, merged), then V43 (payment methods, #160, merged),
      * then V44 (the retail customer accounts, #196), then V45 (customer returns, #201, merged). Nothing here enforces the order, merge order does.
-     * Today V80 to V87 are merged; a number above them is allowed only as an ordered claim (AGENTS.md): V88 (referrals),
-     * V89 (existing loans), V90 (the self-serve plan), V91 (download my data, #334), then V92 (billing), each merged in
-     * its turn or renumbered at merge.
+     * Today V80 to V90 are merged; a number above them is allowed only as an ordered claim (AGENTS.md): V91 (download my
+     * data, #478), then V92 (billing, #482), each merged in its turn or renumbered at merge.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",

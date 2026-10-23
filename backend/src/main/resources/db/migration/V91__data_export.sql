@@ -1,6 +1,6 @@
--- V91: download my data (issue #334 step 1, ADR-074). An ordered claim (AGENTS.md): V80 to V87 are merged, and V88
--- (referrals), V89 (existing loans) and V90 (the self-serve plan) are claimed before it, V92 (billing) after it. Flyway runs with outOfOrder off, so this file merges after those claims; if it must merge
--- sooner it is renumbered to the next free number at merge time.
+-- V91: download my data (issue #334 step 1, ADR-074). An ordered claim (AGENTS.md): V80 to V90 are merged, this file is
+-- V91 (#478) and V92 (billing, #482) is claimed after it. Flyway runs with outOfOrder off, so if the order changes this file
+-- is renumbered to the next free number at merge time.
 --
 -- Expand only, safe on a populated database. One permission, two new tenant tables, and a new function so that the files
 -- of a business that is not active still expire. The runner's functions stay as V90 left them: a business ended by its
