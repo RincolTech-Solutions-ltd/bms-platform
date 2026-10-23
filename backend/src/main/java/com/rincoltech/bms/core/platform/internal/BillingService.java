@@ -296,17 +296,20 @@ class BillingService {
 
     record Owner(String fullName, String email, String phone) {}
 
+    /** The Owner who may be written to; a test runs it against its own copy of the table. */
+    static final String OWNER_SELECT = """
+            SELECT full_name, email, phone_e164 FROM users
+             WHERE is_owner AND kind = 'staff' AND status IN ('invited', 'active')
+             ORDER BY created_at, id
+            """;
+
     /**
      * The Owner of the bound business (ADR-062; invited or active, never deactivated), or empty while it has none. V79 allows
      * one Owner only; should two ever be flagged, the earliest is taken and the rest logged, so one business never fails the
      * whole run.
      */
     private Optional<Owner> owner() {
-        List<Owner> owners = jdbc.sql("""
-                        SELECT full_name, email, phone_e164 FROM users
-                         WHERE is_owner AND kind = 'staff' AND status IN ('invited', 'active')
-                         ORDER BY created_at, id
-                        """)
+        List<Owner> owners = jdbc.sql(OWNER_SELECT)
                 .query((rs, n) ->
                         new Owner(rs.getString("full_name"), rs.getString("email"), rs.getString("phone_e164")))
                 .list();
