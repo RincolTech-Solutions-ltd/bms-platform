@@ -128,9 +128,11 @@ class RetailReportsIT extends IntegrationTest {
                 .forEach(br -> difference.put(
                         br.get("branch_id").asString(),
                         br.get("revaluation_difference_minor").asLong()));
+        // ADR-078: a manual cost edit sets the last price paid only; the stock stays at each branch's average, so it
+        // revalues nothing and no difference to the inventory account appears.
         assertThat(difference)
-                .containsEntry(t.headOffice().toString(), 700L)
-                .containsEntry(t.secondBranch().toString(), 500L);
+                .containsEntry(t.headOffice().toString(), 0L)
+                .containsEntry(t.secondBranch().toString(), 0L);
 
         String yesterday =
                 LocalDate.now(ZoneId.of("Africa/Kampala")).minusDays(1).toString();

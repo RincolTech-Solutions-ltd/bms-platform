@@ -113,15 +113,16 @@ class RetailMarginsIT extends IntegrationTest {
         assertThat(c.get("units_before").asString()).isEqualTo("2.000");
         assertThat(c.get("units_after").asString()).isEqualTo("2.000");
         assertThat(c.get("margin_before_bp").asLong()).isEqualTo(3_333);
-        // Sales 3,500, cost 1,000 + 1,800: profit 700 is 2,000 basis points.
+        // ADR-078: the edited cost is the last price paid; the sale is costed at the branch's average, still 1,000.
+        // Sales 3,500, cost 1,000 + 1,000: profit 1,500 is 4,286 basis points.
         assertThat(c.get("sales_after_minor").asLong()).isEqualTo(3_500);
-        assertThat(c.get("margin_after_bp").asLong()).isEqualTo(2_000);
+        assertThat(c.get("margin_after_bp").asLong()).isEqualTo(4_286);
         assertThat(c.get("days_before").asInt() + c.get("days_after").asInt()).isEqualTo(30);
 
         // The whole item's cost is the sum of the snapshots, not units times the new cost.
         JsonNode ana1 = margins("").get("by_product").get(0);
         assertThat(ana1.get("code").asString()).isEqualTo("ANA-1");
-        assertThat(ana1.get("cost_minor").asLong()).isEqualTo(2_000 + 1_000 + 1_800);
+        assertThat(ana1.get("cost_minor").asLong()).isEqualTo(2_000 + 1_000 + 1_000);
     }
 
     @Test
