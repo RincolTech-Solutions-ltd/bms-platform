@@ -50,17 +50,20 @@ describe('stale app after a deploy', () => {
 });
 
 describe('loading the fresh app', () => {
-  it('removes the old offline copy and its saved files, then reloads', async () => {
+  it('updates the offline copy, clears its saved app files and reloads, keeping the worker for push notices', async () => {
     const unregister = vi.fn(async () => true);
     const update = vi.fn(async () => undefined);
+    const postMessage = vi.fn();
     const del = vi.fn(async () => true);
-    vi.stubGlobal('navigator', { serviceWorker: { getRegistrations: async () => [{ update, unregister }] } });
-    vi.stubGlobal('caches', { keys: async () => ['workbox-precache-v2'], delete: del });
+    vi.stubGlobal('navigator', { serviceWorker: { getRegistrations: async () => [{ update, unregister, waiting: { postMessage } }] } });
+    vi.stubGlobal('caches', { keys: async () => ['workbox-precache-v2', 'push-settings'], delete: del });
     const reload = vi.fn();
     await loadFreshApp(reload);
     expect(update).toHaveBeenCalled();
-    expect(unregister).toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
+    expect(unregister).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalledWith('workbox-precache-v2');
+    expect(del).not.toHaveBeenCalledWith('push-settings');
     expect(reload).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });

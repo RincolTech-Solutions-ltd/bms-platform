@@ -45,8 +45,9 @@ export function claimReload(now = Date.now(), storage: Storage | null = sessionS
 
 /**
  * Loads the newest app, also when the phone's offline copy (the service worker) still holds the old one: it asks the
- * worker for an update, then removes the old worker and its saved files so the reload fetches the app fresh (Hillary,
- * 24 Oct 2026: refreshing kept showing "A new version of the app is ready"). The worker registers itself again on load.
+ * worker to update and to take over at once, and deletes the app files it saved, so the reload fetches the app fresh
+ * (Hillary, 24 Oct 2026: refreshing kept showing "A new version of the app is ready"). The worker itself stays
+ * registered, so the phone keeps its push notices sign-up (ADR-050).
  */
 export async function loadFreshApp(reload: () => void = () => location.reload()): Promise<void> {
   try {
@@ -54,11 +55,11 @@ export async function loadFreshApp(reload: () => void = () => location.reload())
     if (sw) {
       const regs = await sw.getRegistrations();
       await Promise.all(regs.map((r) => r.update().catch(() => undefined)));
-      await Promise.all(regs.map((r) => r.unregister().catch(() => false)));
+      for (const r of regs) r.waiting?.postMessage({ type: 'SKIP_WAITING' });
     }
     if (typeof caches !== 'undefined') {
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
+      await Promise.all(keys.filter((k) => k.includes('precache')).map((k) => caches.delete(k)));
     }
   } catch {
     // A browser that refuses any of this still gets the plain reload.
