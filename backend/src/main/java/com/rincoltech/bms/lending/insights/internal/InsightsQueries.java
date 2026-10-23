@@ -62,7 +62,8 @@ class InsightsQueries {
                 SELECT t.value_date, sum(t.amount_minor) AS amount, count(*) AS n
                   FROM lending_loan_transactions t
                   JOIN lending_loans l ON l.id = t.loan_id
-                 WHERE t.txn_type = 'disbursement' AND t.value_date BETWEEN :from AND :to""" + s.loanFilter("l", p) + """
+                 WHERE t.txn_type = 'disbursement' AND t.value_date BETWEEN :from AND :to
+                   AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)""" + s.loanFilter("l", p) + """
 
                  GROUP BY t.value_date ORDER BY t.value_date
                 """;
@@ -288,13 +289,15 @@ class InsightsQueries {
                     SELECT l.member_id, min(t.value_date) AS first_in
                       FROM lending_loan_transactions t
                       JOIN lending_loans l ON l.id = t.loan_id
-                     WHERE t.txn_type = 'disbursement' AND t.value_date BETWEEN :from AND :to""" + s.loanFilter("l", p) + """
+                     WHERE t.txn_type = 'disbursement' AND t.value_date BETWEEN :from AND :to
+                       AND NOT EXISTS (SELECT 1 FROM lending_loan_transactions r WHERE r.reverses_txn_id = t.id)""" + s.loanFilter("l", p) + """
 
                      GROUP BY l.member_id
                 )
                 SELECT count(*) AS members,
                        count(*) FILTER (WHERE EXISTS (
-                           SELECT 1 FROM lending_loans e WHERE e.member_id = d.member_id AND e.disbursed_on < d.first_in))
+                           SELECT 1 FROM lending_loans e
+                            WHERE e.member_id = d.member_id AND e.status <> 'cancelled' AND e.disbursed_on < d.first_in))
                            AS repeat
                   FROM d
                 """;

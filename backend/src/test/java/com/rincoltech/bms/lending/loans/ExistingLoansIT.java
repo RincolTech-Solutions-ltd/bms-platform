@@ -192,6 +192,19 @@ class ExistingLoansIT extends LoanFixtures {
                         """).param(loanId).query(Long.class).single();
     }
 
+    /** The insights metrics of one product's loans over the range, as {@code key=value}. */
+    List<String> insights(String path, String product, LocalDate from, LocalDate to) {
+        JsonNode body = send(
+                        HttpMethod.GET,
+                        "/api/v1/lending/insights/" + path + "?from=" + from + "&to=" + to + "&product_id=" + product,
+                        as(admin, adminPerms, "*", null),
+                        null)
+                .getBody();
+        List<String> metrics = new ArrayList<>();
+        body.get("metrics").forEach(x -> metrics.add(x.get("key").asString() + "=" + x.get("value")));
+        return metrics;
+    }
+
     long count(String sql, Object... params) {
         return TestDatabase.owner().sql(sql).params(params).query(Long.class).single();
     }
@@ -842,6 +855,12 @@ class ExistingLoansIT extends LoanFixtures {
                 .isEqualTo(HttpStatus.OK);
         ResponseEntity<JsonNode> again = askReversal(id);
         assertThat(again.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+
+        // Recorded again correctly: the reversed bring-in is no disbursement, so the principal counts once and the
+        // member is no repeat borrower.
+        approve(recorded(body));
+        assertThat(insights("portfolio", product, disbursed, today))
+                .contains("portfolio.disbursed=1200000", "portfolio.disbursed_count=1", "portfolio.repeat_borrowers=0");
     }
 
     /** Once the loan has a transaction made in the app, its bring-in is no longer reversed. */
