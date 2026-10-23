@@ -73,7 +73,8 @@ describe('adding an item', () => {
     expect(document.querySelector('.count-badge')).toBeNull();
     await addItem('Test Bulb 9W');
     expect(vibrate).toHaveBeenCalledWith(10);
-    expect(document.querySelectorAll('.sale-line')).toHaveLength(1);
+    expect(document.querySelectorAll('.line-card')).toHaveLength(1);
+    expect(document.querySelectorAll('.line-new')).toHaveLength(1);
     const first = document.querySelector('.count-badge');
     expect(screen.getByRole('heading', { name: /^Items/ }).textContent).toBe('Items 1 on the sale');
     await addItem('Test Lamp 15W');
@@ -83,11 +84,29 @@ describe('adding an item', () => {
     expect(second).not.toBe(first);
   });
 
+  it('gives no buzz and no pop when the item is already on the sale, and no pop on a removal', async () => {
+    const vibrate = vi.fn(() => true);
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { vibrate }));
+    open();
+    await addItem('Test Bulb 9W');
+    await addItem('Test Lamp 15W');
+    expect(vibrate).toHaveBeenCalledTimes(2);
+    const badge = document.querySelector('.count-badge');
+    await addItem('Test Bulb 9W');
+    expect(vibrate).toHaveBeenCalledTimes(2);
+    expect(document.querySelectorAll('.line-card')).toHaveLength(2);
+    expect(document.querySelector('.count-badge')).toBe(badge);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Test Bulb 9W' }));
+    expect(document.querySelector('.count-badge')?.textContent).toBe('1 on the sale');
+    expect(document.querySelector('.count-badge')).toBe(badge);
+    expect(document.querySelectorAll('.line-new')).toHaveLength(0);
+  });
+
   it('adds the item where the phone cannot vibrate', async () => {
     vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { vibrate: undefined }));
     open();
     await addItem('Test Bulb 9W');
-    expect(document.querySelectorAll('.sale-line')).toHaveLength(1);
+    expect(document.querySelectorAll('.line-card')).toHaveLength(1);
   });
 });
 
@@ -111,6 +130,6 @@ describe('the sale screen stylesheet', () => {
       const frames = retail.match(new RegExp(`@keyframes ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
       expect([...frames.matchAll(/([a-z-]+):/g)].map((m) => m[1]).every((p) => p === 'opacity' || p === 'transform')).toBe(true);
     }
-    expect(retail).toMatch(/\.sale-line \{\s*animation: rt-line-in var\(--motion\) var\(--ease-out\);/);
+    expect(retail).toMatch(/\.line-new \{\s*animation: rt-line-in var\(--motion\) var\(--ease-out\);/);
   });
 });

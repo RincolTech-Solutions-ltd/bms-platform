@@ -104,9 +104,12 @@ describe('FR-RET-68 scanning on the sale form', () => {
     scan(EAN);
     await waitFor(() => expect(screen.getByText('Added LED bulb 9W screw.')).toBeTruthy());
     expect(qtyOf(0)).toBe('1');
+    const badge = document.querySelector('.count-badge');
     scan(EAN);
     await waitFor(() => expect(qtyOf(0)).toBe('2'));
     expect(document.querySelectorAll('[id^="qty-"]')).toHaveLength(1);
+    // A top-up pops the count again (#508), though the number of lines is the same.
+    expect(document.querySelector('.count-badge')).not.toBe(badge);
   });
 
   it('takes a slow Bluetooth scanner in the Scan box like a fast one: its speed no longer matters', async () => {

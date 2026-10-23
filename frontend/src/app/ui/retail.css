@@ -359,8 +359,9 @@
   }
 }
 
-/* An item going on the sale (#508): its line slides up 8px and fades in, and the count beside Items pops, without overshoot. */
-.sale-line {
+/* An item going on the sale (#508): a new line slides up 8px and fades in, and the count beside Items pops on every add or
+   top-up, without overshoot. Both are keyed by the add in sale.tsx, so nothing moves on a removal or a refused duplicate. */
+.line-new {
   animation: rt-line-in var(--motion) var(--ease-out);
 }
 

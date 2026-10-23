@@ -123,9 +123,11 @@ export function SaleBar({ children }: { children: ReactNode }) {
  * One line of the sale being made. The unit choice is drawn only while the tenant has the units capability
  * (`unitsOn`) and the item has active pack sizes; otherwise the line is exactly what it was before packs.
  */
-export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, onFlashed, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
+export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh, slide = false, onFlashed, onQty, onPrice, onUnit, onReason, onReset, onRemove }: {
   /** Set on the line just added or topped up, a new number each time: it flashes once (Hillary, 23 Oct 2026). */
   fresh?: number;
+  /** Set while the line just went on the sale as a new line: it slides in (#508). */
+  slide?: boolean;
   /** Called when the flash has run, so it never stays on or moves to another line. */
   onFlashed?: () => void;
   line: DraftLine;
@@ -154,7 +156,7 @@ export function SaleLineCard({ line, index, unitsOn, price, offlinePrice, fresh,
   const noPrice = price ? hasNoPrice(price.resolved) : false;
   const changedOffline = offlinePrice !== undefined && f !== null && f.priceMinor !== defaultPrice(line.product, line.unitId);
   return (
-    <div className="rt-card line-card sale-line">
+    <div className={`rt-card line-card${slide ? ' line-new' : ''}`}>
       {fresh !== undefined && <span key={fresh} className="line-added" aria-hidden="true" onAnimationEnd={onFlashed} />}
       <strong>{line.product.description}</strong>
       {packs.length > 0 && (
@@ -287,12 +289,19 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
   // An item can be on the sale twice (cartons and loose pieces) only while it has pack sizes to choose from.
   // Every add says so on screen (Hillary, 23 Oct 2026): a short toast, and the new line flashes once.
   const { show, toast } = useToast(2500);
-  // The line just added or topped up flashes once; `n` changes on every add so a repeat scan flashes again.
-  const [fresh, setFresh] = useState<{ index: number; n: number } | null>(null);
+  // The line just added or topped up flashes once; `n` changes on every add so a repeat scan flashes again. A line just
+  // appended (`created`) also slides in (#508).
+  const [fresh, setFresh] = useState<{ index: number; n: number; created: boolean } | null>(null);
+  // Counts the adds and top-ups, so the count beside Items pops on each and never on a removal (#508).
+  const [pops, setPops] = useState(0);
   // The lines as of the last add, so two taps or scans before React renders again see each other.
   const lines = useRef(draft.lines);
   lines.current = draft.lines;
-  const mark = (index: number) => setFresh((f) => ({ index, n: (f?.n ?? 0) + 1 }));
+  const mark = (index: number, created: boolean) => {
+    tapFeedback();
+    setPops((n) => n + 1);
+    setFresh((f) => ({ index, n: (f?.n ?? 0) + 1, created }));
+  };
   const add = (p: Product) => {
     const now = lines.current;
     if (now.some((l) => l.product.id === p.id) && !(unitsOn && activePacks(p).length > 0)) {
@@ -301,9 +310,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     }
     const next = [...now, newLine(p)];
     lines.current = next;
-    tapFeedback();
     setDraft((d) => ({ ...d, lines: next }));
-    mark(next.length - 1);
+    mark(next.length - 1, true);
     show(`Added ${p.description}`);
   };
   // A scan (issue #345) adds the item at 1, or one more to its line in the pack the barcode is on; a pack it cannot
@@ -315,9 +323,8 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
     const next = scanInto(now, p, unit, (l) => ({ ...l, qty: plusOne(l.qty) }), () => (unit ? withUnit(newLine(p), unit) : newLine(p)));
     const { index, created } = touchedLine(now, next);
     lines.current = next;
-    tapFeedback();
     setDraft((d) => ({ ...d, lines: next }));
-    if (index >= 0) mark(index);
+    if (index >= 0) mark(index, created);
     show(created ? `Added ${p.description}` : `One more ${p.description}`);
   };
 
@@ -387,7 +394,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
       <h2>
         Items{' '}
         {shown.lines.length > 0 && (
-          <span key={shown.lines.length} className="badge count-badge">
+          <span key={pops} className="badge count-badge">
             {shown.lines.length}
             <span className="visually-hidden"> on the sale</span>
           </span>
@@ -407,6 +414,7 @@ export function SaleForm({ branchId, branchName = '', onSaved, onQueued }: {
           index={i}
           unitsOn={unitsOn}
           fresh={fresh !== null && fresh.index === i ? fresh.n : undefined}
+          slide={fresh !== null && fresh.index === i && fresh.created}
           onFlashed={() => setFresh(null)}
           price={pricesOn ? { resolved: resolved?.[i], listName: resolution.data?.price_list, canOverride: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
           offlinePrice={offlineMode ? { canType: holdsAt(me, PRICE_OVERRIDE, branchId) } : undefined}
