@@ -9,6 +9,7 @@ import com.rincoltech.bms.core.platform.internal.PlatformController.MessageRespo
 import com.rincoltech.bms.core.platform.internal.PlatformController.PaymentRequest;
 import com.rincoltech.bms.core.platform.internal.PlatformController.PaymentResponse;
 import com.rincoltech.bms.core.platform.internal.PlatformController.TenantResponse;
+import com.rincoltech.bms.core.referrals.Referrals;
 import com.rincoltech.bms.kernel.ApiException;
 import com.rincoltech.bms.kernel.ApiException.FieldProblem;
 import com.rincoltech.bms.kernel.BusinessClock;
@@ -47,6 +48,7 @@ class BusinessService {
     private final PlatformAuditLog audit;
     private final Idempotency idempotency;
     private final BusinessClock clock;
+    private final Referrals referrals;
     private final TransactionTemplate transactions;
     private final BillingService billing;
 
@@ -57,6 +59,7 @@ class BusinessService {
             PlatformAuditLog audit,
             Idempotency idempotency,
             BusinessClock clock,
+            Referrals referrals,
             PlatformTransactionManager transactionManager,
             BillingService billing) {
         this.jdbc = jdbc;
@@ -65,6 +68,7 @@ class BusinessService {
         this.audit = audit;
         this.idempotency = idempotency;
         this.clock = clock;
+        this.referrals = referrals;
         this.transactions = new TransactionTemplate(transactionManager);
         this.billing = billing;
     }
@@ -311,6 +315,7 @@ class BusinessService {
      * ADR-024 decision 4: a payment received, entered by the operator and confirmed at once. It covers {@code months} from
      * the day after what is already covered (the trial, an earlier payment, or today) and makes a trial or past due
      * subscription active. Behind the Idempotency-Key protocol, so a repeated submit records nothing and answers the first.
+     * When the business was referred, the commission line of the rule in force is added with it (ADR-069).
      */
     Recorded recordPayment(UUID tenantId, String idempotencyKey, PaymentRequest request) {
         TenantResponse tenant = transactions.execute(status -> platform.tenant(tenantId));
@@ -363,6 +368,9 @@ class BusinessService {
                             // Issue #480: the receipt is numbered and its email queued in the payment's transaction.
                             data.put("receipt_no", billing.issueReceipt(tenant, payment, today));
                             audit.record("platform.tenant.payment_recorded", operator, tenantId, data);
+                            // ADR-069: a referred business's payment adds its referrer's commission line, from the
+                            // rule in force now, in the same transaction.
+                            referrals.commissionForPayment(id, operator);
                             return payment;
                         })));
         return new Recorded(outcome.body(), outcome.replayed());

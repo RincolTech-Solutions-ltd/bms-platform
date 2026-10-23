@@ -576,6 +576,9 @@
             },
             "type" : "array"
           },
+          "referred_by" : {
+            "$ref" : "#/components/schemas/ApplicationReferrer"
+          },
           "suggested_slug" : {
             "description" : "A free slug from the business name (FR-TEN-02); editable at Activate",
             "type" : "string"
@@ -610,6 +613,24 @@
           }
         },
         "required" : [ "note" ]
+      },
+      "ApplicationReferrer" : {
+        "description" : "The business whose referral code the applicant brought",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "tenant_name" : {
+            "type" : "string"
+          },
+          "tenant_slug" : {
+            "type" : "string"
+          }
+        }
       },
       "Approval" : {
         "properties" : {
@@ -1227,6 +1248,121 @@
             "$ref" : "#/components/schemas/PlatformTenant"
           }
         }
+      },
+      "BusinessPlan" : {
+        "properties" : {
+          "applies_at_once" : {
+            "description" : "Whether a change asked for now takes effect at once, as nothing is paid ahead",
+            "type" : "boolean"
+          },
+          "can_change" : {
+            "description" : "Whether the signed-in user is the Owner, who alone may change the plan",
+            "type" : "boolean"
+          },
+          "changes" : {
+            "description" : "Changes still to come, soonest first, then the latest done or undone",
+            "items" : {
+              "$ref" : "#/components/schemas/PlanScheduledChange"
+            },
+            "type" : "array"
+          },
+          "changes_take_effect_on" : {
+            "description" : "The day a change asked for now would take effect",
+            "format" : "date",
+            "type" : "string"
+          },
+          "ended_on" : {
+            "description" : "When the subscription has ended: the day it ended",
+            "format" : "date",
+            "type" : "string"
+          },
+          "ends_on" : {
+            "description" : "While a cancellation is scheduled: the first day the business is read only",
+            "format" : "date",
+            "type" : "string"
+          },
+          "modules" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "modules_available" : {
+            "description" : "Modules the business does not use and may ask for",
+            "items" : {
+              "description" : "Modules the business does not use and may ask for",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "modules_in_plan" : {
+            "description" : "Modules the plan includes: asking for one of these switches it on at once",
+            "items" : {
+              "description" : "Modules the plan includes: asking for one of these switches it on at once",
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "paid_until" : {
+            "description" : "The last day paid for, or null",
+            "format" : "date",
+            "type" : "string"
+          },
+          "pilot" : {
+            "type" : "boolean"
+          },
+          "plan_code" : {
+            "type" : "string"
+          },
+          "plan_name" : {
+            "type" : "string"
+          },
+          "requests" : {
+            "description" : "The latest module requests, newest first",
+            "items" : {
+              "$ref" : "#/components/schemas/PlanModuleRequest"
+            },
+            "type" : "array"
+          },
+          "subscription_status" : {
+            "description" : "trial, active, past_due, suspended or cancelled; null when the business has none yet",
+            "type" : "string"
+          },
+          "today" : {
+            "description" : "Today in the business's own time zone",
+            "format" : "date",
+            "type" : "string"
+          },
+          "trial_ends_on" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "BusinessPlanStatus" : {
+        "description" : "For the banner and the read-only notice every member of staff sees",
+        "properties" : {
+          "ended_on" : {
+            "description" : "When the subscription has ended: the day it ended; the business is read only",
+            "format" : "date",
+            "type" : "string"
+          },
+          "ends_on" : {
+            "description" : "While a cancellation is scheduled: the first day the business is read only",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "CancelExistingLoanRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
       },
       "ChargeWaiverRequest" : {
         "description" : "FR-ARR-04: amount_minor left out waives all that is waivable",
@@ -2115,6 +2251,40 @@
           }
         }
       },
+      "DataExportSettingsRequest" : {
+        "properties" : {
+          "weekly_email" : {
+            "description" : "Email the Owner a copy every week",
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "weekly_email" ]
+      },
+      "DataExportStatus" : {
+        "properties" : {
+          "last_emailed_at" : {
+            "description" : "When the weekly email last went to the Owner; null when never",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "last_export_at" : {
+            "description" : "When a workbook of the business's data was last made, by anyone; null when never",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "latest" : {
+            "$ref" : "#/components/schemas/ReportRun"
+          },
+          "owner" : {
+            "description" : "Whether the caller is the Owner, who alone may switch the weekly email; others see it only",
+            "type" : "boolean"
+          },
+          "weekly_email" : {
+            "description" : "Whether the Owner is emailed a copy every week (on until switched off)",
+            "type" : "boolean"
+          }
+        }
+      },
       "DisbursementRequest" : {
         "properties" : {
           "disbursement_date" : {
@@ -2359,6 +2529,323 @@
           }
         }
       },
+      "ExistingLoan" : {
+        "properties" : {
+          "agreed_total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "approval_request_id" : {
+            "description" : "The pending request a second person decides: the bring-in while the loan is brought_in, the reversal of the bring-in (loan_bring_in_reversal) once it is active or closed",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "brought_in_on" : {
+            "description" : "Set on approval: the first business date the app charges penalties for",
+            "format" : "date",
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "disbursement_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "go_live_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "loan_id" : {
+            "description" : "Null on a check (dry run), which saves nothing",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "loan_no" : {
+            "type" : "string"
+          },
+          "member_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "member_no" : {
+            "type" : "string"
+          },
+          "position" : {
+            "$ref" : "#/components/schemas/ExistingLoanPosition"
+          },
+          "principal_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "product_code" : {
+            "type" : "string"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "register_ref" : {
+            "type" : "string"
+          },
+          "repayments" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExistingLoanRepayment"
+            },
+            "type" : "array"
+          },
+          "schedule" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExistingLoanScheduleItem"
+            },
+            "type" : "array"
+          },
+          "status" : {
+            "description" : "brought_in (waiting for a checker), then active or closed; cancelled if withdrawn",
+            "type" : "string"
+          },
+          "term_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "warnings" : {
+            "description" : "Things to check before recording or approving, none of which stops it: a loan of the same member for the same amount and date already in the app when no register number tells them apart",
+            "items" : {
+              "description" : "Things to check before recording or approving, none of which stops it: a loan of the same member for the same amount and date already in the app when no register number tells them apart",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "ExistingLoanImportRequest" : {
+        "properties" : {
+          "csv" : {
+            "description" : "The CSV text: a header row, then rows of kind loan (one per loan) and kind repayment (any number per loan), tied by ref. Comma, semicolon or tab separated; amounts in the currency's major units",
+            "maxLength" : 1000000,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "csv" ]
+      },
+      "ExistingLoanImportResult" : {
+        "properties" : {
+          "added" : {
+            "description" : "Loans recorded, or on a check the loans that would be; 0 while any row is an error",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "dry_run" : {
+            "type" : "boolean"
+          },
+          "errors" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "loans" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "repayments" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "rows" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExistingLoanImportRow"
+            },
+            "type" : "array"
+          },
+          "rows_read" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "skipped" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "ExistingLoanImportRow" : {
+        "properties" : {
+          "line" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "description" : "ready (a check found nothing wrong), added, skipped (the register number is in use) or error",
+            "type" : "string"
+          },
+          "ref" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ExistingLoanPage" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExistingLoanSummary"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "ExistingLoanPosition" : {
+        "description" : "As the register leaves the loan, on today's business date",
+        "properties" : {
+          "arrears_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "days_past_due" : {
+            "description" : "Counted from the real due date of the oldest unpaid instalment (R-DPD)",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "fees_outstanding_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "interest_outstanding_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "last_repayment_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "next_due_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "principal_outstanding_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "settled" : {
+            "description" : "True when the register shows the loan repaid in full; it is closed on approval",
+            "type" : "boolean"
+          },
+          "total_outstanding_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "total_paid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "ExistingLoanRepayment" : {
+        "description" : "One repayment the register shows, before the go-live date",
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "maximum" : 1000000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "note" : {
+            "description" : "The paper receipt number or a note; optional",
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "payment_method_key" : {
+            "pattern" : "cash|bank|mtn_momo|airtel_money",
+            "type" : "string"
+          },
+          "value_date" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        },
+        "required" : [ "amount_minor", "payment_method_key", "value_date" ]
+      },
+      "ExistingLoanScheduleItem" : {
+        "properties" : {
+          "due_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "fees_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "interest_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "no" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "paid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "principal_due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "unpaid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "ExistingLoanSummary" : {
+        "properties" : {
+          "approval_request_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "disbursement_date" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "loan_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "loan_no" : {
+            "type" : "string"
+          },
+          "member_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "member_no" : {
+            "type" : "string"
+          },
+          "principal_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "register_ref" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
       "FeedbackItem" : {
         "properties" : {
           "app_version" : {
@@ -2468,6 +2955,19 @@
           }
         },
         "required" : [ "full_name" ]
+      },
+      "GoLiveDate" : {
+        "properties" : {
+          "go_live_date" : {
+            "description" : "The business's go-live date, or null while none is known",
+            "format" : "date",
+            "type" : "string"
+          },
+          "source" : {
+            "description" : "set (by the Owner or the operator), first_admin_sign_in (the default) or none (nobody has signed in yet)",
+            "type" : "string"
+          }
+        }
       },
       "HeadOfficeRequest" : {
         "properties" : {
@@ -5546,6 +6046,10 @@
           "external_reference" : {
             "type" : "string"
           },
+          "historic" : {
+            "description" : "From the paper register before go-live (ADR-071): no journal entry, no receipt number, not counted as cash in the app's books",
+            "type" : "boolean"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"
@@ -6065,6 +6569,55 @@
           }
         },
         "required" : [ "code", "mfa_token" ]
+      },
+      "MyReferral" : {
+        "description" : "A business this business referred: its name, when it joined, never more",
+        "properties" : {
+          "joined_at" : {
+            "description" : "When the business was created, or the application sent",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "referred_name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "description" : "applied, active, paying, suspended, cancelled or ended",
+            "type" : "string"
+          },
+          "totals" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ReferralTotal"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "MyReferrals" : {
+        "properties" : {
+          "code" : {
+            "description" : "The business's referral code",
+            "type" : "string"
+          },
+          "items" : {
+            "description" : "Newest first",
+            "items" : {
+              "$ref" : "#/components/schemas/MyReferral"
+            },
+            "type" : "array"
+          },
+          "link" : {
+            "description" : "The public sign-up with the code filled in",
+            "type" : "string"
+          },
+          "totals" : {
+            "description" : "Every referral together, one row per currency",
+            "items" : {
+              "$ref" : "#/components/schemas/ReferralTotal"
+            },
+            "type" : "array"
+          }
+        }
       },
       "NextOfKin" : {
         "properties" : {
@@ -6591,6 +7144,60 @@
           }
         }
       },
+      "PlanModuleAsk" : {
+        "description" : "The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password",
+        "properties" : {
+          "module" : {
+            "pattern" : "^[a-z]{2,30}$",
+            "type" : "string"
+          },
+          "password" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }
+      },
+      "PlanModuleRequest" : {
+        "description" : "A module the Owner asked for, and the operator's decision",
+        "properties" : {
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_automatically" : {
+            "description" : "True when the plan already included the module, so it was switched on at once",
+            "type" : "boolean"
+          },
+          "decision_reason" : {
+            "description" : "The operator's reason, shown to the Owner when declined",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "module_key" : {
+            "type" : "string"
+          },
+          "requested_by_name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "description" : "pending, approved or declined",
+            "type" : "string"
+          }
+        }
+      },
       "PlanPrice" : {
         "description" : "A price of a plan from a date; a later row replaces it from its own date",
         "properties" : {
@@ -6628,6 +7235,57 @@
             "type" : "integer"
           },
           "reason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PlanScheduledChange" : {
+        "description" : "A module stopped or the subscription cancelled, from a date",
+        "properties" : {
+          "applied_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "effective_on" : {
+            "description" : "The first day the change is in force",
+            "format" : "date",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "description" : "stop_module or cancel",
+            "type" : "string"
+          },
+          "module_key" : {
+            "type" : "string"
+          },
+          "requested_by_name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "description" : "scheduled, applied or undone",
+            "type" : "string"
+          }
+        }
+      },
+      "PlanStepUp" : {
+        "description" : "The authenticator code when the Owner has two-step sign-in, else the password",
+        "properties" : {
+          "password" : {
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "maxLength" : 20,
+            "minLength" : 0,
             "type" : "string"
           }
         }
@@ -6747,6 +7405,103 @@
           }
         }
       },
+      "PlatformModuleApproval" : {
+        "properties" : {
+          "plan_code" : {
+            "description" : "Move the business to this plan first, when its plan does not include the module",
+            "pattern" : "^[a-z0-9_-]{1,40}$",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "Why; kept in the platform audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "description" : "A current 6 digit code from the operator's own authenticator app",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason", "totp_code" ]
+      },
+      "PlatformModuleDecline" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why; shown to the Owner and kept in the audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "description" : "A current 6 digit code from the operator's own authenticator app",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason", "totp_code" ]
+      },
+      "PlatformModuleRequest" : {
+        "properties" : {
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "decided_automatically" : {
+            "type" : "boolean"
+          },
+          "decision_reason" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "module_key" : {
+            "type" : "string"
+          },
+          "plan_code" : {
+            "type" : "string"
+          },
+          "plan_includes" : {
+            "description" : "Whether the business's plan already includes the module",
+            "type" : "boolean"
+          },
+          "requested_by_name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "tenant_name" : {
+            "type" : "string"
+          },
+          "tenant_slug" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PlatformModuleRequestList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PlatformModuleRequest"
+            },
+            "type" : "array"
+          }
+        }
+      },
       "PlatformReasonRequest" : {
         "properties" : {
           "reason" : {
@@ -6757,6 +7512,156 @@
           }
         },
         "required" : [ "reason" ]
+      },
+      "PlatformReferral" : {
+        "description" : "The current referral of the business, or null when it has no referrer",
+        "properties" : {
+          "application_id" : {
+            "description" : "The sign-up application, while it is open or when the referral came from one",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "ended_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "joined_at" : {
+            "description" : "When the business was created, or the application sent",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "referral_id" : {
+            "description" : "Null for an application not activated yet",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "referred_name" : {
+            "type" : "string"
+          },
+          "referred_slug" : {
+            "type" : "string"
+          },
+          "referred_tenant_id" : {
+            "description" : "Null while the referred business is an application",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "referrer_name" : {
+            "type" : "string"
+          },
+          "referrer_slug" : {
+            "type" : "string"
+          },
+          "referrer_status" : {
+            "description" : "The referrer business now: active, suspended, cancelled, past_due or trial_lapsed",
+            "type" : "string"
+          },
+          "referrer_tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "rule_override" : {
+            "description" : "True when the operator set a rule for this referral",
+            "type" : "boolean"
+          },
+          "source" : {
+            "description" : "sign_up or operator",
+            "type" : "string"
+          },
+          "started_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "description" : "applied, active, paying, suspended or cancelled (the referred business's subscription), or ended",
+            "type" : "string"
+          },
+          "totals" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ReferralTotal"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "PlatformReferralDetail" : {
+        "properties" : {
+          "lines" : {
+            "description" : "Oldest first",
+            "items" : {
+              "$ref" : "#/components/schemas/ReferralCommissionLine"
+            },
+            "type" : "array"
+          },
+          "referral" : {
+            "$ref" : "#/components/schemas/PlatformReferral"
+          },
+          "rule_in_force" : {
+            "$ref" : "#/components/schemas/ReferralCommissionRule"
+          },
+          "rule_source" : {
+            "description" : "override, default or none",
+            "type" : "string"
+          }
+        }
+      },
+      "PlatformReferralList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PlatformReferral"
+            },
+            "type" : "array"
+          }
+        }
+      },
+      "PlatformScheduledChange" : {
+        "properties" : {
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "effective_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "module_key" : {
+            "type" : "string"
+          },
+          "requested_by_name" : {
+            "type" : "string"
+          },
+          "tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "tenant_name" : {
+            "type" : "string"
+          },
+          "tenant_slug" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PlatformScheduledChangeList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PlatformScheduledChange"
+            },
+            "type" : "array"
+          }
+        }
       },
       "PlatformSignInResetLink" : {
         "description" : "Shown once to the operator, who hands it to the tenant admin",
@@ -7061,6 +7966,62 @@
         },
         "required" : [ "endpoint" ]
       },
+      "RecordExistingLoanRequest" : {
+        "properties" : {
+          "agreed_total_minor" : {
+            "description" : "The total the borrower agreed to repay (principal and interest), when the register records that instead of the product's rate; the difference is spread as flat interest and no fee is added",
+            "format" : "int64",
+            "maximum" : 1000000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "disbursement_date" : {
+            "description" : "The real disbursement date, before the business's go-live date",
+            "format" : "date",
+            "type" : "string"
+          },
+          "member_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "principal_minor" : {
+            "format" : "int64",
+            "maximum" : 1000000000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "purpose_category" : {
+            "description" : "Defaults to other",
+            "pattern" : "business|school_fees|medical|agriculture|household|construction|other",
+            "type" : "string"
+          },
+          "register_ref" : {
+            "description" : "The loan's number in the paper register; one live loan per number",
+            "maxLength" : 40,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "repayments" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ExistingLoanRepayment"
+            },
+            "maxItems" : 500,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "term_count" : {
+            "description" : "Defaults to the product's default term; within the product's limits",
+            "format" : "int32",
+            "minimum" : 0,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "disbursement_date", "member_id", "principal_minor", "product_id", "repayments" ]
+      },
       "RecoveryCodes" : {
         "properties" : {
           "recovery_codes" : {
@@ -7083,6 +8044,297 @@
           }
         },
         "required" : [ "code" ]
+      },
+      "ReferralCommissionLine" : {
+        "description" : "Oldest first",
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "created_by_name" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "inactive_when_worked_out" : {
+            "description" : "The referrer business was not active when the line was worked out",
+            "type" : "boolean"
+          },
+          "kind" : {
+            "description" : "payment (worked out from a rule), manual (typed) or reversal",
+            "type" : "string"
+          },
+          "months_counted" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "paid_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "paid_by_name" : {
+            "type" : "string"
+          },
+          "paid_method" : {
+            "type" : "string"
+          },
+          "paid_note" : {
+            "type" : "string"
+          },
+          "paid_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "paid_reference" : {
+            "type" : "string"
+          },
+          "payment_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "referrer_inactive" : {
+            "description" : "The referrer business is not active now: marking the line paid needs confirm_referrer_inactive",
+            "type" : "boolean"
+          },
+          "referrer_status" : {
+            "description" : "The referrer business now: active, suspended, cancelled, past_due or trial_lapsed",
+            "type" : "string"
+          },
+          "reversed_by_line_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "reverses_line_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "rule_snapshot" : {
+            "additionalProperties" : {
+              "description" : "The rule as it was when the line was worked out, and the payment it was applied to",
+              "type" : "object"
+            },
+            "description" : "The rule as it was when the line was worked out, and the payment it was applied to",
+            "type" : "object"
+          }
+        }
+      },
+      "ReferralCommissionRule" : {
+        "description" : "The rule a payment recorded now would use, or null",
+        "properties" : {
+          "amount_minor" : {
+            "description" : "Minor units: once (fixed_first_payment) or per paid month (fixed_per_month)",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "cap_minor" : {
+            "description" : "The most a referral earns under a percent rule, in currency; null: no cap",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "created_by_name" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "description" : "percent_of_payment, fixed_first_payment or fixed_per_month",
+            "type" : "string"
+          },
+          "months" : {
+            "description" : "The first paid months of the referred business it applies to; null: no end",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "percent_bp" : {
+            "description" : "Basis points of each payment: 1000 is 10%",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "ReferralDefaultRule" : {
+        "properties" : {
+          "rule" : {
+            "$ref" : "#/components/schemas/ReferralCommissionRule"
+          }
+        }
+      },
+      "ReferralLinePaidRequest" : {
+        "description" : "The commission was paid outside the app; this records it",
+        "properties" : {
+          "confirm_referrer_inactive" : {
+            "description" : "True to pay a line although the referrer business is inactive now (suspended, cancelled, past_due or trial_lapsed); without it that is 409 referrer_inactive",
+            "type" : "boolean"
+          },
+          "method" : {
+            "minLength" : 1,
+            "pattern" : "mtn_momo|airtel_money|bank_transfer|cash|other",
+            "type" : "string"
+          },
+          "note" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "paid_on" : {
+            "format" : "date",
+            "type" : "string"
+          },
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "reference" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "method", "paid_on", "reason" ]
+      },
+      "ReferralLineRequest" : {
+        "description" : "A commission the operator works out and types",
+        "properties" : {
+          "amount_minor" : {
+            "format" : "int64",
+            "maximum" : 1000000000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "currency" : {
+            "minLength" : 1,
+            "pattern" : "^[A-Za-z]{3}$",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "Why; kept on the line and in the audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "amount_minor", "currency", "reason" ]
+      },
+      "ReferralLineReverseRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "refunded" : {
+            "description" : "True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment",
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "ReferralPaymentRefundedRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "ReferralRuleBody" : {
+        "description" : "The rule; null clears it (the default: nothing is worked out; a referral: the default)",
+        "properties" : {
+          "amount_minor" : {
+            "description" : "The fixed amount in minor units",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "cap_minor" : {
+            "description" : "percent_of_payment: the most one referral earns; null: no cap",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "currency" : {
+            "pattern" : "^[A-Za-z]{3}$",
+            "type" : "string"
+          },
+          "kind" : {
+            "minLength" : 1,
+            "pattern" : "percent_of_payment|fixed_first_payment|fixed_per_month",
+            "type" : "string"
+          },
+          "months" : {
+            "description" : "The first paid months it applies to; null: no end",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "percent_bp" : {
+            "description" : "percent_of_payment: basis points, 1000 is 10%",
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "required" : [ "kind" ]
+      },
+      "ReferralRuleRequest" : {
+        "properties" : {
+          "reason" : {
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "rule" : {
+            "$ref" : "#/components/schemas/ReferralRuleBody"
+          },
+          "totp_code" : {
+            "description" : "A current 6 digit code from the operator's own authenticator app (step-up), used once",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason", "totp_code" ]
+      },
+      "ReferralTotal" : {
+        "description" : "One currency: everything earned, what was marked paid, and the rest",
+        "properties" : {
+          "currency" : {
+            "type" : "string"
+          },
+          "due_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "earned_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "paid_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
       },
       "RelatedMember" : {
         "properties" : {
@@ -7224,6 +8476,7 @@
         }
       },
       "ReportRun" : {
+        "description" : "The caller's newest workbook, in any state; null when they never asked for one",
         "properties" : {
           "as_of" : {
             "format" : "date",
@@ -11241,6 +12494,200 @@
           }
         },
         "required" : [ "reason" ]
+      },
+      "RetailHomeBranch" : {
+        "description" : "Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first",
+        "properties" : {
+          "branch_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailHomeCreditOwed" : {
+        "description" : "What buyers owe on credit sales, as Credit control counts it",
+        "properties" : {
+          "customers" : {
+            "description" : "Buyers that owe: a customer record, or a name typed with the sale",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "oldest_due_date" : {
+            "description" : "The earliest due date of a sale still owing; absent when none has a due date",
+            "format" : "date",
+            "type" : "string"
+          },
+          "owed_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailHomeSales" : {
+        "description" : "Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; the same figure as today on the dashboard",
+        "properties" : {
+          "sale_count" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailHomeSummary" : {
+        "properties" : {
+          "branches" : {
+            "description" : "Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first",
+            "items" : {
+              "$ref" : "#/components/schemas/RetailHomeBranch"
+            },
+            "type" : "array"
+          },
+          "credit_owed" : {
+            "$ref" : "#/components/schemas/RetailHomeCreditOwed"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "date" : {
+            "description" : "The business day in the tenant's zone (Africa/Kampala by default)",
+            "format" : "date",
+            "type" : "string"
+          },
+          "low_stock" : {
+            "description" : "Present only with retail.stock.read: active items at or below the dashboard's low stock threshold",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "open_orders" : {
+            "description" : "Present only with retail.order.manage: customer orders ordered, packed or out for delivery",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sales_today" : {
+            "$ref" : "#/components/schemas/RetailHomeSales"
+          },
+          "takings" : {
+            "$ref" : "#/components/schemas/RetailHomeTakings"
+          },
+          "top_items" : {
+            "$ref" : "#/components/schemas/RetailHomeTopItems"
+          },
+          "week_from" : {
+            "description" : "The Monday of this week: the first day of the top items of the week",
+            "format" : "date",
+            "type" : "string"
+          }
+        }
+      },
+      "RetailHomeTakings" : {
+        "description" : "Money taken today by way of paying, read the way the cash book reads a day for every way: sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken today, less sales cancelled today, payments on account reversed today and money refunded today on goods taken back. Besides retail.sale.all_sellers it needs, as the cash summary, retail.cashbook.read in every branch it covers and retail.till.close (ADR-076)",
+        "properties" : {
+          "methods" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailHomeTakingsMethod"
+            },
+            "type" : "array"
+          },
+          "total_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailHomeTakingsMethod" : {
+        "properties" : {
+          "amount_minor" : {
+            "description" : "sales_minor + payments_minor + fees_minor - out_minor",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fees_minor" : {
+            "description" : "Delivery fees taken at the door today, or paid today on an account",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "method" : {
+            "description" : "cash and mobile_money always, then any other way that took or gave back money today (bank)",
+            "enum" : [ "cash", "mobile_money", "bank" ],
+            "type" : "string"
+          },
+          "out_minor" : {
+            "description" : "Money given back today: sales cancelled, payments on account reversed, refunds on goods taken back (a return cancelled today counts back in), door fees of cancelled orders",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "payments_minor" : {
+            "description" : "Payments on credit sales dated today, at the branch that took them",
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sales_minor" : {
+            "description" : "Sales paid at the sale dated today, cancelled later or not",
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "RetailHomeTopItem" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "item_id" : {
+            "description" : "The product, or the whole item for one with sizes and colours",
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "description" : "Base units, as a decimal string",
+            "type" : "string"
+          },
+          "sales_minor" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "unit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RetailHomeTopItems" : {
+        "description" : "The five items that sold the most by value, today and this week",
+        "properties" : {
+          "today" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailHomeTopItem"
+            },
+            "type" : "array"
+          },
+          "week" : {
+            "items" : {
+              "$ref" : "#/components/schemas/RetailHomeTopItem"
+            },
+            "type" : "array"
+          }
+        }
       },
       "RetailInFlightTransfer" : {
         "description" : "Dispatched and not received or cancelled, the longest wait first",
@@ -20372,6 +21819,12 @@
             "minItems" : 0,
             "type" : "array"
           },
+          "referral_code" : {
+            "description" : "Optional: the referral code of the business that referred the applicant (the ?ref= of its link). An unknown code is 422 referral_code_unknown (ADR-069)",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          },
           "term" : {
             "minLength" : 1,
             "pattern" : "monthly|annual",
@@ -21006,6 +22459,22 @@
           }
         }
       },
+      "TenantGoLiveRequest" : {
+        "properties" : {
+          "go_live_date" : {
+            "description" : "The day the app became the business's register, today or earlier (ADR-071)",
+            "format" : "date",
+            "type" : "string"
+          },
+          "reason" : {
+            "description" : "Why; kept in the tenant's audit log and the platform's",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          }
+        },
+        "required" : [ "go_live_date", "reason" ]
+      },
       "TenantHistoryEntry" : {
         "description" : "An operator action on the business, from the platform audit log",
         "properties" : {
@@ -21135,6 +22604,40 @@
         },
         "required" : [ "plan_code", "reason" ]
       },
+      "TenantReferrer" : {
+        "properties" : {
+          "referral" : {
+            "$ref" : "#/components/schemas/PlatformReferral"
+          },
+          "tenant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
+      "TenantReferrerRequest" : {
+        "properties" : {
+          "reason" : {
+            "description" : "Why; kept in the platform audit log",
+            "maxLength" : 300,
+            "minLength" : 5,
+            "type" : "string"
+          },
+          "referrer_code" : {
+            "description" : "The referral code of the business that referred this one; null or empty clears it",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "totp_code" : {
+            "description" : "A current 6 digit code from the operator's own authenticator app (step-up), used once",
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason", "totp_code" ]
+      },
       "TenantSettings" : {
         "properties" : {
           "allow_loans_before_kyc_verified" : {
@@ -21170,6 +22673,11 @@
           "display_name_set" : {
             "description" : "True once the admin has saved a business name of their own",
             "type" : "boolean"
+          },
+          "go_live_date" : {
+            "description" : "The day the app became the business's register: as the Owner or the operator set it, else the business date of the first administrator sign-in, stored then; null before either. An existing loan is brought in only with a disbursement date before it (ADR-071)",
+            "format" : "date",
+            "type" : "string"
           },
           "logo_document_id" : {
             "description" : "The current logo (a core document of this tenant), or null; set through PUT /settings/logo",
@@ -21844,6 +23352,11 @@
           "display_name" : {
             "maxLength" : 100,
             "minLength" : 1,
+            "type" : "string"
+          },
+          "go_live_date" : {
+            "description" : "The go-live date, today or earlier; only the Owner of the business sets it, 403 owner_only otherwise (ADR-071)",
+            "format" : "date",
             "type" : "string"
           },
           "max_active_loans_per_member" : {
@@ -23229,6 +24742,81 @@
         "tags" : [ "branding" ]
       }
     },
+    "/api/v1/data-export" : {
+      "get" : {
+        "operationId" : "getDataExport",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DataExportStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The data export card: the weekly email switch, the last export and email, the caller's newest workbook",
+        "tags" : [ "reports" ]
+      }
+    },
+    "/api/v1/data-export/runs" : {
+      "post" : {
+        "operationId" : "createDataExport",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReportRun"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Ask for a workbook of the whole business, made in the background; an identical one still queued or running is returned (202 new, 200 existing)",
+        "tags" : [ "reports" ]
+      }
+    },
+    "/api/v1/data-export/settings" : {
+      "put" : {
+        "operationId" : "updateDataExportSettings",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DataExportSettingsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DataExportStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Switch the weekly email of the workbook to the Owner on or off, audited; the Owner only (403 owner_only)",
+        "tags" : [ "reports" ]
+      }
+    },
     "/api/v1/documents/{document_id}" : {
       "get" : {
         "operationId" : "getDocument",
@@ -24156,6 +25744,268 @@
         },
         "summary" : "Reassign many loans to one officer, all or none (FR-CLN-01)",
         "tags" : [ "lending-collections" ]
+      }
+    },
+    "/api/v1/lending/existing-loans" : {
+      "get" : {
+        "operationId" : "listExistingLoans",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoanPage"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Loans brought in from the register, newest first (at most 200); status filters, for example brought_in",
+        "tags" : [ "lending-loans" ]
+      },
+      "post" : {
+        "operationId" : "recordExistingLoan",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "dry_run",
+          "required" : false,
+          "schema" : {
+            "default" : false,
+            "type" : "boolean"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RecordExistingLoanRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Record an existing loan with its real disbursement date and past repayments; 201 brought_in and waiting for a checker, or with dry_run=true 200 and the position it would have, saving nothing (FR-EXL-01 to FR-EXL-03)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/go-live" : {
+      "get" : {
+        "operationId" : "getLendingGoLiveDate",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GoLiveDate"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The business's go-live date: set by the Owner or the operator, else the first administrator sign-in (ADR-071)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/import" : {
+      "post" : {
+        "operationId" : "importExistingLoans",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "dry_run",
+          "required" : false,
+          "schema" : {
+            "default" : true,
+            "type" : "boolean"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ExistingLoanImportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoanImportResult"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Import existing loans and their repayments from CSV: check first (dry_run=true, the default), then commit; a commit with any error records nothing (FR-EXL-06)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/{loan_id}" : {
+      "get" : {
+        "operationId" : "getExistingLoan",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "An existing loan as recorded: its repayments, schedule and position (FR-EXL-02)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/{loan_id}/approval" : {
+      "post" : {
+        "operationId" : "requestExistingLoanApproval",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Ask for approval again after a rejected, expired or stale request; checked against today's go-live date (FR-EXL-04)",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/{loan_id}/cancel" : {
+      "post" : {
+        "operationId" : "cancelExistingLoan",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CancelExistingLoanRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Withdraw an existing loan still waiting for its checker, with a reason; it ends cancelled",
+        "tags" : [ "lending-loans" ]
+      }
+    },
+    "/api/v1/lending/existing-loans/{loan_id}/reversal" : {
+      "post" : {
+        "operationId" : "requestExistingLoanReversal",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "loan_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CancelExistingLoanRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExistingLoan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Ask a second person to reverse an approved bring-in, with a reason: the opening entry is mirrored, the historic transactions are marked reversed and the loan is cancelled; refused once the loan has a transaction in the app or a penalty charge (FR-EXL-08)",
+        "tags" : [ "lending-loans" ]
       }
     },
     "/api/v1/lending/insights/brief" : {
@@ -28858,6 +30708,167 @@
         "tags" : [ "payments" ]
       }
     },
+    "/api/v1/plan" : {
+      "get" : {
+        "operationId" : "getPlan",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessPlan"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The plan card: the plan, the modules on, the paid-until date, module requests and changes still to come (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
+    "/api/v1/plan/cancel" : {
+      "post" : {
+        "operationId" : "cancelPlan",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlanStepUp"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanScheduledChange"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Owner only, with the step-up: cancel the subscription at the end of the paid period; the business is read only after it, data kept (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
+    "/api/v1/plan/changes/{change_id}/undo" : {
+      "post" : {
+        "operationId" : "undoPlanChange",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "change_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanScheduledChange"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Owner only: undo a module stop or the cancellation before its day (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
+    "/api/v1/plan/module-requests" : {
+      "post" : {
+        "operationId" : "requestPlanModule",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlanModuleAsk"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanModuleRequest"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
+    "/api/v1/plan/modules/{module}/stop" : {
+      "post" : {
+        "operationId" : "stopPlanModule",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "module",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlanStepUp"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanScheduledChange"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Owner only, with the step-up: stop using a module at the end of the paid period (at once when nothing is paid ahead); records are kept (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
+    "/api/v1/plan/status" : {
+      "get" : {
+        "operationId" : "getPlanStatus",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BusinessPlanStatus"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "When the subscription ends or ended, for the banner and the read-only notice (ADR-073)",
+        "tags" : [ "plan" ]
+      }
+    },
     "/api/v1/platform/applications" : {
       "get" : {
         "operationId" : "platformListApplications",
@@ -29505,6 +31516,110 @@
         "tags" : [ "platform-auth" ]
       }
     },
+    "/api/v1/platform/module-requests" : {
+      "get" : {
+        "operationId" : "platformListModuleRequests",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "default" : "pending",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformModuleRequestList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Module requests of every business, newest first; pending by default (ADR-073)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/module-requests/{request_id}/approve" : {
+      "post" : {
+        "operationId" : "platformApproveModuleRequest",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "request_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformModuleApproval"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanModuleRequest"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Approve a module request with a reason, optionally moving the plan first; switches the module on, data kept; needs a current code from the operator's own authenticator (ADR-073)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/module-requests/{request_id}/decline" : {
+      "post" : {
+        "operationId" : "platformDeclineModuleRequest",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "request_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformModuleDecline"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlanModuleRequest"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Decline a module request with a reason the Owner sees; needs a current code from the operator's own authenticator (ADR-073)",
+        "tags" : [ "platform" ]
+      }
+    },
     "/api/v1/platform/outbox" : {
       "get" : {
         "operationId" : "platformOutbox",
@@ -29668,6 +31783,396 @@
           }
         },
         "summary" : "Set the plan's price from a date; the price already in force on that date again changes nothing (FR-SUB-01)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals" : {
+      "get" : {
+        "operationId" : "platformListReferrals",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "referrer_tenant_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "commission",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "offset",
+          "required" : false,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Referrals across the platform and open applications with a code, newest first; filters: referrer_tenant_id, status (applied, active, paying, suspended, cancelled, ended), commission (due, paid)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/commissions/{line_id}/paid" : {
+      "post" : {
+        "operationId" : "platformMarkReferralCommissionPaid",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "line_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralLinePaidRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 commission_reversal_of_unpaid, 409 referrer_inactive unless confirm_referrer_inactive",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/commissions/{line_id}/reverse" : {
+      "post" : {
+        "operationId" : "platformReverseReferralCommission",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "line_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralLineReverseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Reverse one commission line with a reason (lines are never deleted); refunded true records that its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal and commission_line_not_payment",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/default-rule" : {
+      "get" : {
+        "operationId" : "platformGetReferralDefaultRule",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReferralDefaultRule"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The platform default commission rule, or null",
+        "tags" : [ "platform" ]
+      },
+      "put" : {
+        "operationId" : "platformSetReferralDefaultRule",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralRuleRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ReferralDefaultRule"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set or clear the platform default commission rule, with a reason; it applies to payments recorded from now on; needs a current code from the operator's own authenticator",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/export" : {
+      "get" : {
+        "operationId" : "platformExportReferrals",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "referrer_tenant_id",
+          "required" : false,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "commission",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "text/csv" : {
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The same referrals as CSV, one row per referral and currency, at most 10,000; audited",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/payments/{payment_id}/refunded" : {
+      "post" : {
+        "operationId" : "platformMarkReferralPaymentRefunded",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "payment_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralPaymentRefundedRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Record that a referred business's subscription payment was refunded, with a reason, when it has no commission line left standing: it no longer uses up the rule's months; 404 when the payment has no referral, 409 payment_already_refunded, 409 payment_line_not_reversed (reverse the line with refunded instead)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/{referral_id}" : {
+      "get" : {
+        "operationId" : "platformGetReferral",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "referral_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "One referral, the rule a payment recorded now would use, and its commission lines",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/{referral_id}/commissions" : {
+      "post" : {
+        "operationId" : "platformAddReferralCommission",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "referral_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralLineRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Add a commission line with an amount the operator typed, with a reason. Needs an Idempotency-Key; a repeat adds nothing and answers 200",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/referrals/{referral_id}/rule" : {
+      "put" : {
+        "operationId" : "platformSetReferralRule",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "referral_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReferralRuleRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformReferralDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set this referral's own commission rule, or clear it so the default applies, with a reason; 422 referral_ended; needs a current code from the operator's own authenticator",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/scheduled-changes" : {
+      "get" : {
+        "operationId" : "platformListScheduledChanges",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformScheduledChangeList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Module stops and cancellations still to come, soonest first (ADR-073)",
         "tags" : [ "platform" ]
       }
     },
@@ -29883,6 +32388,37 @@
           }
         },
         "summary" : "One tenant",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/tenants/{tenant_id}/go-live" : {
+      "put" : {
+        "operationId" : "platformSetGoLiveDate",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TenantGoLiveRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set the business's go-live date, with a reason: an existing loan is brought in only with a disbursement date before it (ADR-071)",
         "tags" : [ "platform" ]
       }
     },
@@ -30136,6 +32672,44 @@
           }
         },
         "summary" : "Move the business to another active plan, with a reason; the same plan again changes nothing (FR-TEN-04)",
+        "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/platform/tenants/{tenant_id}/referrer" : {
+      "put" : {
+        "operationId" : "platformSetTenantReferrer",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "tenant_id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TenantReferrerRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantReferrer"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set, correct or clear the business that referred this one, with a reason; 422 referral_self and referral_code_unknown; lines already earned stay with their referrer; the same referrer again changes nothing; needs a current code from the operator's own authenticator",
         "tags" : [ "platform" ]
       }
     },
@@ -30658,6 +33232,25 @@
         },
         "summary" : "Lift the sign-in lock of a tenant's staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059)",
         "tags" : [ "platform" ]
+      }
+    },
+    "/api/v1/referrals" : {
+      "get" : {
+        "operationId" : "myReferrals",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MyReferrals"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "The business's referral code and link, the businesses it referred, and the commission earned, paid and due (ADR-069)",
+        "tags" : [ "referrals" ]
       }
     },
     "/api/v1/report-runs" : {
@@ -36961,6 +39554,38 @@
           }
         },
         "summary" : "Owner dashboard: today, 7 and 30 days, stock value and counts, by shop (issue #149); a chosen range (issue #428)",
+        "tags" : [ "retail-reports" ]
+      }
+    },
+    "/api/v1/retail/reports/home" : {
+      "get" : {
+        "description" : "One read for the Shop cards on Home (ADR-076). The money parts (sales_today, takings, credit_owed, top_items, branches) follow the dashboard's scope and need retail.sale.all_sellers in every branch they cover (ADR-055); without it they are left out, not refused. low_stock needs retail.stock.read and open_orders retail.order.manage, each in its own branch scope. branches is present only over two or more shops",
+        "operationId" : "getRetailHomeSummary",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "branch_id",
+          "required" : false,
+          "schema" : {
+            "items" : {
+              "format" : "uuid",
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RetailHomeSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Shop Home summary: today's sales and takings by way of paying, credit owed, top items, each shop, low stock and open orders (issue #485)",
         "tags" : [ "retail-reports" ]
       }
     },

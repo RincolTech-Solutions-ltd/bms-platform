@@ -277,7 +277,9 @@ punctuation, without Ltd, Limited, Co, Company, SMC, Enterprise(s), The), `conta
 `onboarding_email_key`: lower case, a +tag dropped, Gmail dots dropped and googlemail.com read as
 gmail.com), `contact_phone_e164 varchar(20)`, `country char(2)`,
 `modules text[]`, `term` [`monthly`, `annual`], `way_in` [`trial`, `paid`], `agent_code` (recorded,
-unused until agents), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
+unused until agents), `referral_code varchar(10)` and `referrer_tenant_id uuid` (FK `tenants`; the code the applicant
+brought and its business, resolved at the sign-up, made the referral at Activate; `V88`, ADR-069; the operator reads it through
+`onboarding_application_referrer`, which refuses a tenant-bound transaction), `message varchar(1000)`, `link_token_hash char(64) UNIQUE` and
 `link_token_expires_at` (the applicant link: SHA-256 of 256 random bits, 7 days; replaced by every
 email to the applicant), `email_verified_at` (in the operator queue once set), `operator_note`,
 `applicant_reply`, `reject_reason`, `decided_by` and `decided_at` (FK `platform_users`),
@@ -289,8 +291,34 @@ mailbox; indexes on status and date, phone and normalised name serve the queue a
 warning. Row-level security is enabled and forced with no policy (`bms_owner` has BYPASSRLS), and nothing
 is granted to `bms_app`: the definer functions owned by `bms_owner` are its only way in (create,
 relink, created since, read by link, reply, list, counts, duplicates, decide, lock, activated,
-expire, purge). Rejected and
+expire, purge, and since `V88` set referrer and referrer). Rejected and
 expired rows are deleted 90 days after `closed_at` (FR-ONB-09).
+
+### `referral_commission_rules` and `referral_settings` (platform; no privilege for `bms_app`, definer functions only; `V88`, ADR-069)
+
+`referral_commission_rules`: a commission rule the platform operator typed, never changed (append-only; a change is a new rule).
+`id uuid PK`, `kind text NOT NULL` [`percent_of_payment`, `fixed_first_payment`, `fixed_per_month`], `percent_bp integer` (1 to
+10000 basis points), `amount_minor bigint` (1 to 50,000,000), `currency char(3)` (FK `currencies`), `months integer` (1 to 120, the
+first paid months of the referred business it applies to; null for no end), `cap_minor bigint` (1 to 1,000,000,000, a percent rule
+only, with its currency), `created_by_platform_user_id` (FK `platform_users`; null only on the default rule `V88` seeds), `created_at`; a CHECK holds the
+shape of each kind. `referral_settings`: one row (`id boolean PK CHECK (id)`) with `default_rule_id` (FK; null means no rule, so
+nothing is worked out), `updated_by_platform_user_id`, `updated_at`. Row-level security is enabled and forced with no policy on both, and nothing
+is granted to `bms_app`: the definer functions `platform_referral_add_rule`, `platform_referral_set_default_rule`,
+`platform_referral_set_rule` and `platform_referral_rule` are the only way in, each refusing a transaction bound to a tenant. `V88` seeds one
+rule, the default the product owner decided (ADR-069 decision 14: `percent_of_payment`, 1000 basis points, 12 months, no cap,
+fixed id `00000000-0000-4000-8000-000000000890`), and points the default at it only when none is set, with a
+`platform.referral.default_rule_changed` audit row.
+
+`referral_payment_outcomes` (same protection): what each payment of a referred business gave under its referral (for a payment
+made while no referral was current after the first one, `no_referral` under the referral that ended last),
+`payment_id uuid PK` (FK `subscription_payments`), `referral_id` (FK `tenant_referrals`), `outcome text` [`added`, `no_referral`, `no_rule`,
+`not_first_payment`, `months_used`, `currency_differs`, `cap_reached`, `zero`], `created_at`, `refunded_at timestamptz` and
+`refunded_by_line_id uuid` (FK `referral_commission_lines`, the reversal that said so) and `refunded_by_platform_user_id uuid` (FK
+`platform_users`); both are null until `refunded_at` is set. Inserted only by `platform_referral_commission_for_payment`;
+`platform_referral_reverse_line` with `p_refunded`, or `platform_referral_mark_payment_refunded` for a payment with no line to
+reverse (it refuses one whose `payment` line has no reversal), sets the refund columns. A trigger
+refuses a delete and any update except setting the refund columns once. A payment whose outcome was `currency_differs`, or that
+was recorded as refunded, never uses up a rule's first N months (ADR-069 decision 9).
 
 ### `notification_outbox` (platform; no privilege for `bms_app`, definer functions only, ADR-024)
 
@@ -493,6 +521,8 @@ write. Keys and defaults:
 | `require_mfa_roles` | string array of staff role keys (`member` is refused) | empty; the holders of these roles are required to use two-step sign-in | FR-IAM-16 |
 | `mfa_grace_days` | integer 0 to 90 or null | null (read as 0, at once); the grace period last chosen | FR-IAM-16 |
 | `mfa_enforce_from` | ISO instant or absent | absent (at once); written by the server only, to now plus the grace days when the policy is turned on or widened or a grace period is sent, and cleared when the policy is turned off or the grace is 0; until then a covered user without a factor signs in and is shown the date | FR-IAM-16 |
+| `go_live_date` | ISO date or absent | stored at the first sign-in of an administrator unless already set (`go_live_source` `first_admin_sign_in`; V89 backfills it for a business with an administrator sign-in or a loan): the earliest, in the business's time zone, of that sign-in, the first session of anyone ever an administrator, the earliest staff `last_login_at`, the tenant's `created_at` and the first `lending_loans` `created_at` or `disbursed_on`, so it never lands later than the real start; set only by the Owner (`PATCH /settings`, only earlier once a date is stored) or the platform operator (either way), today or earlier; existing loans come in only with a disbursement date before it (issue #466, ADR-071) | FR-EXL-03 |
+| `go_live_source` | `set` or `first_admin_sign_in`, with `go_live_date` | `set` when the Owner or the operator set the date; `first_admin_sign_in` when it was stored at that sign-in (issue #466, ADR-071) | FR-EXL-03 |
 | `reports_enabled` | boolean | false; the tenant switch of the report runs (ADR-038, issue #214): off, nothing is queued, run or listed | FR-RPT-04 |
 
 `logo_document_id` is set only by the logo upload route, never by a settings patch: it names a
@@ -628,6 +658,84 @@ one item, so the operator's screenshot read can bind it) and `platform_feedback_
 `platform_feedback_set_linked_issue(id, issue)` (sets the linked issue or clears it with a null; answers `not_found` or the tenant id).
 The status and the reply change only through `platform_feedback_set_status`, the linked issue only through
 `platform_feedback_set_linked_issue`.
+
+### `subscription_module_requests` (RLS)
+
+(ADR-073; migration `V90`, issue #472) One row per module the Owner asked for. `module_key text NOT NULL` (`^[a-z]{2,30}$`),
+`status text NOT NULL DEFAULT 'pending'` (`pending`, `approved`, `declined`), `requested_by uuid NOT NULL` (FK `(tenant_id,
+requested_by)` to `users`), `created_at`, `decided_at` (null exactly while pending), `decided_by_platform_user_id` (FK to
+`platform_users`, null when the system approved it), `decided_automatically boolean` (the plan already included the module),
+`decision_reason varchar(300)` (required when declined; shown to the Owner), `plan_before`, `plan_after` (plan codes). `UNIQUE
+(tenant_id, id)`; a partial unique index allows one pending request per module. Grants `SELECT, INSERT, UPDATE`: the row is a
+record only; the module is switched on through `platform_set_tenant_modules`, which checks the plan, so a row written by hand
+grants nothing. The operator reads across businesses through `platform_module_requests(status)` and binds the business of one
+request through `platform_module_request_tenant(id)` (both refuse a tenant-bound transaction, ADR-016).
+
+### `subscription_scheduled_changes` (RLS)
+
+(ADR-073; migration `V90`, issue #472) A module stopped or the subscription cancelled by the Owner, in force from a day.
+`kind text NOT NULL` (`stop_module`, `cancel`), `module_key` (set exactly for `stop_module`), `effective_on date NOT NULL` (the
+day after `subscriptions.current_period_end`, or the day asked when nothing is paid ahead), `status text NOT NULL DEFAULT
+'scheduled'` (`scheduled`, `applied`, `undone`; `applied_at` and `undone_at` set exactly with their status), `requested_by`,
+`undone_by` (FKs to `users`), `created_at`. A partial unique index allows one scheduled row per module and one scheduled
+cancellation per business; a partial index on `effective_on` serves the job. Grants `SELECT, INSERT, UPDATE`. The operator lists
+the scheduled rows across businesses through `platform_scheduled_changes()`; the job lists the businesses with one due through
+`platform_tenants_with_due_changes(through)`. `subscriptions.ended_on date` (V90) is the day an Owner's cancellation took effect;
+`platform_end_subscription(tenant_id, on)` (bound to that tenant only) sets it with the status `cancelled` and the tenant
+`suspended`, but changes nothing and returns null for a business the operator suspended or cancelled (the suspension is kept and
+the cancellation stays scheduled until a resume; the job's list counts a due cancellation only for an active business);
+`platform_set_subscription_status` clears it when the subscription leaves `cancelled`; `app_resolve_tenant_status`
+answers `ended` for such a business, and for an active one whose scheduled cancellation's day has come in its own time zone
+before the job applied it, so its writes are refused with `subscription_ended` from that day. V90 also replaces V49's report runner lists
+(`app_count_running_report_runs`, `app_tenants_with_queued_report_runs`, `app_tenants_with_stale_report_runs`) so they take an
+ended business as well as an active one: its report runs still finish and a dead run is still failed. And it adds
+`app_tenant_takes_payments(tenant)` (active, or suspended with the subscription `cancelled` and `ended_on` set), which
+`TenantJobs.callForTenantTakingPayments` checks for the payment gateway's callback and the poller, and through which
+`app_tenants_with_due_payment_checks` (V54) now lists its businesses, so a payment made after the end still posts while a
+business the operator suspended stays left out.
+
+### `referral_codes` (RLS; `bms_app` SELECT only; append-only; `V88`, ADR-069)
+
+`tenant_id uuid PK` (FK `tenants`), `code varchar(10) UNIQUE` (`^[A-Z0-9]{4,10}$`, upper case), `created_at`. Written by the trigger
+`referral_code_on_new_tenant` (after insert on `tenants`) through `bms_assign_referral_code`, and backfilled by `V88` for every
+business that existed: up to five letters of the slug and two characters without 0, 1, I or O, four after ten taken tries, eight
+random after twenty. `referral_code_tenant(code)` (definer, no tenant needed) resolves a typed code, without case, for the public
+sign-up.
+
+### `tenant_referrals` (RLS on the referrer; `bms_app` SELECT only; `V88`, ADR-069)
+
+Who referred whom. `tenant_id` is the **referrer** (the business that owns and reads the row), `referred_tenant_id` (FK `tenants`)
+the business it brought, `code varchar(10)` (the code used), `source text` [`sign_up`, `operator`], `application_id uuid` (the
+sign-up application, for `sign_up`), `rule_id uuid` (FK `referral_commission_rules`; the operator's override, null follows the
+default), `started_at`, `ended_at` (set when the operator moves the business to another referrer), `created_by_platform_user_id`.
+`UNIQUE (tenant_id, id)`; `CHECK (tenant_id <> referred_tenant_id)` (a business never refers itself); a partial unique index on
+`referred_tenant_id` where `ended_at IS NULL` (one current referrer). A trigger refuses a delete and any update but `rule_id` and
+setting `ended_at` once. Written by `platform_referral_from_application` (Activate) and `platform_referral_set_referrer` (the
+operator: ends the current row and starts a new one, so lines stay with the referrer who earned them). The months a rule's
+first N count start at the business's earliest `started_at` over all its rows, so a new row earns only the months left
+(ADR-069 decision 9).
+
+### `referral_commission_lines` (RLS on the referrer; `bms_app` SELECT only; `V88`, ADR-069)
+
+What a referrer earned. `tenant_id` (the referrer), `referral_id` (FK `(tenant_id, referral_id)` to `tenant_referrals`), `kind text`
+[`payment`, `manual`, `reversal`], `payment_id uuid` (FK `subscription_payments`; one `payment` line per payment, a partial unique
+index), `reverses_line_id uuid UNIQUE` (FK `(tenant_id, reverses_line_id)`; a line is reversed once), `amount_minor bigint` (not
+zero, at most 1,000,000,000 either way; negative only for a reversal), `currency char(3)`, `months_counted integer`, `rule_snapshot
+jsonb` (the rule, the payment's months and the months already used; required for `payment`; never the payment's amount, which the
+referrer could read: `platform_referral_lines` adds it for the operator only), `referrer_inactive boolean NOT NULL DEFAULT false`
+(the referrer business was inactive, `bms_referrer_status` not `active`, when the line was worked out, ADR-069 decision 12; the reads return it as
+`inactive_when_worked_out` and work out `referrer_status` and `referrer_inactive` now with `bms_referrer_status`, and
+`platform_referral_mark_paid` refuses an unconfirmed paid mark while the referrer is suspended, cancelled, past due or out of
+an unpaid free month), `note varchar(500)` (the reason of a `manual` or
+`reversal` line), `paid_on date`, `paid_method text` [`mtn_momo`, `airtel_money`, `bank_transfer`, `cash`, `other`],
+`paid_reference varchar(100)`, `paid_note varchar(500)`, `paid_at`, `paid_by_platform_user_id`, `created_by_platform_user_id`,
+`created_at`. `UNIQUE (tenant_id, id)`. A trigger refuses a delete and any update except setting the paid columns once. Written only by
+the definer functions `platform_referral_commission_for_payment` (in the payment's transaction, bound to the paying business, which
+must own the payment), `platform_referral_add_manual_line`, `platform_referral_reverse_line` and `platform_referral_mark_paid` (each
+refusing a tenant-bound transaction; the typed line's Idempotency-Key row is written bound to the referrer and the line unbound,
+in one transaction); read
+across businesses by `platform_referrals_list` and `platform_referral_lines` (each refusing a tenant-bound transaction) and, for the
+bound business only, by `tenant_referrals_mine()`.
 
 ### `auth_sessions` (RLS)
 
@@ -795,6 +903,34 @@ the pack. Three read-only `SECURITY DEFINER` functions let the runner see across
 `app_tenants_with_stale_report_runs(cutoff)`, which names the tenants with a running run whose heartbeat (or start, if it never
 beat) is older than the cutoff. The migration sets `lock_timeout` to five seconds before it takes its brief locks on `tenants` and
 `documents`.
+
+Migration V91 (issue #334, ADR-074) leaves the three definer functions as V90 made them: active tenants and those ended by
+the Owner's cancellation (`subscriptions.status = 'cancelled'` with `ended_on`), so an ended business still gets the workbook it
+asks for and a business the operator suspended gets no run. It adds `app_tenants_with_expired_report_files(now)`, the tenants with a ready run whose file is past its expiry and not yet
+deleted, whatever the tenant's status: the nightly expiry walks it, so a suspended or ended business's files go on time too.
+
+### `data_export_settings` (RLS)
+
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `weekly_email boolean NOT NULL DEFAULT true` (the Owner is
+emailed the workbook every week), `updated_by uuid NOT NULL` (composite foreign key to `users`). Unique `(tenant_id)`: one row
+per business, written on the first change; no row means on. `bms_app` holds SELECT, INSERT and UPDATE; every change is audited
+(`core.data_export.settings_changed`, before and after).
+
+### `data_export_weekly` (RLS)
+
+Built (issue #334 step 1, migration V91; ADR-074). (std, no `version`) `week_of date NOT NULL` (the Monday that starts the week,
+checked), `run_id uuid` (the week's `core.data_export` run, composite foreign key to `report_runs`), `recipient_user_id uuid` (the
+Owner it was made for, composite foreign key to `users`), `status text NOT NULL` [`preparing` (the run is being made),
+`queued` (the email is in the outbox), `emailed` (the outbox recorded it sent), `skipped`, `failed`],
+`attached boolean` (the workbook was attached rather than linked), `reason text` (a stable code: `no_owner_email`, `switched_off`
+(the email was switched off after the week was queued), `cancelled`, `email_failed` or the run's error code), `finished_at timestamptz`. Unique `(tenant_id, week_of)`: one row per business and week, so the job
+queues one workbook and one email however often it runs. Checks: every week but a `skipped` one has a run (a week skipped as `switched_off` keeps the run queued before the switch); only a
+`preparing` or `queued` week has no `finished_at`. Partial index on those open weeks. The definer function
+`app_data_export_weekly_email_status(week_id)` returns the outbox status of the week's own email for the bound tenant, so the
+week becomes `emailed` only when it was sent; `app_data_export_weekly_tenants(now)` lists the businesses the weekly job visits:
+the active ones and those ended by the Owner's cancellation less than 90 days ago by `ended_on`, never one the operator
+suspended (ADR-074 decision 7). `bms_app` holds SELECT and INSERT, and UPDATE of
+`status`, `attached`, `reason` and `finished_at` only.
 
 ### `payment_methods` (RLS)
 
@@ -1205,7 +1341,7 @@ creation and replaced by the approved terms at approval.
 | `member_id` | `uuid NOT NULL` | |
 | `product_version_id` | `uuid NOT NULL` | |
 | `officer_user_id` | `uuid NOT NULL` | Responsible officer (FR-CLN-01). |
-| `status` | `text NOT NULL` | [`draft`, `submitted`, `appraised`, `approved`, `rejected`, `cancelled`, `active`, `closed`, `written_off`, `restructured`] |
+| `status` | `text NOT NULL` | [`draft`, `submitted`, `appraised`, `approved`, `rejected`, `cancelled`, `active`, `closed`, `written_off`, `restructured`, `brought_in`]; `brought_in` (V89) is an existing loan recorded from a paper register and waiting for its checker; it counts nowhere until approved |
 | `channel` | `text NOT NULL` | [`staff`, `portal`, `import`] |
 | `purpose_category` | `text NOT NULL` | [`business`, `school_fees`, `medical`, `agriculture`, `household`, `construction`, `other`] |
 | `purpose_text` | `varchar(300)` | |
@@ -1237,6 +1373,15 @@ creation and replaced by the approved terms at approval.
 | `credit_balance_minor` | `bigint NOT NULL DEFAULT 0` | Excess held as member overpayment (R-ALLOC step 4). |
 | `import_row_id` | `uuid` | When `channel = import`. |
 | `created_by` | `uuid` | |
+| `go_live_on` | `date` | V89, ADR-071: the business's go-live date an existing loan was checked against; set only on a loan brought in, and the date of its opening entry. `CHECK (disbursed_on < go_live_on)` |
+| `brought_in_on` | `date` | V89: set on approval, the later of `go_live_on` and the approval's business date; no penalty period starting before it is charged (FR-EXL-07). `CHECK (brought_in_on >= go_live_on)` |
+| `register_ref` | `varchar(40)` | V89: the loan's number in the paper register; unique per tenant, ignoring case, among loans not cancelled or rejected (`lending_loans_register_ref`) |
+| `agreed_total_minor` | `bigint` | V89: the total the borrower agreed to repay, when the register gives it instead of the rate; `CHECK (> 0)` |
+| `opening_entry_id` | `uuid` | V89: the opening entry at go-live (debit `loans_receivable` with the loan as subledger, credit `opening_balance_equity`), null when no principal was owed. Composite foreign key to `journal_entries` |
+
+A `brought_in` loan holds its real disbursement date in `proposed_disbursement_date` until the approval writes
+`disbursed_on`; `submitted_by` is its maker and `approved_by` its checker, so the approver CHECK keeps the checker from
+being the maker; `lending_loans_brought_in_shape` requires `go_live_on`, the date and the maker while it waits.
 
 Indexes: `(tenant_id, member_id)`, `(tenant_id, branch_id, status)`,
 `(tenant_id, officer_user_id, status)`, `(tenant_id, status, next_due_date)`,
@@ -1753,8 +1898,11 @@ reversal that reopens a closed loan can restore that loan's own pledges (section
 `V63__retail_catalogue_corrections.sql` (#351 and #352, ADR-044) is expand only:
 `bms_name_key`, the generated `retail_products.name_key` with its index, `retail_products.duplicate_reason`,
 `retail_purchase_voids` and `retail_stock_corrections` (section 6.11.2a). No column or check of the movement and balance tables
-changes. The next migration takes the number above the highest on `main` (`MigrationOrderIT`, chapter 15 section
-15.4.3).
+changes. `V88__referrals_and_commissions.sql` (#464, ADR-069) is expand only: `referral_codes` (with the trigger on `tenants` and
+the backfill), `tenant_referrals`, `referral_commission_lines`, `referral_commission_rules`, `referral_settings`, two columns on
+`onboarding_applications`, their definer functions and the permission `core.referrals.read`; `V85` is shop logos and `V86` and `V87`
+are the ordered claims before it (offline sales, barcodes); it is renamed at merge if that order changes. The next migration takes the number above the highest on `main`
+(`MigrationOrderIT`, chapter 15 section 15.4.3).
 
 ## 6.10 Open items
 
@@ -2164,6 +2312,15 @@ Built: optional purchasing (issue #198, migration V47). Eleven tables, all with 
 Built: landed cost and supplier credit notes (issue #199, migration V48, FR-RET-39). Eight tables, all with `tenant_id`, forced RLS, composite foreign keys and money as integer minor units, and one column. `retail_landed_costs` (`landed_no` `LC`, the branch code, a dash and six digits, unique per tenant; `branch_seq` from the tenant sequence `retail_landed_cost_no:<branch>`; `branch_id` of its first received line; `supplier_id` the payee; `bill_id` its invoice, a `retail_supplier_bills` row of kind `landed_cost` and unique per document; `goods_bill_id` optional; `method` `value`, `quantity`, `weight` or `manual`; `cost_date`; `total_minor`; `status` `posted` or `voided` with the void columns; a guard trigger lets only the void change a row, once, and a constraint trigger deferred to the commit refuses a document whose charges or allocated lines do not each add to `total_minor`). `retail_landed_cost_charges` (`kind` `freight`, `duty`, `clearing`, `insurance` or `other`, `description`, `amount_minor`; append-only). `retail_landed_cost_lines` (one row per received line: `receipt_line_id`, `branch_id`, `product_id`, the `basis` and `weight` the spread used, `allocated_minor`, `line_qty`, `on_hand_qty` (the units still on hand in every branch together by first in, first out when the charge was recorded), `to_inventory_minor` (debited to the inventory of the branches that hold the product, in proportion) and `to_cogs_minor` (to cost of goods sold in the receiving branch) which add to `allocated_minor`, `cost_before_minor`, `cost_after_minor`, `cost_applied` and `cost_note`; append-only; the landed unit cost of a receipt line is the sum of its standing rows). `retail_landed_cost_entries` (the entry per branch, so a void can reverse each; append-only). `retail_receipt_holds` (one row per receipt held as received and not costed: `held_by`, and the release columns `released_at`, `released_by`, `release_kind` `landed_cost` or `waived`, `release_reason`, `landed_cost_id`; a guard trigger allows only the release, once, and the undoing of a release by a landed cost when that landed cost is voided). `retail_supplier_credits` (`credit_no` `SC` + branch code + six digits from `retail_supplier_credit_no:<branch>`; `bill_id` the invoice credited; `supplier_ref` the supplier's credit note number, unique per supplier among those that stand; `credit_date`; `kind` `goods` or `price`; `total_minor`; `reason`; the same void columns and guard as a bill), `retail_supplier_credit_lines` (`bill_line_id`, `receipt_line_id`, `branch_id`, `product_id`; for goods `qty` in base units, `unit_qty` and `unit_credit_minor`; `line_total_minor` equal to `to_inventory_minor` plus `to_cogs_minor` plus `variance_minor`; for a price credit `on_hand_qty` and the cost before and after; append-only) and `retail_supplier_credit_entries`. `retail_purchasing_settings` gains `require_costing_before_sale` (boolean, default false). The stock movement kind `return_to_supplier` (negative) is admitted by replacing the two checks of `retail_stock_movements` with looser ones added `NOT VALID` (no scan; the file sets `lock_timeout` to five seconds and runs the statement last); validating them later cannot fail. No permission and no chart account is added. The landed unit cost of a receipt line is never stored on `retail_goods_receipt_lines`, which stay append-only: it is the sum of the line's standing allocation rows.
 
 Built: lending arrears (issue #264, migration V81, increment 6). `lending_loan_charges` and `lending_charge_cancels` as section 6.7 describes them, and `lending_arrears_runs` (one row per tenant and business date: `started_at`, the lease `lease_until`, `attempts`, `finished_at`, the finished run's counts and `failed_loan_ids`; its first date is where the business's penalties start, or a loan's own start in the system when later), both with `tenant_id`, forced RLS and composite foreign keys; no permission and no chart account is added. The waivers (`lending_charge_waivers`, V82, #265) and collection actions (`lending_collection_actions`, V83, #266) follow in their own migrations.
+
+Built: existing loans brought in from a paper register (issue #466, migration V89, ADR-071). The status `brought_in` and
+five columns on `lending_loans` (above), and `lending_brought_in_repayments` (`loan_id`, `line_no` from 1 and
+`UNIQUE (loan_id, line_no)`, `value_date`, `amount_minor` above 0, `payment_method_key` one of `cash`, `bank`,
+`mtn_momo`, `airtel_money`, `note` up to 100 characters), append-only, forced RLS, composite foreign key: the repayments
+as the maker entered them, for the checker. On approval each becomes a `lending_loan_transactions` row with
+`is_historic` true and no journal, receipt number or voucher number (the V29 check already allows a historic row
+without a journal), with its allocation rows; the disbursement likewise. The permission `lending.loans.bring_in`
+(tenant admin, branch manager) is seeded. The go-live date is the tenant setting `go_live_date` (no column).
 
 Built: the arrears notices' record (issue #227, migration V84, pull request #290). `lending_loan_notices` (`loan_id`, `schedule_item_id`, `template_key` one of `loan.overdue_1`, `_7`, `_30`, `business_date`), append-only, forced RLS, composite foreign keys: one row per arrears notice queued, so a loan is not sent another about a different instalment within seven days.
 

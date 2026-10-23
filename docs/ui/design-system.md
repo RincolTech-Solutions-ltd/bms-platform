@@ -89,6 +89,7 @@ The platform host and a tenant without a colour show the Rincol blue.
 | Breadcrumbs | `StaffBreadcrumbs` (`components/breadcrumbs.tsx`): `<nav aria-label="Breadcrumb">` with an `<ol>` | One trail under the staff bar from the routes' `crumb` labels (FR-UXN-01); the last item is `aria-current="page"`; below 720px only Back to the parent and the current page |
 | Category group | `GroupControls`, `GroupedBodies`, `GroupedCards` (`areas/staff/retail/category-groups.tsx`), `.cat-head` | A list in expandable category sections: a full-width header button (`aria-expanded`, `aria-controls`) with the count and subtotal, a Group by category switch, Expand all and Collapse all (FR-UXN-02) |
 | Home cards | `HomeCards` (`areas/staff/home-cards.tsx`), `.home-cards`, `.home-card`, `.home-figures` | Home's card per module the business uses (#471, FR-UXN-05, ADR-072): a `.card` headed with the module's menu icon and name, its figures as a `dl` (label muted, value large and semibold, a count as a hint), and a link to the module; a grid of columns at least 280px wide, so one column on a phone |
+| Shop summary cards | `TakingsCard`, `CreditCard`, `TopItemsCard`, `BranchesCard` (`areas/staff/home-cards.tsx`), `.home-summary`, `.home-summary-body`, `.home-list` | The shop's cards after the Shop card on Home (#485, FR-UXN-06, ADR-076): a `.card` headed by its name without an icon (the icons stay the modules'), figures as a `dl` or a `.home-list` (a name, then its figure at the end of the line, semibold), Today and This week as two `aria-pressed` buttons, a plain sentence when there is nothing to show, and a link to the full page |
 | Retail shortcuts | `RetailMenuGroup` (`areas/staff/retail/nav.tsx`) | Up to five retail shortcuts the user may use, as a group under Retail in the side menu on every size (#455, which removed the retail bottom bar) |
 | Tile | `.tile-grid` of `.tile` | Retail home: icon, label, hint; two per row on a phone |
 | Stat tile | `.an-stats` of `.an-stat` (`.an-stat-label`, `.an-stat-value`, a `.hint`) | The retail dashboard: a figure with its label, two per row on a phone and four from 720px; `.an-placeholder` (dashed) marks a slot for a figure that does not exist yet and shows no number |
@@ -126,8 +127,8 @@ changes, at the design system's phone width, `(max-width: 719px)`, read in code 
 the retail screens re-export it) and in CSS by the `720px` media queries. CSS custom properties cannot be used in a media
 query, so the number is the token.
 
-- **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/route.tsx`, `AREAS` in
-  `areas/platform/route.tsx`) with the permission checks, and both the sidebar and the drawer draw that list with the same
+- **One list.** Each layout builds its areas once (`staffAreas` in `areas/staff/menu.tsx`, `AREAS` in
+  `areas/platform/operator-areas.ts`) with the permission checks, and both the sidebar and the drawer draw that list with the same
   component (`MenuLinks`, one `MenuItemLink` per item): the same items, icons (inline SVG in `currentColor`), groups and the
   current item marked `aria-current="page"` (tinted, with an accent edge). The retail shortcuts are a group under Retail
   (`RetailMenuGroup`, `data-tour="retail-nav"`), drawn with `MenuItemLink` too. Notifications and Feedback are always there.
@@ -143,7 +144,7 @@ query, so the number is the token.
   page, so Tab reaches the menu before the content. Sign out stays in the staff bar.
 - **Sections for a business with Shop and Lending (#471, FR-UXN-04):** each item of `staffAreas` names its module with
   `section` (`shop` for Retail, `lending` for Loans, Members, Collateral, Savings, Investments, Insights and the AI assistant),
-  and the layout passes `STAFF_SECTIONS` (Shop with the `stock` icon, Lending with its own `lending` icon, a coin on an open hand, since `banking` is Receive payments'). When the links name two
+  and the layout passes `STAFF_SECTIONS` (Shop with the `shop` icon, a shop front, which also heads the Shop card on Home; Lending with its own `lending` icon, a coin on an open hand). When the links name two
   sections, `MenuLinks` draws the shared items before the first sectioned one (Home, Approvals), then each section, then the
   other shared items (Reports, SMS, Receive payments, Users, Notifications, Feedback, Business set-up). A section is a
   `.side-menu-block` with a rule above it and a heading button (`.side-menu-heading`: small muted capitals, its icon, a caret,
@@ -190,6 +191,19 @@ query, so the number is the token.
   and without taking focus from the tour card, or unfolds a folded sidebar; both return when the step moves on. A tour that
   starts while the drawer is open closes it first. The tour copy says "the menu", and "on a phone, open the menu at the top
   left".
+- **One icon per item (#483):** no two items of one menu draw the same picture, counting the Retail shortcuts and the section
+  headings as items of the side menu, and each retail tile and catalogue tile as an item of its page. The same item keeps its
+  icon wherever it shows: a retail shortcut and its tile both read `icons[screen]`, and the Shop heading and the Shop card on
+  Home both use `shop`. A new item gets a new drawing in `components/icons.tsx` chosen for its meaning, never another item's.
+  The side menu: Home `home`, Approvals `approve`, Loans `calendar`, Members `people`, Collateral `lock`, Savings `coins`,
+  Investments `investments` (a seedling), Insights `insights` (a light bulb), AI assistant `assistant` (a sparkle), Reports
+  `reports` (a page with bars), Retail `retail` (a shopping bag) with Sale `sale` (a cart), Orders `orders` (a delivery
+  motorbike), Banked `banking` (a bank building), Savings `savings` (a safe), Expenses `expenses` (a wallet), Advances
+  `advances`, Stock `stock`, Restock `restock`, Count `stocktake` and Usage `usage`, SMS `phone`, Receive payments
+  `receivePayments` (an arrow coming in to a coin), Users `user`, Notifications `bell`, Feedback `chat`, Business set-up
+  `settings`; the headings Shop `shop` and Lending `lending`. Stock moves (`transfers`) is redrawn as a list with arrows,
+  so it no longer looks like a plain list. The member portal cards (`member/features.ts`): Balances `coins`, Loan schedule
+  `calendar`, Payments `phone`.
 - **Where it applies:** the staff area and the operator portal. The member area has no area list and keeps its layout.
 
 ## Light and dark theme (#429, #452)
@@ -294,6 +308,11 @@ cannot be read on a dark page: `--color-link` and `--color-focus` become `color-
 - `npm test` runs the busy guard (`src/app/ui/busy-guard.test.ts`, #456: every mutation a press sends, including
   `useMutation<T>(`, destructured ones and local hooks that return one, hands its pending flag to `busy`, and no plain
   button is disabled by a pending state; fixture tests prove it fails both wrong shapes) and `BusyButton.dom.test.tsx`.
+- `npm test` runs `src/areas/staff/menu-icons.test.tsx` (#483): two items of the staff side menu (its full list asserted, the shortcuts as their group draws them), the
+  retail tiles and catalogue tiles (both as their pages draw them), the operator portal or the member portal cards that draw
+  the same picture fail it, compared by the drawing itself. `home-cards.dom.test.tsx` checks the Home cards draw their side
+  menu headings' icons, no two alike, and
+  `setup.dom.test.tsx` that the Business set-up page, with everything rendered beside it, draws no picture twice.
 - `npm test` runs the token contrast test and the design guard (`src/app/ui/design-guard.test.ts`: no
   `<style>` element, no inline HTML, and no hex colour in a component or a design layer stylesheet, and no palette token that would not follow the theme);
   `src/app/theme-mode.dom.test.tsx` covers the three choices, persistence, following the system, the pre-paint script and the

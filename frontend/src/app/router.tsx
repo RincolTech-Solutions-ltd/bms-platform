@@ -81,6 +81,10 @@ const staffBusinessNotificationsRoute = createRoute({ getParentRoute: () => staf
 const staffBillingRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/billing', staticData: { crumb: 'Plan and billing' } }).lazy(() =>
   import('../areas/staff/billing/page').then((m) => m.Route),
 );
+// Referrals (issue #464, ADR-069): the business's own link to the sign-up and the businesses it referred. Under Business set-up.
+const staffReferralsRoute = createRoute({ getParentRoute: () => staffRoute, path: '/setup/referrals', staticData: { crumb: 'Referrals' } }).lazy(() =>
+  import('../areas/staff/referrals/page').then((m) => m.Route),
+);
 const staffOwnTwoStepRoute = createRoute({ getParentRoute: () => staffRoute, path: '/two-step', staticData: { crumb: 'Your two-step sign-in' } }).lazy(() =>
   import('../areas/staff/two-step/own').then((m) => m.Route),
 );
@@ -236,6 +240,10 @@ const savingsStatementRoute = lendingScreen('/savings/accounts/$accountId/statem
 );
 const memberSavingsRoute = lendingScreen('/members/$memberId/savings', 'Member savings').lazy(() => import('../areas/staff/lending/member-savings').then((m) => m.Route));
 // Members, next of kin, KYC documents and the collateral register (issue #280).
+const existingLoansRoute = lendingScreen('/existing-loans', 'Existing loans').lazy(() => import('../areas/staff/lending/existing-loans').then((m) => m.Route));
+const existingLoansImportRoute = lendingScreen('/existing-loans/import', 'Import').lazy(() =>
+  import('../areas/staff/lending/existing-loans-import').then((m) => m.Route),
+);
 const membersRoute = lendingScreen('/members', 'Members').lazy(() => import('../areas/staff/lending/members').then((m) => m.Route));
 const memberNewRoute = lendingScreen('/members/new', 'New member').lazy(() => import('../areas/staff/lending/member-form').then((m) => m.NewRoute));
 const lendingMemberRoute = lendingScreen('/members/$memberId', 'Member').lazy(() => import('../areas/staff/lending/member-page').then((m) => m.Route));
@@ -324,7 +332,7 @@ export const router = createRouter({
     forgotPasswordRoute,
     resetPasswordRoute,
     acceptInvitationRoute,
-    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
+    staffRoute.addChildren([staffHomeRoute, staffApprovalsRoute, staffSetupRoute, staffBranchesRoute, staffTwoStepPolicyRoute, staffBusinessNotificationsRoute, staffBillingRoute, staffReferralsRoute, staffOwnTwoStepRoute, staffRetailRoute.addChildren([
         retailHomeRoute,
         retailSaleRoute,
         retailCreditSalesRoute,
@@ -409,6 +417,8 @@ export const router = createRouter({
         savingsProductsRoute,
         savingsAccountRoute,
         savingsStatementRoute,
+        existingLoansRoute,
+        existingLoansImportRoute,
         membersRoute,
         memberNewRoute,
         lendingMemberRoute,

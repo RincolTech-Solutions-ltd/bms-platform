@@ -501,6 +501,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The data export card: the weekly email switch, the last export and email, the caller's newest workbook */
+        get: operations["getDataExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-export/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask for a workbook of the whole business, made in the background; an identical one still queued or running is returned (202 new, 200 existing) */
+        post: operations["createDataExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-export/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Switch the weekly email of the workbook to the Owner on or off, audited; the Owner only (403 owner_only) */
+        put: operations["updateDataExportSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -807,6 +858,126 @@ export interface paths {
         put?: never;
         /** Reassign many loans to one officer, all or none (FR-CLN-01) */
         post: operations["reassignLoans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loans brought in from the register, newest first (at most 200); status filters, for example brought_in */
+        get: operations["listExistingLoans"];
+        put?: never;
+        /** Record an existing loan with its real disbursement date and past repayments; 201 brought_in and waiting for a checker, or with dry_run=true 200 and the position it would have, saving nothing (FR-EXL-01 to FR-EXL-03) */
+        post: operations["recordExistingLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/go-live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's go-live date: set by the Owner or the operator, else the first administrator sign-in (ADR-071) */
+        get: operations["getLendingGoLiveDate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import existing loans and their repayments from CSV: check first (dry_run=true, the default), then commit; a commit with any error records nothing (FR-EXL-06) */
+        post: operations["importExistingLoans"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An existing loan as recorded: its repayments, schedule and position (FR-EXL-02) */
+        get: operations["getExistingLoan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask for approval again after a rejected, expired or stale request; checked against today's go-live date (FR-EXL-04) */
+        post: operations["requestExistingLoanApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw an existing loan still waiting for its checker, with a reason; it ends cancelled */
+        post: operations["cancelExistingLoan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lending/existing-loans/{loan_id}/reversal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask a second person to reverse an approved bring-in, with a reason: the opening entry is mirrored, the historic transactions are marked reversed and the loan is cancelled; refused once the loan has a transaction in the app or a penalty charge (FR-EXL-08) */
+        post: operations["requestExistingLoanReversal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2520,6 +2691,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The plan card: the plan, the modules on, the paid-until date, module requests and changes still to come (ADR-073) */
+        get: operations["getPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, with the step-up: cancel the subscription at the end of the paid period; the business is read only after it, data kept (ADR-073) */
+        post: operations["cancelPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/changes/{change_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only: undo a module stop or the cancellation before its day (ADR-073) */
+        post: operations["undoPlanChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/module-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, after the step-up: ask for a module; switched on at once when the plan includes it, otherwise the platform operator decides (ADR-073) */
+        post: operations["requestPlanModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/modules/{module}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Owner only, with the step-up: stop using a module at the end of the paid period (at once when nothing is paid ahead); records are kept (ADR-073) */
+        post: operations["stopPlanModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plan/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** When the subscription ends or ended, for the banner and the read-only notice (ADR-073) */
+        get: operations["getPlanStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/applications": {
         parameters: {
             query?: never;
@@ -2878,6 +3151,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/module-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Module requests of every business, newest first; pending by default (ADR-073) */
+        get: operations["platformListModuleRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/module-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a module request with a reason, optionally moving the plan first; switches the module on, data kept; needs a current code from the operator's own authenticator (ADR-073) */
+        post: operations["platformApproveModuleRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/module-requests/{request_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decline a module request with a reason the Owner sees; needs a current code from the operator's own authenticator (ADR-073) */
+        post: operations["platformDeclineModuleRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/outbox": {
         parameters: {
             query?: never;
@@ -2958,6 +3282,177 @@ export interface paths {
         put?: never;
         /** Set the plan's price from a date; the price already in force on that date again changes nothing (FR-SUB-01) */
         post: operations["platformAddPlanPrice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Referrals across the platform and open applications with a code, newest first; filters: referrer_tenant_id, status (applied, active, paying, suspended, cancelled, ended), commission (due, paid) */
+        get: operations["platformListReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/commissions/{line_id}/paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that one commission line was paid (date, method, reference, note), with a reason; the app never pays; 409 commission_already_paid, 409 commission_line_reversed, 409 commission_reversal_of_unpaid, 409 referrer_inactive unless confirm_referrer_inactive */
+        post: operations["platformMarkReferralCommissionPaid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/commissions/{line_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reverse one commission line with a reason (lines are never deleted); refunded true records that its payment was refunded; 409 commission_line_already_reversed, 422 commission_line_is_reversal and commission_line_not_payment */
+        post: operations["platformReverseReferralCommission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/default-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The platform default commission rule, or null */
+        get: operations["platformGetReferralDefaultRule"];
+        /** Set or clear the platform default commission rule, with a reason; it applies to payments recorded from now on; needs a current code from the operator's own authenticator */
+        put: operations["platformSetReferralDefaultRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The same referrals as CSV, one row per referral and currency, at most 10,000; audited */
+        get: operations["platformExportReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/payments/{payment_id}/refunded": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that a referred business's subscription payment was refunded, with a reason, when it has no commission line left standing: it no longer uses up the rule's months; 404 when the payment has no referral, 409 payment_already_refunded, 409 payment_line_not_reversed (reverse the line with refunded instead) */
+        post: operations["platformMarkReferralPaymentRefunded"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One referral, the rule a payment recorded now would use, and its commission lines */
+        get: operations["platformGetReferral"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}/commissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a commission line with an amount the operator typed, with a reason. Needs an Idempotency-Key; a repeat adds nothing and answers 200 */
+        post: operations["platformAddReferralCommission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/referrals/{referral_id}/rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set this referral's own commission rule, or clear it so the default applies, with a reason; 422 referral_ended; needs a current code from the operator's own authenticator */
+        put: operations["platformSetReferralRule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/scheduled-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Module stops and cancellations still to come, soonest first (ADR-073) */
+        get: operations["platformListScheduledChanges"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3060,6 +3555,23 @@ export interface paths {
         /** One tenant */
         get: operations["platformGetTenant"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/go-live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the business's go-live date, with a reason: an existing loan is brought in only with a disbursement date before it (ADR-071) */
+        put: operations["platformSetGoLiveDate"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3179,6 +3691,23 @@ export interface paths {
         get?: never;
         /** Move the business to another active plan, with a reason; the same plan again changes nothing (FR-TEN-04) */
         put: operations["platformSetTenantPlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenant_id}/referrer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set, correct or clear the business that referred this one, with a reason; 422 referral_self and referral_code_unknown; lines already earned stay with their referrer; the same referrer again changes nothing; needs a current code from the operator's own authenticator */
+        put: operations["platformSetTenantReferrer"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3386,6 +3915,23 @@ export interface paths {
         put?: never;
         /** Lift the sign-in lock of a tenant's staff user after too many wrong passwords, with a reason; audited, changes no password (ADR-059) */
         post: operations["platformUnlockUserSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The business's referral code and link, the businesses it referred, and the commission earned, paid and due (ADR-069) */
+        get: operations["myReferrals"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5515,6 +6061,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/retail/reports/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shop Home summary: today's sales and takings by way of paying, credit owed, top items, each shop, low stock and open orders (issue #485)
+         * @description One read for the Shop cards on Home (ADR-076). The money parts (sales_today, takings, credit_owed, top_items, branches) follow the dashboard's scope and need retail.sale.all_sellers in every branch they cover (ADR-055); without it they are left out, not refused. low_stock needs retail.stock.read and open_orders retail.order.manage, each in its own branch scope. branches is present only over two or more shops
+         */
+        get: operations["getRetailHomeSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/retail/reports/margins": {
         parameters: {
             query?: never;
@@ -7156,6 +7722,7 @@ export interface components {
         ApplicationDetail: {
             application?: components["schemas"]["Application"];
             possible_duplicates?: components["schemas"]["PossibleDuplicate"][];
+            referred_by?: components["schemas"]["ApplicationReferrer"];
             /** @description A free slug from the business name (FR-TEN-02); editable at Activate */
             suggested_slug?: string;
         };
@@ -7168,6 +7735,14 @@ export interface components {
         };
         ApplicationNoteRequest: {
             note: string;
+        };
+        /** @description The business whose referral code the applicant brought */
+        ApplicationReferrer: {
+            code?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
         };
         Approval: {
             action_type?: string;
@@ -7462,6 +8037,69 @@ export interface components {
             payments?: components["schemas"]["SubscriptionPayment"][];
             plan_price?: components["schemas"]["PlanPrice"];
             tenant?: components["schemas"]["PlatformTenant"];
+        };
+        BusinessPlan: {
+            /** @description Whether a change asked for now takes effect at once, as nothing is paid ahead */
+            applies_at_once?: boolean;
+            /** @description Whether the signed-in user is the Owner, who alone may change the plan */
+            can_change?: boolean;
+            /** @description Changes still to come, soonest first, then the latest done or undone */
+            changes?: components["schemas"]["PlanScheduledChange"][];
+            /**
+             * Format: date
+             * @description The day a change asked for now would take effect
+             */
+            changes_take_effect_on?: string;
+            /**
+             * Format: date
+             * @description When the subscription has ended: the day it ended
+             */
+            ended_on?: string;
+            /**
+             * Format: date
+             * @description While a cancellation is scheduled: the first day the business is read only
+             */
+            ends_on?: string;
+            modules?: string[];
+            /** @description Modules the business does not use and may ask for */
+            modules_available?: string[];
+            /** @description Modules the plan includes: asking for one of these switches it on at once */
+            modules_in_plan?: string[];
+            /**
+             * Format: date
+             * @description The last day paid for, or null
+             */
+            paid_until?: string;
+            pilot?: boolean;
+            plan_code?: string;
+            plan_name?: string;
+            /** @description The latest module requests, newest first */
+            requests?: components["schemas"]["PlanModuleRequest"][];
+            /** @description trial, active, past_due, suspended or cancelled; null when the business has none yet */
+            subscription_status?: string;
+            /**
+             * Format: date
+             * @description Today in the business's own time zone
+             */
+            today?: string;
+            /** Format: date */
+            trial_ends_on?: string;
+        };
+        /** @description For the banner and the read-only notice every member of staff sees */
+        BusinessPlanStatus: {
+            /**
+             * Format: date
+             * @description When the subscription has ended: the day it ended; the business is read only
+             */
+            ended_on?: string;
+            /**
+             * Format: date
+             * @description While a cancellation is scheduled: the first day the business is read only
+             */
+            ends_on?: string;
+        };
+        CancelExistingLoanRequest: {
+            reason: string;
         };
         /** @description FR-ARR-04: amount_minor left out waives all that is waivable */
         ChargeWaiverRequest: {
@@ -7800,6 +8438,27 @@ export interface components {
             head_office_branch_id?: string;
             tenant?: components["schemas"]["PlatformTenant"];
         };
+        DataExportSettingsRequest: {
+            /** @description Email the Owner a copy every week */
+            weekly_email: boolean;
+        };
+        DataExportStatus: {
+            /**
+             * Format: date-time
+             * @description When the weekly email last went to the Owner; null when never
+             */
+            last_emailed_at?: string;
+            /**
+             * Format: date-time
+             * @description When a workbook of the business's data was last made, by anyone; null when never
+             */
+            last_export_at?: string;
+            latest?: components["schemas"]["ReportRun"];
+            /** @description Whether the caller is the Owner, who alone may switch the weekly email; others see it only */
+            owner?: boolean;
+            /** @description Whether the Owner is emailed a copy every week (on until switched off) */
+            weekly_email?: boolean;
+        };
         DisbursementRequest: {
             /**
              * Format: date
@@ -7915,6 +8574,156 @@ export interface components {
         DuplicateCheckResponse: {
             candidates?: components["schemas"]["DuplicateCandidate"][];
         };
+        ExistingLoan: {
+            /** Format: int64 */
+            agreed_total_minor?: number;
+            /**
+             * Format: uuid
+             * @description The pending request a second person decides: the bring-in while the loan is brought_in, the reversal of the bring-in (loan_bring_in_reversal) once it is active or closed
+             */
+            approval_request_id?: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /**
+             * Format: date
+             * @description Set on approval: the first business date the app charges penalties for
+             */
+            brought_in_on?: string;
+            currency?: string;
+            /** Format: date */
+            disbursement_date?: string;
+            /** Format: date */
+            go_live_date?: string;
+            /**
+             * Format: uuid
+             * @description Null on a check (dry run), which saves nothing
+             */
+            loan_id?: string;
+            loan_no?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_no?: string;
+            position?: components["schemas"]["ExistingLoanPosition"];
+            /** Format: int64 */
+            principal_minor?: number;
+            product_code?: string;
+            /** Format: uuid */
+            product_id?: string;
+            register_ref?: string;
+            repayments?: components["schemas"]["ExistingLoanRepayment"][];
+            schedule?: components["schemas"]["ExistingLoanScheduleItem"][];
+            /** @description brought_in (waiting for a checker), then active or closed; cancelled if withdrawn */
+            status?: string;
+            /** Format: int32 */
+            term_count?: number;
+            /** @description Things to check before recording or approving, none of which stops it: a loan of the same member for the same amount and date already in the app when no register number tells them apart */
+            warnings?: string[];
+        };
+        ExistingLoanImportRequest: {
+            /** @description The CSV text: a header row, then rows of kind loan (one per loan) and kind repayment (any number per loan), tied by ref. Comma, semicolon or tab separated; amounts in the currency's major units */
+            csv: string;
+        };
+        ExistingLoanImportResult: {
+            /**
+             * Format: int32
+             * @description Loans recorded, or on a check the loans that would be; 0 while any row is an error
+             */
+            added?: number;
+            dry_run?: boolean;
+            /** Format: int32 */
+            errors?: number;
+            /** Format: int32 */
+            loans?: number;
+            /** Format: int32 */
+            repayments?: number;
+            rows?: components["schemas"]["ExistingLoanImportRow"][];
+            /** Format: int32 */
+            rows_read?: number;
+            /** Format: int32 */
+            skipped?: number;
+        };
+        ExistingLoanImportRow: {
+            /** Format: int32 */
+            line?: number;
+            /** Format: uuid */
+            loan_id?: string;
+            message?: string;
+            /** @description ready (a check found nothing wrong), added, skipped (the register number is in use) or error */
+            outcome?: string;
+            ref?: string;
+        };
+        ExistingLoanPage: {
+            items?: components["schemas"]["ExistingLoanSummary"][];
+        };
+        /** @description As the register leaves the loan, on today's business date */
+        ExistingLoanPosition: {
+            /** Format: int64 */
+            arrears_minor?: number;
+            /**
+             * Format: int32
+             * @description Counted from the real due date of the oldest unpaid instalment (R-DPD)
+             */
+            days_past_due?: number;
+            /** Format: int64 */
+            fees_outstanding_minor?: number;
+            /** Format: int64 */
+            interest_outstanding_minor?: number;
+            /** Format: date */
+            last_repayment_on?: string;
+            /** Format: date */
+            next_due_date?: string;
+            /** Format: int64 */
+            principal_outstanding_minor?: number;
+            /** @description True when the register shows the loan repaid in full; it is closed on approval */
+            settled?: boolean;
+            /** Format: int64 */
+            total_outstanding_minor?: number;
+            /** Format: int64 */
+            total_paid_minor?: number;
+        };
+        /** @description One repayment the register shows, before the go-live date */
+        ExistingLoanRepayment: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** @description The paper receipt number or a note; optional */
+            note?: string;
+            payment_method_key: string;
+            /** Format: date */
+            value_date: string;
+        };
+        ExistingLoanScheduleItem: {
+            /** Format: date */
+            due_date?: string;
+            /** Format: int64 */
+            fees_due_minor?: number;
+            /** Format: int64 */
+            interest_due_minor?: number;
+            /** Format: int32 */
+            no?: number;
+            /** Format: int64 */
+            paid_minor?: number;
+            /** Format: int64 */
+            principal_due_minor?: number;
+            status?: string;
+            /** Format: int64 */
+            unpaid_minor?: number;
+        };
+        ExistingLoanSummary: {
+            /** Format: uuid */
+            approval_request_id?: string;
+            /** Format: date */
+            disbursement_date?: string;
+            /** Format: uuid */
+            loan_id?: string;
+            loan_no?: string;
+            /** Format: uuid */
+            member_id?: string;
+            member_no?: string;
+            /** Format: int64 */
+            principal_minor?: number;
+            register_ref?: string;
+            status?: string;
+        };
         FeedbackItem: {
             /** @description The version of BMS that was running (version and git SHA) */
             app_version?: string;
@@ -7960,6 +8769,15 @@ export interface components {
             email?: string;
             full_name: string;
             phone?: string;
+        };
+        GoLiveDate: {
+            /**
+             * Format: date
+             * @description The business's go-live date, or null while none is known
+             */
+            go_live_date?: string;
+            /** @description set (by the Owner or the operator), first_admin_sign_in (the default) or none (nobody has signed in yet) */
+            source?: string;
         };
         HeadOfficeRequest: {
             code: string;
@@ -9271,6 +10089,8 @@ export interface components {
             created_at?: string;
             currency?: string;
             external_reference?: string;
+            /** @description From the paper register before go-live (ADR-071): no journal entry, no receipt number, not counted as cash in the app's books */
+            historic?: boolean;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -9484,6 +10304,28 @@ export interface components {
             /** @description A 6 digit TOTP code or a recovery code */
             code: string;
             mfa_token: string;
+        };
+        /** @description A business this business referred: its name, when it joined, never more */
+        MyReferral: {
+            /**
+             * Format: date-time
+             * @description When the business was created, or the application sent
+             */
+            joined_at?: string;
+            referred_name?: string;
+            /** @description applied, active, paying, suspended, cancelled or ended */
+            status?: string;
+            totals?: components["schemas"]["ReferralTotal"][];
+        };
+        MyReferrals: {
+            /** @description The business's referral code */
+            code?: string;
+            /** @description Newest first */
+            items?: components["schemas"]["MyReferral"][];
+            /** @description The public sign-up with the code filled in */
+            link?: string;
+            /** @description Every referral together, one row per currency */
+            totals?: components["schemas"]["ReferralTotal"][];
         };
         NextOfKin: {
             /** Format: date-time */
@@ -9729,6 +10571,29 @@ export interface components {
         PlanList: {
             items?: components["schemas"]["Plan"][];
         };
+        /** @description The module, with the Owner's step-up: the authenticator code when the Owner has two-step sign-in, else the password */
+        PlanModuleAsk: {
+            module?: string;
+            password?: string;
+            totp_code?: string;
+        };
+        /** @description A module the Owner asked for, and the operator's decision */
+        PlanModuleRequest: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** @description True when the plan already included the module, so it was switched on at once */
+            decided_automatically?: boolean;
+            /** @description The operator's reason, shown to the Owner when declined */
+            decision_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** @description pending, approved or declined */
+            status?: string;
+        };
         /** @description A price of a plan from a date; a later row replaces it from its own date */
         PlanPrice: {
             /**
@@ -9755,6 +10620,31 @@ export interface components {
              */
             monthly_minor?: number;
             reason?: string;
+        };
+        /** @description A module stopped or the subscription cancelled, from a date */
+        PlanScheduledChange: {
+            /** Format: date-time */
+            applied_at?: string;
+            /** Format: date-time */
+            created_at?: string;
+            /**
+             * Format: date
+             * @description The first day the change is in force
+             */
+            effective_on?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description stop_module or cancel */
+            kind?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** @description scheduled, applied or undone */
+            status?: string;
+        };
+        /** @description The authenticator code when the Owner has two-step sign-in, else the password */
+        PlanStepUp: {
+            password?: string;
+            totp_code?: string;
         };
         PlatformFeedbackItem: {
             app_version?: string;
@@ -9802,9 +10692,118 @@ export interface components {
             /** Format: uuid */
             user_id?: string;
         };
+        PlatformModuleApproval: {
+            /** @description Move the business to this plan first, when its plan does not include the module */
+            plan_code?: string;
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+            /** @description A current 6 digit code from the operator's own authenticator app */
+            totp_code: string;
+        };
+        PlatformModuleDecline: {
+            /** @description Why; shown to the Owner and kept in the audit log */
+            reason: string;
+            /** @description A current 6 digit code from the operator's own authenticator app */
+            totp_code: string;
+        };
+        PlatformModuleRequest: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            decided_automatically?: boolean;
+            decision_reason?: string;
+            /** Format: uuid */
+            id?: string;
+            module_key?: string;
+            plan_code?: string;
+            /** @description Whether the business's plan already includes the module */
+            plan_includes?: boolean;
+            requested_by_name?: string;
+            status?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+        };
+        PlatformModuleRequestList: {
+            items?: components["schemas"]["PlatformModuleRequest"][];
+        };
         PlatformReasonRequest: {
             /** @description Why; kept in the platform audit log */
             reason: string;
+        };
+        /** @description The current referral of the business, or null when it has no referrer */
+        PlatformReferral: {
+            /**
+             * Format: uuid
+             * @description The sign-up application, while it is open or when the referral came from one
+             */
+            application_id?: string;
+            code?: string;
+            /** Format: date-time */
+            ended_at?: string;
+            /**
+             * Format: date-time
+             * @description When the business was created, or the application sent
+             */
+            joined_at?: string;
+            /**
+             * Format: uuid
+             * @description Null for an application not activated yet
+             */
+            referral_id?: string;
+            referred_name?: string;
+            referred_slug?: string;
+            /**
+             * Format: uuid
+             * @description Null while the referred business is an application
+             */
+            referred_tenant_id?: string;
+            referrer_name?: string;
+            referrer_slug?: string;
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
+            referrer_status?: string;
+            /** Format: uuid */
+            referrer_tenant_id?: string;
+            /** @description True when the operator set a rule for this referral */
+            rule_override?: boolean;
+            /** @description sign_up or operator */
+            source?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** @description applied, active, paying, suspended or cancelled (the referred business's subscription), or ended */
+            status?: string;
+            totals?: components["schemas"]["ReferralTotal"][];
+        };
+        PlatformReferralDetail: {
+            /** @description Oldest first */
+            lines?: components["schemas"]["ReferralCommissionLine"][];
+            referral?: components["schemas"]["PlatformReferral"];
+            rule_in_force?: components["schemas"]["ReferralCommissionRule"];
+            /** @description override, default or none */
+            rule_source?: string;
+        };
+        PlatformReferralList: {
+            items?: components["schemas"]["PlatformReferral"][];
+        };
+        PlatformScheduledChange: {
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date */
+            effective_on?: string;
+            /** Format: uuid */
+            id?: string;
+            kind?: string;
+            module_key?: string;
+            requested_by_name?: string;
+            /** Format: uuid */
+            tenant_id?: string;
+            tenant_name?: string;
+            tenant_slug?: string;
+        };
+        PlatformScheduledChangeList: {
+            items?: components["schemas"]["PlatformScheduledChange"][];
         };
         /** @description Shown once to the operator, who hands it to the tenant admin */
         PlatformSignInResetLink: {
@@ -9939,6 +10938,34 @@ export interface components {
         PushUnsubscribeRequest: {
             endpoint: string;
         };
+        RecordExistingLoanRequest: {
+            /**
+             * Format: int64
+             * @description The total the borrower agreed to repay (principal and interest), when the register records that instead of the product's rate; the difference is spread as flat interest and no fee is added
+             */
+            agreed_total_minor?: number;
+            /**
+             * Format: date
+             * @description The real disbursement date, before the business's go-live date
+             */
+            disbursement_date: string;
+            /** Format: uuid */
+            member_id: string;
+            /** Format: int64 */
+            principal_minor: number;
+            /** Format: uuid */
+            product_id: string;
+            /** @description Defaults to other */
+            purpose_category?: string;
+            /** @description The loan's number in the paper register; one live loan per number */
+            register_ref?: string;
+            repayments: components["schemas"]["ExistingLoanRepayment"][];
+            /**
+             * Format: int32
+             * @description Defaults to the product's default term; within the product's limits
+             */
+            term_count?: number;
+        };
         RecoveryCodes: {
             /** @description Shown once; each works once */
             recovery_codes?: string[];
@@ -9946,6 +10973,148 @@ export interface components {
         RecoveryCodesRequest: {
             /** @description A current TOTP code */
             code: string;
+        };
+        /** @description Oldest first */
+        ReferralCommissionLine: {
+            /** Format: int64 */
+            amount_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            created_by_name?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description The referrer business was not active when the line was worked out */
+            inactive_when_worked_out?: boolean;
+            /** @description payment (worked out from a rule), manual (typed) or reversal */
+            kind?: string;
+            /** Format: int32 */
+            months_counted?: number;
+            note?: string;
+            /** Format: date-time */
+            paid_at?: string;
+            paid_by_name?: string;
+            paid_method?: string;
+            paid_note?: string;
+            /** Format: date */
+            paid_on?: string;
+            paid_reference?: string;
+            /** Format: uuid */
+            payment_id?: string;
+            /** @description The referrer business is not active now: marking the line paid needs confirm_referrer_inactive */
+            referrer_inactive?: boolean;
+            /** @description The referrer business now: active, suspended, cancelled, past_due or trial_lapsed */
+            referrer_status?: string;
+            /** Format: uuid */
+            reversed_by_line_id?: string;
+            /** Format: uuid */
+            reverses_line_id?: string;
+            /** @description The rule as it was when the line was worked out, and the payment it was applied to */
+            rule_snapshot?: {
+                [key: string]: Record<string, never>;
+            };
+        };
+        /** @description The rule a payment recorded now would use, or null */
+        ReferralCommissionRule: {
+            /**
+             * Format: int64
+             * @description Minor units: once (fixed_first_payment) or per paid month (fixed_per_month)
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description The most a referral earns under a percent rule, in currency; null: no cap
+             */
+            cap_minor?: number;
+            /** Format: date-time */
+            created_at?: string;
+            created_by_name?: string;
+            currency?: string;
+            /** Format: uuid */
+            id?: string;
+            /** @description percent_of_payment, fixed_first_payment or fixed_per_month */
+            kind?: string;
+            /**
+             * Format: int32
+             * @description The first paid months of the referred business it applies to; null: no end
+             */
+            months?: number;
+            /**
+             * Format: int32
+             * @description Basis points of each payment: 1000 is 10%
+             */
+            percent_bp?: number;
+        };
+        ReferralDefaultRule: {
+            rule?: components["schemas"]["ReferralCommissionRule"];
+        };
+        /** @description The commission was paid outside the app; this records it */
+        ReferralLinePaidRequest: {
+            /** @description True to pay a line although the referrer business is inactive now (suspended, cancelled, past_due or trial_lapsed); without it that is 409 referrer_inactive */
+            confirm_referrer_inactive?: boolean;
+            method: string;
+            note?: string;
+            /** Format: date */
+            paid_on: string;
+            reason: string;
+            reference?: string;
+        };
+        /** @description A commission the operator works out and types */
+        ReferralLineRequest: {
+            /** Format: int64 */
+            amount_minor: number;
+            currency: string;
+            /** @description Why; kept on the line and in the audit log */
+            reason: string;
+        };
+        ReferralLineReverseRequest: {
+            reason: string;
+            /** @description True when the line's subscription payment was refunded: the payment then no longer uses up the rule's months. Only for a line worked out from a payment */
+            refunded?: boolean;
+        };
+        ReferralPaymentRefundedRequest: {
+            reason: string;
+        };
+        /** @description The rule; null clears it (the default: nothing is worked out; a referral: the default) */
+        ReferralRuleBody: {
+            /**
+             * Format: int64
+             * @description The fixed amount in minor units
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description percent_of_payment: the most one referral earns; null: no cap
+             */
+            cap_minor?: number;
+            currency?: string;
+            kind: string;
+            /**
+             * Format: int32
+             * @description The first paid months it applies to; null: no end
+             */
+            months?: number;
+            /**
+             * Format: int32
+             * @description percent_of_payment: basis points, 1000 is 10%
+             */
+            percent_bp?: number;
+        };
+        ReferralRuleRequest: {
+            reason: string;
+            rule?: components["schemas"]["ReferralRuleBody"];
+            /** @description A current 6 digit code from the operator's own authenticator app (step-up), used once */
+            totp_code: string;
+        };
+        /** @description One currency: everything earned, what was marked paid, and the rest */
+        ReferralTotal: {
+            currency?: string;
+            /** Format: int64 */
+            due_minor?: number;
+            /** Format: int64 */
+            earned_minor?: number;
+            /** Format: int64 */
+            paid_minor?: number;
         };
         RelatedMember: {
             full_name?: string;
@@ -10000,6 +11169,7 @@ export interface components {
             /** @description The allowed values of an enum */
             values?: string[];
         };
+        /** @description The caller's newest workbook, in any state; null when they never asked for one */
         ReportRun: {
             /** Format: date */
             as_of?: string;
@@ -12161,6 +13331,126 @@ export interface components {
         };
         RetailGoodsReceiptVoidRequest: {
             reason: string;
+        };
+        /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first */
+        RetailHomeBranch: {
+            /** Format: uuid */
+            branch_id?: string;
+            name?: string;
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        /** @description What buyers owe on credit sales, as Credit control counts it */
+        RetailHomeCreditOwed: {
+            /**
+             * Format: int32
+             * @description Buyers that owe: a customer record, or a name typed with the sale
+             */
+            customers?: number;
+            /**
+             * Format: date
+             * @description The earliest due date of a sale still owing; absent when none has a due date
+             */
+            oldest_due_date?: string;
+            /** Format: int64 */
+            owed_minor?: number;
+            /** Format: int32 */
+            sales?: number;
+        };
+        /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; the same figure as today on the dashboard */
+        RetailHomeSales: {
+            /** Format: int64 */
+            sale_count?: number;
+            /** Format: int64 */
+            sales_minor?: number;
+        };
+        RetailHomeSummary: {
+            /** @description Present only with retail.sale.all_sellers in every branch the summary covers (ADR-055): everybody's money; and only when the summary covers two or more shops: one line per shop, most sales first */
+            branches?: components["schemas"]["RetailHomeBranch"][];
+            credit_owed?: components["schemas"]["RetailHomeCreditOwed"];
+            currency?: string;
+            /**
+             * Format: date
+             * @description The business day in the tenant's zone (Africa/Kampala by default)
+             */
+            date?: string;
+            /**
+             * Format: int32
+             * @description Present only with retail.stock.read: active items at or below the dashboard's low stock threshold
+             */
+            low_stock?: number;
+            /**
+             * Format: int32
+             * @description Present only with retail.order.manage: customer orders ordered, packed or out for delivery
+             */
+            open_orders?: number;
+            sales_today?: components["schemas"]["RetailHomeSales"];
+            takings?: components["schemas"]["RetailHomeTakings"];
+            top_items?: components["schemas"]["RetailHomeTopItems"];
+            /**
+             * Format: date
+             * @description The Monday of this week: the first day of the top items of the week
+             */
+            week_from?: string;
+        };
+        /** @description Money taken today by way of paying, read the way the cash book reads a day for every way: sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken today, less sales cancelled today, payments on account reversed today and money refunded today on goods taken back. Besides retail.sale.all_sellers it needs, as the cash summary, retail.cashbook.read in every branch it covers and retail.till.close (ADR-076) */
+        RetailHomeTakings: {
+            methods?: components["schemas"]["RetailHomeTakingsMethod"][];
+            /** Format: int64 */
+            total_minor?: number;
+        };
+        RetailHomeTakingsMethod: {
+            /**
+             * Format: int64
+             * @description sales_minor + payments_minor + fees_minor - out_minor
+             */
+            amount_minor?: number;
+            /**
+             * Format: int64
+             * @description Delivery fees taken at the door today, or paid today on an account
+             */
+            fees_minor?: number;
+            /**
+             * @description cash and mobile_money always, then any other way that took or gave back money today (bank)
+             * @enum {string}
+             */
+            method?: "cash" | "mobile_money" | "bank";
+            /**
+             * Format: int64
+             * @description Money given back today: sales cancelled, payments on account reversed, refunds on goods taken back (a return cancelled today counts back in), door fees of cancelled orders
+             */
+            out_minor?: number;
+            /**
+             * Format: int64
+             * @description Payments on credit sales dated today, at the branch that took them
+             */
+            payments_minor?: number;
+            /**
+             * Format: int64
+             * @description Sales paid at the sale dated today, cancelled later or not
+             */
+            sales_minor?: number;
+        };
+        RetailHomeTopItem: {
+            code?: string;
+            /**
+             * Format: uuid
+             * @description The product, or the whole item for one with sizes and colours
+             */
+            item_id?: string;
+            label?: string;
+            /** @description Base units, as a decimal string */
+            qty?: string;
+            /** Format: int64 */
+            sales_minor?: number;
+            unit?: string;
+        };
+        /** @description The five items that sold the most by value, today and this week */
+        RetailHomeTopItems: {
+            today?: components["schemas"]["RetailHomeTopItem"][];
+            week?: components["schemas"]["RetailHomeTopItem"][];
         };
         /** @description Dispatched and not received or cancelled, the longest wait first */
         RetailInFlightTransfer: {
@@ -16777,6 +18067,8 @@ export interface components {
             country: string;
             message?: string;
             modules: string[];
+            /** @description Optional: the referral code of the business that referred the applicant (the ?ref= of its link). An unknown code is 422 referral_code_unknown (ADR-069) */
+            referral_code?: string;
             term: string;
             /** @description trial: one month free; paid: subscribe now */
             way_in: string;
@@ -17062,6 +18354,15 @@ export interface components {
             /** @description invited, active or deactivated */
             status?: string;
         };
+        TenantGoLiveRequest: {
+            /**
+             * Format: date
+             * @description The day the app became the business's register, today or earlier (ADR-071)
+             */
+            go_live_date: string;
+            /** @description Why; kept in the tenant's audit log and the platform's */
+            reason: string;
+        };
         /** @description An operator action on the business, from the platform audit log */
         TenantHistoryEntry: {
             action?: string;
@@ -17114,6 +18415,19 @@ export interface components {
             plan_code: string;
             reason: string;
         };
+        TenantReferrer: {
+            referral?: components["schemas"]["PlatformReferral"];
+            /** Format: uuid */
+            tenant_id?: string;
+        };
+        TenantReferrerRequest: {
+            /** @description Why; kept in the platform audit log */
+            reason: string;
+            /** @description The referral code of the business that referred this one; null or empty clears it */
+            referrer_code?: string;
+            /** @description A current 6 digit code from the operator's own authenticator app (step-up), used once */
+            totp_code: string;
+        };
         TenantSettings: {
             allow_loans_before_kyc_verified?: boolean;
             appraisal_weights?: {
@@ -17128,6 +18442,11 @@ export interface components {
             display_name?: string;
             /** @description True once the admin has saved a business name of their own */
             display_name_set?: boolean;
+            /**
+             * Format: date
+             * @description The day the app became the business's register: as the Owner or the operator set it, else the business date of the first administrator sign-in, stored then; null before either. An existing loan is brought in only with a disbursement date before it (ADR-071)
+             */
+            go_live_date?: string;
             /**
              * Format: uuid
              * @description The current logo (a core document of this tenant), or null; set through PUT /settings/logo
@@ -17425,6 +18744,11 @@ export interface components {
             approval_validity_days?: number;
             disabled_collateral_types?: string[];
             display_name?: string;
+            /**
+             * Format: date
+             * @description The go-live date, today or earlier; only the Owner of the business sets it, 403 owner_only otherwise (ADR-071)
+             */
+            go_live_date?: string;
             /** Format: int32 */
             max_active_loans_per_member?: number;
             /**
@@ -18394,6 +19718,72 @@ export interface operations {
             };
         };
     };
+    getDataExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataExportStatus"];
+                };
+            };
+        };
+    };
+    createDataExport: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportRun"];
+                };
+            };
+        };
+    };
+    updateDataExportSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DataExportSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataExportStatus"];
+                };
+            };
+        };
+    };
     getDocument: {
         parameters: {
             query?: never;
@@ -19013,6 +20403,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoanReassignResult"];
+                };
+            };
+        };
+    };
+    listExistingLoans: {
+        parameters: {
+            query?: {
+                status?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoanPage"];
+                };
+            };
+        };
+    };
+    recordExistingLoan: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    getLendingGoLiveDate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoLiveDate"];
+                };
+            };
+        };
+    };
+    importExistingLoans: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExistingLoanImportRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoanImportResult"];
+                };
+            };
+        };
+    };
+    getExistingLoan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    requestExistingLoanApproval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    cancelExistingLoan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
+                };
+            };
+        };
+    };
+    requestExistingLoanReversal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelExistingLoanRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExistingLoan"];
                 };
             };
         };
@@ -22099,6 +23681,142 @@ export interface operations {
             };
         };
     };
+    getPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessPlan"];
+                };
+            };
+        };
+    };
+    cancelPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanStepUp"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    undoPlanChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    requestPlanModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanModuleAsk"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
+                };
+            };
+        };
+    };
+    stopPlanModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanStepUp"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanScheduledChange"];
+                };
+            };
+        };
+    };
+    getPlanStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessPlanStatus"];
+                };
+            };
+        };
+    };
     platformListApplications: {
         parameters: {
             query?: {
@@ -22608,6 +24326,80 @@ export interface operations {
             };
         };
     };
+    platformListModuleRequests: {
+        parameters: {
+            query?: {
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformModuleRequestList"];
+                };
+            };
+        };
+    };
+    platformApproveModuleRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformModuleApproval"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
+                };
+            };
+        };
+    };
+    platformDeclineModuleRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformModuleDecline"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanModuleRequest"];
+                };
+            };
+        };
+    };
     platformOutbox: {
         parameters: {
             query?: never;
@@ -22740,6 +24532,274 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanDetail"];
+                };
+            };
+        };
+    };
+    platformListReferrals: {
+        parameters: {
+            query?: {
+                referrer_tenant_id?: string;
+                status?: string;
+                commission?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralList"];
+                };
+            };
+        };
+    };
+    platformMarkReferralCommissionPaid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLinePaidRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformReverseReferralCommission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLineReverseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformGetReferralDefaultRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralDefaultRule"];
+                };
+            };
+        };
+    };
+    platformSetReferralDefaultRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralDefaultRule"];
+                };
+            };
+        };
+    };
+    platformExportReferrals: {
+        parameters: {
+            query?: {
+                referrer_tenant_id?: string;
+                status?: string;
+                commission?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+        };
+    };
+    platformMarkReferralPaymentRefunded: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                payment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralPaymentRefundedRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformGetReferral: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformAddReferralCommission: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralLineRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformSetReferralRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformReferralDetail"];
+                };
+            };
+        };
+    };
+    platformListScheduledChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformScheduledChangeList"];
                 };
             };
         };
@@ -22907,6 +24967,30 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
                 };
+            };
+        };
+    };
+    platformSetGoLiveDate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantGoLiveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -23082,6 +25166,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformTenant"];
+                };
+            };
+        };
+    };
+    platformSetTenantReferrer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantReferrerRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantReferrer"];
                 };
             };
         };
@@ -23432,6 +25542,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    myReferrals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyReferrals"];
+                };
             };
         };
     };
@@ -27261,6 +29391,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetailDashboard"];
+                };
+            };
+        };
+    };
+    getRetailHomeSummary: {
+        parameters: {
+            query?: {
+                branch_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetailHomeSummary"];
                 };
             };
         };

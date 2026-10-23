@@ -9,6 +9,8 @@ import { StaffHome } from '../areas/staff/home';
 import { Approvals } from '../areas/staff/approvals';
 import { Insights } from '../areas/staff/insights/page';
 import { CollateralForm } from '../areas/staff/lending/collateral-form';
+import { ExistingLoansPage } from '../areas/staff/lending/existing-loans';
+import { ExistingLoansImport } from '../areas/staff/lending/existing-loans-import';
 import { CertificateBody } from '../areas/staff/lending/investment-certificate';
 import { NewInvestment } from '../areas/staff/lending/investment-new';
 import { Products as InvestmentProducts } from '../areas/staff/lending/investment-products';
@@ -43,7 +45,7 @@ const ALL = [
   'lending.savings.read', 'lending.savings.deposit', 'lending.savings.withdraw', 'lending.savings.open', 'lending.savings_products.manage',
   'lending.members.read', 'lending.members.create', 'lending.members.update', 'lending.collateral.read', 'lending.collateral.manage',
   'lending.investments.read', 'lending.investments.open', 'lending.investments.fund', 'lending.investments.payout', 'lending.investment_products.manage',
-  'lending.loans.read', 'lending.insights.read', 'lending.reports.portfolio',
+  'lending.loans.read', 'lending.loans.bring_in', 'lending.insights.read', 'lending.reports.portfolio',
   'core.approvals.read', 'core.settings.read', 'core.settings.manage', 'core.payment_account.manage', 'core.users.manage',
   'core.notifications.read', 'core.notification_templates.manage',
 ];
@@ -57,6 +59,8 @@ const OWNER = person('Test Owner 01', ALL);
 const SAVER_READER = person('Test Reader 01', ['lending.savings.read', 'lending.members.read']);
 const INVESTMENT_READER = person('Test Reader 02', ['lending.investments.read']);
 const ASKER = person('Test Asker 01', ['core.approvals.read', 'core.settings.read', 'core.notifications.read']);
+// The owner of a shop (issue #485): Home shows the shop's summary cards.
+const SHOP_OWNER = { ...mockMe('admin'), full_name: 'Test Shop Owner 01', modules: ['retail'], permission_scopes: undefined, branches } as Me;
 
 const account: SavingsAccount = {
   id: 'a1', account_no: 'SV000001', member_id: 'm1', member_no: 'M000001', member_name: 'Test Saver 01', product_code: 'TEST-SAVE', product_name: 'Test passbook savings',
@@ -169,6 +173,10 @@ function screen(path: string): ReactElement {
       return <OwnTwoStep />;
     case '/staff/sms/opt-outs':
       return <OptOutsScreen />;
+    case '/staff/lending/existing-loans':
+      return <ExistingLoansPage />;
+    case '/staff/lending/existing-loans/import':
+      return <ExistingLoansImport />;
     default:
       throw new Error(`No screen is mapped for ${path}: add it to tours-lending-more.test.tsx`);
   }
@@ -190,7 +198,7 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-member-investments': [OWNER],
   'page-investment': [OWNER, INVESTMENT_READER],
   'page-investment-certificate': [OWNER, INVESTMENT_READER],
-  'page-staff-home': [OWNER, ASKER],
+  'page-staff-home': [OWNER, ASKER, SHOP_OWNER],
   'page-approvals': [OWNER, ASKER],
   'page-insights': [OWNER],
   'page-payments': [OWNER, ASKER],
@@ -200,6 +208,8 @@ const AUDIENCE: Record<string, Me[]> = {
   'page-sms-wording': [OWNER],
   'page-sms-opt-outs': [OWNER],
   'page-own-two-step': [OWNER],
+  'page-existing-loans': [OWNER],
+  'page-existing-loans-import': [OWNER],
 };
 
 describeTours('lending more', LENDING_MORE_TOURS, AUDIENCE, screen, seed);

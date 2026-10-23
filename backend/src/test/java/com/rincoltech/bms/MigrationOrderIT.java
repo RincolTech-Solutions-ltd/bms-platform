@@ -40,6 +40,8 @@ class MigrationOrderIT {
      * Merge order matters because {@code outOfOrder} is off: V41 (the retail price lists, #247, merged)
      * came before V42 (the loan pledge guard, #176, merged), then V43 (payment methods, #160, merged),
      * then V44 (the retail customer accounts, #196), then V45 (customer returns, #201, merged). Nothing here enforces the order, merge order does.
+     * Today V80 to V91 are merged (V91 is download my data, #478); V92 is billing, this pull request (#482). A number above
+     * them is allowed only as an ordered claim (AGENTS.md), merged in its turn or renumbered at merge.
      */
     static final List<String> MERGED = List.of(
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "20", "21", "22", "23", "26",
@@ -1482,13 +1484,16 @@ class MigrationOrderIT {
                 .isEqualTo(before);
         // V48 adds no permission; V55 (the AI assistant, #226) adds the two advisor ones, V57 (#233) the payment
         // account one, V83 (collections, #266) the two collection list ones, V86 (offline sales, #458)
-        // retail.offline.resolve and V92 (billing, #480) core.billing.read, which are not V48's to answer for.
+        // retail.offline.resolve, V88 (referrals, #464) core.referrals.read, V89 (existing loans, #466)
+        // lending.loans.bring_in, V91 (download my data, #334) its own and V92 (billing, #480) core.billing.read,
+        // which are not V48's to answer for.
         assertThat(owner.sql(
                                 "SELECT count(*) FROM permissions WHERE key NOT IN ('lending.advisor.use', 'lending.advisor.configure',"
                                         + " 'core.payment_account.manage', 'retail.controls.read', 'retail.credit.write_off',"
                                         + " 'retail.order.manage', 'retail.sale.all_sellers', 'retail.till.close',"
                                         + " 'retail.offline.resolve', 'lending.members.contact',"
-                                        + " 'lending.collections.all_officers', 'core.billing.read')")
+                                        + " 'lending.collections.all_officers', 'core.referrals.read',"
+                                        + " 'lending.loans.bring_in', 'core.data_export.run', 'core.billing.read')")
                         .query(Long.class)
                         .single())
                 .as("no permission is added")
@@ -1994,6 +1999,131 @@ class MigrationOrderIT {
                                     """).query(Long.class).single())
                     .as("every constraint ends validated")
                     .isZero();
+        }
+    }
+
+    /**
+     * #464 (ADR-069): the referral migration gives every business that already exists its own code, and a business made
+     * afterwards gets one from the trigger; the default commission rule is the product owner's (ADR-069 decision 14), audited
+     * once.
+     * JUSTIFICATION-A3: a new test case; no existing case migrates a database with businesses across V88.
+     */
+    @Test
+    void referralsMigrationGivesEveryExistingBusinessACode() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("88") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            for (String slug : List.of("dodos-shop", "dodos-mart", "x9-42")) {
+                owner.sql(
+                                "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, ?, 'Test Tenant V88', '00000000-0000-4000-8000-000000000001')")
+                        .params(UUID.randomUUID(), slug)
+                        .update();
+            }
+
+            DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            List<String> codes = owner.sql(
+                            "SELECT c.code FROM referral_codes c JOIN tenants t ON t.id = c.tenant_id ORDER BY t.slug")
+                    .query(String.class)
+                    .list();
+            assertThat(codes).hasSize(3).doesNotHaveDuplicates();
+            assertThat(codes.get(0)).startsWith("DODOS");
+            assertThat(codes.get(1)).startsWith("DODOS");
+            UUID later = UUID.randomUUID();
+            owner.sql(
+                            "INSERT INTO tenants (id, slug, name, plan_id) VALUES (?, 'later-shop', 'Test Tenant Later', '00000000-0000-4000-8000-000000000001')")
+                    .param(later)
+                    .update();
+            assertThat(owner.sql("SELECT code FROM referral_codes WHERE tenant_id = ?")
+                            .param(later)
+                            .query(String.class)
+                            .single())
+                    .startsWith("LATER");
+            assertThat(owner.sql(
+                                    "SELECT r.kind || ' ' || r.percent_bp || ' ' || r.months || ' ' || (r.cap_minor IS NULL)"
+                                            + " FROM referral_settings s JOIN referral_commission_rules r ON r.id = s.default_rule_id")
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("percent_of_payment 1000 12 true");
+            assertThat(owner.sql("SELECT data->>'reason' FROM platform_audit_log"
+                                    + " WHERE action = 'platform.referral.default_rule_changed'")
+                            .query(String.class)
+                            .list())
+                    .containsExactly("default set by product owner decision 22 Oct 2026");
+        }
+    }
+
+    /**
+     * V89 (existing loans, #466, ADR-071) backfills the default go-live date no later than the real start: a business
+     * whose only surviving administrator session is from March, but which was created in January, goes live in January;
+     * a business nobody has signed in to gets none; a date already stored is kept.
+     */
+    @Test
+    void existingLoansMigrationDatesTheGoLiveNoLaterThanTheRealStart() {
+        try (PostgreSQLContainer postgres = database()) {
+            postgres.start();
+            String before = VERSIONS.get(VERSIONS.indexOf("89") - 1);
+            assertThat(flyway(postgres, before).migrate().targetSchemaVersion).isEqualTo(before);
+            JdbcClient owner = JdbcClient.create(
+                    new DriverManagerDataSource(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD));
+            UUID pruned = UUID.randomUUID();
+            UUID quiet = UUID.randomUUID();
+            UUID kept = UUID.randomUUID();
+            int n = 0;
+            for (UUID tenant : List.of(pruned, quiet, kept)) {
+                n++;
+                owner.sql("""
+                                INSERT INTO tenants (id, slug, name, plan_id, created_at)
+                                VALUES (?, ?, 'Test Tenant V89', '00000000-0000-4000-8000-000000000001',
+                                        TIMESTAMPTZ '2026-01-05 09:00:00+03')
+                                """).params(tenant, "test-v89-" + n).update();
+            }
+            for (UUID tenant : List.of(pruned, kept)) {
+                UUID user = UUID.randomUUID();
+                owner.sql("""
+                                INSERT INTO users (id, tenant_id, kind, full_name, email, status, last_login_at)
+                                VALUES (?, ?, 'staff', 'Test Staff V89', ?, 'active', TIMESTAMPTZ '2026-03-20 09:00:00+03')
+                                """).params(user, tenant, user + "@example.test").update();
+                owner.sql("""
+                                INSERT INTO user_role_assignments (id, tenant_id, user_id, role_key, branch_id, granted_by)
+                                VALUES (gen_random_uuid(), ?, ?, 'tenant_admin', NULL, ?)
+                                """).params(tenant, user, user).update();
+                owner.sql("""
+                                INSERT INTO auth_sessions (id, tenant_id, created_at, user_id, family_id, refresh_token_hash,
+                                                           expires_at, idle_expires_at)
+                                VALUES (gen_random_uuid(), ?, TIMESTAMPTZ '2026-03-02 09:00:00+03', ?, gen_random_uuid(),
+                                        ?, now(), now())
+                                """)
+                        .params(tenant, user, "%064d".formatted(Math.abs(user.hashCode())))
+                        .update();
+            }
+            owner.sql("""
+                            INSERT INTO tenant_settings (id, tenant_id, settings)
+                            VALUES (gen_random_uuid(), ?, '{"go_live_date": "2025-12-01", "go_live_source": "set"}')
+                            """).param(kept).update();
+
+            DatabaseMigrator.migrate(postgres.getJdbcUrl(), "bms_owner", TestDatabase.OWNER_PASSWORD);
+
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(pruned)
+                            .query(String.class)
+                            .single())
+                    .as("the day the business was created, before the surviving session")
+                    .isEqualTo("2026-01-05");
+            assertThat(owner.sql("SELECT count(*) FROM tenant_settings WHERE tenant_id = ?"
+                                    + " AND settings->>'go_live_date' IS NOT NULL")
+                            .param(quiet)
+                            .query(Long.class)
+                            .single())
+                    .isZero();
+            assertThat(owner.sql("SELECT settings->>'go_live_date' FROM tenant_settings WHERE tenant_id = ?")
+                            .param(kept)
+                            .query(String.class)
+                            .single())
+                    .isEqualTo("2025-12-01");
         }
     }
 

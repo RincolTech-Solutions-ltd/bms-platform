@@ -3,9 +3,9 @@
 -- sets, the operator's list of businesses due for suspension, a numbered receipt for every subscription payment, and the
 -- Owner's Plan and billing page.
 --
--- V92 is the number this work was given in the agreed merge order (AGENTS.md, the migration ledger): main ends at V86 and
--- V87 to V91 are claimed by open pull requests (#470, #467, #475, #474, #478). Flyway runs with outOfOrder off,
--- so this file is renamed at merge if those numbers land after it.
+-- V92 is the number this work was given in the agreed merge order (AGENTS.md, the migration ledger): V80 to V91 are
+-- merged (V91 is download my data, #478) and V92 is this pull request (#482). Flyway runs with outOfOrder off, so a
+-- migration merged before this one would take V92 and this file would be renamed at merge.
 --
 -- Expand only, safe on a populated database. Nothing is ever suspended by this migration or by anything it adds: after the
 -- grace period a business only appears on the operator's list, and the operator suspends by hand with the existing route.

@@ -161,6 +161,7 @@ Summarised from chapter 7 section 7.4 and chapter 3 section 3.7.
 | An admin resetting users outside their branches | The route needs `core.users.manage`; an admin whose scope is not every branch reaches only users whose every role is inside it |
 | A hijacked tenant admin session chaining the MFA reset and the sign-in reset to take an account over | The tenant route refuses oneself and any tenant admin (a locked-out admin is recovered by the platform operator), checks the target first, then asks the acting admin to prove they are still themselves: a fresh authenticator code when they have one enrolled, otherwise their own current password (two-step sign-in is optional only where the `tenant_admin` role's `mfa_required` was hand-edited off, which is staging alone; the V2 seed requires it, so elsewhere an admin with no factor never gets a session and the password branch is not reached; whoever reads a no-factor tenant admin's mailbox can take the account over on staging until #348 lands, a consequence of the optional setting listed for Hillary's explicit acceptance); a stolen session or token has neither. A wrong password counts on the sign-in lock like one at sign-in, and the fifth wrong password a session sends here ends that session (and only it), so a thief with a stolen token cannot keep guessing. The user is emailed when a link is issued (ADR-042 decision 9) |
 | A stolen platform operator token resetting an admin's second factor and then issuing a link for the same admin, on any tenant | Both platform reset routes need the operator's own fresh, single-use authenticator code and fail closed without one; five wrong codes lock the step-up and end the operator's sessions; both audit logs record the act; the admin is emailed when a link is issued, before it is used, which is the detective control (ADR-042 decision 9(b2)) |
+| A stolen platform operator token moving a business's referral to another referrer, or changing a commission rule, so later commissions go elsewhere | `PUT /platform/tenants/{id}/referrer`, `PUT /platform/referrals/default-rule` and `PUT /platform/referrals/{id}/rule` need the operator's own fresh, single-use authenticator code (`totp_code`) checked before the change; every change is audited with the reason, before and after (ADR-069 decision 6) |
 | A link in the admin's hand used by the admin | Possible by design for an ordinary user (an admin who can reset a sign-in could also deactivate and invite): the issue and the reveal are audited with the admin's identity, the user is emailed when it is issued and again when the password changes |
 
 ### 8.2b Threat model of push notifications (ADR-050)
@@ -252,6 +253,7 @@ platform API and holds no tenant permissions.
 | `core.settings.manage` | Y | | | | | | | | | | | |
 | `core.payment_account.manage` | Y | | | | | | | | | | | |
 | `core.billing.read` | Y | | | | | | | | | | | |
+| `core.referrals.read` | Y | | | | | | | | | | | |
 | `core.branches.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `core.branches.manage` | Y | | | | | | | | | | | |
 | `core.users.read` | Y | Y | | | | Y | | | | | | |
@@ -275,6 +277,7 @@ platform API and holds no tenant permissions.
 | `core.payments.allocate` | Y | | | Y | Y | | | | | | | |
 | `core.reports.financial` | Y | Y | | | Y | Y | | | | | | |
 | `core.reports.audit` | Y | | | | | Y | | | | | | |
+| `core.data_export.run` | Y | | | | | | | | | | | |
 | `lending.members.read` | Y | Y | Y | Y | Y | Y | | | | | | |
 | `lending.members.create` | Y | Y | Y | | | | | | | | | |
 | `lending.members.update` | Y | Y | Y | | | | | | | | | |
@@ -288,6 +291,7 @@ platform API and holds no tenant permissions.
 | `lending.loans.appraise` | Y | Y | Y | | | | | | | | | |
 | `lending.loans.approve` | Y | Y | | | | | | | | | | |
 | `lending.loans.cancel` | Y | Y | Y | | | | | | | | | |
+| `lending.loans.bring_in` | Y | Y | | | | | | | | | | |
 | `lending.disbursements.request` | Y | Y | | Y | | | | | | | | |
 | `lending.disbursements.authorise` | Y | Y | | | Y | | | | | | | |
 | `lending.repayments.create` | Y | Y | | Y | | | | | | | | |
@@ -379,6 +383,18 @@ The staff member and collateral screens (issue #280) offer an action only when t
 
 Notes:
 
+- Existing loans (issue #466, ADR-071, migration `V89`): `lending.loans.bring_in` records a loan from a paper register with
+  its real disbursement date and past repayments, by the form or the CSV import, checks one without saving (`dry_run`),
+  withdraws one still waiting and asks for its approval again. Administrators and branch managers hold it, in the
+  member's branch. The checker of `loan_bring_in` holds `lending.disbursements.authorise`, as for a disbursement, and is
+  never the maker (the approval CHECK, and the loan's own approver CHECK of V8, since the maker is stored as the
+  submitter). The existing loans are read with `lending.loans.read`. The go-live date that bounds them is set by the
+  Owner of the business alone (`PATCH /settings`, 403 `owner_only` for another administrator; ADR-062) or by the
+  platform operator with a reason (`platform.tenants.manage`), both audited. The date can only move earlier, otherwise
+  operator only: once a date is stored the Owner's later date is refused (422 `go_live_locked`), and only the operator
+  moves it later (`PUT /platform/tenants/{tenant_id}/go-live`), since a later date reopens the window for bringing loans in. An approved bring-in is reversed only
+  through `loan_bring_in_reversal`, with the same maker and checker permissions, never decided by its maker, and only
+  while the loan has no transaction in the app and no penalty charge (ADR-071 decision 9).
 - A loan officer running `lending.reports.collections` sees only loans where they are
   the responsible officer; branch managers and above see their branch scope.
 - Insights (#153, ADR-030): `lending.insights.read` opens the page in the user's branch scope.
@@ -417,6 +433,18 @@ Notes:
   it (no signed-in user) can neither widen nor lose it; `lending.par` takes it from the insights module, the same code as the
   insights endpoints, and needs `lending.insights.read` as well. Report runs are off until a tenant administrator sets
   `reports_enabled` in the tenant settings (`core.settings.manage`).
+  Built (issue #334 step 1, ADR-074, migration V91): `core.data_export.run`, the tenant admin's alone (the Owner is one,
+  ADR-062), asks for "Download my data", the whole business as one workbook across every branch, and sees the weekly email switch;
+  only the Owner (`users.is_owner`) turns it on or off (audited, `core.data_export.settings_changed`; anyone else 403
+  `owner_only`). It is offered whatever `reports_enabled` says; the file
+  is fetched by the person it was made for while they hold the permission, every refusal 404. A business ended by its Owner's
+  cancellation (ADR-073) may still ask for it and fetch the signed address of its file, the two reads that are a `POST`; it may
+  sign the download address only of the data export's own report documents (a report document whose run is `core.data_export`,
+  decided by `DocumentAccess.downloadableWhenEnded` in the documents layer), and a KYC upload, a receipt or any other document
+  answers 423 `subscription_ended`, as does every other write. A business the operator suspended (FR-TEN-06) is refused both, 423 `tenant_suspended`.
+  The weekly copy emailed to the Owner leaves out the columns of personal data (members' phones, ID numbers, dates of birth
+  and villages, the arrears phone, customers' and suppliers' contacts); they are only in the full workbook downloaded after
+  sign-in (ADR-074 decision 6).
   Built (extras slice D2, issue #217): the PDF and Excel renderers and `lending.portfolio_outstanding` add no permission and no seeded
   row either (both lending reports run under `lending.reports.portfolio`); `PermissionMatrixIT` still passes and this matrix equals the
   seeds. A spreadsheet cell is never a formula: text is written as a string cell and text that begins with `=`, `+`, `-`, `@`, a tab or a
@@ -685,6 +713,13 @@ read need `platform.tenants.read` and a status change or a linked issue `platfor
 `DocumentAccess` lets only its sender and an operator read it (a refusal is a 404). The operator reads across businesses only through
 the definer functions of `V80`, which refuse a tenant-bound transaction.
 
+The Owner's own plan (issue #472, ADR-073) adds no permission, so the matrix is unchanged: the Plan and modules card (`GET /plan`)
+needs `core.settings.manage`, so administrators see it, and asking for a module, stopping one, cancelling and undoing need it too and
+are then refused to anyone but the Owner (403 `owner_only`, ADR-062); stopping and cancelling also ask for the owner step-up. The end
+date (`GET /plan/status`) is open to every signed-in member of staff. The operator's lists need `platform.tenants.read`, an approval or
+a decline `platform.tenants.manage` (an approval also the operator's own authenticator code), on the platform host only. After a
+cancellation's end date the business is read only with `subscription_ended`, as a suspended one is with `tenant_suspended`.
+
 ### 8.3.3 Enforcement
 
 - Every route declares exactly one permission (`@RequiresPermission`), or is explicitly marked
@@ -723,6 +758,8 @@ CHECK constraint as well as the service.
 | Action type | Maker permission | Checker permission | Threshold applies |
 |---|---|---|---|
 | `loan_disbursement` | `lending.disbursements.request` | `lending.disbursements.authorise` | Yes |
+| `loan_bring_in` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
+| `loan_bring_in_reversal` | `lending.loans.bring_in` | `lending.disbursements.authorise` | No (always checked) |
 | `repayment_reversal` | `lending.repayments.reverse_request` | `lending.repayments.reverse_approve` | No (always checked) |
 | `charge_waiver` | `lending.charges.waive_request` | `lending.charges.waive_approve` | Yes |
 | `loan_write_off` | `lending.loans.write_off_request` | `lending.loans.write_off_approve` | No |

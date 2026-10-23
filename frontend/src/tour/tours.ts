@@ -135,7 +135,8 @@ export const adminWelcome: Tour = {
   // Version 16 adds the Light or dark step (issue #429): the theme selector at the top right.
   // Version 17 adds the Refresh step (issue #430): the button at the top that gets the latest figures.
   // Version 18 adds the Feedback step (issue #447): send the BMS team an idea, a problem or a question.
-  version: 18,
+  // Version 19 adds the Download my data step (issue #334): the whole business as one Excel workbook, and the weekly copy by email.
+  version: 19,
   title: 'Welcome tour',
   audience: isTenantAdmin,
   autoStart: true,
@@ -173,6 +174,15 @@ export const adminWelcome: Tour = {
       target: 'setup-colour',
       title: 'Pick your colour',
       body: 'Choose the colour of your business. We check that text stays easy to read on it.',
+    },
+    {
+      id: 'data-export',
+      route: '/staff/setup',
+      target: 'setup-data-export',
+      needs: ['core.data_export.run'],
+      optional: true,
+      title: 'Download my data',
+      body: 'Get every table of your business in one Excel workbook, a sheet each, like your old spreadsheet. The Owner also gets a copy by email every week; you can switch that off here.',
     },
     {
       id: 'staff',
@@ -709,13 +719,20 @@ export const creditSalesPage: Tour = {
 
 export const setupPage: Tour = {
   id: 'page-setup',
-  version: 1,
+  version: 2,
   title: 'This page: business set-up',
   audience: isTenantAdmin,
   autoStart: false,
   page: '/staff/setup',
   steps: [
     ...adminWelcome.steps.filter((s) => s.route === '/staff/setup'),
+    {
+      id: 'plan',
+      target: 'setup-plan',
+      optional: true,
+      title: 'Plan and modules',
+      body: 'Your plan, what you use and the last day paid for. The owner adds or stops a module or cancels here; a change starts after the days already paid for.',
+    },
     {
       id: 'save',
       target: 'setup-save',
@@ -1724,12 +1741,42 @@ export const controlsPage: Tour = {
   ],
 };
 
+// Referrals (issue #464, ADR-069): the business's own link to the sign-up and the businesses that signed up with it.
+export const referralsPage: Tour = {
+  id: 'page-referrals',
+  version: 1,
+  title: 'This page: referrals',
+  audience: (me) => held(me, 'core.referrals.read'),
+  autoStart: false,
+  page: '/staff/setup/referrals',
+  steps: [
+    {
+      id: 'intro',
+      target: 'referrals-intro',
+      title: 'Bring a business, earn a commission',
+      body: 'When a business you send signs up and pays for BMS, you earn a commission. The BMS team pays it and marks it paid here.',
+    },
+    {
+      id: 'link',
+      target: 'referrals-link',
+      title: 'Your link',
+      body: 'Tap Copy to paste your link into a message, or Share on WhatsApp to send it. They can also type your code in the Referred by box when they sign up.',
+    },
+    {
+      id: 'list',
+      target: 'referrals-list',
+      title: 'Who signed up',
+      body: 'Each business that signed up with your link, and whether it uses BMS or pays. You see what you earned, were paid and are still owed. You see their name only.',
+    },
+  ],
+};
+
 /** The tours whose screens tours.test.tsx maps one by one; the slices below carry their own test files (test-kit.tsx). */
 export const CORE_TOURS: readonly Tour[] = [
   adminWelcome, retailSales, staffWelcome, salePage, stockPage, restocksPage, salesPage, creditSalesPage, setupPage, loansPage, loanPage, cataloguePage, stocktakePage,
   retailSettingsPage, branchRolesCapability, stockByLocationPage, inTransitPage, transferReceiptCapability, unitsCapability,
   priceListsCapability, priceListsPage, customerAccountsCapability, accountsPage, returnsCapability, returnsPage, documentsCapability, documentsPage, quotationsPage,
-  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, notificationsPage, feedbackPage, ...CUSTOMER_TOURS,
+  purchasingCapability, purchasingPage, landedCostsPage, assistantPage, usersPage, branchesPage, controlsPage, twoStepPage, businessNotificationsPage, billingPage, notificationsPage, feedbackPage, referralsPage, ...CUSTOMER_TOURS,
 ];
 
 const dynamicSegments = (tour: Tour) => (tour.page ?? '').split('/').filter((part) => part.startsWith('$')).length;
