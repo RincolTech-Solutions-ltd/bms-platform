@@ -17,7 +17,7 @@ by hand (issue #480, ADR-075). Payments are still recorded by the operator on th
 **Nothing is ever suspended by itself.** A pilot (complimentary) business, a suspended or cancelled business and one already overdue
 get no reminder. A business with no Owner gets no email: give it an Owner first (Business page, the owner rescue). The
 reminder of that day is still marked as done, so an Owner added later the same day gets the next one, not that one. A
-business with a status change you scheduled gets no reminder and is never made overdue or listed.
+business with a status change you scheduled, or whose Owner cancelled (ADR-073), gets no reminder and is never made overdue or listed.
 
 ## Set the grace period and how to pay
 

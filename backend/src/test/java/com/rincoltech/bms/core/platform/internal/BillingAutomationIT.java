@@ -434,6 +434,40 @@ class BillingAutomationIT extends IntegrationTest {
         assertThat(reminders(trial)).isEmpty();
     }
 
+    /**
+     * FR-SUB-08, FR-SUB-09: a business whose Owner cancelled (ADR-073, in force the day after the last day paid for) gets no
+     * "pay to keep using" reminder and is never made overdue: nothing is owed after the end.
+     * JUSTIFICATION-A3: a new test case; no existing case combines the Owner's cancellation with the billing run.
+     */
+    @Test
+    void frSub08_anOwnersCancellationGetsNoReminderAndIsNeverMadeOverdue() {
+        Business b = business("active", null, LocalDate.of(2026, 11, 8), false);
+        TestDatabase.owner()
+                .sql("""
+                        INSERT INTO subscription_scheduled_changes (id, tenant_id, kind, effective_on, requested_by)
+                        VALUES (?, ?, 'cancel', ?, ?)
+                        """)
+                .params(UUID.randomUUID(), b.id(), LocalDate.of(2026, 11, 9), b.ownerId())
+                .update();
+
+        for (String at : List.of("2026-11-01T06:00:00Z", "2026-11-07T06:00:00Z", "2026-11-08T06:00:00Z")) {
+            clock.set(Instant.parse(at));
+            assertThat(run(b).remindersQueued()).as(at).isZero();
+        }
+        assertThat(reminders(b)).isEmpty();
+        assertThat(TestDatabase.owner()
+                        .sql("SELECT platform_mark_subscription_overdue(?, ?, ?)")
+                        .params(b.id(), LocalDate.of(2026, 11, 8), LocalDate.of(2026, 11, 10))
+                        .query(Boolean.class)
+                        .single())
+                .as("the database function refuses too, whoever calls it")
+                .isFalse();
+        clock.set(Instant.parse("2026-11-10T06:00:00Z"));
+        assertThat(run(b).markedOverdue()).isZero();
+        assertThat(status(b)).isEqualTo("active");
+        assertThat(audits("platform.tenant.subscription_overdue", b.id())).isZero();
+    }
+
     List<String> listed() {
         ResponseEntity<JsonNode> list =
                 platform.get("/api/v1/platform/billing/due-for-suspension", operator.accessToken());

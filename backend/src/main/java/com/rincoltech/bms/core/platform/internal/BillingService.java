@@ -230,8 +230,8 @@ class BillingService {
      * One pass over every business in its free month or paid: the one overdue the day after its last day becomes past_due
      * (audited by the database function), and the one whose reminder falls today gets it, at most once. A pilot, a suspended
      * or cancelled business, and a business already overdue get nothing. One with a status change the operator scheduled (an
-     * end chosen for the end of its period) is skipped: it gets no "pay to keep using" reminder, and the database function
-     * would never make it overdue nor touch its date anyway. One business's failure is logged and does not stop the others.
+     * end chosen for the end of its period) or a cancellation the Owner scheduled (ADR-073) is skipped: it gets no "pay to
+     * keep using" reminder, and the database function would never make it overdue nor touch its date anyway. One business's failure is logged and does not stop the others.
      */
     RunResult run() {
         return run(null);
@@ -399,14 +399,17 @@ class BillingService {
 
     /**
      * Read again in the reminder's own transaction: the subscription is still in its free month or paid and its last day is
-     * still the one the run saw and no status change is scheduled, so a payment recorded or an end scheduled during the run
-     * sends no reminder for the old date.
+     * still the one the run saw and no status change is scheduled, by the operator or by the Owner's cancellation (ADR-073),
+     * so a payment recorded or an end scheduled during the run sends no reminder for the old date.
      */
     private boolean stillDue(LocalDate due) {
         return jdbc.sql("""
                         SELECT CASE WHEN status = 'trial' THEN trial_ends_on ELSE current_period_end END
                           FROM subscriptions
                          WHERE status IN ('trial', 'active') AND NOT is_pilot AND next_status_change_on IS NULL
+                           AND NOT EXISTS (SELECT 1 FROM subscription_scheduled_changes c
+                                            WHERE c.tenant_id = subscriptions.tenant_id AND c.kind = 'cancel'
+                                              AND c.status = 'scheduled')
                         """)
                 .query(LocalDate.class)
                 .optional()

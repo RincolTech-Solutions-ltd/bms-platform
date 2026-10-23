@@ -176,6 +176,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM tenants t WHERE t.id = p_tenant_id AND t.status = 'active') THEN
         RETURN false;
     END IF;
+    -- The Owner's cancellation (V90, ADR-073) takes effect the day after the last day paid for: nothing is owed.
+    IF EXISTS (SELECT 1 FROM subscription_scheduled_changes c
+                WHERE c.tenant_id = p_tenant_id AND c.kind = 'cancel' AND c.status = 'scheduled') THEN
+        RETURN false;
+    END IF;
     SELECT grace_days INTO v_grace FROM platform_billing_settings WHERE id = 1;
     UPDATE subscriptions s
        SET status = 'past_due', updated_by_platform_user_id = NULL, updated_at = now()
