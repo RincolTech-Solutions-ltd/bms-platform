@@ -4,12 +4,14 @@ import { RouterContextProvider, createMemoryHistory, createRouter } from '@tanst
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me } from '../../api/client';
 import { mockMe } from '../../api/retail-mock';
 import { router as appRouter } from '../../app/router';
 import { StaffContext } from './context';
 import { HomeCards, LENDING_APPROVALS } from './home-cards';
+import { STAFF_SECTIONS } from './route';
 
 // Home's card per module (issue #471): Shop and Lending for a business with both, only its own card for a business with one, and
 // each figure only for the permissions its endpoint requires. Every figure and name is fabricated.
@@ -228,6 +230,14 @@ describe('the Home cards (issue #471)', () => {
     cleanup();
     show(partial, a as string);
     expect(await within(await screen.findByRole('article', { name: 'Shop' })).findByText('Low on stock')).toBeTruthy();
+  });
+
+  it('heads each card with the icon of its heading in the side menu (issue #483)', async () => {
+    show(both);
+    for (const section of STAFF_SECTIONS) {
+      const article = await screen.findByRole('article', { name: section.label });
+      expect(article.querySelector('h2 svg')?.outerHTML).toBe(renderToStaticMarkup(<>{section.icon}</>));
+    }
   });
 
   it('stacks the cards in one column on a 360px phone: two need at least 576px', () => {

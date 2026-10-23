@@ -80,12 +80,12 @@ export const icons = {
       <circle cx="12" cy="9" r="2.5" />
     </Svg>
   ),
-  // An hourglass: stock sent and not yet received.
+  // A parcel on the move: stock sent and not yet received.
   inTransit: (
     <Svg>
-      <path d="M6 3h12M6 21h12" />
-      <path d="M8 3v2.5a4 4 0 0 0 1.6 3.2L12 12l-2.4 3.3A4 4 0 0 0 8 18.5V21" />
-      <path d="M16 3v2.5a4 4 0 0 1-1.6 3.2L12 12l2.4 3.3a4 4 0 0 1 1.6 3.2V21" />
+      <rect x="9" y="6" width="12" height="12" rx="1" />
+      <path d="M13 6v4h4V6" />
+      <path d="M2 9h4M1 12h5M2 15h4" />
     </Svg>
   ),
   usage: (
@@ -122,12 +122,12 @@ export const icons = {
       <path d="M16 5.2a3 3 0 0 1 0 5.6M18 14.3a5 5 0 0 1 3 4.7v1" />
     </Svg>
   ),
-  // A customer's card: credit limits and statements.
+  // A customer beside the lines of their statement: credit limits and statements.
   customerAccounts: (
     <Svg>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <circle cx="9" cy="11" r="2" />
-      <path d="M6 16a3 3 0 0 1 6 0M14 10h4M14 14h4" />
+      <circle cx="8" cy="8" r="3" />
+      <path d="M3 20a5 5 0 0 1 10 0" />
+      <path d="M15 8h6M15 12h6M15 16h4" />
     </Svg>
   ),
   documents: (
@@ -374,12 +374,13 @@ export const icons = {
       <circle cx="12" cy="15" r="1.5" />
     </Svg>
   ),
-  // A coin going round: money advanced, and repaid.
+  // A note with an arrow out and an arrow back: money advanced, and repaid.
   advances: (
     <Svg>
-      <circle cx="12" cy="13" r="4" />
-      <path d="M4 12a8 8 0 0 1 14.3-5" />
-      <path d="M19 3v4h-4" />
+      <rect x="4" y="8.5" width="16" height="7" rx="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <path d="M6 4.5h13M16.5 2l2.5 2.5-2.5 2.5" />
+      <path d="M18 19.5H5M7.5 17L5 19.5 7.5 22" />
     </Svg>
   ),
   // Two notes: the cash of each shop, each day.

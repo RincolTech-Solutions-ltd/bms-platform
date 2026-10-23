@@ -1,10 +1,22 @@
 import type { Business, Plan, PlanPrice, SavePlanRequest, SubscriptionStatus } from '../../api/operator';
+import { icons } from '../../components/icons';
 import { formatMinor, parseMinor } from '../../components/money';
+import type { MenuLink } from '../../components/side-menu';
 
 // The rules and the plain words of the operator screens (issue #407), kept apart from the screens so they are tested without a
 // browser: what each status means, what the subscription line says, what an action will do before the operator confirms it, the
 // payment form and the price book forms. Dates are calendar days (YYYY-MM-DD) and are worked out in UTC, never in the device's own
 // time zone, so a phone in another zone shows the same days as the server.
+
+// The portal's areas, in the same side menu as the staff area's: a sidebar from 720px, a drawer on a phone (issue #455). Here,
+// not in route.tsx, so a test reads them without loading the portal (issue #483).
+export const AREAS: MenuLink[] = [
+  { to: '/platform', label: 'Applications', icon: icons.documents, exact: true },
+  { to: '/platform/businesses', label: 'Businesses', icon: icons.building },
+  { to: '/platform/plans', label: 'Plans and prices', icon: icons.priceLists },
+  { to: '/platform/outbox', label: 'Messages not sent', icon: icons.bell },
+  { to: '/platform/feedback', label: 'Feedback', icon: icons.chat },
+];
 
 export const STATUSES: SubscriptionStatus[] = ['trial', 'active', 'past_due', 'suspended', 'cancelled'];
 
