@@ -197,7 +197,8 @@ export function CorrectItem({ row, branchId, onClose }: { row: StockRow; branchI
           label="What is wrong"
           options={choices.filter((c) => c.show).map((c) => ({ value: c.id, label: c.label }))}
           value={choice}
-          onChange={(id) => { setMessage(null); setChoice(choice === id ? null : id); }}
+          clearable
+          onChange={(id) => { setMessage(null); setChoice(id); }}
         />
         <button type="button" className="btn-ghost btn-sm" onClick={onClose}>Close</button>
       </div>

@@ -34,8 +34,8 @@
   color: var(--color-text);
 }
 
-.segmented > button[aria-pressed='true'],
-.segmented > button[aria-pressed='true']:hover {
+.segmented > button[data-state='on'],
+.segmented > button[data-state='on']:hover {
   border-color: var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);

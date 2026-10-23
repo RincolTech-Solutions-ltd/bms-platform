@@ -29,7 +29,7 @@ describe('the component kit page', () => {
     show(person('tenant_admin'));
     const sections = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(sections).toEqual(expect.arrayContaining(['Segmented', 'Stepper', 'Field', 'MoneyInput', 'ListRow and Card', 'Sheet', 'EmptyState', 'Skeleton', 'SuccessScreen']));
-    expect(screen.getByRole('group', { name: 'Show' })).toBeTruthy();
+    expect(screen.getByRole('radiogroup', { name: 'Show' })).toBeTruthy();
     expect(screen.getByLabelText('Quantity (piece)')).toBeTruthy();
     expect(screen.getByLabelText('Amount paid in UGX').getAttribute('inputmode')).toBe('numeric');
     expect(screen.getByText('UGX 57,500')).toBeTruthy();
