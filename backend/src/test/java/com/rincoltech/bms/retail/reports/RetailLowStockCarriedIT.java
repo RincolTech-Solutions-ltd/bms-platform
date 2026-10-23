@@ -142,6 +142,16 @@ class RetailLowStockCarriedIT extends IntegrationTest {
                 .isEqualTo(3);
         assertThat(codes(get("/stock?branch_id=" + t.secondBranch() + "&stock_level=low")))
                 .containsExactly("LOW-E");
+        // Overall, out on the summed balance (LOW-B and LOW-E at 0) and low at any branch (head office's three and
+        // LOW-E):
+        // the dashboard figures are the All branches lists, item for item.
+        JsonNode dashboard = get("/reports/dashboard");
+        assertThat(dashboard.get("stock").get("out_of_stock").asInt()).isEqualTo(2);
+        assertThat(dashboard.get("stock").get("low_stock").asInt()).isEqualTo(4);
+        assertThat(get("/reports/home").get("low_stock").asInt()).isEqualTo(4);
+        assertThat(codes(get("/stock/all-branches?stock_level=out"))).containsExactly("LOW-B", "LOW-E");
+        assertThat(codes(get("/stock/all-branches?stock_level=low")))
+                .containsExactly("LOW-A", "LOW-B", "LOW-C", "LOW-E");
         // Grouped by shop, each branch counts its own: three low at head office, one at branch two.
         JsonNode shops = get("/stock/summary?group_by=branch&stock_level=low");
         assertThat(shops.get("items")).hasSize(2);
@@ -149,6 +159,50 @@ class RetailLowStockCarriedIT extends IntegrationTest {
             assertThat(g.get("items_count").asLong())
                     .isEqualTo(g.get("key").asString().equals(t.headOffice().toString()) ? 3 : 1);
         }
+    }
+
+    @Test
+    void overSeveralBranchesAnItemIsLowWhenItIsLowAtAnyBranchThatHeldItByThatBranchsMinimum() {
+        // LOW-C: 20 at head office under its minimum of 25 (low there), 30 at branch two over its minimum of 10 (not
+        // low).
+        api.stockUp(t.secondBranch(), c, "30");
+        minimum(c, t.secondBranch(), "10");
+        // A branch minimum where the item was never held counts nothing: LOW-A is not carried at branch two.
+        minimum(a, t.secondBranch(), "50");
+        assertThat(get("/reports/home?branch_id=" + t.secondBranch())
+                        .get("low_stock")
+                        .asInt())
+                .isZero();
+        assertThat(get("/reports/home").get("low_stock").asInt()).isEqualTo(3);
+        JsonNode lowList = get("/stock/all-branches?stock_level=low");
+        assertThat(codes(lowList)).containsExactly("LOW-A", "LOW-B", "LOW-C");
+        JsonNode stock = get("/reports/dashboard").get("stock");
+        assertThat(stock.get("low_stock").asInt())
+                .isEqualTo(lowList.get("items").size());
+        assertThat(stock.get("out_of_stock").asInt())
+                .isEqualTo(
+                        get("/stock/all-branches?stock_level=out").get("items").size());
+    }
+
+    @Test
+    void aClosedBranchThatHoldsNothingCountsNowhere() {
+        api.stockUp(t.secondBranch(), e, "10");
+        ResponseEntity<JsonNode> sold = api.sell(t.secondBranch(), "cash", e, "10");
+        assertThat(sold.getStatusCode()).as("%s", sold.getBody()).isEqualTo(HttpStatus.CREATED);
+        assertThat(get("/reports/home").get("low_stock").asInt()).isEqualTo(4);
+        // Branch two closes, emptied: LOW-E held there at 0 no longer counts, as it has no shop line and no list
+        // column.
+        TestDatabase.owner()
+                .sql("UPDATE branches SET status = 'inactive' WHERE id = ?")
+                .param(t.secondBranch())
+                .update();
+        assertThat(get("/reports/home").get("low_stock").asInt()).isEqualTo(3);
+        JsonNode dashboard = get("/reports/dashboard");
+        assertThat(dashboard.get("stock").get("low_stock").asInt()).isEqualTo(3);
+        assertThat(dashboard.get("stock").get("out_of_stock").asInt()).isEqualTo(1);
+        JsonNode two = shop(dashboard, t.secondBranch());
+        assertThat(two == null || !two.has("low_stock")).isTrue();
+        assertThat(codes(get("/stock/all-branches?stock_level=low"))).containsExactly("LOW-A", "LOW-B", "LOW-C");
     }
 
     @Test

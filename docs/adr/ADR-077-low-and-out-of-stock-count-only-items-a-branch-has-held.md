@@ -25,7 +25,8 @@ threshold of 5 (ADR-029). The per-branch minimums of ADR-057 were used by the pu
    when it is low at one of them by decision 2, so a branch's own minimum counts on Home with no branch chosen as on that branch's
    line; it is out when its balance summed over them is zero or less, as before, and one of them has held it. Low still includes
    out: a sum at zero or below leaves a held branch at zero or below. This replaces the earlier rule that judged low on the summed
-   balance against one threshold (an item at 4 in each of two shops was not low over both). This is issue #490's own rule (at or below the branch minimum, else the threshold) applied to each held branch in
+   balance against one threshold (an item at 4 in each of two shops was not low over both). The overall counts judge the
+   branches that have a shop line: active ones, and closed ones still holding stock, so a closed and emptied shop counts nowhere. This is issue #490's own rule (at or below the branch minimum, else the threshold) applied to each held branch in
    scope, so the Home total agrees with the per-branch lines; it adds no requirement.
 4. **One rule in one place.** The SQL of these predicates lives in `retail.stock.LowStockRule` and is used by the stock lists, the
    grouped stock summary, the dashboard (counts and the line per shop) and so Home, so the figures equal the filtered lists. Every
@@ -48,7 +49,8 @@ counts use "at or below", as the threshold always did.
 **Watch for:** the held test reads `retail_stock_balances` and `retail_stock_movements` per item and branch through their
 `(tenant_id, branch_id, product_id ...)` indexes; with a catalogue of thousands of items and many branches the dashboard's per-shop
 count is items times branches probes. Bench queries k15 (positions), k18 (the counts) and c10 (the Low tab) measure it. At 25
-times the data (3000 items, 4 branches, 1.6 million movements, about 10000 minimums added to the seed) every probe is an index
-scan with `tenant_id` in its condition; medians were k15 162 ms, k18 190 ms and c10 17 ms. The positions query keeps its inner
-select behind `OFFSET 0`: flattened, the held and minimum probes ran once per aggregate and JIT optimisation took it to 1.4 s.
-If it grows, a held flag kept on the balance row is the fix and needs a migration.
+times the data (3000 items, 4 branches, 1.6 million movements, 19084 fabricated minimums added to the seed) every probe is an index
+scan with `tenant_id`, the branch and the item in its condition (`retail_stock_balances_pkey`, `retail_stock_movements_position`,
+`retail_stock_minimums_tenant_id_product_id_branch_id_key`); medians were k15 137 ms, k18 189 ms and c10 16 ms. The positions
+query computes its rows in a `MATERIALIZED` CTE: inlined, the held and minimum probes ran once per aggregate and JIT optimisation
+took it to 1.4 s. If it grows, a held flag kept on the balance row is the fix and needs a migration.

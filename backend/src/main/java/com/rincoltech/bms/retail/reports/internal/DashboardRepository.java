@@ -110,26 +110,23 @@ class DashboardRepository {
             params.put("branchIds", branchIds);
             branch = " AND br.id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT x.branch_id,"
+        // A materialized CTE, never inlined, probes held and level once a row rather than once an aggregate that reads
+        // them (flattened, with JIT optimising it, it took 1.4 s instead of 160 ms on the 25x bench, ADR-077).
+        return jdbc.sql("WITH x AS MATERIALIZED ("
+                        + "SELECT br.id AS branch_id, p.sell_minor, p.cost_minor, coalesce(b.qty, 0) AS qty,"
+                        + "       " + LowStockRule.heldSql("p.tenant_id", "p.id", "br.id") + " AS held,"
+                        + "       " + LowStockRule.levelSql("p.tenant_id", "p.id", "br.id", ":low") + " AS level"
+                        + "  FROM branches br"
+                        + "  CROSS JOIN retail_products p"
+                        + "  LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
+                        + "   AND b.branch_id = br.id"
+                        + " WHERE p.active AND p.tenant_id = br.tenant_id AND " + shown("br") + branch + ")"
+                        + " SELECT x.branch_id,"
                         + " coalesce(sum(round(x.qty * x.sell_minor)) FILTER (WHERE x.qty > 0), 0) AS at_price,"
                         + " coalesce(sum(round(x.qty * x.cost_minor)) FILTER (WHERE x.qty > 0), 0) AS at_cost,"
                         + " CASE WHEN bool_or(x.held) THEN count(*) FILTER (WHERE x.held AND x.qty <= 0)::int END AS out_of_stock,"
                         + " CASE WHEN bool_or(x.held) THEN count(*) FILTER (WHERE x.held AND x.qty <= x.level)::int END AS low_stock"
-                        + "  FROM (SELECT br.id AS branch_id, p.sell_minor, p.cost_minor, coalesce(b.qty, 0) AS qty,"
-                        + "               " + LowStockRule.heldSql("p.tenant_id", "p.id", "br.id") + " AS held,"
-                        + "               " + LowStockRule.levelSql("p.tenant_id", "p.id", "br.id", ":low")
-                        + " AS level"
-                        + "          FROM branches br"
-                        + "          CROSS JOIN retail_products p"
-                        + "          LEFT JOIN retail_stock_balances b ON b.tenant_id = p.tenant_id AND b.product_id = p.id"
-                        + "           AND b.branch_id = br.id"
-                        + "         WHERE p.active AND p.tenant_id = br.tenant_id"
-                        + "           AND (br.status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h"
-                        + "                WHERE h.tenant_id = br.tenant_id AND h.branch_id = br.id AND h.qty <> 0))"
-                        + branch
-                        // OFFSET 0 keeps x a subquery, so held and level are probed once a row, not once an aggregate
-                        // (and JIT skips optimising: 160 ms, not 1.4 s, on the 25x bench, ADR-077).
-                        + "         OFFSET 0) x"
+                        + "  FROM x"
                         + " GROUP BY x.branch_id")
                 .params(params)
                 .query((rs, n) -> new Position(
@@ -144,7 +141,8 @@ class DashboardRepository {
     /**
      * Items out of stock and low over the given branches (all of them when null), as the stock list judges them (issue #490,
      * {@link LowStockRule}): an item counts only where it has been held; out when its balance summed over the branches is at
-     * zero or below, low when it is low at one of them. Returns {out, low}; low includes out.
+     * zero or below, low when it is low at one of them. Only the branches with a shop line are judged ({@link #shown}): a
+     * closed branch that holds nothing is not one. Returns {out, low}; low includes out.
      */
     int[] counts(List<UUID> branchIds, BigDecimal lowThreshold) {
         if (branchIds != null && branchIds.isEmpty()) {
@@ -153,11 +151,12 @@ class DashboardRepository {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("low", lowThreshold);
         String branch = "";
-        String scope = "true";
+        // The branches the shop lines cover (positions), so a closed and emptied shop counts nowhere.
+        String scope = shown("lb");
         if (branchIds != null) {
             params.put("branchIds", branchIds);
             branch = " AND b.branch_id IN (:branchIds)";
-            scope = "lb.id IN (:branchIds)";
+            scope += " AND lb.id IN (:branchIds)";
         }
         return jdbc.sql("SELECT count(*) FILTER (WHERE "
                         + LowStockRule.overBranchesSql(false, "t.tenant_id", "t.id", scope, "t.total", ":low")
@@ -174,5 +173,11 @@ class DashboardRepository {
                 .params(params)
                 .query((rs, n) -> new int[] {rs.getInt("out_of_stock"), rs.getInt("low_stock")})
                 .single();
+    }
+
+    /** SQL: true for a branch {@code alias} with a shop line: active, or closed and still holding stock. */
+    private static String shown(String alias) {
+        return "(" + alias + ".status = 'active' OR EXISTS (SELECT 1 FROM retail_stock_balances h WHERE h.tenant_id = "
+                + alias + ".tenant_id AND h.branch_id = " + alias + ".id AND h.qty <> 0))";
     }
 }
