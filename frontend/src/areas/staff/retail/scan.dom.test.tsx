@@ -29,6 +29,15 @@ vi.mock('@tanstack/react-router', async (original) => {
   return { ...real, Link: ({ children, to }: { children: unknown; to: string }) => <a href={to}>{children as never}</a> };
 });
 
+// The camera view, stood in for by a button that reports one read, as the real one does after two frames agree.
+vi.mock('./camera-scan', () => ({
+  default: ({ onCode }: { onCode: (code: string) => void }) => (
+    <button type="button" onClick={() => onCode('4006381333931')}>
+      Fake camera read
+    </button>
+  ),
+}));
+
 const BRANCH = '00000000-0000-4000-8000-0000000000a1';
 const LAMP = '00000000-0000-4000-8000-0000000b0003';
 const EAN = '4006381333931';
@@ -240,6 +249,81 @@ describe('FR-RET-68 scanning on the stock count', () => {
     scan('TEST-LAMP-BOX');
     await waitFor(() => expect(screen.getByTestId('scan-refused').textContent).toContain('pack size'));
     expect((document.getElementById(`count-${LAMP}`) as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('FR-RET-68 the Scan box', () => {
+  it('adds the scanned item, clears the box and keeps the cursor there for the next scan', async () => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    expect(document.activeElement).toBe(scanBox());
+    scan(EAN);
+    expect(scanBox().value).toBe('');
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    expect(document.activeElement).toBe(scanBox());
+    scan(EAN);
+    scan(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('3'));
+    expect(document.querySelectorAll('[id^="qty-"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(scanBox());
+  });
+
+  it('never submits the form on the Enter that ends a scan', async () => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<SaleForm branchId={BRANCH} />);
+    const submitted = vi.fn((e: Event) => e.preventDefault());
+    scanBox().form?.addEventListener('submit', submitted);
+    const createSale = vi.spyOn(retail, 'createSale');
+    scanBox().focus();
+    for (const ch of EAN) press(ch, (clock += 8));
+    expect(press('Enter', (clock += 8)).defaultPrevented).toBe(true);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    expect(submitted).not.toHaveBeenCalled();
+    expect(createSale).not.toHaveBeenCalled();
+  });
+
+  it('says an unknown code plainly, adds nothing, and keeps the cursor in the box', async () => {
+    screenOf(<SaleForm branchId={BRANCH} />);
+    scan('TEST-NOT-HERE');
+    await waitFor(() => expect(screen.getByTestId('scan-unknown').textContent).toContain('No item has the barcode TEST-NOT-HERE.'));
+    expect(document.querySelectorAll('[id^="qty-"]')).toHaveLength(0);
+    expect(scanBox().value).toBe('');
+    expect(document.activeElement).toBe(scanBox());
+  });
+
+  it('sends a camera read through the same lookup and adds the item the same way', async () => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn() } });
+    const lookUp = vi.spyOn(retail, 'findByBarcode');
+    screenOf(<SaleForm branchId={BRANCH} />);
+    scan(EAN);
+    await waitFor(() => expect(qtyOf(0)).toBe('1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Scan with the camera' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Fake camera read' }));
+    await waitFor(() => expect(qtyOf(0)).toBe('2'));
+    expect(lookUp).toHaveBeenCalledTimes(2);
+    expect(lookUp).toHaveBeenLastCalledWith(EAN, BRANCH);
+    expect(screen.queryByRole('button', { name: 'Fake camera read' })).toBeNull();
+    expect(screen.getByText('Added LED bulb 9W screw.')).toBeTruthy();
+  });
+
+  it.each([
+    ['the restock', () => <RestockForm />, 'restock-scan'],
+    ['the stock count', () => <StocktakePage />, 'count-scan'],
+    ['the move stock form', () => <TransferForm fromBranchId={BRANCH} />, 'transfer-scan'],
+  ] as const)('starts with the cursor in the Scan box on %s', async (_where, form, id) => {
+    screenOf(form());
+    await waitFor(() => expect(document.activeElement?.id).toBe(id));
+    expect(screen.getByLabelText('Scan here').id).toBe(id);
+  });
+
+  it('marks the count line a scan counted on the stock count', async () => {
+    await retail.addBarcode(LAMP, { code: EAN });
+    screenOf(<StocktakePage />);
+    await waitFor(() => expect(document.getElementById(`count-${LAMP}`)).not.toBeNull());
+    scan(EAN);
+    await waitFor(() => expect(screen.getByTestId('scan-hit').querySelector('input')?.id).toBe(`count-${LAMP}`));
+    expect(document.activeElement?.id).toBe('count-scan');
   });
 });
 
