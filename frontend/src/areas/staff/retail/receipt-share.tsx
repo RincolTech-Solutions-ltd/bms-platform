@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { retail, type Sale } from '../../../api/retail';
 import { useStaff } from '../context';
 import { ALL_SELLERS, holdsAt } from './permissions';
@@ -75,6 +75,10 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // View receipt (Hillary, 23 Oct 2026): the same PDF the customer gets, shown here before it is sent.
+  const [preview, setPreview] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
   // The PDF once fetched, for this state of the sale only: a second tap shares it at once, inside the tap, which a phone that
   // let the first tap's wait run out needs. `refused` counts the phone's refusals of the share sheet for this file.
   const file = useRef<{ key: string; pdf: File; refused: number } | null>(null);
@@ -93,6 +97,27 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
     f?.customer_id !== undefined && f.customer_version !== undefined && !f.customer_has_contact && holdsAt(me, CUSTOMER_MANAGE, sale.branch_id) && (typed ?? '').trim() !== '';
   const title = `Receipt ${f?.receipt_no ?? sale.sale_no ?? ''}`.trim();
 
+  /** The receipt PDF for this state of the sale, fetched once and kept for Share and View. */
+  async function pdf() {
+    if (file.current?.key === key) return file.current;
+    const blob = await retail.saleReceiptPdf(sale.id ?? '');
+    file.current = { key, pdf: new File([blob], `${title}.pdf`, { type: 'application/pdf' }), refused: 0 };
+    return file.current;
+  }
+
+  async function view() {
+    if (preview && file.current?.key === key) return setPreview(null);
+    setError(null);
+    setViewing(true);
+    try {
+      setPreview(URL.createObjectURL((await pdf()).pdf));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setViewing(false);
+    }
+  }
+
   async function share() {
     if (!f) return;
     setNote(null);
@@ -101,9 +126,7 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
     try {
       if (!held) {
         setBusy(true);
-        const blob = await retail.saleReceiptPdf(sale.id ?? '');
-        held = { key, pdf: new File([blob], `${title}.pdf`, { type: 'application/pdf' }), refused: 0 };
-        file.current = held;
+        held = await pdf();
       }
       if ((await shareOrDownload(held.pdf, title, receiptCaption(f))) === 'downloaded') setNote(DOWNLOADED);
     } catch (e) {
@@ -143,8 +166,17 @@ export function ShareReceipt({ sale, madeHere = false }: { sale: Sale; madeHere?
       {f && (
         <>
           <p className="cluster">
+            <BusyButton type="button" className="btn" busy={viewing} onClick={() => void view()} aria-expanded={preview !== null}>
+              {preview ? 'Hide the receipt' : 'View receipt'}
+            </BusyButton>
             <BusyButton type="button" className="rt-primary" busy={busy} onClick={() => void share()}>Share receipt</BusyButton>
           </p>
+          {preview && (
+            <div className="receipt-preview">
+              <iframe title={`Preview of ${title}`} src={preview} />
+              <a href={preview} target="_blank" rel="noopener noreferrer">Open the receipt full screen</a>
+            </div>
+          )}
           {note && <p role="status" className="alert alert-info">{note}</p>}
           <Problem error={error} />
           <label htmlFor={`receipt-phone-${sale.id}`}>Customer&apos;s WhatsApp number</label>

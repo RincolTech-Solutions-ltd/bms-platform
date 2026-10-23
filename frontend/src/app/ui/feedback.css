@@ -258,3 +258,17 @@
     display: inline;
   }
 }
+
+/* The receipt PDF shown before it is sent (Hillary, 23 Oct 2026). */
+.receipt-preview {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.receipt-preview iframe {
+  width: 100%;
+  height: min(70vh, 720px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: #fff;
+}

@@ -96,6 +96,18 @@ const whatsAppButton = () => screen.findByRole('button', { name: 'WhatsApp custo
 const phoneBox = async () => (await screen.findByLabelText("Customer's WhatsApp number")) as HTMLInputElement;
 
 describe('Share receipt', () => {
+  it('shows the receipt PDF on the screen with View receipt, and Share reuses the same file', async () => {
+    const share = sharing(true);
+    screenOf(seller, sale);
+    fireEvent.click(await screen.findByRole('button', { name: 'View receipt' }));
+    const frame = (await screen.findByTitle(/Preview of Receipt/)) as HTMLIFrameElement;
+    expect(frame.getAttribute('src')).toBe('blob:receipt');
+    expect(screen.getByRole('button', { name: 'Hide the receipt' })).toBeTruthy();
+    fireEvent.click(await shareButton());
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    expect(saleReceiptPdf).toHaveBeenCalledTimes(1);
+  });
+
   it('hands the PDF to the share sheet as a file, with the caption from the receipt facts', async () => {
     const share = sharing(true);
     screenOf(seller, sale);
