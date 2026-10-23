@@ -13101,7 +13101,7 @@ export interface components {
              */
             week_from?: string;
         };
-        /** @description Money taken today by way of paying, counted as the cash summary counts cash: sales paid at the sale dated today, payments on credit sales paid on today, delivery fees paid today and returns voided today, less sales voided today, payments on account reversed today and money refunded today on returns of any day's sales. For cash, takings_minor and voids_minor are the cash summary's Cash takings and Cash sales voided or refunded for today */
+        /** @description Money taken today by way of paying, read the way the cash book reads a day for every way: sales paid at the sale dated today, payments on credit sales dated today and delivery fees taken today, less sales cancelled today, payments on account reversed today and money refunded today on goods taken back */
         RetailHomeTakings: {
             methods?: components["schemas"]["RetailHomeTakingsMethod"][];
             /** Format: int64 */
@@ -13110,24 +13110,34 @@ export interface components {
         RetailHomeTakingsMethod: {
             /**
              * Format: int64
-             * @description takings_minor less voids_minor; below zero when more went back than came in
+             * @description sales_minor + payments_minor + fees_minor - out_minor
              */
             amount_minor?: number;
             /**
-             * @description cash and mobile_money always, then any other way that took or paid back money today (bank)
+             * Format: int64
+             * @description Delivery fees taken at the door today, or paid today on an account
+             */
+            fees_minor?: number;
+            /**
+             * @description cash and mobile_money always, then any other way that took or gave back money today (bank)
              * @enum {string}
              */
             method?: "cash" | "mobile_money" | "bank";
             /**
              * Format: int64
-             * @description Money in today: sales paid at the sale, payments on credit sales, delivery fees, returns voided
+             * @description Money given back today: sales cancelled, payments on account reversed, refunds on goods taken back (a return cancelled today counts back in), door fees of cancelled orders
              */
-            takings_minor?: number;
+            out_minor?: number;
             /**
              * Format: int64
-             * @description Money out today: sales voided, payments on account reversed, refunds on returns
+             * @description Payments on credit sales dated today, at the branch that took them
              */
-            voids_minor?: number;
+            payments_minor?: number;
+            /**
+             * Format: int64
+             * @description Sales paid at the sale dated today, cancelled later or not
+             */
+            sales_minor?: number;
         };
         RetailHomeTopItem: {
             code?: string;

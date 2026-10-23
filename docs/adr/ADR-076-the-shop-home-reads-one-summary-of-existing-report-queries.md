@@ -26,23 +26,29 @@ rules than the cards need.
    `top_items` (today and this week), `branches`, `low_stock` and `open_orders`. The Home asks it once; the Top items switch between
    today and this week reads nothing more.
 2. **It reuses the report queries, over today or this week only.** Sales today and the line per shop are the dashboard's sales query
-   for one day, unchanged; the takings are a query of their own that applies the cash book's rules (`CashSales`, the source of the
-   cash summary) to every way of paying, since `retail.reports` may not read `retail.sales`; credit owed is credit control's total row, with the earliest
-   due date added; the top items are the sales analysis's item ranking with a limit of five; the low stock count is the dashboard's.
-   Three queries are new: the takings by way of paying, the active shops in scope (for a line with no sale yet) and the open
-   orders as one count. No table,
-   column, index, permission or migration is added.
+   for one day, unchanged (still grouped by the credit flag; the takings do not read it);
+   credit owed is credit control's total row, with the earliest due date added; the top items are the sales analysis's item ranking
+   with a limit of five; the low stock count is the dashboard's. Three queries are new: the takings (decision 4), the active shops
+   in scope (for a line with no sale yet) and the open orders as one count. No table, column, index, permission or migration is
+   added.
 3. **The money parts follow the dashboard's scope and are left out, not refused.** `sales_today`, `takings`, `credit_owed`,
    `top_items` and `branches` need `retail.sale.all_sellers` in every branch they cover (ADR-055); without a branch a Supervisor gets
    the shops it supervises, as on the dashboard. A seller gets 200 with those parts absent, so the stock count (`retail.stock.read`)
    and the open orders (`retail.order.manage`), each in its own branch scope, still reach them. `branches` is present only when the
    summary covers two or more shops, so a session with one branch, or with one branch chosen in the header, gets no line per shop.
-4. **Takings are money taken today by way of paying, counted as the cash summary counts cash**: cash and mobile money always, then
-   any other way that took or paid back money (bank). In: sales paid at the sale dated today (voided later or not), payments on
-   credit sales by `paid_on` at the branch that took them, delivery fees paid today and returns voided today. Out: sales voided
-   today in the tenant's zone, payments on account reversed today and money refunded today on returns of any day's sales. Each
-   way of paying shows what came in less what went out, so the cash line equals the cash summary's Cash takings less Cash sales
-   voided or refunded for today, to the shilling. They are not Received of ADR-043, which counts a sale on the day it was entered.
+   A branch asked for outside the caller's scope of a part leaves that part out instead of answering zeros, and the PWA takes a
+   card away when its part is absent, so no card says "nothing" about a shop the caller cannot see.
+4. **Takings are read the way the cash book reads a day, for every way of paying.** The cash book (`JdbcCashSales`) is what the
+   cash summary shows, and the card links there, so the two must agree: in, the sales paid at the sale dated today (cancelled later
+   or not), the payments on credit sales dated today at the branch that took them, and the delivery fees taken at the door today or
+   paid today on an account; out, the sales paid at the sale cancelled today, payments on account reversed today, money refunded
+   today on goods taken back (at the till that paid it, a return cancelled today bringing it back) and the door fee of an order whose
+   sale was cancelled today. Each way (cash and mobile money always, bank when it moved money) gives its in, its out and the
+   difference. Payments are chosen by `paid_on` alone, as the cash book chooses them, whenever they were entered: the payment
+   routes refuse a `paid_on` after the day of entry, but an import or a replay can still write one, and the card must not lose it.
+   No index leads on `retail_sale_payments.paid_on`, so that part reads the tenant's payments as the cash summary's own query does
+   (bench query k17); an index on `(tenant_id, paid_on)` is the fix if it shows, and needs a migration. They are not Received of ADR-043, which counts a
+   sale on the day it was entered.
 5. **Home dates are the business day in the tenant's zone** (Africa/Kampala by default); this week starts on Monday.
 
 ## Consequences
@@ -52,11 +58,12 @@ agree with the pages they link to because they run the same SQL; a seller now se
 without any money figure.
 
 **Worse:** the Home summary is a second place that reads the dashboard and credit control queries, so a change to either rule
-changes Home too (on purpose). The takings repeat the rules of `CashSales` in `retail.reports`; a change to how the cash book
-counts a kind of money must change both, and `RetailHomeSummaryIT` fails if the cash line and the cash summary part. A session with `retail.order.manage` and no sales read still asks the orders board.
+changes Home too (on purpose). The takings repeat the rules of `JdbcCashSales` in `retail.reports` (which may not read
+`retail.sales`), so a change to how the cash book counts a kind of money must change both; `RetailHomeSummaryIT` compares the cash
+line with `GET /retail/reports/cash/daily` and fails if they part. A session with `retail.order.manage` and no sales read still asks the orders board.
 
-**Watch for:** no index leads on `retail_sale_payments.paid_on` (only `(tenant_id, sale_id, paid_on)` and the moment of entry),
-so the payments part of the takings reads the tenant's payments as the cash summary does; if it shows in the database benchmarks,
-an index on `(tenant_id, paid_on)` is the fix (a migration, not added here). The top items of the week scan the sale lines of up to seven days; if it shows in the database benchmarks, the week
+**Watch for:** the reversals of payments on account, the refunds and the fees paid on an account have no index on their day; those
+tables hold one row per receipt, return or order and are measured by bench query k17. The top items of the week scan the sale lines
+of up to seven days; if it shows in the database benchmarks, the week
 can move to the sales summary's grouped read. A new way of paying appears on the takings card on its own, labelled by its key until
 the PWA names it.

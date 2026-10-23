@@ -12,9 +12,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * The reads of the shop Home summary (issue #485) that no report had: the shops to give a line each, the open customer orders as
- * one count, and the day's takings by way of paying. Sales, credit owed and the top items come from the dashboard, credit
- * control and sales analysis queries.
+ * The two reads of the shop Home summary (issue #485) that no report had: the shops to give a line each, and the open customer
+ * orders as one count. Every money figure comes from the dashboard, credit control and sales analysis queries.
  */
 @Repository
 class HomeRepository {
@@ -27,76 +26,66 @@ class HomeRepository {
 
     record Shop(UUID id, String name) {}
 
-    /** One way of paying on one day: the money that came in and the money that went back out, as the cash book counts them. */
-    record Taken(String method, long takings, long voids) {}
+    /** Money of one way of paying and one kind: sales, payments, fees, or out (given back). */
+    record Taking(String method, String kind, long amount) {}
 
     /**
-     * The day's takings by way of paying, by the rules of the cash book's {@code CashSales} (the cash summary's Cash takings and
-     * Cash sales voided or refunded) applied to every way of paying, not only cash: {@code retail.reports} may not read
-     * {@code retail.sales}, so the rules are repeated here and {@code RetailHomeSummaryIT} holds the cash to the cash summary.
-     * In: sales paid at the sale by sale date (voided later or not), payments on credit sales by {@code paid_on} at the branch
-     * that took them, returns voided on the day, and delivery fees paid at the door on the day of delivery or paid later on the
-     * day they were paid. Out: sales voided on the day (in the tenant's zone), payments on account reversed on the day, money
-     * refunded on returns on the day, whatever sale it was, and the fees of delivered orders whose sale was voided on the day.
-     * A credit sale, a fee left on an account and a fee written off take no money.
+     * Today's takings by way of paying, read the way the cash book reads a day (ADR-022, {@code JdbcCashSales}) for every way and
+     * not only cash, so the card agrees with the cash summary it links to. In: sales paid at the sale dated today (cancelled
+     * later or not); payments on credit sales dated today, at the branch that took them; delivery fees taken at the door on
+     * deliveries of today, and fees left on an account and paid today. Out: sales paid at the sale cancelled today, payments on
+     * account reversed today, money refunded today on goods taken back (at the till that paid it), and the door fee of an order
+     * whose sale was cancelled today; a return cancelled today brings its refund back in. Payments are chosen by {@code paid_on}
+     * alone, as the cash book chooses them, whenever they were entered: no index leads on {@code paid_on} (pending a migration,
+     * see bench query k17), so this part reads the tenant's payments the way the cash summary does.
      */
-    List<Taken> takings(List<UUID> branchIds, LocalDate day, ZoneId zone) {
+    List<Taking> takings(List<UUID> branchIds, LocalDate today, ZoneId zone) {
         if (branchIds != null && branchIds.isEmpty()) {
             return List.of();
         }
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("day", Date.valueOf(day));
-        params.put("start", Timestamp.from(day.atStartOfDay(zone).toInstant()));
-        params.put("end", Timestamp.from(day.plusDays(1).atStartOfDay(zone).toInstant()));
-        String sale = "";
-        String received = "";
-        String reversed = "";
-        String refunded = "";
-        String order = "";
+        params.put("today", Date.valueOf(today));
+        params.put("zone", zone.getId());
+        params.put("start", Timestamp.from(today.atStartOfDay(zone).toInstant()));
+        params.put("end", Timestamp.from(today.plusDays(1).atStartOfDay(zone).toInstant()));
         if (branchIds != null) {
             params.put("branchIds", branchIds);
-            sale = " AND branch_id IN (:branchIds)";
-            received = " AND coalesce(r.branch_id, s.branch_id) IN (:branchIds)";
-            reversed = " AND branch_id IN (:branchIds)";
-            refunded = " AND refund_branch_id IN (:branchIds)";
-            order = " AND o.branch_id IN (:branchIds)";
         }
-        return jdbc.sql("SELECT t.method, sum(t.taken) AS takings, sum(t.out) AS voids FROM ("
-                        + "SELECT payment_method AS method, total_minor AS taken, 0 AS out FROM retail_sales"
-                        + " WHERE sale_date = :day AND payment_method <> 'credit'" + sale
-                        + " UNION ALL"
-                        + " SELECT p.method, p.amount_minor, 0"
-                        + " FROM retail_sale_payments p JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
-                        + " LEFT JOIN retail_account_payment_allocations a ON a.tenant_id = p.tenant_id AND a.sale_payment_id = p.id"
-                        + " LEFT JOIN retail_account_payments r ON r.tenant_id = a.tenant_id AND r.id = a.receipt_id"
-                        + " WHERE p.paid_on = :day" + received
-                        + " UNION ALL"
-                        + " SELECT payment_method, 0, total_minor FROM retail_sales"
-                        + " WHERE payment_method <> 'credit' AND voided_at >= :start AND voided_at < :end" + sale
-                        + " UNION ALL"
-                        + " SELECT method, 0, amount_minor FROM retail_account_payments"
-                        + " WHERE status = 'reversed' AND reversed_on = :day" + reversed
-                        + " UNION ALL"
-                        + " SELECT refund_method, 0, refund_minor FROM retail_sale_returns"
-                        + " WHERE refund_minor > 0 AND returned_on = :day" + refunded
-                        + " UNION ALL"
-                        + " SELECT refund_method, refund_minor, 0 FROM retail_sale_returns"
-                        + " WHERE refund_minor > 0 AND status = 'voided' AND voided_on = :day" + refunded
-                        + " UNION ALL"
-                        + " SELECT o.fee_method, o.delivery_fee_minor, 0 FROM retail_customer_orders o"
-                        + " WHERE o.status = 'delivered' AND o.fee_method <> 'account' AND o.fee_entry_id IS NOT NULL"
-                        + " AND o.delivered_on = :day" + order
-                        + " UNION ALL"
-                        + " SELECT o.fee_paid_method, o.delivery_fee_minor, 0 FROM retail_customer_orders o"
-                        + " WHERE o.fee_paid_method <> 'written_off' AND o.fee_paid_on = :day" + order
-                        + " UNION ALL"
-                        + " SELECT o.fee_method, 0, o.delivery_fee_minor"
-                        + " FROM retail_customer_orders o JOIN retail_sales s ON s.tenant_id = o.tenant_id AND s.id = o.sale_id"
-                        + " WHERE o.fee_method <> 'account' AND o.fee_entry_id IS NOT NULL"
-                        + " AND s.status = 'voided' AND s.voided_at >= :start AND s.voided_at < :end" + order
-                        + ") t GROUP BY t.method")
+        java.util.function.Function<String, String> in =
+                column -> branchIds == null ? "" : " AND " + column + " IN (:branchIds)";
+        String money = "('cash', 'mobile_money', 'bank')";
+        return jdbc.sql("SELECT t.method, t.kind, sum(t.amount) AS amount FROM ("
+                        + " SELECT s.payment_method AS method, 'sales' AS kind, s.total_minor AS amount FROM retail_sales s"
+                        + " WHERE s.sale_date = :today AND s.payment_method <> 'credit'" + in.apply("s.branch_id")
+                        + " UNION ALL SELECT s.payment_method, 'out', s.total_minor FROM retail_sales s"
+                        + " WHERE s.payment_method <> 'credit' AND s.voided_at >= :start AND s.voided_at < :end"
+                        + in.apply("s.branch_id")
+                        + " UNION ALL SELECT p.method, 'payments', p.amount_minor FROM retail_sale_payments p"
+                        + " JOIN retail_sales s ON s.tenant_id = p.tenant_id AND s.id = p.sale_id"
+                        + " LEFT JOIN retail_account_payment_allocations al ON al.tenant_id = p.tenant_id AND al.sale_payment_id = p.id"
+                        + " LEFT JOIN retail_account_payments ap ON ap.tenant_id = al.tenant_id AND ap.id = al.receipt_id"
+                        + " WHERE p.paid_on = :today"
+                        + in.apply("coalesce(ap.branch_id, s.branch_id)")
+                        + " UNION ALL SELECT ap.method, 'out', ap.amount_minor FROM retail_account_payments ap"
+                        + " WHERE ap.status = 'reversed' AND ap.reversed_on = :today" + in.apply("ap.branch_id")
+                        + " UNION ALL SELECT r.refund_method, 'out', r.refund_minor FROM retail_sale_returns r"
+                        + " WHERE r.refund_minor > 0 AND r.returned_on = :today" + in.apply("r.refund_branch_id")
+                        + " UNION ALL SELECT r.refund_method, 'out', -r.refund_minor FROM retail_sale_returns r"
+                        + " WHERE r.refund_minor > 0 AND r.status = 'voided' AND r.voided_on = :today"
+                        + in.apply("r.refund_branch_id")
+                        + " UNION ALL SELECT o.fee_method, 'fees', o.delivery_fee_minor FROM retail_customer_orders o"
+                        + " WHERE o.status = 'delivered' AND o.fee_method IN " + money
+                        + " AND o.fee_entry_id IS NOT NULL AND o.delivered_on = :today" + in.apply("o.branch_id")
+                        + " UNION ALL SELECT o.fee_paid_method, 'fees', o.delivery_fee_minor FROM retail_customer_orders o"
+                        + " WHERE o.fee_paid_method IN " + money + " AND o.fee_paid_on = :today"
+                        + in.apply("o.branch_id")
+                        + " UNION ALL SELECT o.fee_method, 'out', o.delivery_fee_minor FROM retail_customer_orders o"
+                        + " JOIN retail_sales s ON s.tenant_id = o.tenant_id AND s.id = o.sale_id"
+                        + " WHERE o.fee_method IN " + money + " AND o.fee_entry_id IS NOT NULL AND s.status = 'voided'"
+                        + " AND s.voided_at >= :start AND s.voided_at < :end" + in.apply("o.branch_id")
+                        + ") t GROUP BY t.method, t.kind")
                 .params(params)
-                .query((rs, n) -> new Taken(rs.getString("method"), rs.getLong("takings"), rs.getLong("voids")))
+                .query((rs, n) -> new Taking(rs.getString("method"), rs.getString("kind"), rs.getLong("amount")))
                 .list();
     }
 

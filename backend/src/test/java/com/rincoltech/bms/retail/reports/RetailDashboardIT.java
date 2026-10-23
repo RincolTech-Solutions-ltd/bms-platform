@@ -117,17 +117,22 @@ class RetailDashboardIT extends IntegrationTest {
         assertThat(b2.get("stock_at_price_minor").asLong()).isEqualTo(13_500);
     }
 
-    /** Two ways of paying that are not credit, at one branch on one day, both count in the cash (non-credit) figure. */
     @Test
-    void twoNonCreditMethodsOnOneBranchAndDayBothCountAsPaid() {
+    void twoWaysOfPayingAtOneShopOnOneDayAddUp() {
+        // Two ways of paying that are not credit at one shop on one day: head office's cash (600) and mobile money
+        // (300)
+        // today both count as paid, in every figure (issue #485 keeps the sales query grouped by the credit flag).
         d.sell(t.headOffice(), "mobile_money", d.p2, "1", 0);
-        d.sell(t.headOffice(), "bank", d.p2, "1", 0);
-        JsonNode today = dashboard(ADMIN).get("today");
-        assertThat(today.get("sales_minor").asLong()).isEqualTo(4_200);
-        assertThat(today.get("cash_minor").asLong()).isEqualTo(2_700);
-        assertThat(today.get("credit_minor").asLong()).isEqualTo(1_500);
-        JsonNode headOffice = shop(dashboard(ADMIN), t.headOffice());
-        assertThat(headOffice.get("today_sales_minor").asLong()).isEqualTo(2_700);
+        JsonNode r = dashboard(ADMIN);
+        assertThat(r.get("today").get("sales_minor").asLong()).isEqualTo(3_900);
+        assertThat(r.get("today").get("sale_count").asLong()).isEqualTo(4);
+        assertThat(r.get("today").get("cash_minor").asLong()).isEqualTo(2_400);
+        assertThat(r.get("today").get("credit_minor").asLong()).isEqualTo(1_500);
+        assertThat(shop(r, t.headOffice()).get("today_sales_minor").asLong()).isEqualTo(2_400);
+        assertThat(r.get("days").get(29).get("sales_minor").asLong()).isEqualTo(3_900);
+        JsonNode ranged = api.get("/reports/dashboard?period=today", ADMIN).getBody();
+        assertThat(ranged.get("range").get("current").get("sales_minor").asLong())
+                .isEqualTo(3_900);
     }
 
     @Test

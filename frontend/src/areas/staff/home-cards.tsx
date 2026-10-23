@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { listPendingApprovals, type Me } from '../../api/client';
 import { lending } from '../../api/lending';
-import { retailAnalytics, type HomeTopItem } from '../../api/retail-analytics';
+import { retailAnalytics, type HomeSummary, type HomeTopItem } from '../../api/retail-analytics';
 import { retailOrders } from '../../api/retail-orders';
 import { ALL_BRANCHES, branchFilter } from '../../auth/branch';
 import { icons } from '../../components/icons';
@@ -102,13 +102,13 @@ function ShopCard({ parts, home }: { parts: Parts; home: Summary }) {
     <article className="card home-card" aria-labelledby="home-shop">
       <h2 id="home-shop" className="card-title">{icons.shop}<span>Shop</span></h2>
       <dl className="home-figures">
-        {parts.sales && (
+        {parts.sales && answered(home, 'sales_today') && (
           <Figure label="Sales today" query={home}>
             {() => <>{retailMoney(today?.sales_minor ?? 0)} <span className="hint">{plural(today?.sale_count ?? 0, 'sale', 'sales')}</span></>}
           </Figure>
         )}
-        {parts.lowStock && <Figure label="Low on stock" query={home}>{() => plural(home.data?.low_stock ?? 0, 'item', 'items')}</Figure>}
-        {parts.orders && <Figure label="Open customer orders" query={ordersFrom}>{() => open}</Figure>}
+        {parts.lowStock && answered(home, 'low_stock') && <Figure label="Low on stock" query={home}>{() => plural(home.data?.low_stock ?? 0, 'item', 'items')}</Figure>}
+        {parts.orders && (!parts.summary || answered(home, 'open_orders')) && <Figure label="Open customer orders" query={ordersFrom}>{() => open}</Figure>}
       </dl>
       <Link to="/staff/retail">Open the shop</Link>
     </article>
@@ -233,6 +233,11 @@ function BranchesCard({ home }: { home: Summary }) {
   );
 }
 
+/** True while the summary is loading or failed (the card says so), and once it answered, when it holds the part. */
+function answered(home: Summary, part: keyof HomeSummary): boolean {
+  return home.isPending || home.isError || home.data?.[part] !== undefined;
+}
+
 /** A quantity without its trailing zeros: "2.000" reads 2, "1.500" reads 1.5. */
 function qty(value: string | undefined): string {
   return value && value.includes('.') ? value.replace(/\.?0+$/, '') : (value ?? '0');
@@ -241,15 +246,16 @@ function qty(value: string | undefined): string {
 /** The Shop card and, for a session that sees everybody's money, the shop's summary cards after it. */
 function ShopCards({ parts }: { parts: Parts }) {
   const home = useHomeSummary(parts);
-  // The server leaves the lines out over fewer than two shops, so the card goes when it answers without them.
-  const branches = parts.branches && (home.isPending || home.isError || !!home.data?.branches);
+  // The server decides every figure: a part it leaves out (no money permission over the branches covered, a branch outside the
+  // session's scope, fewer than two shops for the lines) takes its card away once it has answered, rather than saying "nothing".
+  const sent = (part: keyof HomeSummary) => answered(home, part);
   return (
     <>
       <ShopCard parts={parts} home={home} />
-      {parts.sales && <TakingsCard home={home} />}
-      {parts.sales && <CreditCard home={home} />}
-      {parts.sales && <TopItemsCard home={home} />}
-      {branches && <BranchesCard home={home} />}
+      {parts.sales && sent('takings') && <TakingsCard home={home} />}
+      {parts.sales && sent('credit_owed') && <CreditCard home={home} />}
+      {parts.sales && sent('top_items') && <TopItemsCard home={home} />}
+      {parts.branches && sent('branches') && <BranchesCard home={home} />}
     </>
   );
 }

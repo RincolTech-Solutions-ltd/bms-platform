@@ -95,9 +95,9 @@ const HOME = {
   takings: {
     total_minor: 98_000,
     methods: [
-      { method: 'cash', amount_minor: 60_000, takings_minor: 62_000, voids_minor: 2_000 },
-      { method: 'mobile_money', amount_minor: 35_000, takings_minor: 35_000, voids_minor: 0 },
-      { method: 'bank', amount_minor: 3_000, takings_minor: 3_000, voids_minor: 0 },
+      { method: 'cash', amount_minor: 60_000, sales_minor: 50_000, payments_minor: 10_000, fees_minor: 0, out_minor: 0 },
+      { method: 'mobile_money', amount_minor: 35_000, sales_minor: 35_000, payments_minor: 0, fees_minor: 0, out_minor: 0 },
+      { method: 'bank', amount_minor: 3_000, sales_minor: 0, payments_minor: 3_000, fees_minor: 0, out_minor: 0 },
     ],
   },
   credit_owed: { owed_minor: 450_000, customers: 3, sales: 5, oldest_due_date: '2026-10-02' },
@@ -377,7 +377,7 @@ describe('the shop summary cards (issue #485)', () => {
     calls.home.mockResolvedValue({
       ...HOME,
       sales_today: { sales_minor: 0, sale_count: 0 },
-      takings: { total_minor: 0, methods: [{ method: 'cash', amount_minor: 0, takings_minor: 0, voids_minor: 0 }, { method: 'mobile_money', amount_minor: 0, takings_minor: 0, voids_minor: 0 }] },
+      takings: { total_minor: 0, methods: [{ method: 'cash', amount_minor: 0, sales_minor: 0, payments_minor: 0, fees_minor: 0, out_minor: 0 }, { method: 'mobile_money', amount_minor: 0, sales_minor: 0, payments_minor: 0, fees_minor: 0, out_minor: 0 }] },
       credit_owed: { owed_minor: 0, customers: 0, sales: 0 },
       top_items: { today: [], week: [] },
     });
@@ -387,6 +387,25 @@ describe('the shop summary cards (issue #485)', () => {
     expect(text('Top items')).toContain('Nothing sold yet today.');
     fireEvent.click(within(card('Top items') as HTMLElement).getByRole('button', { name: 'This week' }));
     expect(text('Top items')).toContain('Nothing sold yet this week.');
+  });
+
+  it('takes a card away when the server leaves its part out, rather than saying there is nothing', async () => {
+    // The session's own view says it may see the money, yet the server answers without it (scopes changed since sign-in).
+    calls.home.mockResolvedValue(NO_MONEY);
+    show(both, 'all');
+    const shop = await screen.findByRole('article', { name: 'Shop' });
+    expect(await within(shop).findByText('3 items')).toBeTruthy();
+    expect(within(shop).queryByText('Sales today')).toBeNull();
+    for (const name of ['Takings today', 'Credit owed', 'Top items', 'Each shop today']) expect(card(name)).toBeNull();
+    expect(screen.queryByText('No money taken yet today.')).toBeNull();
+    expect(screen.queryByText('No customer owes you money.')).toBeNull();
+    cleanup();
+    // One part missing takes only its own card.
+    calls.home.mockResolvedValue({ ...HOME, credit_owed: undefined });
+    show(both);
+    expect(await screen.findByRole('article', { name: 'Takings today' })).toBeTruthy();
+    await screen.findByText('Cash');
+    expect(card('Credit owed')).toBeNull();
   });
 
   it('says so in each card when the summary cannot be loaded', async () => {
